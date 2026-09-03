@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from .domain import MatchGrade, SourceType
+from .domain import EvidenceType, MatchGrade, SourceType
 
 
 @dataclass(frozen=True)
@@ -20,12 +20,19 @@ class CollectedPrice:
     model_name: str | None
     specification: str | None
     price: Decimal
+    evidence_type: EvidenceType
     source_type: SourceType
     source_name: str
     source_url: str | None
     collected_at: date
     transaction_date: date | None = None
+    quantity: Decimal | None = None
+    unit: str | None = None
+    total_amount: Decimal | None = None
+    currency: str = "KRW"
     vat_status: str | None = None
     conditions: str | None = None
+    source_record_id: str | None = None
+    original_title: str | None = None
     match_grade: MatchGrade = MatchGrade.X
     match_note: str | None = None
