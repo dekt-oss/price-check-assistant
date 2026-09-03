@@ -4,6 +4,7 @@ import pytest
 from purchase_price.clients.data_go_kr import (
     PublicDataPortalClient,
     _http_error_message,
+    _payload_error_fields,
     normalize_service_key,
 )
 
@@ -51,3 +52,23 @@ def test_data_go_kr_auth_error_is_sanitized():
     assert "서비스 접근거부" in message
     assert "code=30" in message
     assert secret not in message
+
+
+def test_http_200_error_envelope_is_detected():
+    payload = {
+        "OpenAPI_ServiceResponse": {
+            "cmmMsgHeader": {
+                "errMsg": "HTTP_ERROR",
+                "returnAuthMsg": "HTTP 에러",
+                "returnReasonCode": "04",
+            }
+        }
+    }
+
+    assert _payload_error_fields(payload) == ("HTTP_ERROR", "HTTP 에러", "04")
+
+
+def test_success_header_is_not_treated_as_error():
+    payload = {"response": {"header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE"}}}
+
+    assert _payload_error_fields(payload) == (None, None, None)
