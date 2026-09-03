@@ -13,6 +13,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
 
     steps:
       - name: Checkout
@@ -34,3 +36,58 @@ jobs:
 
       - name: Pytest
         run: pytest -q
+
+      - name: Temporary Phase 0 benchmark source-hit smoke
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
+            echo "DATA_GO_KR_SERVICE_KEY secret is not available"
+            exit 2
+          fi
+          NORMALIZED_KEY="$(python -c 'import os, urllib.parse; print(urllib.parse.unquote(os.environ["DATA_GO_KR_SERVICE_KEY"]))')"
+
+          for TERM in '인큐베이터' '심전도기' '노트북컴퓨터'; do
+            OUT="/tmp/g2b-${TERM}.json"
+            curl -4 -sS --fail \
+              --connect-timeout 8 --max-time 25 \
+              --get \
+              --data-urlencode "serviceKey=$NORMALIZED_KEY" \
+              --data-urlencode 'pageNo=1' \
+              --data-urlencode 'numOfRows=10' \
+              --data-urlencode 'type=json' \
+              --data-urlencode 'inqryDiv=1' \
+              --data-urlencode 'inqryBgnDate=20260714' \
+              --data-urlencode 'inqryEndDate=20260813' \
+              --data-urlencode 'inqryPrdctDiv=2' \
+              --data-urlencode 'fnlCntrctDlvrReqChgOrdYn=Y' \
+              --data-urlencode "dtilPrdctClsfcNoNm=$TERM" \
+              'https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getSpcifyPrdlstPrcureInfoList' \
+              -o "$OUT"
+
+            TERM="$TERM" OUT="$OUT" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          term = os.environ["TERM"]
+          payload = json.loads(Path(os.environ["OUT"]).read_text(encoding="utf-8"))
+          if "OpenAPI_ServiceResponse" in payload:
+              print(f"SMOKE term={term} api_error={payload['OpenAPI_ServiceResponse']}")
+              raise SystemExit(3)
+          response = payload.get("response", {})
+          header = response.get("header", {})
+          body = response.get("body", {})
+          items = body.get("items") or []
+          if isinstance(items, dict):
+              items = items.get("item", items)
+          if isinstance(items, dict):
+              items = [items]
+          names = [item.get("prdctIdntNoNm") for item in items[:10] if isinstance(item, dict)]
+          print(
+              f"SMOKE term={term} resultCode={header.get('resultCode')} "
+              f"totalCount={body.get('totalCount')} sample_names={names}"
+          )
+          PY
+          done
