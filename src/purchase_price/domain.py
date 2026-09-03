@@ -1,7 +1,7 @@
-from enum import Enum
+from enum import StrEnum
 
 
-class MatchGrade(str, Enum):
+class MatchGrade(StrEnum):
     A = "A"
     B = "B"
     C = "C"
@@ -9,7 +9,7 @@ class MatchGrade(str, Enum):
     X = "X"
 
 
-class SourceType(str, Enum):
+class SourceType(StrEnum):
     PUBLIC_CONTRACT = "public_contract"
     PROCUREMENT = "procurement"
     MANUFACTURER = "manufacturer"
