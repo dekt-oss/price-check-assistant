@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any
 
 from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
 from purchase_price.domain import EvidenceType, MatchGrade, SourceType
@@ -193,7 +195,7 @@ def parse_official_report_record(
         source_type=SourceType.PROCUREMENT,
         source_name=SOURCE_NAME,
         source_url=None,
-        collected_at=__import__("datetime").date.today(),
+        collected_at=date.today(),
         quantity=quantity,
         unit=str(unit) if unit not in (None, "") else None,
         total_amount=total_amount,
