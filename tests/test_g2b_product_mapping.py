@@ -54,15 +54,24 @@ class StubCollector:
         return unwrap_g2b_page(self.payload), self.payload
 
 
-def test_default_registry_contains_all_phase0_rows_but_only_verified_rows_resolve() -> None:
+def test_default_registry_contains_all_phase0_rows_and_verified_rows_resolve() -> None:
     mappings = load_g2b_product_mappings()
 
     assert len(mappings) == 20
-    assert sum(mapping.verified for mapping in mappings) == 2
+    verified_models = {mapping.model_name for mapping in mappings if mapping.verified}
+    assert {
+        "Sophie",
+        "NT960XJG-K72AG",
+        "ThinkStation P2 Tower",
+    } <= verified_models
+    assert "TN500" not in verified_models
 
     sophie = resolve_verified_g2b_mapping(ProductQuery(model_name="Sophie"), mappings)
     galaxy = resolve_verified_g2b_mapping(
         ProductQuery(model_name="NT960XJG-K72AG"), mappings
+    )
+    workstation = resolve_verified_g2b_mapping(
+        ProductQuery(model_name="ThinkStation P2 Tower"), mappings
     )
     tn500 = resolve_verified_g2b_mapping(ProductQuery(model_name="TN500"), mappings)
 
@@ -72,6 +81,9 @@ def test_default_registry_contains_all_phase0_rows_but_only_verified_rows_resolv
     assert galaxy is not None
     assert galaxy.detail_product_name == "노트북컴퓨터"
     assert galaxy.detail_product_code == "4321150301"
+    assert workstation is not None
+    assert workstation.detail_product_name == "워크스테이션"
+    assert workstation.detail_product_code == "4321151501"
     assert tn500 is None
 
 
