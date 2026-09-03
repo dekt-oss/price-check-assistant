@@ -6,6 +6,7 @@ from purchase_price.schemas import CollectedPrice
 from purchase_price.services.phase0_validation import (
     build_source_evaluation,
     is_condition_complete_direct_evidence,
+    summarize_phase0_by_source,
     summarize_phase0_evaluations,
 )
 
@@ -206,3 +207,125 @@ def test_summary_reports_multi_source_only_when_two_sources_are_successful() -> 
     assert summary.multi_source_product_rate == 0.5
     assert summary.source_hit_rate == 1.0
     assert summary.not_evaluated_products == 0
+
+
+def test_mixed_source_readiness_is_unique_by_product_and_local_success_counts() -> None:
+    direct = _price(
+        grade=MatchGrade.A,
+        evidence_type=EvidenceType.PUBLIC_SALE_PRICE,
+        source_name="manufacturer-record",
+    )
+    rows = (
+        build_source_evaluation(
+            benchmark_model="A",
+            product_name="A product",
+            source_name="g2b",
+            mapping_status="verified",
+            evaluation_status="not_run_offline",
+        ),
+        build_source_evaluation(
+            benchmark_model="A",
+            product_name="A product",
+            source_name="manufacturer",
+            mapping_status="missing",
+            evaluation_status="mapping_unverified",
+        ),
+        build_source_evaluation(
+            benchmark_model="B",
+            product_name="B product",
+            source_name="g2b",
+            mapping_status="unverified",
+            evaluation_status="mapping_unverified",
+        ),
+        build_source_evaluation(
+            benchmark_model="B",
+            product_name="B product",
+            source_name="manufacturer",
+            mapping_status="verified",
+            evaluation_status="success",
+            observations=(direct,),
+            source_hit=True,
+        ),
+    )
+
+    summary = summarize_phase0_evaluations(rows, benchmark_products=2)
+
+    assert summary.mapping_ready_products == 2
+    assert summary.mapping_readiness_rate == 1.0
+    assert summary.successfully_evaluated_products == 1
+    assert summary.evaluation_coverage_rate == 0.5
+    assert summary.source_hit_rate == 1.0
+    assert summary.direct_evidence_product_rate == 1.0
+    assert summary.multi_source_product_rate is None
+    assert summary.not_evaluated_products == 1
+
+
+def test_per_source_summary_keeps_denominators_and_latency_separate() -> None:
+    direct = _price(
+        grade=MatchGrade.A,
+        evidence_type=EvidenceType.PUBLIC_SALE_PRICE,
+        source_name="manufacturer-record",
+        complete_conditions=False,
+    )
+    rows = (
+        build_source_evaluation(
+            benchmark_model="A",
+            product_name="A product",
+            source_name="manufacturer",
+            mapping_status="verified",
+            evaluation_status="success",
+            observations=(direct,),
+            source_hit=True,
+            elapsed_ms=10,
+        ),
+        build_source_evaluation(
+            benchmark_model="B",
+            product_name="B product",
+            source_name="manufacturer",
+            mapping_status="verified",
+            evaluation_status="error",
+            elapsed_ms=30,
+        ),
+        build_source_evaluation(
+            benchmark_model="A",
+            product_name="A product",
+            source_name="g2b",
+            mapping_status="unverified",
+            evaluation_status="mapping_unverified",
+        ),
+        build_source_evaluation(
+            benchmark_model="B",
+            product_name="B product",
+            source_name="g2b",
+            mapping_status="unverified",
+            evaluation_status="mapping_unverified",
+        ),
+    )
+
+    summaries = {
+        item.source_name: item
+        for item in summarize_phase0_by_source(rows, benchmark_products=2)
+    }
+    manufacturer = summaries["manufacturer"]
+    g2b = summaries["g2b"]
+
+    assert manufacturer.mapping_ready_products == 2
+    assert manufacturer.mapping_readiness_rate == 1.0
+    assert manufacturer.attempted_pairs == 2
+    assert manufacturer.successful_pairs == 1
+    assert manufacturer.source_hit_pairs == 1
+    assert manufacturer.source_hit_rate == 1.0
+    assert manufacturer.direct_evidence_products == 1
+    assert manufacturer.direct_evidence_product_rate == 1.0
+    assert manufacturer.traceability_rate == 1.0
+    assert manufacturer.condition_completeness_rate == 0.0
+    assert manufacturer.error_pairs == 1
+    assert manufacturer.collector_error_rate == 0.5
+    assert manufacturer.average_elapsed_ms == 20.0
+
+    assert g2b.mapping_ready_products == 0
+    assert g2b.attempted_pairs == 0
+    assert g2b.successful_pairs == 0
+    assert g2b.source_hit_rate is None
+    assert g2b.collector_error_rate is None
+    assert g2b.average_elapsed_ms is None
