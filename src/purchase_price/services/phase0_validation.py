@@ -152,12 +152,13 @@ def summarize_phase0_evaluations(
     not_evaluated_models = all_models - attempted_models
 
     # A second source adapter should only activate Multi-source Rate after it has produced at
-    # least one successful evaluation. Merely having a placeholder/unverified row must not turn
-    # an unavailable metric into a misleading 0%.
+    # least one successful evaluation. Rejected X-only observations do not count as usable
+    # cross-source evidence.
     successfully_integrated_sources = {row.source_name for row in successful if row.source_name}
     evidence_sources_by_model: dict[str, set[str]] = {}
     for row in successful:
-        if row.evidence_count <= 0:
+        usable_evidence_count = row.direct_evidence_count + row.reference_evidence_count
+        if usable_evidence_count <= 0:
             continue
         evidence_sources_by_model.setdefault(row.benchmark_model, set()).add(row.source_name)
     multi_source_models = {
