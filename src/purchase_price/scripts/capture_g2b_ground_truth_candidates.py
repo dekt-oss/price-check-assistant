@@ -6,14 +6,13 @@ from datetime import date, datetime
 from pathlib import Path
 
 from purchase_price.collectors.g2b_shopping import (
-    G2B_SHOPPING_BASE_URL,
-    G2BShoppingCollector,
     G2BShoppingOperation,
     parse_official_report_record,
 )
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_product_mapping import load_g2b_product_mappings
+from purchase_price.services.g2b_runtime import build_configured_g2b_collector
 from purchase_price.services.match_benchmark import (
     DEFAULT_PRODUCTS_PATH,
     MatchBenchmarkError,
@@ -132,10 +131,7 @@ def main() -> None:
     queries = _load_queries(args.products)
     mappings = load_g2b_product_mappings()
     verified = tuple(mapping for mapping in mappings if mapping.verified)
-    collector = G2BShoppingCollector(
-        settings.data_go_kr_service_key,
-        base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
-    )
+    collector = build_configured_g2b_collector(settings)
 
     rows: list[dict[str, str]] = []
     for mapping in verified:
