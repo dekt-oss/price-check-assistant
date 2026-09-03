@@ -36,6 +36,8 @@ GitHub Actions repository secret `DATA_GO_KR_SERVICE_KEY`를 사용해 실제 AP
 - Encoding/Decoding 서비스키를 한 번만 정규화하도록 공통 client 보강
 - HTTP 4xx뿐 아니라 HTTP 200 안의 `OpenAPI_ServiceResponse` 오류 envelope도 실패 처리
 - 서비스키/요청 URL을 오류 로그에 노출하지 않는 sanitized error 처리
+- httpx가 INFO 레벨에서 남기는 `HTTP Request: GET <url>` 로그의 `serviceKey=` 값을 마스킹하는 필터를
+  client import 시점에 설치하고, `httpx`/`httpcore` logger를 명시 설정이 없으면 WARNING으로 유지
 
 ### 특정품목조달내역 실응답
 
@@ -129,10 +131,12 @@ NT960XJG-K72AG
 
 ## 페이지네이션과 Raw evidence
 
-`totalCount`와 `numOfRows`를 기준으로 페이지를 끝까지 수집한다.
+`totalCount`와 **실제 반환된 행 수**를 기준으로 페이지를 끝까지 수집한다. 요청한 `numOfRows`가 아니라
+누적 수신 건수로 완료를 판단하므로, 서버가 페이지 크기를 요청보다 작게 잘라도 조기 종료되지 않는다.
 
 - `max_pages` 안전상한을 둔다.
 - 안전상한 때문에 결과가 잘릴 경우 일부 결과를 정상으로 반환하지 않고 실패한다.
+- `totalCount`에 못 미쳤는데 빈 페이지가 오면 안전상한까지 반복하지 않고 즉시 실패한다.
 - API 각 원문 record를 정규화 전에 `raw_evidence`에 저장한다.
 - source + canonical payload SHA-256으로 중복 방지한다.
 - 같은 원문 재수집 시 새 evidence를 만들지 않는다.
@@ -147,7 +151,8 @@ NT960XJG-K72AG
 - pytest
 - fixture 기반 parser/ingestion/idempotency/mapping/pagination 검사
 
-실제 API는 `.github/workflows/g2b-live-smoke.yml`의 수동 `workflow_dispatch`에서만 호출한다. 개발계정 호출량과 외부 API 일시 장애가 일반 PR 품질게이트에 영향을 주지 않도록 분리한다.
+실제 API는 `.github/workflows/g2b-live-smoke.yml`과 `.github/workflows/g2b-ground-truth-capture.yml`의
+수동 `workflow_dispatch`에서만 호출한다. push 이벤트로 live 호출을 시작하는 workflow는 두지 않는다. 개발계정 호출량과 외부 API 일시 장애가 일반 PR 품질게이트에 영향을 주지 않도록 분리한다.
 
 2026-09-03 현재 일반 CI: **31 tests passed**.
 

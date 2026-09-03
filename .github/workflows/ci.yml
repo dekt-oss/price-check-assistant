@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # No base-branch filter: CI uses no secrets or external APIs, so it is safe to run on
+  # pull requests stacked on feature branches as well as on those targeting main.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -35,5 +36,17 @@ jobs:
       - name: Pytest
         run: pytest -q
 
-      - name: Match benchmark report
-        run: python -m purchase_price.scripts.evaluate_match_benchmark
+      - name: Match benchmark (fails on any grade mismatch against ground truth)
+        run: |
+          python -m purchase_price.scripts.evaluate_match_benchmark \
+            --fail-on-mismatch \
+            --output artifacts/match-benchmark-predictions.csv
+
+      - name: Upload benchmark predictions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: match-benchmark-predictions
+          path: artifacts/match-benchmark-predictions.csv
+          retention-days: 14
+          if-no-files-found: ignore
