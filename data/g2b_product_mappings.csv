@@ -1,0 +1,21 @@
+model_name,product_name,g2b_detail_product_name,g2b_detail_product_code,mapping_status,last_smoke_begin,last_smoke_end,last_smoke_total_count,evidence_url,notes
+TN500,인큐베이터(인공보육기),,,unverified,20260714,20260813,0,,인큐베이터 검색어 0건; 표준 세부품명 확인 전 자동 사용 금지
+Sophie,인공호흡기,인공호흡기,4227220901,verified,20260714,20260813,9,https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01259646&bidPbancOrd=000&fileSeq=1&fileType=&prcmBsneSeCd=01,공식 공고 세부품명 확인 및 live API source-hit 확인
+"iTero Lumina pro",입체광학인상채득장치,,,unverified,,,,,표준 세부품명 미확정
+ROTAPRO,혈관박리카테터장치,,,unverified,,,,,표준 세부품명 미확정
+"Veriti Pro Dx",핵산증폭기,,,unverified,,,,,표준 세부품명 미확정
+FT10,전기수술기(소작기),,,unverified,,,,,표준 세부품명 미확정
+"N-Pulse Pro",탄산가스레이저수술기,,,unverified,,,,,표준 세부품명 미확정
+"MinION Mk1D",염기서열분석기,,,unverified,,,,,표준 세부품명 미확정
+"Hall Titan Drill set",배터리 드릴세트,,,unverified,,,,,표준 세부품명 미확정
+L4-20t-RS,선형탐촉자(초음파 Probe),,,unverified,,,,,표준 세부품명 미확정
+"Efficia DFM100",심장 충격기,,,unverified,,,,,표준 세부품명 미확정
+MAC5,심전도기,,,unverified,20260714,20260813,0,,심전도기 검색어 0건; 표준 세부품명 확인 전 자동 사용 금지
+GMSR-182,약품냉장고,,,unverified,,,,,표준 세부품명 미확정
+30-4494,Mixter hemostatic Forceps,,,unverified,,,,,표준 세부품명 미확정
+26173KA,Laparoscopical Needle holder,,,unverified,,,,,표준 세부품명 미확정
+B61084,TEBBETTS FIBEROPTIC RETRACTOR,,,unverified,,,,,표준 세부품명 미확정
+NT960XJG-K72AG,노트북(갤럭시북6 PRO),노트북컴퓨터,4321150301,verified,20260714,20260813,1021,https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01514813&bidPbancOrd=000&fileSeq=2&fileType=&prcmBsneSeCd=01,공식 공고 세부품명번호 확인 및 live API source-hit 확인
+C5570,Color Laser Printer,,,unverified,,,,,표준 세부품명 미확정
+"ThinkStation P2 Tower",컴퓨터(동영상편집용),,,unverified,,,,,표준 세부품명 미확정
+CX30N,영상 판독용 모니터,,,unverified,,,,,표준 세부품명 미확정
