@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
@@ -38,12 +38,6 @@ def _int_or_none(value: Any) -> int | None:
 
 
 def unwrap_g2b_page(payload: Mapping[str, Any]) -> G2BShoppingPage:
-    """Unwrap the common data.go.kr response envelope.
-
-    This intentionally validates only the common envelope. Operation-specific field names
-    are learned from captured live fixtures before being promoted into parser aliases.
-    """
-
     response = payload.get("response", payload)
     if not isinstance(response, Mapping):
         raise PublicDataClientError("G2B response must be an object")
@@ -71,35 +65,44 @@ def unwrap_g2b_page(payload: Mapping[str, Any]) -> G2BShoppingPage:
     if not isinstance(raw_items, list):
         raise PublicDataClientError("G2B response items must be a list or item object")
 
-    items: list[dict[str, Any]] = []
-    for item in raw_items:
-        if isinstance(item, Mapping):
-            items.append(dict(item))
-
+    items = tuple(dict(item) for item in raw_items if isinstance(item, Mapping))
     return G2BShoppingPage(
-        items=tuple(items),
+        items=items,
         total_count=_int_or_none(body.get("totalCount")),
         page_no=_int_or_none(body.get("pageNo")),
         num_of_rows=_int_or_none(body.get("numOfRows")),
     )
 
 
-# These aliases are based only on official G2B file-report field labels that are publicly
-# documented. API-specific English/camelCase aliases are deliberately NOT guessed here.
+# Korean aliases come from official public file reports. camelCase aliases below were
+# verified against a live getSpcifyPrdlstPrcureInfoList response on 2026-09-03.
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
-    "product_id": ("물품식별", "물품식별번호"),
-    "product_name": ("물품식별명", "품명", "세부품명(명칭)", "세부품명"),
-    "contract_number": ("계약번호", "단가계약번호"),
-    "delivery_request_number": ("납품요구번호", "계약(납품요구)번호"),
+    "product_id": ("물품식별", "물품식별번호", "prdctIdntNo"),
+    "product_name": (
+        "물품식별명",
+        "품명",
+        "세부품명(명칭)",
+        "세부품명",
+        "prdctIdntNoNm",
+    ),
+    "contract_number": ("계약번호", "단가계약번호", "uprcCntrctNo"),
+    "delivery_request_number": (
+        "납품요구번호",
+        "계약(납품요구)번호",
+        "cntrctDlvrReqNo",
+    ),
     "contract_unit_price": ("계약단가",),
     "delivery_unit_price": ("납품단가",),
-    "generic_unit_price": ("단가",),
-    "delivery_quantity": ("납품수량", "수량"),
-    "delivery_amount": ("납품금액", "금액"),
-    "unit": ("납품단위명", "단위"),
-    "supplier": ("업체", "업체명"),
-    "transaction_date": ("결재일자", "계약(납품요구)일자"),
-    "contract_delivery_type": ("계약납품구분",),
+    "generic_unit_price": ("단가", "prdctUprc"),
+    "delivery_quantity": ("납품수량", "수량", "prdctQty"),
+    "delivery_amount": ("납품금액", "금액", "prdctAmt"),
+    "unit": ("납품단위명", "단위", "prdctUnit"),
+    "supplier": ("업체", "업체명", "corpNm"),
+    "transaction_date": ("결재일자", "계약(납품요구)일자", "cntrctDlvrReqDate"),
+    "contract_delivery_type": ("계약납품구분", "cntrctDlvrDivNm"),
+    "demand_institution": ("dminsttNm",),
+    "contract_type": ("cntrctDivNm",),
+    "delivery_condition": ("dlvryCndtnNm",),
 }
 
 
@@ -119,6 +122,18 @@ def _decimal_or_none(value: Any) -> Decimal | None:
         return Decimal(cleaned)
     except InvalidOperation:
         return None
+
+
+def _date_or_none(value: Any) -> date | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    for fmt in ("%Y%m%d", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _record_id(record: Mapping[str, Any]) -> str | None:
@@ -165,11 +180,10 @@ def parse_official_report_record(
     *,
     operation: G2BShoppingOperation,
 ) -> CollectedPrice | None:
-    """Convert a record only when a documented unit-price field is present.
+    """Convert only records whose unit-price meaning is verified.
 
-    Manufacturer/model identity is not inferred from supplier or product text. Until the
-    matching engine runs, records stay MatchGrade.X and therefore cannot enter the direct
-    reference-price range.
+    Product identity matching is deliberately deferred to F3, so every F1 result remains
+    MatchGrade.X and cannot enter the direct reference-price range yet.
     """
 
     evidence = _evidence_amount(record, operation)
@@ -183,12 +197,19 @@ def parse_official_report_record(
 
     quantity = _decimal_or_none(_first_value(record, "delivery_quantity"))
     total_amount = _decimal_or_none(_first_value(record, "delivery_amount"))
-    supplier = _first_value(record, "supplier")
     unit = _first_value(record, "unit")
+    transaction_date = _date_or_none(_first_value(record, "transaction_date"))
 
     conditions_parts: list[str] = []
-    if supplier not in (None, ""):
-        conditions_parts.append(f"공급업체={supplier}")
+    for label, logical_name in (
+        ("공급업체", "supplier"),
+        ("수요기관", "demand_institution"),
+        ("계약구분", "contract_type"),
+        ("납품조건", "delivery_condition"),
+    ):
+        value = _first_value(record, logical_name)
+        if value not in (None, ""):
+            conditions_parts.append(f"{label}={value}")
 
     return CollectedPrice(
         manufacturer=None,
@@ -201,6 +222,7 @@ def parse_official_report_record(
         source_name=SOURCE_NAME,
         source_url=None,
         collected_at=date.today(),
+        transaction_date=transaction_date,
         quantity=quantity,
         unit=str(unit) if unit not in (None, "") else None,
         total_amount=total_amount,
@@ -233,6 +255,44 @@ class G2BShoppingCollector:
         payload = self.client.get_json(self.base_url, operation.value, **params)
         return unwrap_g2b_page(payload), payload
 
+    def fetch_specific_item_page(
+        self,
+        *,
+        detail_product_name: str,
+        begin_date: date,
+        end_date: date,
+        page_no: int = 1,
+        num_of_rows: int = 100,
+        inquiry_div: str = "1",
+        product_div: str = "2",
+        final_change_order_only: str = "Y",
+    ) -> tuple[G2BShoppingPage, dict[str, Any]]:
+        """Call the live-verified specific-item procurement query contract.
+
+        The parameter names/default values are known to produce a valid response. Their
+        business-code semantics remain intentionally neutral until the reference document is
+        incorporated; callers may override them explicitly.
+        """
+
+        if not detail_product_name.strip():
+            raise ValueError("detail_product_name is required")
+        if begin_date > end_date:
+            raise ValueError("begin_date must not be after end_date")
+        if page_no < 1 or num_of_rows < 1:
+            raise ValueError("page_no and num_of_rows must be positive")
+
+        return self.fetch_page(
+            G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS,
+            pageNo=page_no,
+            numOfRows=num_of_rows,
+            inqryDiv=inquiry_div,
+            inqryBgnDate=begin_date.strftime("%Y%m%d"),
+            inqryEndDate=end_date.strftime("%Y%m%d"),
+            inqryPrdctDiv=product_div,
+            fnlCntrctDlvrReqChgOrdYn=final_change_order_only,
+            dtilPrdctClsfcNoNm=detail_product_name.strip(),
+        )
+
     def parse_payload(
         self,
         payload: Mapping[str, Any],
@@ -249,7 +309,7 @@ class G2BShoppingCollector:
 
     def search(self, query: ProductQuery) -> list[CollectedPrice]:
         raise RuntimeError(
-            "Live G2B search parameter mapping is intentionally not guessed. "
-            "Run purchase_price.scripts.g2b_shopping_probe after API approval, capture a live "
-            "fixture, then wire verified query parameters into F1."
+            "A verified model/product-name query parameter is not available yet. "
+            "Use fetch_specific_item_page for classification-based procurement history; "
+            "general ProductQuery search will be wired only after its live contract is verified."
         )
