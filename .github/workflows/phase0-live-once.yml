@@ -1,0 +1,73 @@
+name: Phase 0 G2B Diagnostics Once
+
+on:
+  push:
+    branches:
+      - ops/phase0-live-20260904
+    paths:
+      - .github/workflows/phase0-live-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      G2B_REQUEST_TIMEOUT_SECONDS: "30"
+      G2B_MAX_RETRIES: "5"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Verify secret
+        shell: bash
+        run: |
+          if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
+            echo "DATA_GO_KR_SERVICE_KEY secret is not configured"
+            exit 2
+          fi
+
+      - name: Capture representative G2B identities
+        shell: bash
+        run: |
+          python -m purchase_price.scripts.capture_g2b_ground_truth_candidates \
+            --begin-date "20260714" \
+            --end-date "20260813" \
+            --sample-pages-per-model "2" \
+            --max-rows-per-model "25" \
+            --output artifacts/g2b-diagnostics/identity-sample.csv
+
+      - name: Scan exact model candidates to completion
+        shell: bash
+        run: |
+          python -m purchase_price.scripts.scan_g2b_exact_model_candidates \
+            --begin-date "20260714" \
+            --end-date "20260813" \
+            --chunk-days "31" \
+            --max-pages-per-chunk "20" \
+            --summary-output artifacts/g2b-diagnostics/exact-model-summary.csv \
+            --candidates-output artifacts/g2b-diagnostics/exact-model-candidates.csv
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2b-diagnostics-20260714-20260813
+          path: artifacts/g2b-diagnostics/
+          retention-days: 14
+          if-no-files-found: error
