@@ -98,14 +98,17 @@ def test_model_token_candidate_filter_ignores_punctuation_and_rejects_other_mode
     assert candidates[0]["cntrctDlvrReqNo"] == "A"
 
 
-def test_mapped_search_uses_verified_classification_and_keeps_candidate_grade_x() -> None:
-    mapping = G2BProductMapping(
+def _sophie_mapping() -> G2BProductMapping:
+    return G2BProductMapping(
         model_name="Sophie",
         product_name="인공호흡기",
         detail_product_name="인공호흡기",
         detail_product_code="4227220901",
         mapping_status="verified",
     )
+
+
+def test_mapped_search_promotes_candidate_to_a_only_with_query_spec_evidence() -> None:
     collector = StubCollector(
         _payload(
             [
@@ -117,17 +120,63 @@ def test_mapped_search_uses_verified_classification_and_keeps_candidate_grade_x(
 
     result = search_mapped_g2b_candidates(
         collector,
-        ProductQuery(product_name="인공호흡기", manufacturer="Stephan", model_name="Sophie"),
+        ProductQuery(
+            product_name="인공호흡기",
+            manufacturer="Stephan",
+            model_name="Sophie",
+            specification="운반형",
+        ),
         begin_date=date(2026, 7, 1),
         end_date=date(2026, 7, 31),
-        mappings=(mapping,),
+        mappings=(_sophie_mapping(),),
     )
 
     assert collector.detail_product_names == ["인공호흡기"]
     assert result.records_seen == 2
     assert len(result.candidate_prices) == 1
-    assert result.candidate_prices[0].price == Decimal("7800000")
+    candidate = result.candidate_prices[0]
+    assert candidate.price == Decimal("7800000")
+    assert candidate.manufacturer == "Stephan"
+    assert candidate.model_name == "Sophie"
+    assert candidate.specification == "운반형"
+    assert candidate.match_grade == MatchGrade.A
+    assert "specification=compatible" in (candidate.match_note or "")
+
+
+def test_mapped_search_same_model_without_query_spec_is_b() -> None:
+    collector = StubCollector(
+        _payload([_record("SOPHIE-B", "인공호흡기, Stephan, Sophie, 운반형", "7800000")])
+    )
+
+    result = search_mapped_g2b_candidates(
+        collector,
+        ProductQuery(product_name="인공호흡기", manufacturer="Stephan", model_name="Sophie"),
+        begin_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 31),
+        mappings=(_sophie_mapping(),),
+    )
+
+    assert len(result.candidate_prices) == 1
+    assert result.candidate_prices[0].match_grade == MatchGrade.B
+    assert "specification=not_provided" in (result.candidate_prices[0].match_note or "")
+
+
+def test_mapped_search_keeps_same_model_with_conflicting_manufacturer_as_x() -> None:
+    collector = StubCollector(
+        _payload([_record("SOPHIE-X", "인공호흡기, Other Medical, Sophie, 운반형")])
+    )
+
+    result = search_mapped_g2b_candidates(
+        collector,
+        ProductQuery(product_name="인공호흡기", manufacturer="Stephan", model_name="Sophie"),
+        begin_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 31),
+        mappings=(_sophie_mapping(),),
+    )
+
+    assert len(result.candidate_prices) == 1
     assert result.candidate_prices[0].match_grade == MatchGrade.X
+    assert "manufacturer=conflict" in (result.candidate_prices[0].match_note or "")
 
 
 def test_mapped_search_refuses_unverified_classification() -> None:
