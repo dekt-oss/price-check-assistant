@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -7,7 +8,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
-from purchase_price.collectors.g2b_shopping import G2BShoppingCollector, G2BShoppingPage
+from purchase_price.collectors.g2b_shopping import (
+    G2BShoppingCollector,
+    G2BShoppingOperation,
+    G2BShoppingPage,
+)
 from purchase_price.models import CollectionRun
 from purchase_price.services.g2b_shopping_ingest import persist_g2b_shopping_payload
 
@@ -35,7 +40,7 @@ def iter_specific_item_pages(
     end_date: date,
     num_of_rows: int = 100,
     max_pages: int = 20,
-):
+) -> Iterator[G2BCollectedPage]:
     """Yield complete pages or fail when the explicit safety cap would truncate results."""
 
     if max_pages < 1:
@@ -96,7 +101,7 @@ def collect_specific_item_history(
             session,
             run=run,
             payload=collected.payload,
-            operation="getSpcifyPrdlstPrcureInfoList",
+            operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS,
         )
         records_seen += ingest.record_count
         evidence_created += ingest.created_count
