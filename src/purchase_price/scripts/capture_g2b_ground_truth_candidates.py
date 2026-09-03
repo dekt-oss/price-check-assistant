@@ -13,8 +13,8 @@ from purchase_price.collectors.g2b_shopping import (
 )
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_pagination import iter_specific_item_pages
 from purchase_price.services.g2b_product_mapping import load_g2b_product_mappings
-from purchase_price.services.g2b_shopping_collection import iter_specific_item_pages
 from purchase_price.services.matching import normalize_text
 from purchase_price.services.product_matching import grade_product_identity, parse_g2b_identity
 
