@@ -10,7 +10,7 @@ from purchase_price.services.search import search_all
 
 st.set_page_config(page_title="통합검색", page_icon="🔎", layout="wide")
 st.title("통합검색")
-st.caption("개발단계: 실제 외부 수집기 대신 샘플 수집기로 end-to-end 흐름을 검증합니다.")
+st.caption("현재 공식 제조사 공개가격 source와 개발용 샘플 수집기를 함께 사용합니다. 근거가 없는 가격은 생성하지 않습니다.")
 
 with st.form("search-form"):
     c1, c2 = st.columns(2)
@@ -18,8 +18,8 @@ with st.form("search-form"):
         product_name = st.text_input("제품명", placeholder="예: Patient Monitor / 환자감시장치")
         manufacturer = st.text_input("제조사", placeholder="예: ABC Medical")
     with c2:
-        model_name = st.text_input("모델명", placeholder="샘플: XYZ-100")
-        specification = st.text_input("규격", placeholder="예: standard")
+        model_name = st.text_input("모델명", placeholder="예: GMSR-182")
+        specification = st.text_input("규격", placeholder="예: 182L")
     quote_text = st.text_input("현재 견적 단가 (선택)", placeholder="예: 38500000")
     submitted = st.form_submit_button("가격자료 검색", type="primary")
 
@@ -48,7 +48,7 @@ if submitted:
         st.warning("일부 수집기 오류: " + " / ".join(run.errors))
 
     if not run.results:
-        st.error("현재 연결된 수집기에서 비교자료를 찾지 못했습니다. 실제 외부 데이터 연동 전 단계입니다.")
+        st.error("현재 연결된 공개가격 source에서 비교자료를 찾지 못했습니다. 근거 부족 상태로 처리합니다.")
         st.stop()
 
     assessment = assess_prices(run.results, quote)

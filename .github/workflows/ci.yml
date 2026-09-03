@@ -42,11 +42,28 @@ jobs:
             --fail-on-mismatch \
             --output artifacts/match-benchmark-predictions.csv
 
+      - name: Phase 0 offline integration check
+        run: |
+          python -m purchase_price.scripts.run_phase0_validation \
+            --offline \
+            --begin-date 20260714 \
+            --end-date 20260813 \
+            --output-dir artifacts/phase0-validation-offline
+
       - name: Upload benchmark predictions
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: match-benchmark-predictions
           path: artifacts/match-benchmark-predictions.csv
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload Phase 0 offline validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase0-validation-offline
+          path: artifacts/phase0-validation-offline/
           retention-days: 14
           if-no-files-found: ignore

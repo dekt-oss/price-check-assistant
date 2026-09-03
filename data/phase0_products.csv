@@ -11,11 +11,11 @@ category,manufacturer,product_name,model_name,specification,status,notes
 의료비품,GE Healthcare,선형탐촉자(초음파 Probe),L4-20t-RS,L4-20t-RS,benchmark 확정,공개가격 근거 검증 대상
 의료비품,필립스,심장 충격기,Efficia DFM100,,benchmark 확정,공개가격 근거 검증 대상
 의료비품,GE HealthCare,심전도기,MAC5,,benchmark 확정,공식 제조사 표기 정규화
-의료비품,SGM,약품냉장고,GMSR-182,182L,benchmark 확정,공식 제품 페이지 확인
+의료비품,GMS,약품냉장고,GMSR-182,182L,benchmark 확정,제조사 공식 제품·견적 페이지에서 GMS 및 182L 확인
 수술기구,,Mixter hemostatic Forceps,30-4494,,benchmark 확정,제조사 미상 난이도 검증
 수술기구,,Laparoscopical Needle holder,26173KA,,benchmark 확정,제조사 미상 난이도 검증
 수술기구,BLACK & BLACK SURGICAL,TEBBETTS FIBEROPTIC RETRACTOR,B61084,9CM X20MM,benchmark 확정,공개 의료기기 식별정보로 제조사 정규화
 전산비품,삼성전자,노트북(갤럭시북6 PRO),NT960XJG-K72AG,NT960XJG-K72AG,benchmark 확정,국내 공개판매가 다중출처 확인
-전산비품,,Color Laser Printer,C5570,"55PPM,A3",benchmark 확정,제조사 미상 난이도 검증
+전산비품,FUJIFILM Business Innovation,Color Laser Printer,C5570,"55PPM,A3",benchmark 확정,제조사 공식 페이지에서 ApeosPrint C5570 A3 컬러 55ppm 확인
 전산비품,,컴퓨터(동영상편집용),ThinkStation P2 Tower,"ULTRA 7 265K 계열",benchmark 확정,제조사·세부사양 확인 필요
 의료비품,WIDE,영상 판독용 모니터,CX30N,,benchmark 확정,공식 제품 페이지 교차확인
