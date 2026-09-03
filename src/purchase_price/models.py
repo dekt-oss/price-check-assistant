@@ -8,7 +8,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
-from .domain import MatchGrade, SourceType
+from .domain import EvidenceType, MatchGrade, SourceType
 
 
 class Product(Base):
@@ -34,14 +34,20 @@ class PriceObservation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
     price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    evidence_type: Mapped[EvidenceType] = mapped_column(
+        SAEnum(EvidenceType, native_enum=False), index=True
+    )
     currency: Mapped[str] = mapped_column(String(10), default="KRW")
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3))
     unit: Mapped[str | None] = mapped_column(String(50))
+    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
     vat_status: Mapped[str | None] = mapped_column(String(50))
     conditions: Mapped[str | None] = mapped_column(Text)
     source_type: Mapped[SourceType] = mapped_column(SAEnum(SourceType, native_enum=False))
     source_name: Mapped[str] = mapped_column(String(300))
     source_url: Mapped[str | None] = mapped_column(Text)
+    source_record_id: Mapped[str | None] = mapped_column(String(300), index=True)
+    original_title: Mapped[str | None] = mapped_column(Text)
     collected_at: Mapped[date] = mapped_column(Date, default=date.today)
     transaction_date: Mapped[date | None] = mapped_column(Date)
     match_grade: Mapped[MatchGrade] = mapped_column(SAEnum(MatchGrade, native_enum=False))
