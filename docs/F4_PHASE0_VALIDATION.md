@@ -132,10 +132,11 @@ Direct EvidenceType:
 
 ## 현재 known limitation
 
-2026-09-03 기준 G2B mapping registry에서 명시적으로 verified인 benchmark는 현재 2개다.
+2026-09-03 기준 G2B mapping registry에서 명시적으로 verified인 benchmark는 현재 3개다.
 
-- Sophie → 인공호흡기
-- NT960XJG-K72AG → 노트북컴퓨터
+- Sophie → 인공호흡기 / 4227220901 — live API source-hit 확인
+- NT960XJG-K72AG → 노트북컴퓨터 / 4321150301 — live API source-hit 확인
+- ThinkStation P2 Tower → 워크스테이션 / 4321151501 — 공식 G2B 모델 문서 + 목록정보 분류로 mapping 확인, live API source-hit는 아직 미검증
 
 나머지는 표준 세부품명/번호를 검증하기 전까지 자동 실행하지 않는다.
 
