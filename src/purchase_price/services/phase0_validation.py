@@ -28,6 +28,8 @@ class Phase0SourceEvaluation:
 @dataclass(frozen=True)
 class Phase0ValidationSummary:
     benchmark_products: int
+    mapping_ready_products: int
+    mapping_readiness_rate: float | None
     successfully_evaluated_products: int
     evaluation_coverage_rate: float | None
     attempted_source_product_pairs: int
@@ -138,15 +140,21 @@ def summarize_phase0_evaluations(
     successful = tuple(row for row in rows if row.evaluation_status == "success")
     errors = tuple(row for row in rows if row.evaluation_status == "error")
 
+    all_models = {row.benchmark_model for row in rows}
+    attempted_models = {row.benchmark_model for row in attempted}
     successful_models = {row.benchmark_model for row in successful}
+    mapping_ready_models = {
+        row.benchmark_model for row in rows if row.mapping_status.casefold() == "verified"
+    }
     direct_models = {
         row.benchmark_model for row in successful if row.direct_evidence_count > 0
     }
-    not_evaluated_models = {
-        row.benchmark_model for row in rows if row.evaluation_status not in {"success", "error"}
-    }
+    not_evaluated_models = all_models - attempted_models
 
-    integrated_sources = {row.source_name for row in rows if row.source_name}
+    # A second source adapter should only activate Multi-source Rate after it has produced at
+    # least one successful evaluation. Merely having a placeholder/unverified row must not turn
+    # an unavailable metric into a misleading 0%.
+    successfully_integrated_sources = {row.source_name for row in successful if row.source_name}
     evidence_sources_by_model: dict[str, set[str]] = {}
     for row in successful:
         if row.evidence_count <= 0:
@@ -162,16 +170,16 @@ def summarize_phase0_evaluations(
     condition_complete = sum(row.condition_complete_count for row in successful)
     source_hits = sum(row.source_hit is True for row in successful)
 
-    # Multi-source coverage is not a meaningful metric until at least two independent source
-    # adapters are represented in the evaluation input. Returning None prevents a misleading 0%.
     multi_source_rate = (
         _ratio(len(multi_source_models), len(successful_models))
-        if len(integrated_sources) >= 2
+        if len(successfully_integrated_sources) >= 2
         else None
     )
 
     return Phase0ValidationSummary(
         benchmark_products=benchmark_products,
+        mapping_ready_products=len(mapping_ready_models),
+        mapping_readiness_rate=_ratio(len(mapping_ready_models), benchmark_products),
         successfully_evaluated_products=len(successful_models),
         evaluation_coverage_rate=_ratio(len(successful_models), benchmark_products),
         attempted_source_product_pairs=len(attempted),
