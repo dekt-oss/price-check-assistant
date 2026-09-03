@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 
 from purchase_price.collectors.g2b_shopping import (
@@ -16,6 +16,7 @@ from purchase_price.services.g2b_product_mapping import (
     resolve_verified_g2b_mapping,
 )
 from purchase_price.services.g2b_shopping_collection import iter_specific_item_pages
+from purchase_price.services.product_matching import grade_product_identity, parse_g2b_identity
 
 
 @dataclass(frozen=True)
@@ -37,10 +38,12 @@ def search_mapped_g2b_candidates(
     num_of_rows: int = 100,
     max_pages: int = 20,
 ) -> G2BCandidateSearchResult:
-    """Search verified G2B classification history and locally narrow model candidates.
+    """Search verified G2B history, narrow candidates, and apply conservative F3 matching.
 
-    F1 candidate filtering never promotes MatchGrade. Parsed prices remain MatchGrade.X until
-    the F3 identity matcher verifies manufacturer/model/specification equivalence.
+    The G2B classification itself must already be verified. Candidate records are narrowed by
+    model/manufacturer tokens and then graded from their parsed manufacturer/model/specification.
+    Explicit conflicts remain X. A/B grades may enter pricing analysis only because both the
+    source amount semantics (F1 EvidenceType) and the product identity (F3 MatchGrade) are known.
     """
 
     mapping = resolve_verified_g2b_mapping(query, mappings)
@@ -73,8 +76,22 @@ def search_mapped_g2b_candidates(
                 record,
                 operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS,
             )
-            if parsed is not None:
-                prices.append(parsed)
+            if parsed is None:
+                continue
+
+            identity = parse_g2b_identity(parsed.original_title)
+            decision = grade_product_identity(query, identity)
+            prices.append(
+                replace(
+                    parsed,
+                    manufacturer=identity.manufacturer,
+                    product_name=identity.product_name or parsed.product_name,
+                    model_name=identity.model_name,
+                    specification=identity.specification,
+                    match_grade=decision.grade,
+                    match_note=decision.note,
+                )
+            )
 
     return G2BCandidateSearchResult(
         mapping=mapping,
