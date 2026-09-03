@@ -11,8 +11,10 @@ from pathlib import Path
 
 from purchase_price.collectors.g2b_shopping import (
     G2B_SHOPPING_BASE_URL,
-    SOURCE_NAME as G2B_SOURCE_NAME,
     G2BShoppingCollector,
+)
+from purchase_price.collectors.g2b_shopping import (
+    SOURCE_NAME as G2B_SOURCE_NAME,
 )
 from purchase_price.config import get_settings
 from purchase_price.services.g2b_candidate_search import search_mapped_g2b_candidates
