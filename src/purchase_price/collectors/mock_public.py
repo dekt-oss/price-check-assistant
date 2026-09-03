@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from purchase_price.domain import MatchGrade, SourceType
+from purchase_price.domain import EvidenceType, MatchGrade, SourceType
 from purchase_price.schemas import CollectedPrice, ProductQuery
 
 from .base import PriceCollector
@@ -28,6 +28,7 @@ class MockPublicCollector(PriceCollector):
                     model_name=query.model_name or "XYZ-100",
                     specification=query.specification or "standard",
                     price=Decimal("35800000"),
+                    evidence_type=EvidenceType.CONTRACT_UNIT_PRICE,
                     source_type=SourceType.PUBLIC_CONTRACT,
                     source_name="개발용 샘플 공공계약 A",
                     source_url=None,
@@ -43,6 +44,7 @@ class MockPublicCollector(PriceCollector):
                     model_name=query.model_name or "XYZ-100",
                     specification=query.specification or "standard",
                     price=Decimal("37500000"),
+                    evidence_type=EvidenceType.PUBLIC_SALE_PRICE,
                     source_type=SourceType.B2B,
                     source_name="개발용 샘플 공개판매가 B",
                     source_url=None,
