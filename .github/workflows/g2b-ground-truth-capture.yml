@@ -29,8 +29,7 @@ jobs:
           pip install \
             "pydantic-settings<3,>=2.4" \
             "httpx<1,>=0.27" \
-            "tenacity<10,>=9" \
-            "sqlalchemy<3,>=2.0"
+            "tenacity<10,>=9"
 
       - name: Verify secret
         shell: bash
