@@ -6,9 +6,9 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL, G2BShoppingCollector
 from purchase_price.config import get_settings
 from purchase_price.services.g2b_product_mapping import load_g2b_product_mappings
+from purchase_price.services.g2b_runtime import build_configured_g2b_collector
 from purchase_price.services.g2b_scan import G2BExactModelScanResult, scan_exact_model_candidates
 from purchase_price.services.match_benchmark import (
     DEFAULT_PRODUCTS_PATH,
@@ -167,10 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         if not verified:
             raise SystemExit("none of the requested models has a verified G2B mapping")
 
-    collector = G2BShoppingCollector(
-        settings.data_go_kr_service_key,
-        base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
-    )
+    collector = build_configured_g2b_collector(settings)
 
     results: list[G2BExactModelScanResult] = []
     for mapping in verified:
