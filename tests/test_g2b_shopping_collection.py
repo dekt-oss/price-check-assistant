@@ -138,3 +138,83 @@ def test_paginated_collection_persists_raw_evidence_idempotently() -> None:
         assert second.duplicates_seen == 2
         assert len(evidence) == 2
         assert {row.source_record_id for row in evidence} == {"DLVR-1", "DLVR-2"}
+
+
+def _multi_payload(page_no: int, *, total_count: int, record_ids: list[str]) -> dict:
+    payload = _payload(page_no, total_count=total_count, record_id="ignored")
+    items = [
+        _payload(page_no, total_count=total_count, record_id=record_id)["response"]["body"][
+            "items"
+        ][0]
+        for record_id in record_ids
+    ]
+    payload["response"]["body"]["items"] = items
+    payload["response"]["body"]["numOfRows"] = len(items)
+    return payload
+
+
+def test_pagination_counts_returned_rows_not_requested_rows_when_server_caps_page_size() -> None:
+    # Requesting 100 rows but the server returns 2 per page. totalCount=3 needs 2 pages.
+    # Counting requested rows (100 >= 3) would stop after page 1 with a truncated result.
+    collector = StubCollector(
+        {
+            1: _multi_payload(1, total_count=3, record_ids=["DLVR-1", "DLVR-2"]),
+            2: _multi_payload(2, total_count=3, record_ids=["DLVR-3"]),
+        }
+    )
+
+    pages = list(
+        iter_specific_item_pages(
+            collector,
+            detail_product_name="테스트",
+            begin_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
+            num_of_rows=100,
+            max_pages=5,
+        )
+    )
+
+    assert collector.requested_pages == [1, 2]
+    assert sum(len(page.page.items) for page in pages) == 3
+
+
+def test_pagination_fails_closed_on_empty_page_before_total_count_is_reached() -> None:
+    collector = StubCollector(
+        {
+            1: _multi_payload(1, total_count=3, record_ids=["DLVR-1"]),
+            2: _multi_payload(2, total_count=3, record_ids=[]),
+            3: _multi_payload(3, total_count=3, record_ids=[]),
+        }
+    )
+
+    with pytest.raises(PublicDataClientError, match="no items before totalCount"):
+        list(
+            iter_specific_item_pages(
+                collector,
+                detail_product_name="테스트",
+                begin_date=date(2026, 7, 1),
+                end_date=date(2026, 7, 31),
+                num_of_rows=1,
+                max_pages=5,
+            )
+        )
+
+    assert collector.requested_pages == [1, 2]
+
+
+def test_pagination_treats_zero_total_count_as_complete() -> None:
+    collector = StubCollector({1: _multi_payload(1, total_count=0, record_ids=[])})
+
+    pages = list(
+        iter_specific_item_pages(
+            collector,
+            detail_product_name="테스트",
+            begin_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
+            num_of_rows=100,
+            max_pages=5,
+        )
+    )
+
+    assert len(pages) == 1
+    assert collector.requested_pages == [1]
