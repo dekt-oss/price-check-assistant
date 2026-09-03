@@ -18,6 +18,7 @@ from purchase_price.collectors.g2b_shopping import (
 )
 from purchase_price.collectors.manufacturer_public_catalog import (
     ManufacturerPublicCatalogCollector,
+    ManufacturerPublicPrice,
     load_manufacturer_public_prices,
 )
 from purchase_price.config import get_settings
@@ -142,8 +143,8 @@ def _write_summary(
                 "benchmark products with at least one successful source evaluation / all benchmark products"
             ),
             "source_hit_rate": (
-                "successful source-product evaluations that retained or reported at least one public "
-                "record / successful source-product evaluations"
+                "successful source-product evaluations whose underlying public source contained at "
+                "least one mapped record / successful source-product evaluations"
             ),
             "direct_evidence_product_rate": (
                 "successfully evaluated products with >=1 A/B observation whose EvidenceType is a direct "
@@ -191,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     manufacturer_catalog = load_manufacturer_public_prices()
-    manufacturer_catalog_by_model: dict[str, list[object]] = {}
+    manufacturer_catalog_by_model: dict[str, list[ManufacturerPublicPrice]] = {}
     for item in manufacturer_catalog:
         manufacturer_catalog_by_model.setdefault(normalize_text(item.model_name), []).append(item)
     manufacturer_collector = ManufacturerPublicCatalogCollector()
@@ -330,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
                         mapping_status="verified",
                         evaluation_status="success",
                         observations=observations,
-                        source_hit=bool(observations),
+                        source_hit=True,
                         records_seen=len(manufacturer_matches),
                         elapsed_ms=elapsed_ms,
                         reason=(
