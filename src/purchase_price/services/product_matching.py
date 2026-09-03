@@ -111,8 +111,14 @@ def _spec_tokens(value: str | None) -> tuple[str, ...]:
 
 
 def _informative_query_spec_tokens(query: ProductQuery) -> tuple[str, ...]:
-    tokens = list(_spec_tokens(query.specification))
+    specification_key = normalize_text(query.specification)
     model_key = normalize_text(query.model_name)
+    if not specification_key:
+        return ()
+    if model_key and specification_key == model_key:
+        return ()
+
+    tokens = list(_spec_tokens(query.specification))
     if not model_key:
         return tuple(tokens)
     return tuple(token for token in tokens if normalize_text(token) != model_key)
@@ -121,12 +127,10 @@ def _informative_query_spec_tokens(query: ProductQuery) -> tuple[str, ...]:
 def _specification_state(query: ProductQuery, candidate: ProductIdentity) -> str:
     query_tokens = _informative_query_spec_tokens(query)
     if not query_tokens:
-        return "not_required"
+        return "not_provided"
 
     candidate_text = " ".join(
-        value
-        for value in (candidate.specification, candidate.source_title)
-        if value
+        value for value in (candidate.specification, candidate.source_title) if value
     )
     candidate_tokens = set(_spec_tokens(candidate_text))
     if not candidate_tokens:
@@ -157,12 +161,11 @@ def grade_product_identity(
 ) -> MatchDecision:
     """Assign A/B/C/D/X conservatively.
 
-    A/B require an exact normalized model match. A additionally requires compatible
-    manufacturer evidence and all informative query specification tokens to be present.
-    Missing manufacturer/specification evidence downgrades the same model to B. Any explicit
-    manufacturer or model conflict fails closed to X. C is reserved for same product class
-    without exact-model evidence. D is only emitted when the caller supplies an explicit,
-    curated functional-alternative relationship.
+    A/B require an exact normalized model match. A additionally requires verified manufacturer
+    compatibility and informative specification evidence from the query to be present in the
+    candidate. Missing manufacturer or specification evidence downgrades the same model to B.
+    Any explicit manufacturer/model conflict fails closed to X. C is same product class without
+    exact-model evidence. D is emitted only for an explicit curated functional alternative.
     """
 
     aliases = manufacturer_aliases if manufacturer_aliases is not None else load_manufacturer_aliases()
@@ -174,11 +177,8 @@ def grade_product_identity(
     if model_state == "conflict" or manufacturer_state == "conflict":
         grade = MatchGrade.X
     elif model_state == "exact":
-        if manufacturer_state in {"exact_or_alias", "not_requested"} and specification_state in {
-            "compatible",
-            "not_required",
-        }:
-            grade = MatchGrade.A if manufacturer_state == "exact_or_alias" else MatchGrade.B
+        if manufacturer_state == "exact_or_alias" and specification_state == "compatible":
+            grade = MatchGrade.A
         else:
             grade = MatchGrade.B
     elif functional_alternative:
