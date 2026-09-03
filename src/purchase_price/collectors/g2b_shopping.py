@@ -93,6 +93,7 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "delivery_request_number": ("납품요구번호", "계약(납품요구)번호"),
     "contract_unit_price": ("계약단가",),
     "delivery_unit_price": ("납품단가",),
+    "generic_unit_price": ("단가",),
     "delivery_quantity": ("납품수량", "수량"),
     "delivery_amount": ("납품금액", "금액"),
     "unit": ("납품단위명", "단위"),
@@ -145,7 +146,11 @@ def _evidence_amount(
 
     if operation == G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS:
         delivery_or_contract = str(_first_value(record, "contract_delivery_type") or "")
-        generic_unit_price = delivery_unit_price or contract_unit_price
+        generic_unit_price = (
+            _decimal_or_none(_first_value(record, "generic_unit_price"))
+            or delivery_unit_price
+            or contract_unit_price
+        )
         if generic_unit_price is not None:
             if "납품" in delivery_or_contract:
                 return generic_unit_price, EvidenceType.DELIVERY_ORDER_UNIT_PRICE
