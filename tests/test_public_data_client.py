@@ -72,3 +72,52 @@ def test_success_header_is_not_treated_as_error():
     payload = {"response": {"header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE"}}}
 
     assert _payload_error_fields(payload) == (None, None, None)
+
+
+def test_httpx_request_log_never_contains_service_key(caplog):
+    """httpx logs the full request URL at INFO; the client must mask serviceKey in it."""
+    import logging
+
+    from purchase_price.clients.data_go_kr import harden_http_logging
+
+    secret = "SECRETKEY-1234567890"
+    harden_http_logging()
+    httpx_logger = logging.getLogger("httpx")
+    previous_level = httpx_logger.level
+    httpx_logger.setLevel(logging.DEBUG)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="httpx"):
+            httpx_logger.info(
+                'HTTP Request: %s %s "%s"',
+                "GET",
+                f"https://example.invalid/op?serviceKey={secret}&type=json&pageNo=1",
+                "HTTP/1.1 200 OK",
+            )
+    finally:
+        httpx_logger.setLevel(previous_level)
+
+    assert caplog.records, "log record should still be emitted"
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert secret not in joined
+    assert "serviceKey=***" in joined
+    assert "pageNo=1" in joined
+
+
+def test_http_transport_loggers_default_to_warning():
+    import logging
+
+    from purchase_price.clients.data_go_kr import harden_http_logging
+
+    harden_http_logging()
+    for name in ("httpx", "httpcore"):
+        assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING
+
+
+def test_service_key_redaction_covers_encoded_and_quoted_urls():
+    from purchase_price.clients.data_go_kr import redact_service_key_query
+
+    encoded = "https://x/op?serviceKey=abc%2Bdef%3D&pageNo=1"
+    assert redact_service_key_query(encoded) == "https://x/op?serviceKey=***&pageNo=1"
+    assert redact_service_key_query('url="https://x/op?servicekey=abc"') == (
+        'url="https://x/op?servicekey=***"'
+    )
