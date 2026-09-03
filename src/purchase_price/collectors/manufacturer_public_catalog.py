@@ -12,6 +12,7 @@ from purchase_price.schemas import CollectedPrice, ProductQuery
 from purchase_price.services.product_matching import ProductIdentity, grade_product_identity
 
 DEFAULT_CATALOG_PATH = Path(__file__).resolve().parents[3] / "data" / "public_manufacturer_prices.csv"
+SUPPORTED_CURRENCY = "KRW"
 
 
 class ManufacturerCatalogError(RuntimeError):
@@ -71,7 +72,7 @@ def load_manufacturer_public_prices(
             source_name = (row.get("source_name") or "").strip()
             source_url = (row.get("source_url") or "").strip()
             source_record_id = (row.get("source_record_id") or "").strip()
-            currency = (row.get("currency") or "KRW").strip() or "KRW"
+            currency = ((row.get("currency") or SUPPORTED_CURRENCY).strip() or SUPPORTED_CURRENCY).upper()
 
             if not all(
                 [manufacturer, product_name, model_name, source_name, source_url, source_record_id]
@@ -83,6 +84,10 @@ def load_manufacturer_public_prices(
                 raise ManufacturerCatalogError(
                     f"duplicate manufacturer source_record_id: {source_record_id}"
                 )
+            if currency != SUPPORTED_CURRENCY:
+                raise ManufacturerCatalogError(
+                    f"manufacturer catalog line {line_number} currency must be {SUPPORTED_CURRENCY}"
+                )
 
             try:
                 price = Decimal((row.get("price") or "").strip())
@@ -90,9 +95,9 @@ def load_manufacturer_public_prices(
                 raise ManufacturerCatalogError(
                     f"invalid price on manufacturer catalog line {line_number}"
                 ) from exc
-            if price <= 0:
+            if not price.is_finite() or price <= 0:
                 raise ManufacturerCatalogError(
-                    f"manufacturer catalog line {line_number} price must be positive"
+                    f"manufacturer catalog line {line_number} price must be finite and positive"
                 )
 
             try:
@@ -129,16 +134,24 @@ class ManufacturerPublicCatalogCollector(PriceCollector):
     The adapter never invents current prices or fills missing commercial conditions. Each row must
     carry a traceable public URL and explicit verification date. Rows are graded by the same F3
     identity contract as procurement records, so only A/B observations can enter direct pricing.
+    Catalog loading is lazy so malformed or missing catalog data remains inside the per-collector
+    failure isolation boundary in `search_all()`.
     """
 
     name = "manufacturer_public_catalog"
 
     def __init__(self, path: Path = DEFAULT_CATALOG_PATH) -> None:
-        self._rows = load_manufacturer_public_prices(path)
+        self._path = path
+        self._rows: tuple[ManufacturerPublicPrice, ...] | None = None
+
+    def _load_rows(self) -> tuple[ManufacturerPublicPrice, ...]:
+        if self._rows is None:
+            self._rows = load_manufacturer_public_prices(self._path)
+        return self._rows
 
     def search(self, query: ProductQuery) -> list[CollectedPrice]:
         results: list[CollectedPrice] = []
-        for row in self._rows:
+        for row in self._load_rows():
             identity = ProductIdentity(
                 manufacturer=row.manufacturer,
                 product_name=row.product_name,
