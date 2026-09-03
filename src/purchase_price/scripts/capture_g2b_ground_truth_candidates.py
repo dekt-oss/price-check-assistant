@@ -13,7 +13,6 @@ from purchase_price.collectors.g2b_shopping import (
 )
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
-from purchase_price.services.g2b_pagination import iter_specific_item_pages
 from purchase_price.services.g2b_product_mapping import load_g2b_product_mappings
 from purchase_price.services.matching import normalize_text
 from purchase_price.services.product_matching import grade_product_identity, parse_g2b_identity
@@ -71,20 +70,24 @@ def _priority(query: ProductQuery, title: str) -> int:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Capture public G2B class records for human-reviewed F3 ground truth. "
-            "The service key is never written to the output."
+            "Capture a bounded public G2B sample for human-reviewed F3 ground truth. "
+            "This is a sampling workflow, not a completeness scan, and the service key is "
+            "never written to the output."
         )
     )
     parser.add_argument("--begin-date", required=True, type=_date)
     parser.add_argument("--end-date", required=True, type=_date)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--products", type=Path, default=DEFAULT_PRODUCTS_PATH)
+    parser.add_argument("--sample-pages-per-model", type=int, default=1)
     parser.add_argument("--max-rows-per-model", type=int, default=25)
     return parser
 
 
 def main() -> None:
     args = _parser().parse_args()
+    if args.sample_pages_per_model < 1:
+        raise SystemExit("--sample-pages-per-model must be positive")
     if args.max_rows_per_model < 1:
         raise SystemExit("--max-rows-per-model must be positive")
 
@@ -117,19 +120,19 @@ def main() -> None:
         pages_fetched = 0
         reported_total_count: int | None = None
 
-        for collected in iter_specific_item_pages(
-            collector,
-            detail_product_name=mapping.detail_product_name,
-            begin_date=args.begin_date,
-            end_date=args.end_date,
-            num_of_rows=100,
-            max_pages=20,
-        ):
+        for page_no in range(1, args.sample_pages_per_model + 1):
+            page, _payload = collector.fetch_specific_item_page(
+                detail_product_name=mapping.detail_product_name,
+                begin_date=args.begin_date,
+                end_date=args.end_date,
+                page_no=page_no,
+                num_of_rows=100,
+            )
             pages_fetched += 1
-            records_seen += len(collected.page.items)
-            reported_total_count = collected.page.total_count
+            records_seen += len(page.items)
+            reported_total_count = page.total_count
 
-            for record in collected.page.items:
+            for record in page.items:
                 parsed = parse_official_report_record(
                     record,
                     operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS,
@@ -165,6 +168,11 @@ def main() -> None:
                 }
                 model_rows.append((_priority(query, title), transaction_date, row))
 
+            if page.total_count is not None and page_no * 100 >= page.total_count:
+                break
+            if page.total_count is None and len(page.items) < 100:
+                break
+
         deduped: dict[tuple[str, str], tuple[int, str, dict[str, str]]] = {}
         for item in model_rows:
             row = item[2]
@@ -174,15 +182,14 @@ def main() -> None:
         ranked = sorted(
             deduped.values(),
             key=lambda item: (item[0], item[1], item[2]["source_record_id"]),
-            reverse=False,
         )
         selected = ranked[: args.max_rows_per_model]
         rows.extend(item[2] for item in selected)
 
         print(
-            f"model={mapping.model_name} pages={pages_fetched} records={records_seen} "
-            f"reported_total={reported_total_count} parsed={len(model_rows)} "
-            f"captured={len(selected)}"
+            f"model={mapping.model_name} sampled_pages={pages_fetched} "
+            f"sampled_records={records_seen} reported_total={reported_total_count} "
+            f"parsed={len(model_rows)} captured={len(selected)}"
         )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
