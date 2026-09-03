@@ -4,7 +4,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from purchase_price.collectors.g2b_shopping import G2BShoppingOperation, SOURCE_NAME
+from purchase_price.collectors.g2b_shopping import SOURCE_NAME, G2BShoppingOperation
 from purchase_price.db import Base
 from purchase_price.models import RawEvidence
 from purchase_price.repositories.evidence import start_collection_run
