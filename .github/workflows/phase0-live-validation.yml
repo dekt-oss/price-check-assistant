@@ -25,6 +25,9 @@ jobs:
     timeout-minutes: 20
     env:
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      PHASE0_BEGIN_DATE: ${{ inputs.begin_date }}
+      PHASE0_END_DATE: ${{ inputs.end_date }}
+      PHASE0_MAX_PAGES: ${{ inputs.max_pages }}
 
     steps:
       - name: Checkout
@@ -50,11 +53,12 @@ jobs:
           fi
 
       - name: Run Phase 0 validation
+        shell: bash
         run: |
           python -m purchase_price.scripts.run_phase0_validation \
-            --begin-date "${{ inputs.begin_date }}" \
-            --end-date "${{ inputs.end_date }}" \
-            --max-pages "${{ inputs.max_pages }}" \
+            --begin-date "$PHASE0_BEGIN_DATE" \
+            --end-date "$PHASE0_END_DATE" \
+            --max-pages "$PHASE0_MAX_PAGES" \
             --output-dir artifacts/phase0-validation
 
       - name: Upload validation report
