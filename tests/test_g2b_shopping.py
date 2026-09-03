@@ -54,6 +54,35 @@ def test_delivery_unit_price_is_classified_as_delivery_evidence() -> None:
     assert result.evidence_type == EvidenceType.DELIVERY_ORDER_UNIT_PRICE
 
 
+def test_specific_item_unit_price_requires_contract_or_delivery_semantics() -> None:
+    delivery_record = {
+        "물품식별번호": "TEST-003",
+        "품명": "테스트 특정품목",
+        "단가": "128000",
+        "계약납품구분": "납품",
+    }
+    contract_record = {
+        "물품식별번호": "TEST-004",
+        "품명": "테스트 특정품목",
+        "단가": "130000",
+        "계약납품구분": "계약",
+    }
+
+    delivery = parse_official_report_record(
+        delivery_record, operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
+    )
+    contract = parse_official_report_record(
+        contract_record, operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
+    )
+
+    assert delivery is not None
+    assert delivery.price == Decimal("128000")
+    assert delivery.evidence_type == EvidenceType.DELIVERY_ORDER_UNIT_PRICE
+    assert contract is not None
+    assert contract.price == Decimal("130000")
+    assert contract.evidence_type == EvidenceType.CONTRACT_UNIT_PRICE
+
+
 def test_generic_amount_without_verified_unit_price_is_not_promoted() -> None:
     record = {
         "물품식별명": "테스트 품목",
@@ -62,6 +91,19 @@ def test_generic_amount_without_verified_unit_price_is_not_promoted() -> None:
 
     result = parse_official_report_record(
         record, operation=G2BShoppingOperation.SHOPPING_MALL_PRODUCTS
+    )
+
+    assert result is None
+
+
+def test_specific_item_unit_price_without_contract_delivery_type_is_not_promoted() -> None:
+    record = {
+        "물품식별명": "테스트 품목",
+        "단가": "128000",
+    }
+
+    result = parse_official_report_record(
+        record, operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
     )
 
     assert result is None
