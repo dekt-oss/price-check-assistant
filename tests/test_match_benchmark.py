@@ -8,7 +8,6 @@ from purchase_price.services.match_benchmark import (
     run_match_benchmark,
 )
 
-
 PRODUCTS = """category,manufacturer,product_name,model_name,specification,status,notes
 의료장비,Stephan,인공호흡기,Sophie,운반형,benchmark 확정,test
 전산비품,삼성전자,노트북컴퓨터,NT960XJG-K72AG,32GB 1TB,benchmark 확정,test
