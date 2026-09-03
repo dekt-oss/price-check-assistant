@@ -164,8 +164,9 @@ def grade_product_identity(
     A/B require an exact normalized model match. A additionally requires verified manufacturer
     compatibility and informative specification evidence from the query to be present in the
     candidate. Missing manufacturer or specification evidence downgrades the same model to B.
-    Any explicit manufacturer/model conflict fails closed to X. C is same product class without
-    exact-model evidence. D is emitted only for an explicit curated functional alternative.
+    Any explicit manufacturer/model conflict fails closed to X. C is a reference-only class match
+    and requires more than a bare class label when the query asks for a specific model. D is emitted
+    only for an explicit curated functional alternative.
     """
 
     aliases = manufacturer_aliases if manufacturer_aliases is not None else load_manufacturer_aliases()
@@ -183,11 +184,9 @@ def grade_product_identity(
             grade = MatchGrade.B
     elif functional_alternative:
         grade = MatchGrade.D
-    elif product_state == "compatible" and manufacturer_state in {
-        "exact_or_alias",
-        "not_requested",
-        "missing",
-    }:
+    elif product_state == "compatible" and (
+        model_state == "not_requested" or manufacturer_state == "exact_or_alias"
+    ):
         grade = MatchGrade.C
     else:
         grade = MatchGrade.X

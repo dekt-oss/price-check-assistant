@@ -1,0 +1,60 @@
+name: G2B Ground Truth Capture
+
+on:
+  push:
+    branches: [feat/f3-live-ground-truth]
+    paths:
+      - ".github/workflows/g2b-ground-truth-capture.yml"
+      - "src/purchase_price/scripts/capture_g2b_ground_truth_candidates.py"
+      - "data/g2b_product_mappings.csv"
+      - "data/phase0_products.csv"
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      PYTHONPATH: src
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install capture dependencies
+        run: |
+          pip install \
+            "pydantic-settings<3,>=2.4" \
+            "httpx<1,>=0.27" \
+            "tenacity<10,>=9"
+
+      - name: Verify secret
+        shell: bash
+        run: |
+          if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
+            echo "DATA_GO_KR_SERVICE_KEY secret is not configured"
+            exit 2
+          fi
+
+      - name: Capture verified-model candidates
+        run: |
+          python -m purchase_price.scripts.capture_g2b_ground_truth_candidates \
+            --begin-date 20260714 \
+            --end-date 20260813 \
+            --output artifacts/g2b-ground-truth-candidates.csv
+
+      - name: Upload public candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2b-ground-truth-candidates
+          path: artifacts/g2b-ground-truth-candidates.csv
+          retention-days: 7
+          if-no-files-found: error

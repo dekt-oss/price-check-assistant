@@ -9,13 +9,13 @@ from purchase_price.collectors.g2b_shopping import (
     parse_official_report_record,
 )
 from purchase_price.schemas import CollectedPrice, ProductQuery
+from purchase_price.services.g2b_pagination import iter_specific_item_pages
 from purchase_price.services.g2b_product_mapping import (
     G2BMappingError,
     G2BProductMapping,
     filter_g2b_query_candidates,
     resolve_verified_g2b_mapping,
 )
-from purchase_price.services.g2b_shopping_collection import iter_specific_item_pages
 from purchase_price.services.product_matching import grade_product_identity, parse_g2b_identity
 
 

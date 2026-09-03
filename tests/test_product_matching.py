@@ -122,6 +122,21 @@ def test_explicit_model_conflict_never_becomes_a_or_b() -> None:
     assert decision.model_state == "conflict"
 
 
+def test_model_specific_query_rejects_bare_product_class_as_x() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="인공호흡기",
+            manufacturer="Stephan",
+            model_name="Sophie",
+        ),
+        ProductIdentity(product_name="인공호흡기"),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert decision.model_state == "missing"
+    assert decision.manufacturer_state == "missing"
+
+
 def test_same_product_class_without_exact_model_is_c_reference_only() -> None:
     decision = grade_product_identity(
         ProductQuery(product_name="인공호흡기", manufacturer="Stephan"),
