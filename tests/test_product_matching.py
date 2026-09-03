@@ -8,18 +8,20 @@ from purchase_price.services.product_matching import (
 )
 
 
-def test_manufacturer_alias_registry_normalizes_korean_and_english_names() -> None:
+def test_manufacturer_alias_and_spec_evidence_can_produce_a() -> None:
     aliases = load_manufacturer_aliases()
     decision = grade_product_identity(
         ProductQuery(
             product_name="노트북컴퓨터",
             manufacturer="삼성전자",
             model_name="NT960XJG-K72AG",
+            specification="32GB 1TB",
         ),
         ProductIdentity(
             product_name="노트북컴퓨터",
             manufacturer="Samsung Electronics",
             model_name="NT960XJG K72AG",
+            specification="32GB 1TB",
         ),
         manufacturer_aliases=aliases,
     )
@@ -27,6 +29,27 @@ def test_manufacturer_alias_registry_normalizes_korean_and_english_names() -> No
     assert decision.grade == MatchGrade.A
     assert decision.model_state == "exact"
     assert decision.manufacturer_state == "exact_or_alias"
+    assert decision.specification_state == "compatible"
+
+
+def test_exact_model_and_manufacturer_without_real_spec_is_b() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="인공호흡기",
+            manufacturer="Stephan",
+            model_name="Sophie",
+            specification="Sophie",
+        ),
+        ProductIdentity(
+            product_name="인공호흡기",
+            manufacturer="Stephan",
+            model_name="Sophie",
+            specification="운반형",
+        ),
+    )
+
+    assert decision.grade == MatchGrade.B
+    assert decision.specification_state == "not_provided"
 
 
 def test_exact_model_with_missing_manufacturer_is_downgraded_to_b() -> None:
