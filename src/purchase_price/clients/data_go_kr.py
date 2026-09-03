@@ -13,11 +13,7 @@ class PublicDataClientError(RuntimeError):
 
 
 def normalize_service_key(service_key: str) -> str:
-    """Accept either data.go.kr Encoding or Decoding key form.
-
-    data.go.kr exposes both representations. Internally we keep the decoded value and let
-    the HTTP client perform query-string encoding exactly once.
-    """
+    """Accept either data.go.kr Encoding or Decoding key form."""
 
     normalized = unquote(service_key.strip())
     if not normalized:
@@ -33,6 +29,35 @@ def _redact_secret(text: str, secret: str) -> str:
     return redacted
 
 
+def _payload_error_fields(payload: Any) -> tuple[str | None, str | None, str | None]:
+    if not isinstance(payload, dict):
+        return None, None, None
+
+    service_response = payload.get("OpenAPI_ServiceResponse")
+    if isinstance(service_response, dict):
+        header = service_response.get("cmmMsgHeader")
+        if isinstance(header, dict):
+            return (
+                str(header.get("errMsg") or "").strip() or None,
+                str(header.get("returnAuthMsg") or "").strip() or None,
+                str(header.get("returnReasonCode") or "").strip() or None,
+            )
+
+    common_response = payload.get("response")
+    if isinstance(common_response, dict):
+        header = common_response.get("header")
+        if isinstance(header, dict):
+            result_code = str(header.get("resultCode") or "").strip()
+            if result_code and result_code not in {"0", "00", "000"}:
+                return (
+                    str(header.get("resultMsg") or "").strip() or None,
+                    None,
+                    result_code,
+                )
+
+    return None, None, None
+
+
 def _public_data_error_fields(response: httpx.Response) -> tuple[str | None, str | None, str | None]:
     """Extract data.go.kr error fields from JSON or XML without logging request URLs."""
 
@@ -41,26 +66,9 @@ def _public_data_error_fields(response: httpx.Response) -> tuple[str | None, str
     except ValueError:
         payload = None
 
-    if isinstance(payload, dict):
-        service_response = payload.get("OpenAPI_ServiceResponse")
-        if isinstance(service_response, dict):
-            header = service_response.get("cmmMsgHeader")
-            if isinstance(header, dict):
-                return (
-                    str(header.get("errMsg") or "").strip() or None,
-                    str(header.get("returnAuthMsg") or "").strip() or None,
-                    str(header.get("returnReasonCode") or "").strip() or None,
-                )
-
-        common_response = payload.get("response")
-        if isinstance(common_response, dict):
-            header = common_response.get("header")
-            if isinstance(header, dict):
-                return (
-                    str(header.get("resultMsg") or "").strip() or None,
-                    None,
-                    str(header.get("resultCode") or "").strip() or None,
-                )
+    fields = _payload_error_fields(payload)
+    if any(fields):
+        return fields
 
     text = response.text.strip()
     if text:
@@ -81,28 +89,32 @@ def _public_data_error_fields(response: httpx.Response) -> tuple[str | None, str
     return None, None, None
 
 
-def _http_error_message(response: httpx.Response, secret: str) -> str:
-    err_msg, auth_msg, reason_code = _public_data_error_fields(response)
-    details = [f"HTTP {response.status_code}"]
+def _format_error(prefix: str, fields: tuple[str | None, str | None, str | None], secret: str) -> str:
+    err_msg, auth_msg, reason_code = fields
+    details = [prefix]
     if err_msg:
         details.append(f"error={err_msg}")
     if auth_msg:
         details.append(f"auth={auth_msg}")
     if reason_code:
         details.append(f"code={reason_code}")
-    if len(details) == 1:
-        body = response.text.strip().replace("\n", " ")[:300]
-        if body:
-            details.append(f"body={body}")
-    return _redact_secret("Public Data Portal request failed: " + " ".join(details), secret)
+    return _redact_secret(" ".join(details), secret)
+
+
+def _http_error_message(response: httpx.Response, secret: str) -> str:
+    fields = _public_data_error_fields(response)
+    if any(fields):
+        return _format_error(f"Public Data Portal request failed: HTTP {response.status_code}", fields, secret)
+
+    body = response.text.strip().replace("\n", " ")[:300]
+    message = f"Public Data Portal request failed: HTTP {response.status_code}"
+    if body:
+        message += f" body={body}"
+    return _redact_secret(message, secret)
 
 
 class PublicDataPortalClient:
-    """Small common client for data.go.kr-backed APIs.
-
-    Concrete collectors own endpoint paths and response parsing. The shared client handles
-    authentication, JSON requests, timeout, transient network retries and sanitized errors.
-    """
+    """Common data.go.kr client with single key encoding and fail-closed errors."""
 
     def __init__(
         self,
@@ -133,8 +145,15 @@ class PublicDataPortalClient:
                     payload = response.json()
                 except ValueError as exc:
                     raise PublicDataClientError("API response is not valid JSON") from exc
+
             if not isinstance(payload, dict):
                 raise PublicDataClientError("API response root must be a JSON object")
+
+            fields = _payload_error_fields(payload)
+            if any(fields):
+                raise PublicDataClientError(
+                    _format_error("Public Data Portal API error:", fields, self.service_key)
+                )
             return payload
 
         return do_request()
