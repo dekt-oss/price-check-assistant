@@ -37,7 +37,7 @@ jobs:
       - name: Pytest
         run: pytest -q
 
-      - name: Temporary G2B auth diagnostics
+      - name: Temporary G2B live schema probe
         if: github.event_name == 'pull_request'
         shell: bash
         run: |
@@ -51,16 +51,22 @@ jobs:
           STATUS="000"
 
           for ATTEMPT in 1 2 3 4; do
-            echo "authenticated_api_attempt=$ATTEMPT"
-            STATUS="$(curl -4 -sS -o /tmp/g2b-auth.out \
-              --connect-timeout 5 --max-time 12 \
+            echo "specific_item_probe_attempt=$ATTEMPT"
+            STATUS="$(curl -4 -sS -o /tmp/g2b-live.out \
+              --connect-timeout 5 --max-time 15 \
               -w '%{http_code}' \
               --get \
               --data-urlencode "serviceKey=$NORMALIZED_KEY" \
               --data-urlencode 'pageNo=1' \
               --data-urlencode 'numOfRows=1' \
               --data-urlencode 'type=json' \
-              'https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getShoppingMallPrdctInfoList' || true)"
+              --data-urlencode 'inqryDiv=1' \
+              --data-urlencode 'inqryBgnDate=20260714' \
+              --data-urlencode 'inqryEndDate=20260813' \
+              --data-urlencode 'inqryPrdctDiv=2' \
+              --data-urlencode 'fnlCntrctDlvrReqChgOrdYn=Y' \
+              --data-urlencode 'dtilPrdctClsfcNoNm=제습기' \
+              'https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getSpcifyPrdlstPrcureInfoList' || true)"
             echo "http=$STATUS"
             if [ "$STATUS" != "000" ]; then
               break
@@ -68,9 +74,19 @@ jobs:
             sleep 1
           done
 
-          head -c 1200 /tmp/g2b-auth.out 2>/dev/null || true
+          head -c 5000 /tmp/g2b-live.out 2>/dev/null || true
           echo
 
           if [ "$STATUS" != "200" ]; then
             exit 3
           fi
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path('/tmp/g2b-live.out').read_text(encoding='utf-8'))
+          if 'OpenAPI_ServiceResponse' in payload:
+              raise SystemExit('data.go.kr returned an API error envelope')
+          body = payload.get('response', {}).get('body', {})
+          print(f"totalCount={body.get('totalCount')} pageNo={body.get('pageNo')} numOfRows={body.get('numOfRows')}")
+          PY
