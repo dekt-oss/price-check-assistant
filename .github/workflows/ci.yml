@@ -37,13 +37,34 @@ jobs:
       - name: Pytest
         run: pytest -q
 
-      - name: Temporary G2B live probe
+      - name: Temporary G2B network diagnostics
         if: github.event_name == 'pull_request'
+        shell: bash
         run: |
+          set -u
           if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
             echo "DATA_GO_KR_SERVICE_KEY secret is not available"
             exit 2
           fi
+
+          echo "ipv4_dns:"
+          getent ahostsv4 apis.data.go.kr | head -5 || true
+
+          echo "portal_reachability:"
+          curl -4 -sS -o /dev/null \
+            --connect-timeout 8 --max-time 15 \
+            -w 'data.go.kr http=%{http_code} connect=%{time_connect} total=%{time_total}\n' \
+            https://www.data.go.kr/ || true
+
+          echo "api_host_reachability_without_auth:"
+          curl -4 -sS -o /tmp/g2b-noauth.out \
+            --connect-timeout 8 --max-time 15 \
+            -w 'apis.data.go.kr http=%{http_code} connect=%{time_connect} total=%{time_total}\n' \
+            'https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getShoppingMallPrdctInfoList?pageNo=1&numOfRows=1&type=json' || true
+          head -c 500 /tmp/g2b-noauth.out 2>/dev/null || true
+          echo
+
+          echo "authenticated_probe:"
           python -m purchase_price.scripts.g2b_shopping_probe \
             getShoppingMallPrdctInfoList \
             --param pageNo=1 \
