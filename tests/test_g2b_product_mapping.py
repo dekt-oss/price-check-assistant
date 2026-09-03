@@ -62,6 +62,7 @@ def test_default_registry_contains_all_phase0_rows_and_verified_rows_resolve() -
     assert {
         "Sophie",
         "NT960XJG-K72AG",
+        "ApeosPrint C5570 GK",
         "ThinkStation P2 Tower",
     } <= verified_models
     assert "TN500" not in verified_models
@@ -69,6 +70,9 @@ def test_default_registry_contains_all_phase0_rows_and_verified_rows_resolve() -
     sophie = resolve_verified_g2b_mapping(ProductQuery(model_name="Sophie"), mappings)
     galaxy = resolve_verified_g2b_mapping(
         ProductQuery(model_name="NT960XJG-K72AG"), mappings
+    )
+    c5570 = resolve_verified_g2b_mapping(
+        ProductQuery(model_name="ApeosPrint C5570 GK"), mappings
     )
     workstation = resolve_verified_g2b_mapping(
         ProductQuery(model_name="ThinkStation P2 Tower"), mappings
@@ -81,6 +85,9 @@ def test_default_registry_contains_all_phase0_rows_and_verified_rows_resolve() -
     assert galaxy is not None
     assert galaxy.detail_product_name == "노트북컴퓨터"
     assert galaxy.detail_product_code == "4321150301"
+    assert c5570 is not None
+    assert c5570.detail_product_name == "레이저프린터"
+    assert c5570.detail_product_code == "4321210501"
     assert workstation is not None
     assert workstation.detail_product_name == "워크스테이션"
     assert workstation.detail_product_code == "4321151501"
@@ -152,6 +159,55 @@ def test_mapped_search_promotes_candidate_to_a_only_with_query_spec_evidence() -
     assert candidate.model_name == "Sophie"
     assert candidate.specification == "운반형"
     assert candidate.match_grade == MatchGrade.A
+    assert "specification=compatible" in (candidate.match_note or "")
+
+
+def test_mapped_search_live_c5570_shape_is_direct_a() -> None:
+    mapping = G2BProductMapping(
+        model_name="ApeosPrint C5570 GK",
+        product_name="컬러 레이저프린터",
+        detail_product_name="레이저프린터",
+        detail_product_code="4321210501",
+        mapping_status="verified",
+    )
+    collector = StubCollector(
+        _payload(
+            [
+                _record(
+                    "R26TB02131898",
+                    "레이저프린터, Fujifilm, (CN)ApeosPrint C5570 GK, A3, 55ppm/55ppm",
+                    "2981000",
+                ),
+                _record(
+                    "OTHER",
+                    "레이저프린터, Other, OTHER-100, A3, 40ppm/40ppm",
+                    "1500000",
+                ),
+            ]
+        )
+    )
+
+    result = search_mapped_g2b_candidates(
+        collector,
+        ProductQuery(
+            product_name="컬러 레이저프린터",
+            manufacturer="FUJIFILM Business Innovation",
+            model_name="ApeosPrint C5570 GK",
+            specification="A3,55PPM",
+        ),
+        begin_date=date(2026, 7, 14),
+        end_date=date(2026, 8, 13),
+        mappings=(mapping,),
+    )
+
+    assert collector.detail_product_names == ["레이저프린터"]
+    assert result.records_seen == 2
+    assert len(result.candidate_prices) == 1
+    candidate = result.candidate_prices[0]
+    assert candidate.price == Decimal("2981000")
+    assert candidate.model_name == "ApeosPrint C5570 GK"
+    assert candidate.match_grade == MatchGrade.A
+    assert "model=exact_with_verified_origin" in (candidate.match_note or "")
     assert "specification=compatible" in (candidate.match_note or "")
 
 

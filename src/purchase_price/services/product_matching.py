@@ -13,6 +13,12 @@ DEFAULT_MANUFACTURER_ALIAS_PATH = (
     Path(__file__).resolve().parents[3] / "data" / "manufacturer_aliases.csv"
 )
 
+# G2B 목록정보 공식 품목 상세에서 상품원산지국가명 중국(CN)/베트남(VN)이
+# 품목명의 모델 앞에 `(CN)`/`(VN)`으로 반복 표기되는 것을 검증했다. 이 두 값만
+# G2B parser가 원산지 메타데이터로 확인한다. Generic ProductIdentity의 qualifier 문자열만으로
+# 신뢰하지 않으며, 다른 qualifier는 계속 fail-closed한다.
+VERIFIED_G2B_ORIGIN_QUALIFIERS = frozenset({"CN", "VN"})
+
 
 @dataclass(frozen=True)
 class ProductIdentity:
@@ -22,10 +28,11 @@ class ProductIdentity:
     specification: str | None = None
     source_title: str | None = None
     # Leading parenthesised qualifiers observed in live G2B titles, e.g. `(VN)NT960XHA-KG71G`
-    # or `(주문자상표부착)삼성전자`. Their business meaning is not verified, so they are kept
-    # separate from the bare token instead of being silently dropped or merged.
+    # or `(주문자상표부착)삼성전자`. Their business meaning is interpreted only when separately
+    # verified from public G2B evidence; otherwise they remain conservative blockers.
     manufacturer_qualifier: str | None = None
     model_qualifier: str | None = None
+    model_qualifier_verified_as_origin: bool = False
 
 
 _LEADING_QUALIFIER_PATTERN = re.compile(r"^\((?P<qualifier>[^()]{1,30})\)\s*(?P<rest>\S.*)$")
@@ -98,6 +105,8 @@ def _model_state(
     query_model: str | None,
     candidate_model: str | None,
     candidate_qualifier: str | None = None,
+    *,
+    candidate_qualifier_verified_as_origin: bool = False,
 ) -> str:
     query_key = normalize_text(query_model)
     candidate_key = normalize_text(candidate_model)
@@ -107,6 +116,8 @@ def _model_state(
         return "missing"
     if query_key == candidate_key:
         if candidate_qualifier:
+            if candidate_qualifier_verified_as_origin:
+                return "exact_with_verified_origin"
             return "exact_with_unverified_qualifier"
         return "exact"
     return "conflict"
@@ -135,7 +146,10 @@ def _spec_tokens(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
     normalized = value.casefold()
-    tokens = re.findall(r"[0-9]+(?:\.[0-9]+)?[a-z]*|[a-z가-힣]{2,}", normalized)
+    tokens = re.findall(
+        r"[a-z]+[0-9]+[a-z0-9.-]*|[0-9]+(?:\.[0-9]+)?[a-z]*|[a-z가-힣]{2,}",
+        normalized,
+    )
     return tuple(dict.fromkeys(token for token in tokens if len(token) > 1))
 
 
@@ -197,16 +211,25 @@ def grade_product_identity(
     and requires more than a bare class label when the query asks for a specific model. D is emitted
     only for an explicit curated functional alternative.
 
-    A model token that matches only after removing an unverified leading qualifier such as `(VN)`
-    is reported as `exact_with_unverified_qualifier` and stays X: the token is surfaced for human
-    review instead of being reported as a conflict, but it is not promoted to A/B until the
-    qualifier's meaning is confirmed from public evidence. A manufacturer that matches only after
-    removing a qualifier such as `(주문자상표부착)` counts as incomplete manufacturer evidence and
-    caps the grade at B, the same as a missing manufacturer.
+    A model token that matches only after removing an unverified leading qualifier stays X. The
+    qualifier is surfaced for human review instead of being reported as a model conflict. The G2B
+    parser can mark `(CN)` and `(VN)` as verified origin-country metadata after official evidence;
+    only that parser-derived flag preserves model identity. A generic qualifier string alone cannot
+    unlock A/B. A manufacturer that matches only after removing a qualifier such as
+    `(주문자상표부착)` counts as incomplete manufacturer evidence and caps the grade at B.
     """
 
-    aliases = manufacturer_aliases if manufacturer_aliases is not None else load_manufacturer_aliases()
-    model_state = _model_state(query.model_name, candidate.model_name, candidate.model_qualifier)
+    aliases = (
+        manufacturer_aliases
+        if manufacturer_aliases is not None
+        else load_manufacturer_aliases()
+    )
+    model_state = _model_state(
+        query.model_name,
+        candidate.model_name,
+        candidate.model_qualifier,
+        candidate_qualifier_verified_as_origin=candidate.model_qualifier_verified_as_origin,
+    )
     manufacturer_state = _manufacturer_state(
         query.manufacturer,
         candidate.manufacturer,
@@ -220,7 +243,7 @@ def grade_product_identity(
         grade = MatchGrade.X
     elif model_state == "exact_with_unverified_qualifier":
         grade = MatchGrade.X
-    elif model_state == "exact":
+    elif model_state in {"exact", "exact_with_verified_origin"}:
         if manufacturer_state == "exact_or_alias" and specification_state == "compatible":
             grade = MatchGrade.A
         else:
@@ -258,8 +281,8 @@ def parse_g2b_identity(title: str | None) -> ProductIdentity:
     three comma-separated components keep manufacturer/model unknown rather than guessing.
 
     Leading parenthesised qualifiers seen in live titles (`(VN)NT960XHA-KG71G`,
-    `(주문자상표부착)삼성전자`) are split off into `model_qualifier` /
-    `manufacturer_qualifier`; the grader decides how much evidence they remove.
+    `(주문자상표부착)삼성전자`) are split off. Only model qualifiers whose G2B meaning has been
+    independently verified as origin metadata are marked trusted by this G2B-specific parser.
     """
 
     if not title:
@@ -276,6 +299,10 @@ def parse_g2b_identity(title: str | None) -> ProductIdentity:
     model_qualifier, model_name = (
         split_leading_qualifier(parts[2]) if len(parts) >= 3 else (None, None)
     )
+    verified_origin = bool(
+        model_qualifier
+        and model_qualifier.strip().upper() in VERIFIED_G2B_ORIGIN_QUALIFIERS
+    )
     specification = ", ".join(parts[3:]) if len(parts) >= 4 else None
     return ProductIdentity(
         product_name=product_name,
@@ -285,4 +312,5 @@ def parse_g2b_identity(title: str | None) -> ProductIdentity:
         source_title=title,
         manufacturer_qualifier=manufacturer_qualifier,
         model_qualifier=model_qualifier,
+        model_qualifier_verified_as_origin=verified_origin,
     )
