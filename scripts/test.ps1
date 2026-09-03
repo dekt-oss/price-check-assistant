@@ -2,15 +2,16 @@
 $ErrorActionPreference = "Stop"
 
 Set-Location (Join-Path $PSScriptRoot "..")
-if (-not (Test-Path ".venv\Scripts\python.exe")) {
+$python = ".\.venv\Scripts\python.exe"
+if (-not (Test-Path $python)) {
     throw "Environment not initialized. Run .\scripts\setup.ps1 first."
 }
 
-& .\.venv\Scripts\ruff.exe check .
-if ($LASTEXITCODE -ne 0) { throw "ruff failed" }
+& $python -m ruff check .
+if ($LASTEXITCODE -ne 0) { throw "ruff found issues" }
 
-& .\.venv\Scripts\python.exe -m pytest -q
+& $python -m pytest -q
 if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
 
-& .\.venv\Scripts\python.exe -m purchase_price.scripts.evaluate_match_benchmark --fail-on-mismatch
+& $python -m purchase_price.scripts.evaluate_match_benchmark --fail-on-mismatch
 if ($LASTEXITCODE -ne 0) { throw "match benchmark disagrees with the human-reviewed ground truth" }

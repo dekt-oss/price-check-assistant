@@ -34,26 +34,25 @@ else
 fi
 
 echo "[4/5] Starting PostgreSQL (optional)..."
-DB_READY=0
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     docker compose up -d db
     for _ in $(seq 1 30); do
         status="$(docker inspect --format='{{.State.Health.Status}}' purchase-price-postgres 2>/dev/null || true)"
-        if [ "$status" = "healthy" ]; then DB_READY=1; break; fi
+        if [ "$status" = "healthy" ]; then break; fi
         sleep 2
     done
-    [ "$DB_READY" = "1" ] || echo "  PostgreSQL did not become healthy. See: docker compose logs db"
 else
-    echo "  Docker is unavailable. Skipping the database."
-    echo "  Point DATABASE_URL in .env at a local PostgreSQL 16 if you need the Streamlit demo."
+    echo "  Docker is unavailable. Checking DATABASE_URL for an already-running PostgreSQL."
 fi
 
-if [ "$DB_READY" = "1" ]; then
+# Decide from a real connection, so a locally installed PostgreSQL counts even without Docker.
+if ./.venv/bin/python -c "import sys; from purchase_price.scripts.doctor import database_error; sys.exit(1 if database_error() else 0)"; then
     echo "[5/5] Applying database migrations..."
     ./.venv/bin/python -m purchase_price.scripts.init_db
     ./.venv/bin/python -m purchase_price.scripts.seed_demo
 else
-    echo "[5/5] Skipping migrations because no database is reachable."
+    echo "[5/5] No database reachable at DATABASE_URL. Skipping migrations."
+    echo "  Tests, lint and the match benchmark still run. The Streamlit demo pages need a database."
 fi
 
 echo

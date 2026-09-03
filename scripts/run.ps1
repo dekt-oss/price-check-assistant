@@ -2,7 +2,8 @@
 $ErrorActionPreference = "Stop"
 
 Set-Location (Join-Path $PSScriptRoot "..")
-if (-not (Test-Path ".venv\Scripts\streamlit.exe")) {
+$python = ".\.venv\Scripts\python.exe"
+if (-not (Test-Path $python)) {
     throw "Environment not initialized. Run .\scripts\setup.ps1 first."
 }
 
@@ -15,4 +16,4 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     }
 }
 
-& .\.venv\Scripts\streamlit.exe run Home.py
+& $python -m streamlit run Home.py

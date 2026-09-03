@@ -158,29 +158,42 @@ def _service_key_check() -> CheckResult:
     )
 
 
-def _database_check() -> CheckResult:
+def database_error() -> str | None:
+    """Return None when DATABASE_URL accepts a connection, else a one-line reason.
+
+    The setup scripts call this to decide whether to apply migrations, so that a developer
+    running a local PostgreSQL without Docker is not treated as having no database.
+    """
+
     try:
         from sqlalchemy import create_engine, text
 
         from purchase_price.config import get_settings
     except ImportError as exc:
-        return CheckResult("database", SKIP, f"SQLAlchemy unavailable: {exc}", required=False)
+        return f"SQLAlchemy unavailable: {exc}"
 
-    url = get_settings().database_url
     try:
-        engine = create_engine(url, connect_args={"connect_timeout": 3})
+        engine = create_engine(
+            get_settings().database_url, connect_args={"connect_timeout": 3}
+        )
         with engine.connect() as connection:
             connection.execute(text("select 1"))
     except Exception as exc:
-        reason = str(exc).splitlines()[0][:160]
-        return CheckResult(
-            "database",
-            SKIP,
-            f"not reachable: {reason}",
-            hint="Start it with `docker compose up -d db`, or point DATABASE_URL at a local PostgreSQL 16.",
-            required=False,
-        )
-    return CheckResult("database", OK, "connected", required=False)
+        return str(exc).splitlines()[0][:160]
+    return None
+
+
+def _database_check() -> CheckResult:
+    reason = database_error()
+    if reason is None:
+        return CheckResult("database", OK, "connected", required=False)
+    return CheckResult(
+        "database",
+        SKIP,
+        f"not reachable: {reason}",
+        hint="Start it with `docker compose up -d db`, or point DATABASE_URL at a local PostgreSQL 16.",
+        required=False,
+    )
 
 
 def _migration_check(database_reachable: bool) -> CheckResult:

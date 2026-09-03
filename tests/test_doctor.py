@@ -59,3 +59,20 @@ def test_service_key_value_is_never_printed(monkeypatch) -> None:
         get_settings.cache_clear()
 
     assert secret not in report
+
+
+def test_database_error_reports_a_reason_for_an_unreachable_url(monkeypatch) -> None:
+    from purchase_price.config import get_settings
+    from purchase_price.scripts.doctor import database_error
+
+    get_settings.cache_clear()
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql+psycopg://nobody:nobody@127.0.0.1:1/does_not_exist"
+    )
+    try:
+        reason = database_error()
+    finally:
+        get_settings.cache_clear()
+
+    assert reason is not None
+    assert len(reason.splitlines()) == 1
