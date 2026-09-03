@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # No base-branch filter: CI uses no secrets or external APIs, so it is safe to run on
+  # pull requests stacked on feature branches as well as on those targeting main.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
