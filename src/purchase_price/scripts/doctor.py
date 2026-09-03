@@ -2,9 +2,10 @@
 
 Required checks must pass before code work is meaningful (interpreter, package import,
 lint/test tooling, data registries). Optional checks describe capabilities that only some
-tasks need: a PostgreSQL connection is needed for the Streamlit demo and ingestion, and a
-data.go.kr service key is needed only for live G2B calls. Optional failures are reported as
-SKIP so a developer without Docker or without a key still gets a usable verdict.
+tasks need: a PostgreSQL connection is needed for the Streamlit demo and ingestion, a
+data.go.kr service key is needed only for live G2B calls, and a .env file only overrides
+settings that already have working defaults. Optional failures are reported as SKIP so a
+developer without Docker or without a key, and CI without a .env, still get a usable verdict.
 
 The service key is never printed; only whether one is configured.
 """
@@ -94,14 +95,21 @@ def _streamlit_check() -> CheckResult:
 
 
 def _env_file_check() -> CheckResult:
+    """A .env only overrides defaults, so its absence is reported, never treated as broken.
+
+    Settings falls back to the values in Settings itself and to the process environment, which
+    is how CI runs the whole suite without a .env at all.
+    """
+
     env_path = PROJECT_ROOT / ".env"
     if env_path.exists():
-        return CheckResult("env file", OK, f"{env_path.name} present")
+        return CheckResult("env file", OK, f"{env_path.name} present", required=False)
     return CheckResult(
         "env file",
-        FAIL,
-        ".env not found",
-        hint="Copy .env.example to .env. Never commit the real service key.",
+        SKIP,
+        ".env not found; using built-in defaults and the process environment",
+        hint="Copy .env.example to .env to change DATABASE_URL or add a service key. Never commit the real key.",
+        required=False,
     )
 
 

@@ -96,9 +96,10 @@ Set-ExecutionPolicy -Scope Process Bypass
 python -m purchase_price.scripts.doctor
 ```
 
-Python 버전, 패키지 설치, 개발도구, `.env`, 데이터 registry는 **필수** 항목이라 실패하면 exit 1입니다.
-DB 연결, migration 적용상태, `DATA_GO_KR_SERVICE_KEY`는 **선택** 항목이라 없으면 `SKIP`으로만 표시하고
-`doctor_status=ready`로 끝납니다. 세 가지까지 모두 갖춰졌는지 확인하려면 `--strict`를 붙입니다.
+Python 버전, 패키지 설치, 개발도구, 데이터 registry는 **필수** 항목이라 실패하면 exit 1입니다.
+`.env`, DB 연결, migration 적용상태, `DATA_GO_KR_SERVICE_KEY`는 **선택** 항목이라 없으면 `SKIP`으로만
+표시하고 `doctor_status=ready`로 끝납니다. `.env`가 없어도 Settings 기본값과 프로세스 환경변수로 동작하며,
+CI가 실제로 그렇게 전체 테스트를 실행합니다. 선택 항목까지 모두 갖춰졌는지 확인하려면 `--strict`를 붙입니다.
 서비스키는 존재 여부만 출력하며 값은 절대 출력하지 않습니다.
 
 ### 수동 설치

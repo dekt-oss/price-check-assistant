@@ -36,8 +36,20 @@ def test_report_is_ready_when_only_optional_checks_are_skipped() -> None:
     assert "blocked" not in report
 
 
+def test_missing_env_file_is_reported_but_never_blocks(monkeypatch, tmp_path) -> None:
+    # CI checks the repo out without a .env and still runs the whole suite, so a missing .env
+    # is information, not a broken environment.
+    monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+    result = doctor._env_file_check()
+
+    assert result.status == doctor.SKIP
+    assert not result.blocking
+    assert ".env" in result.detail
+
+
 def test_real_environment_has_no_blocking_check(capsys) -> None:
-    # The checked-out repo must always be workable without a database or a service key.
+    # The checked-out repo must always be workable without a database, a service key or a .env.
     results = run_checks()
     blocking = [result.name for result in results if result.blocking]
 
