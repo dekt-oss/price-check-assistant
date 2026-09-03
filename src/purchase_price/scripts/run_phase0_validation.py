@@ -9,6 +9,7 @@ from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from purchase_price.clients.data_go_kr import PublicDataPortalClient, redact_service_key_query
 from purchase_price.collectors.g2b_shopping import (
     G2B_SHOPPING_BASE_URL,
     G2BShoppingCollector,
@@ -17,8 +18,14 @@ from purchase_price.collectors.g2b_shopping import (
     SOURCE_NAME as G2B_SOURCE_NAME,
 )
 from purchase_price.config import get_settings
+from purchase_price.domain import MatchGrade
+from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_candidate_search import search_mapped_g2b_candidates
-from purchase_price.services.g2b_product_mapping import load_g2b_product_mappings
+from purchase_price.services.g2b_product_mapping import (
+    G2BProductMapping,
+    load_g2b_product_mappings,
+    resolve_verified_g2b_mapping,
+)
 from purchase_price.services.match_benchmark import (
     DEFAULT_PRODUCTS_PATH,
     load_phase0_product_queries,
@@ -127,16 +134,16 @@ def _write_summary(
                 "benchmark products with at least one successful source evaluation / all benchmark products"
             ),
             "source_hit_rate": (
-                "successful source-product evaluations whose public source reported at least one record / "
-                "successful source-product evaluations"
+                "successful source-product evaluations whose public source reported or returned at least one "
+                "record / successful source-product evaluations"
             ),
             "direct_evidence_product_rate": (
                 "successfully evaluated products with >=1 A/B observation whose EvidenceType is a direct "
                 "unit/public-sale price / successfully evaluated products"
             ),
             "multi_source_product_rate": (
-                "successfully evaluated products with evidence from >=2 independent sources / successfully "
-                "evaluated products; null until >=2 source adapters are successfully evaluated"
+                "successfully evaluated products with usable A/B/C/D evidence from >=2 independent sources / "
+                "successfully evaluated products; null until >=2 source adapters are successfully evaluated"
             ),
             "traceability_rate": (
                 "observations carrying source name + source record id + source URL or original title / all "
@@ -159,6 +166,37 @@ def _fmt_ratio(value: float | None) -> str:
     return "N/A" if value is None else f"{value * 100:.1f}%"
 
 
+def _mapping_status_for_query(
+    query: ProductQuery,
+    mappings: tuple[G2BProductMapping, ...],
+) -> str:
+    if resolve_verified_g2b_mapping(query, mappings) is not None:
+        return "verified"
+    model_key = normalize_text(query.model_name)
+    if model_key and any(normalize_text(row.model_name) == model_key for row in mappings):
+        return "unverified"
+    return "missing"
+
+
+def _source_hit(*, reported_total_count: int | None, records_seen: int) -> bool:
+    if reported_total_count is not None:
+        return reported_total_count > 0
+    return records_seen > 0
+
+
+def _retained_evidence_reason(candidate_prices: tuple) -> str | None:
+    if not candidate_prices:
+        return "source searched successfully but no model/manufacturer candidate evidence was retained"
+    if not any(price.match_grade in {MatchGrade.A, MatchGrade.B, MatchGrade.C, MatchGrade.D} for price in candidate_prices):
+        return "candidate rows were retained but all failed usable identity grading and remained X"
+    return None
+
+
+def _safe_error_detail(exc: Exception) -> str:
+    detail = redact_service_key_query(str(exc)).strip()
+    return detail[:500] if detail else "collection failed"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.begin_date > args.end_date:
@@ -168,9 +206,6 @@ def main(argv: list[str] | None = None) -> int:
 
     queries = load_phase0_product_queries(args.products)
     mappings = load_g2b_product_mappings()
-    mapping_by_model = {
-        normalize_text(mapping.model_name): mapping for mapping in mappings if mapping.model_name
-    }
 
     collector: G2BShoppingCollector | None = None
     if not args.offline:
@@ -179,17 +214,23 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(
                 "DATA_GO_KR_SERVICE_KEY is not configured; use --offline for readiness-only output"
             )
+        client = PublicDataPortalClient(
+            settings.data_go_kr_service_key,
+            timeout_seconds=settings.g2b_request_timeout_seconds,
+            max_retries=settings.g2b_max_retries,
+        )
         collector = G2BShoppingCollector(
             settings.data_go_kr_service_key,
             base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
+            client=client,
         )
 
     rows: list[Phase0SourceEvaluation] = []
     for query in queries.values():
-        mapping = mapping_by_model.get(normalize_text(query.model_name))
-        mapping_status = mapping.mapping_status if mapping is not None else "missing"
+        mapping = resolve_verified_g2b_mapping(query, mappings)
+        mapping_status = _mapping_status_for_query(query, mappings)
 
-        if mapping is None or not mapping.verified:
+        if mapping is None:
             rows.append(
                 build_source_evaluation(
                     benchmark_model=query.model_name,
@@ -237,15 +278,12 @@ def main(argv: list[str] | None = None) -> int:
                     mapping_status=mapping_status,
                     evaluation_status="error",
                     elapsed_ms=elapsed_ms,
-                    reason=f"{type(exc).__name__}: collection failed",
+                    reason=f"{type(exc).__name__}: {_safe_error_detail(exc)}",
                 )
             )
             continue
 
         elapsed_ms = round((time.monotonic() - started) * 1000)
-        source_hit = (
-            result.reported_total_count is not None and result.reported_total_count > 0
-        )
         rows.append(
             build_source_evaluation(
                 benchmark_model=query.model_name,
@@ -254,15 +292,14 @@ def main(argv: list[str] | None = None) -> int:
                 mapping_status=mapping_status,
                 evaluation_status="success",
                 observations=result.candidate_prices,
-                source_hit=source_hit,
+                source_hit=_source_hit(
+                    reported_total_count=result.reported_total_count,
+                    records_seen=result.records_seen,
+                ),
                 records_seen=result.records_seen,
                 reported_total_count=result.reported_total_count,
                 elapsed_ms=elapsed_ms,
-                reason=(
-                    None
-                    if result.candidate_prices
-                    else "source searched successfully but no model/manufacturer candidate evidence was retained"
-                ),
+                reason=_retained_evidence_reason(result.candidate_prices),
             )
         )
 
