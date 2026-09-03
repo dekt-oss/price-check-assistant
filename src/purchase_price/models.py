@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Text, func
+
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -21,7 +23,7 @@ class Product(Base):
     aliases: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    observations: Mapped[list["PriceObservation"]] = relationship(
+    observations: Mapped[list[PriceObservation]] = relationship(
         back_populates="product", cascade="all, delete-orphan"
     )
 
