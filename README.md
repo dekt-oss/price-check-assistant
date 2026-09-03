@@ -59,37 +59,58 @@
 - Alembic
 - pytest / Ruff
 
-## Windows 빠른 실행
+## 로컬 개발환경 설치
 
-### 가장 쉬운 방법
+### 사전 준비
 
-PowerShell에서 프로젝트 폴더로 이동한 뒤:
+- Python 3.11 이상 (필수)
+- Git (필수)
+- Docker Desktop 또는 로컬 PostgreSQL 16 (선택)
+
+**PostgreSQL은 선택입니다.** 테스트, Ruff, 매칭 benchmark, 대부분의 코드작업은 DB 없이 동작합니다.
+DB는 Streamlit 화면에서 저장된 가격관측값을 읽거나 수집 결과를 적재할 때만 필요합니다.
+Docker가 없으면 설치 스크립트는 DB 단계만 건너뛰고 나머지를 끝까지 진행합니다.
+
+### Windows
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\setup.ps1
-.\scripts\run.ps1
+.\scripts\setup.ps1     # venv, 패키지, .env, (가능하면) DB + migration, 환경점검
+.\scripts\test.ps1      # CI와 동일한 검사
+.\scripts\run.ps1       # Streamlit 실행
 ```
 
-`setup.ps1`은 가상환경 생성, Python 패키지 설치, PostgreSQL 시작, DB 테이블 생성, 샘플 데이터 입력까지 수행합니다.
+### Linux / macOS
 
-### 수동 방법
+```bash
+./scripts/setup.sh
+./scripts/test.sh
+./scripts/run.sh
+```
 
-#### 1. 사전 준비
+### 환경 점검
 
-- Python 3.11 이상
-- Docker Desktop
-- Git
+설치가 끝나면 언제든 다음으로 현재 상태를 확인할 수 있습니다.
 
-#### 2. 프로젝트 환경
+```bash
+python -m purchase_price.scripts.doctor
+```
 
-```powershell
-cd price-check-assistant
-Copy-Item .env.example .env
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -U pip
-pip install -e ".[dev]"
+Python 버전, 패키지 설치, 개발도구, 데이터 registry는 **필수** 항목이라 실패하면 exit 1입니다.
+`.env`, DB 연결, migration 적용상태, `DATA_GO_KR_SERVICE_KEY`는 **선택** 항목이라 없으면 `SKIP`으로만
+표시하고 `doctor_status=ready`로 끝납니다. `.env`가 없어도 Settings 기본값과 프로세스 환경변수로 동작하며,
+CI가 실제로 그렇게 전체 테스트를 실행합니다. 선택 항목까지 모두 갖춰졌는지 확인하려면 `--strict`를 붙입니다.
+서비스키는 존재 여부만 출력하며 값은 절대 출력하지 않습니다.
+
+### 수동 설치
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate     # Windows: py -3.11 -m venv .venv
+pip install -U pip && pip install -e ".[dev]"
+cp .env.example .env
+docker compose up -d db                            # 선택. 로컬 PostgreSQL 16을 써도 됩니다
+python -m purchase_price.scripts.init_db           # DB가 있을 때만
+python -m purchase_price.scripts.doctor
 ```
 
 실제 나라장터 live 호출이 필요할 때만 로컬 `.env`에 서비스키를 넣습니다. 실제 키는 Git에 커밋하지 않습니다.
@@ -98,26 +119,7 @@ pip install -e ".[dev]"
 DATA_GO_KR_SERVICE_KEY=...
 ```
 
-#### 3. PostgreSQL 시작
-
-```powershell
-docker compose up -d db
-```
-
-#### 4. DB 테이블 생성
-
-```powershell
-python -m purchase_price.scripts.init_db
-python -m purchase_price.scripts.seed_demo
-```
-
-#### 5. Streamlit 실행
-
-```powershell
-streamlit run Home.py
-```
-
-브라우저에서 일반적으로 `http://localhost:8501`이 열립니다.
+Streamlit은 `streamlit run Home.py`로 실행하며 브라우저에서 보통 `http://localhost:8501`이 열립니다.
 
 ## 개발용 샘플 검색
 
@@ -127,27 +129,23 @@ streamlit run Home.py
 
 ## 테스트
 
-```powershell
-pytest -q
+```bash
+./scripts/test.sh          # Windows: .\scripts\test.ps1
+```
+
+이 스크립트는 CI와 같은 순서로 Ruff, pytest, 매칭 benchmark를 실행하므로 로컬에서 통과하면 PR도 통과합니다.
+개별 실행은 다음과 같습니다.
+
+```bash
 ruff check .
+pytest -q
+python -m purchase_price.scripts.evaluate_match_benchmark --fail-on-mismatch
+alembic check              # DB가 있을 때. ORM 모델과 migration 불일치 검출
 ```
 
 일반 CI는 GitHub Secret이나 외부 API를 호출하지 않습니다. CI는 `evaluate_match_benchmark --fail-on-mismatch`로
 사람 판정 Ground Truth와 matcher 결과가 하나라도 다르면 실패합니다. 실제 API 호출은
 `.github/workflows/g2b-live-smoke.yml`과 `.github/workflows/g2b-ground-truth-capture.yml`을 수동 실행할 때만 수행합니다.
-
-### Linux/macOS 수동 설치
-
-```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -U pip && pip install -e ".[dev]"
-cp .env.example .env
-docker compose up -d db          # 또는 로컬 PostgreSQL 16에 .env의 사용자/DB 생성
-python -m purchase_price.scripts.init_db
-alembic check                    # ORM 모델과 migration 불일치 검출
-pytest -q && ruff check .
-python -m purchase_price.scripts.evaluate_match_benchmark --fail-on-mismatch
-```
 
 ## 구조
 
@@ -159,6 +157,7 @@ src/purchase_price/services              매핑·수집·제품매칭·가격분
 src/purchase_price/repositories          PostgreSQL 접근 / raw evidence
 data/phase0_products.csv                  Phase 0 benchmark 20개
 data/g2b_product_mappings.csv             검증된 G2B 세부품명 mapping registry
+scripts/                                 로컬 설치·검사·실행 스크립트
 docs/                                    설계·구현계약·다음 구현순서
 tests/                                   핵심 규칙/fixture 테스트
 ```
