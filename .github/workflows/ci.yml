@@ -13,6 +13,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
 
     steps:
       - name: Checkout
@@ -34,3 +36,15 @@ jobs:
 
       - name: Pytest
         run: pytest -q
+
+      - name: Temporary G2B live probe
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
+            echo "DATA_GO_KR_SERVICE_KEY secret is not available"
+            exit 2
+          fi
+          python -m purchase_price.scripts.g2b_shopping_probe \
+            getShoppingMallPrdctInfoList \
+            --param pageNo=1 \
+            --param numOfRows=1
