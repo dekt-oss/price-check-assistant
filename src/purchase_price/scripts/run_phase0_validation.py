@@ -16,6 +16,10 @@ from purchase_price.collectors.g2b_shopping import (
 from purchase_price.collectors.g2b_shopping import (
     SOURCE_NAME as G2B_SOURCE_NAME,
 )
+from purchase_price.collectors.manufacturer_public_catalog import (
+    ManufacturerPublicCatalogCollector,
+    load_manufacturer_public_prices,
+)
 from purchase_price.config import get_settings
 from purchase_price.services.g2b_candidate_search import search_mapped_g2b_candidates
 from purchase_price.services.g2b_product_mapping import load_g2b_product_mappings
@@ -27,6 +31,7 @@ from purchase_price.services.matching import normalize_text
 from purchase_price.services.phase0_validation import (
     Phase0SourceEvaluation,
     build_source_evaluation,
+    summarize_phase0_by_source,
     summarize_phase0_evaluations,
 )
 
@@ -65,8 +70,9 @@ def _parser() -> argparse.ArgumentParser:
     begin_default, end_default = _default_dates()
     parser = argparse.ArgumentParser(
         description=(
-            "Run the Phase 0 benchmark against currently verified public-price source mappings. "
-            "Unverified mappings are reported as not evaluated, never as source misses."
+            "Run the Phase 0 benchmark against verified public-price source mappings. "
+            "Network sources may be skipped offline while verified local public snapshots are "
+            "still evaluated. Unverified mappings are never counted as source misses."
         )
     )
     parser.add_argument("--begin-date", type=_date, default=begin_default)
@@ -78,7 +84,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--offline",
         action="store_true",
-        help="Do not call external APIs; emit mapping/readiness coverage only.",
+        help=(
+            "Do not call external APIs. Network collectors are skipped, but verified local "
+            "public-price snapshots are still evaluated."
+        ),
     )
     return parser
 
@@ -111,32 +120,38 @@ def _write_summary(
     offline: bool,
 ) -> None:
     summary = summarize_phase0_evaluations(rows, benchmark_products=benchmark_products)
+    source_summaries = summarize_phase0_by_source(
+        rows,
+        benchmark_products=benchmark_products,
+    )
     payload = {
-        "schema_version": "phase0-validation-v1",
+        "schema_version": "phase0-validation-v2",
         "query_window": {
             "begin_date": begin_date.isoformat(),
             "end_date": end_date.isoformat(),
         },
         "offline": offline,
         "summary": asdict(summary),
+        "source_summaries": [asdict(item) for item in source_summaries],
         "metric_definitions": {
             "mapping_readiness_rate": (
-                "benchmark products with an explicitly verified source mapping / all benchmark products"
+                "benchmark products with at least one explicitly verified source mapping / all "
+                "benchmark products; source_summaries reports the same metric per adapter"
             ),
             "evaluation_coverage_rate": (
                 "benchmark products with at least one successful source evaluation / all benchmark products"
             ),
             "source_hit_rate": (
-                "successful source-product evaluations whose public source reported at least one record / "
-                "successful source-product evaluations"
+                "successful source-product evaluations that retained or reported at least one public "
+                "record / successful source-product evaluations"
             ),
             "direct_evidence_product_rate": (
                 "successfully evaluated products with >=1 A/B observation whose EvidenceType is a direct "
                 "unit/public-sale price / successfully evaluated products"
             ),
             "multi_source_product_rate": (
-                "successfully evaluated products with evidence from >=2 independent sources / successfully "
-                "evaluated products; null until >=2 source adapters are successfully evaluated"
+                "successfully evaluated products with evidence from >=2 independent source adapters / "
+                "successfully evaluated products; null until >=2 adapters are successfully evaluated"
             ),
             "traceability_rate": (
                 "observations carrying source name + source record id + source URL or original title / all "
@@ -144,7 +159,7 @@ def _write_summary(
             ),
             "condition_completeness_rate": (
                 "direct evidence with quantity + unit + transaction date + VAT status + conditions / all "
-                "direct evidence; this is conservative v0 until install/shipping/options/warranty are split"
+                "direct evidence; conservative v0 until install/shipping/options/warranty are split"
             ),
             "collector_error_rate": (
                 "source-product evaluations that raised a collector error / attempted source-product evaluations"
@@ -167,104 +182,164 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--num-of-rows and --max-pages must be positive")
 
     queries = load_phase0_product_queries(args.products)
-    mappings = load_g2b_product_mappings()
-    mapping_by_model = {
-        normalize_text(mapping.model_name): mapping for mapping in mappings if mapping.model_name
+
+    g2b_mappings = load_g2b_product_mappings()
+    g2b_mapping_by_model = {
+        normalize_text(mapping.model_name): mapping
+        for mapping in g2b_mappings
+        if mapping.model_name
     }
 
-    collector: G2BShoppingCollector | None = None
+    manufacturer_catalog = load_manufacturer_public_prices()
+    manufacturer_catalog_by_model: dict[str, list[object]] = {}
+    for item in manufacturer_catalog:
+        manufacturer_catalog_by_model.setdefault(normalize_text(item.model_name), []).append(item)
+    manufacturer_collector = ManufacturerPublicCatalogCollector()
+
+    g2b_collector: G2BShoppingCollector | None = None
     if not args.offline:
         settings = get_settings()
         if not settings.data_go_kr_service_key:
             raise SystemExit(
-                "DATA_GO_KR_SERVICE_KEY is not configured; use --offline for readiness-only output"
+                "DATA_GO_KR_SERVICE_KEY is not configured; use --offline to skip network sources"
             )
-        collector = G2BShoppingCollector(
+        g2b_collector = G2BShoppingCollector(
             settings.data_go_kr_service_key,
             base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
         )
 
     rows: list[Phase0SourceEvaluation] = []
     for query in queries.values():
-        mapping = mapping_by_model.get(normalize_text(query.model_name))
-        mapping_status = mapping.mapping_status if mapping is not None else "missing"
+        model_key = normalize_text(query.model_name)
 
-        if mapping is None or not mapping.verified:
+        # G2B Shopping: verified classification is required before an API query is allowed.
+        g2b_mapping = g2b_mapping_by_model.get(model_key)
+        g2b_mapping_status = g2b_mapping.mapping_status if g2b_mapping is not None else "missing"
+        if g2b_mapping is None or not g2b_mapping.verified:
             rows.append(
                 build_source_evaluation(
                     benchmark_model=query.model_name,
                     product_name=query.product_name,
                     source_name=G2B_SOURCE_NAME,
-                    mapping_status=mapping_status,
+                    mapping_status=g2b_mapping_status,
                     evaluation_status="mapping_unverified",
                     reason="verified G2B detail-product mapping required before live evaluation",
                 )
             )
-            continue
-
-        if args.offline:
+        elif args.offline:
             rows.append(
                 build_source_evaluation(
                     benchmark_model=query.model_name,
                     product_name=query.product_name,
                     source_name=G2B_SOURCE_NAME,
-                    mapping_status=mapping_status,
+                    mapping_status=g2b_mapping_status,
                     evaluation_status="not_run_offline",
-                    reason="verified mapping exists; external API call skipped by --offline",
+                    reason="verified G2B mapping exists; external API call skipped by --offline",
                 )
             )
-            continue
+        else:
+            started = time.monotonic()
+            try:
+                assert g2b_collector is not None
+                result = search_mapped_g2b_candidates(
+                    g2b_collector,
+                    query,
+                    begin_date=args.begin_date,
+                    end_date=args.end_date,
+                    mappings=g2b_mappings,
+                    num_of_rows=args.num_of_rows,
+                    max_pages=args.max_pages,
+                )
+            except Exception as exc:
+                elapsed_ms = round((time.monotonic() - started) * 1000)
+                rows.append(
+                    build_source_evaluation(
+                        benchmark_model=query.model_name,
+                        product_name=query.product_name,
+                        source_name=G2B_SOURCE_NAME,
+                        mapping_status=g2b_mapping_status,
+                        evaluation_status="error",
+                        elapsed_ms=elapsed_ms,
+                        reason=f"{type(exc).__name__}: collection failed",
+                    )
+                )
+            else:
+                elapsed_ms = round((time.monotonic() - started) * 1000)
+                source_hit = (
+                    result.reported_total_count is not None
+                    and result.reported_total_count > 0
+                )
+                rows.append(
+                    build_source_evaluation(
+                        benchmark_model=query.model_name,
+                        product_name=query.product_name,
+                        source_name=G2B_SOURCE_NAME,
+                        mapping_status=g2b_mapping_status,
+                        evaluation_status="success",
+                        observations=result.candidate_prices,
+                        source_hit=source_hit,
+                        records_seen=result.records_seen,
+                        reported_total_count=result.reported_total_count,
+                        elapsed_ms=elapsed_ms,
+                        reason=(
+                            None
+                            if result.candidate_prices
+                            else "source searched successfully but no model/manufacturer candidate evidence was retained"
+                        ),
+                    )
+                )
 
-        started = time.monotonic()
-        try:
-            assert collector is not None
-            result = search_mapped_g2b_candidates(
-                collector,
-                query,
-                begin_date=args.begin_date,
-                end_date=args.end_date,
-                mappings=mappings,
-                num_of_rows=args.num_of_rows,
-                max_pages=args.max_pages,
-            )
-        except Exception as exc:
-            elapsed_ms = round((time.monotonic() - started) * 1000)
+        # Manufacturer public catalog: a verified local snapshot is itself the source mapping.
+        # It is safe to evaluate in --offline mode because no network request is made here.
+        manufacturer_matches = manufacturer_catalog_by_model.get(model_key, [])
+        if not manufacturer_matches:
             rows.append(
                 build_source_evaluation(
                     benchmark_model=query.model_name,
                     product_name=query.product_name,
-                    source_name=G2B_SOURCE_NAME,
-                    mapping_status=mapping_status,
-                    evaluation_status="error",
-                    elapsed_ms=elapsed_ms,
-                    reason=f"{type(exc).__name__}: collection failed",
+                    source_name=manufacturer_collector.name,
+                    mapping_status="missing",
+                    evaluation_status="mapping_unverified",
+                    reason="no verified official manufacturer price snapshot for this benchmark",
                 )
             )
-            continue
-
-        elapsed_ms = round((time.monotonic() - started) * 1000)
-        source_hit = (
-            result.reported_total_count is not None and result.reported_total_count > 0
-        )
-        rows.append(
-            build_source_evaluation(
-                benchmark_model=query.model_name,
-                product_name=query.product_name,
-                source_name=G2B_SOURCE_NAME,
-                mapping_status=mapping_status,
-                evaluation_status="success",
-                observations=result.candidate_prices,
-                source_hit=source_hit,
-                records_seen=result.records_seen,
-                reported_total_count=result.reported_total_count,
-                elapsed_ms=elapsed_ms,
-                reason=(
-                    None
-                    if result.candidate_prices
-                    else "source searched successfully but no model/manufacturer candidate evidence was retained"
-                ),
-            )
-        )
+        else:
+            started = time.monotonic()
+            try:
+                observations = tuple(manufacturer_collector.search(query))
+            except Exception as exc:
+                elapsed_ms = round((time.monotonic() - started) * 1000)
+                rows.append(
+                    build_source_evaluation(
+                        benchmark_model=query.model_name,
+                        product_name=query.product_name,
+                        source_name=manufacturer_collector.name,
+                        mapping_status="verified",
+                        evaluation_status="error",
+                        elapsed_ms=elapsed_ms,
+                        reason=f"{type(exc).__name__}: local catalog evaluation failed",
+                    )
+                )
+            else:
+                elapsed_ms = round((time.monotonic() - started) * 1000)
+                rows.append(
+                    build_source_evaluation(
+                        benchmark_model=query.model_name,
+                        product_name=query.product_name,
+                        source_name=manufacturer_collector.name,
+                        mapping_status="verified",
+                        evaluation_status="success",
+                        observations=observations,
+                        source_hit=bool(observations),
+                        records_seen=len(manufacturer_matches),
+                        elapsed_ms=elapsed_ms,
+                        reason=(
+                            None
+                            if observations
+                            else "verified manufacturer snapshot exists but identity grading retained no evidence"
+                        ),
+                    )
+                )
 
     row_tuple = tuple(rows)
     products_path = args.output_dir / "phase0-products.csv"
@@ -280,6 +355,10 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     summary = summarize_phase0_evaluations(row_tuple, benchmark_products=len(queries))
+    source_summaries = summarize_phase0_by_source(
+        row_tuple,
+        benchmark_products=len(queries),
+    )
     print(f"benchmark_products={summary.benchmark_products}")
     print(
         "mapping_readiness="
@@ -305,6 +384,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"condition_completeness_rate={_fmt_ratio(summary.condition_completeness_rate)}")
     print(f"collector_error_rate={_fmt_ratio(summary.collector_error_rate)}")
     print(f"not_evaluated_products={summary.not_evaluated_products}")
+    for item in source_summaries:
+        print(
+            "source_summary="
+            f"{item.source_name} mapping={item.mapping_ready_products}/{item.benchmark_products} "
+            f"hit={item.source_hit_pairs}/{item.successful_pairs} "
+            f"direct_products={item.direct_evidence_products} errors={item.error_pairs} "
+            f"avg_elapsed_ms={item.average_elapsed_ms if item.average_elapsed_ms is not None else 'N/A'}"
+        )
     print(f"products_output={products_path}")
     print(f"summary_output={summary_path}")
 
