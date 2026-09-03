@@ -1,8 +1,8 @@
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from purchase_price import models  # noqa: F401
 from purchase_price.config import get_settings
 from purchase_price.db import Base

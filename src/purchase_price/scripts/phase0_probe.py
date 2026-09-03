@@ -5,7 +5,6 @@ from pathlib import Path
 
 from purchase_price.config import get_settings
 
-
 BENCHMARK_PATH = Path("data/phase0_products.csv")
 
 
@@ -21,7 +20,9 @@ def main() -> None:
 
     for index, row in enumerate(rows, start=1):
         identity = " | ".join(
-            value for value in [row.get("manufacturer"), row.get("product_name"), row.get("model_name")] if value
+            value
+            for value in [row.get("manufacturer"), row.get("product_name"), row.get("model_name")]
+            if value
         )
         print(f"{index:02d}. {identity}")
 
