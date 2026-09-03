@@ -1,0 +1,60 @@
+name: G2B Live Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      detail_product_name:
+        description: "나라장터 세부품명"
+        required: true
+        default: "제습기"
+      begin_date:
+        description: "조회 시작일 YYYYMMDD"
+        required: true
+        default: "20260714"
+      end_date:
+        description: "조회 종료일 YYYYMMDD"
+        required: true
+        default: "20260813"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Verify secret
+        shell: bash
+        run: |
+          if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
+            echo "DATA_GO_KR_SERVICE_KEY secret is not configured"
+            exit 2
+          fi
+
+      - name: Probe specific-item procurement API
+        run: |
+          python -m purchase_price.scripts.g2b_shopping_probe \
+            getSpcifyPrdlstPrcureInfoList \
+            --param pageNo=1 \
+            --param numOfRows=1 \
+            --param inqryDiv=1 \
+            --param inqryBgnDate=${{ inputs.begin_date }} \
+            --param inqryEndDate=${{ inputs.end_date }} \
+            --param inqryPrdctDiv=2 \
+            --param fnlCntrctDlvrReqChgOrdYn=Y \
+            --param dtilPrdctClsfcNoNm=${{ inputs.detail_product_name }}
