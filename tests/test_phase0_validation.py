@@ -111,6 +111,8 @@ def test_summary_keeps_unverified_mapping_out_of_source_hit_denominator() -> Non
 
     summary = summarize_phase0_evaluations(rows, benchmark_products=3)
 
+    assert summary.mapping_ready_products == 2
+    assert summary.mapping_readiness_rate == 0.666667
     assert summary.successfully_evaluated_products == 2
     assert summary.evaluation_coverage_rate == 0.666667
     assert summary.source_hit_pairs == 1
@@ -122,7 +124,36 @@ def test_summary_keeps_unverified_mapping_out_of_source_hit_denominator() -> Non
     assert summary.multi_source_product_rate is None
 
 
-def test_summary_reports_multi_source_only_when_two_sources_are_present() -> None:
+def test_offline_rows_report_mapping_readiness_without_fake_source_metrics() -> None:
+    rows = (
+        build_source_evaluation(
+            benchmark_model="A",
+            product_name="A product",
+            source_name="g2b",
+            mapping_status="verified",
+            evaluation_status="not_run_offline",
+        ),
+        build_source_evaluation(
+            benchmark_model="B",
+            product_name="B product",
+            source_name="g2b",
+            mapping_status="unverified",
+            evaluation_status="mapping_unverified",
+        ),
+    )
+
+    summary = summarize_phase0_evaluations(rows, benchmark_products=2)
+
+    assert summary.mapping_ready_products == 1
+    assert summary.mapping_readiness_rate == 0.5
+    assert summary.successfully_evaluated_products == 0
+    assert summary.evaluation_coverage_rate == 0.0
+    assert summary.source_hit_rate is None
+    assert summary.direct_evidence_product_rate is None
+    assert summary.not_evaluated_products == 2
+
+
+def test_summary_reports_multi_source_only_when_two_sources_are_successful() -> None:
     evidence_a = _price(
         grade=MatchGrade.A,
         evidence_type=EvidenceType.PUBLIC_SALE_PRICE,
@@ -153,6 +184,13 @@ def test_summary_reports_multi_source_only_when_two_sources_are_present() -> Non
             source_hit=True,
         ),
         build_source_evaluation(
+            benchmark_model="A",
+            product_name="A product",
+            source_name="source-c",
+            mapping_status="unverified",
+            evaluation_status="mapping_unverified",
+        ),
+        build_source_evaluation(
             benchmark_model="B",
             product_name="B product",
             source_name="source-a",
@@ -167,3 +205,4 @@ def test_summary_reports_multi_source_only_when_two_sources_are_present() -> Non
     assert summary.multi_source_products == 1
     assert summary.multi_source_product_rate == 0.5
     assert summary.source_hit_rate == 1.0
+    assert summary.not_evaluated_products == 0
