@@ -120,6 +120,9 @@ def _write_summary(
         "offline": offline,
         "summary": asdict(summary),
         "metric_definitions": {
+            "mapping_readiness_rate": (
+                "benchmark products with an explicitly verified source mapping / all benchmark products"
+            ),
             "evaluation_coverage_rate": (
                 "benchmark products with at least one successful source evaluation / all benchmark products"
             ),
@@ -133,7 +136,7 @@ def _write_summary(
             ),
             "multi_source_product_rate": (
                 "successfully evaluated products with evidence from >=2 independent sources / successfully "
-                "evaluated products; null until >=2 source adapters are present"
+                "evaluated products; null until >=2 source adapters are successfully evaluated"
             ),
             "traceability_rate": (
                 "observations carrying source name + source record id + source URL or original title / all "
@@ -278,6 +281,11 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = summarize_phase0_evaluations(row_tuple, benchmark_products=len(queries))
     print(f"benchmark_products={summary.benchmark_products}")
+    print(
+        "mapping_readiness="
+        f"{summary.mapping_ready_products}/{summary.benchmark_products} "
+        f"({_fmt_ratio(summary.mapping_readiness_rate)})"
+    )
     print(
         "evaluation_coverage="
         f"{summary.successfully_evaluated_products}/{summary.benchmark_products} "
