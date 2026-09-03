@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from purchase_price.db import SessionLocal
-from purchase_price.domain import MatchGrade, SourceType
+from purchase_price.domain import EvidenceType, MatchGrade, SourceType
 from purchase_price.models import PriceObservation, Product
 
 
@@ -25,6 +25,7 @@ def main() -> None:
         p.observations = [
             PriceObservation(
                 price=Decimal("35800000"),
+                evidence_type=EvidenceType.CONTRACT_UNIT_PRICE,
                 source_type=SourceType.PUBLIC_CONTRACT,
                 source_name="샘플 공공기관 계약",
                 collected_at=date.today(),
