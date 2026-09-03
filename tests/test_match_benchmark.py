@@ -7,8 +7,8 @@ from purchase_price.services.match_benchmark import MatchBenchmarkError, run_mat
 
 
 PRODUCTS = """category,manufacturer,product_name,model_name,specification,status,notes
-의료장비,Stephan,인공호흡기,Sophie,Sophie,benchmark 확정,test
-전산비품,삼성전자,노트북컴퓨터,NT960XJG-K72AG,NT960XJG-K72AG,benchmark 확정,test
+의료장비,Stephan,인공호흡기,Sophie,운반형,benchmark 확정,test
+전산비품,삼성전자,노트북컴퓨터,NT960XJG-K72AG,32GB 1TB,benchmark 확정,test
 """
 
 
@@ -22,21 +22,9 @@ def test_benchmark_runner_scores_ground_truth_rows(tmp_path: Path) -> None:
     _write(products, PRODUCTS)
     _write(
         truth,
-        "benchmark_model,source_name,source_record_id,candidate_title,expected_grade,review_note,evidence_url\n"
-        "Sophie,g2b,1,인공호흡기|Stephan|Sophie|운반형,A,test,https://example.test/1\n".replace(
-            "|", ","
-        )
-        + "NT960XJG-K72AG,g2b,2,노트북컴퓨터|Other Vendor|NT960XJG-K72AG,X,test,https://example.test/2\n".replace(
-            "|", ","
-        ),
-    )
-
-    # Candidate titles contain commas, so rewrite the file with proper CSV quoting.
-    _write(
-        truth,
         'benchmark_model,source_name,source_record_id,candidate_title,expected_grade,review_note,evidence_url\n'
         'Sophie,g2b,1,"인공호흡기, Stephan, Sophie, 운반형",A,test,https://example.test/1\n'
-        'NT960XJG-K72AG,g2b,2,"노트북컴퓨터, Other Vendor, NT960XJG-K72AG",X,test,https://example.test/2\n',
+        'NT960XJG-K72AG,g2b,2,"노트북컴퓨터, Other Vendor, NT960XJG-K72AG, 32GB 1TB",X,test,https://example.test/2\n',
     )
 
     result = run_match_benchmark(products_path=products, ground_truth_path=truth)
