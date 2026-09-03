@@ -3,6 +3,11 @@ name: G2B Ground Truth Capture
 on:
   push:
     branches: [feat/f3-live-ground-truth]
+    paths:
+      - ".github/workflows/g2b-ground-truth-capture.yml"
+      - "src/purchase_price/scripts/capture_g2b_ground_truth_candidates.py"
+      - "data/g2b_product_mappings.csv"
+      - "data/phase0_products.csv"
 
 permissions:
   contents: read
