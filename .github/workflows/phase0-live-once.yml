@@ -1,4 +1,4 @@
-name: Phase 0 G2B Diagnostics Once
+name: Phase 0 Wider G2B Scan Once
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  scan:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -42,32 +42,25 @@ jobs:
             exit 2
           fi
 
-      - name: Capture representative G2B identities
-        shell: bash
-        run: |
-          python -m purchase_price.scripts.capture_g2b_ground_truth_candidates \
-            --begin-date "20260714" \
-            --end-date "20260813" \
-            --sample-pages-per-model "2" \
-            --max-rows-per-model "25" \
-            --output artifacts/g2b-diagnostics/identity-sample.csv
-
-      - name: Scan exact model candidates to completion
+      - name: Scan unresolved exact models over 2026 YTD
         shell: bash
         run: |
           python -m purchase_price.scripts.scan_g2b_exact_model_candidates \
-            --begin-date "20260714" \
-            --end-date "20260813" \
+            --begin-date "20260101" \
+            --end-date "20260903" \
             --chunk-days "31" \
             --max-pages-per-chunk "20" \
-            --summary-output artifacts/g2b-diagnostics/exact-model-summary.csv \
-            --candidates-output artifacts/g2b-diagnostics/exact-model-candidates.csv
+            --model "Sophie" \
+            --model "NT960XJG-K72AG" \
+            --model "ThinkStation P2 Tower" \
+            --summary-output artifacts/g2b-wide-scan/exact-model-summary.csv \
+            --candidates-output artifacts/g2b-wide-scan/exact-model-candidates.csv
 
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: g2b-diagnostics-20260714-20260813
-          path: artifacts/g2b-diagnostics/
+          name: g2b-wide-scan-20260101-20260903
+          path: artifacts/g2b-wide-scan/
           retention-days: 14
           if-no-files-found: error
