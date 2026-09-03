@@ -37,7 +37,7 @@ if (-not $healthy) {
     throw "PostgreSQL did not become healthy. Run 'docker compose logs db'."
 }
 
-Write-Host "[5/5] Creating database tables..."
+Write-Host "[5/5] Applying database migrations..."
 & .\.venv\Scripts\python.exe -m purchase_price.scripts.init_db
 & .\.venv\Scripts\python.exe -m purchase_price.scripts.seed_demo
 

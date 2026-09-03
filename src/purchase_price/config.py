@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     )
     log_level: str = "INFO"
 
+    data_go_kr_service_key: str | None = None
+    g2b_shopping_base_url: str | None = None
+    g2b_contract_base_url: str | None = None
+    g2b_request_timeout_seconds: float = 20.0
+    g2b_max_retries: int = 3
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 

@@ -1,10 +1,12 @@
-from purchase_price import models  # noqa: F401
-from purchase_price.db import Base, engine
+from alembic.config import Config
+
+from alembic import command
 
 
 def main() -> None:
-    Base.metadata.create_all(bind=engine)
-    print("Database tables created.")
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    print("Database migrations applied.")
 
 
 if __name__ == "__main__":
