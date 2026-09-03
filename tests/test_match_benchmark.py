@@ -3,7 +3,10 @@ from pathlib import Path
 import pytest
 
 from purchase_price.domain import MatchGrade
-from purchase_price.services.match_benchmark import MatchBenchmarkError, run_match_benchmark
+from purchase_price.services.match_benchmark import (
+    MatchBenchmarkError,
+    run_match_benchmark,
+)
 
 
 PRODUCTS = """category,manufacturer,product_name,model_name,specification,status,notes
