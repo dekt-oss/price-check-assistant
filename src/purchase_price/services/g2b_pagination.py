@@ -26,14 +26,22 @@ def iter_specific_item_pages(
 ) -> Iterator[G2BCollectedPage]:
     """Yield complete public-API pages without importing persistence dependencies.
 
-    The iterator fails closed if the explicit page cap would truncate the API result.
+    Completion is decided from the number of records actually returned, not from the
+    requested `num_of_rows`: if the server silently caps a page at fewer rows than requested,
+    counting requested rows would stop early and present a truncated result as complete.
+
+    The iterator fails closed when the explicit page cap would truncate the API result, and
+    when the API returns an empty page while `totalCount` says records remain.
     It deliberately contains no SQLAlchemy/model imports so live probes and evidence
     capture can run without a database driver.
     """
 
     if max_pages < 1:
         raise ValueError("max_pages must be positive")
+    if num_of_rows < 1:
+        raise ValueError("num_of_rows must be positive")
 
+    records_seen = 0
     for page_no in range(1, max_pages + 1):
         page, payload = collector.fetch_specific_item_page(
             detail_product_name=detail_product_name,
@@ -44,13 +52,21 @@ def iter_specific_item_pages(
         )
         yield G2BCollectedPage(page=page, payload=payload)
 
+        records_seen += len(page.items)
         if page.total_count is not None:
-            if page_no * num_of_rows >= page.total_count:
+            if records_seen >= page.total_count:
                 return
+            if not page.items:
+                raise PublicDataClientError(
+                    "G2B page returned no items before totalCount was reached: "
+                    f"page_no={page_no} records_seen={records_seen} "
+                    f"total_count={page.total_count} detail_product_name={detail_product_name!r}"
+                )
         elif len(page.items) < num_of_rows:
             return
 
     raise PublicDataClientError(
         "G2B pagination safety limit reached before collection completed: "
-        f"max_pages={max_pages} detail_product_name={detail_product_name!r}"
+        f"max_pages={max_pages} records_seen={records_seen} "
+        f"detail_product_name={detail_product_name!r}"
     )

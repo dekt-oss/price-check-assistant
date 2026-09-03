@@ -132,7 +132,22 @@ pytest -q
 ruff check .
 ```
 
-일반 CI는 GitHub Secret이나 외부 API를 호출하지 않습니다. 실제 API smoke는 `.github/workflows/g2b-live-smoke.yml`을 수동 실행할 때만 수행합니다.
+일반 CI는 GitHub Secret이나 외부 API를 호출하지 않습니다. CI는 `evaluate_match_benchmark --fail-on-mismatch`로
+사람 판정 Ground Truth와 matcher 결과가 하나라도 다르면 실패합니다. 실제 API 호출은
+`.github/workflows/g2b-live-smoke.yml`과 `.github/workflows/g2b-ground-truth-capture.yml`을 수동 실행할 때만 수행합니다.
+
+### Linux/macOS 수동 설치
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -U pip && pip install -e ".[dev]"
+cp .env.example .env
+docker compose up -d db          # 또는 로컬 PostgreSQL 16에 .env의 사용자/DB 생성
+python -m purchase_price.scripts.init_db
+alembic check                    # ORM 모델과 migration 불일치 검출
+pytest -q && ruff check .
+python -m purchase_price.scripts.evaluate_match_benchmark --fail-on-mismatch
+```
 
 ## 구조
 

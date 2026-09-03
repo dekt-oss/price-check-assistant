@@ -35,7 +35,9 @@ class MatchBenchmarkResult:
     evaluation: MatchEvaluation
 
 
-def _load_product_queries(path: Path) -> dict[str, ProductQuery]:
+def load_phase0_product_queries(path: Path = DEFAULT_PRODUCTS_PATH) -> dict[str, ProductQuery]:
+    """Load Phase 0 benchmark queries keyed by normalized model; duplicates fail closed."""
+
     if not path.exists():
         raise MatchBenchmarkError(f"Phase 0 product registry not found: {path}")
 
@@ -67,7 +69,7 @@ def run_match_benchmark(
     products_path: Path = DEFAULT_PRODUCTS_PATH,
     ground_truth_path: Path = DEFAULT_GROUND_TRUTH_PATH,
 ) -> MatchBenchmarkResult:
-    queries = _load_product_queries(products_path)
+    queries = load_phase0_product_queries(products_path)
     if not ground_truth_path.exists():
         raise MatchBenchmarkError(f"match ground truth not found: {ground_truth_path}")
 
@@ -120,3 +122,31 @@ def run_match_benchmark(
         predictions=tuple(predictions),
         evaluation=evaluate_match_grades(expected, predicted),
     )
+
+
+PREDICTION_FIELDS = (
+    "benchmark_model",
+    "candidate_title",
+    "expected_grade",
+    "predicted_grade",
+    "match_note",
+)
+
+
+def write_benchmark_predictions(result: MatchBenchmarkResult, path: Path) -> None:
+    """Persist every per-row decision so a benchmark run can be audited and reproduced."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(PREDICTION_FIELDS))
+        writer.writeheader()
+        for row in result.predictions:
+            writer.writerow(
+                {
+                    "benchmark_model": row.benchmark_model,
+                    "candidate_title": row.candidate_title,
+                    "expected_grade": row.expected_grade.value,
+                    "predicted_grade": row.predicted_grade.value,
+                    "match_note": row.match_note,
+                }
+            )

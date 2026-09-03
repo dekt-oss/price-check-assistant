@@ -14,10 +14,31 @@ from purchase_price.collectors.g2b_shopping import (
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_product_mapping import load_g2b_product_mappings
+from purchase_price.services.match_benchmark import (
+    DEFAULT_PRODUCTS_PATH,
+    MatchBenchmarkError,
+    load_phase0_product_queries,
+)
 from purchase_price.services.matching import normalize_text
 from purchase_price.services.product_matching import grade_product_identity, parse_g2b_identity
 
-DEFAULT_PRODUCTS_PATH = Path(__file__).resolve().parents[3] / "data" / "phase0_products.csv"
+CAPTURE_FIELDS = [
+    "benchmark_model",
+    "source_name",
+    "source_record_id",
+    "candidate_title",
+    "predicted_grade",
+    "match_note",
+    "price",
+    "transaction_date",
+    "quantity",
+    "unit",
+    "total_amount",
+    "evidence_type",
+    "transaction_count",
+    "query_begin_date",
+    "query_end_date",
+]
 
 
 class CandidateCaptureError(RuntimeError):
@@ -32,28 +53,41 @@ def _date(value: str) -> date:
 
 
 def _load_queries(path: Path) -> dict[str, ProductQuery]:
-    if not path.exists():
-        raise CandidateCaptureError(f"Phase 0 product registry not found: {path}")
+    try:
+        return load_phase0_product_queries(path)
+    except MatchBenchmarkError as exc:
+        raise CandidateCaptureError(str(exc)) from exc
 
-    queries: dict[str, ProductQuery] = {}
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        required = {"manufacturer", "product_name", "model_name", "specification"}
-        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
-            raise CandidateCaptureError("Phase 0 product registry is missing required columns")
 
-        for row in reader:
-            model = (row.get("model_name") or "").strip()
-            key = normalize_text(model)
-            if not key:
-                continue
-            queries[key] = ProductQuery(
-                product_name=(row.get("product_name") or "").strip(),
-                manufacturer=(row.get("manufacturer") or "").strip(),
-                model_name=model,
-                specification=(row.get("specification") or "").strip(),
-            )
-    return queries
+def select_identity_sample(
+    ranked_rows: list[tuple[int, str, dict[str, str]]],
+    *,
+    max_rows: int,
+) -> list[dict[str, str]]:
+    """Keep one representative transaction per distinct candidate title.
+
+    Repeated deliveries of the same G2B identity would otherwise fill the human-review sample
+    with the same product. The kept row is the best-ranked (priority, date, record id) one and
+    carries `transaction_count` so reviewers can see how often the identity recurred.
+    """
+
+    grouped: dict[str, list[tuple[int, str, dict[str, str]]]] = {}
+    for item in ranked_rows:
+        key = normalize_text(item[2]["candidate_title"])
+        if not key:
+            continue
+        grouped.setdefault(key, []).append(item)
+
+    representatives: list[tuple[int, str, dict[str, str]]] = []
+    for group in grouped.values():
+        ordered = sorted(group, key=lambda item: (item[0], item[1], item[2]["source_record_id"]))
+        priority, transaction_date, row = ordered[0]
+        representatives.append(
+            (priority, transaction_date, {**row, "transaction_count": str(len(ordered))})
+        )
+
+    representatives.sort(key=lambda item: (item[0], item[1], item[2]["source_record_id"]))
+    return [item[2] for item in representatives[:max_rows]]
 
 
 def _priority(query: ProductQuery, title: str) -> int:
@@ -173,44 +207,18 @@ def main() -> None:
             if page.total_count is None and len(page.items) < 100:
                 break
 
-        deduped: dict[tuple[str, str], tuple[int, str, dict[str, str]]] = {}
-        for item in model_rows:
-            row = item[2]
-            key = (row["source_record_id"], row["candidate_title"])
-            deduped.setdefault(key, item)
-
-        ranked = sorted(
-            deduped.values(),
-            key=lambda item: (item[0], item[1], item[2]["source_record_id"]),
-        )
-        selected = ranked[: args.max_rows_per_model]
-        rows.extend(item[2] for item in selected)
+        selected = select_identity_sample(model_rows, max_rows=args.max_rows_per_model)
+        rows.extend(selected)
 
         print(
             f"model={mapping.model_name} sampled_pages={pages_fetched} "
             f"sampled_records={records_seen} reported_total={reported_total_count} "
-            f"parsed={len(model_rows)} captured={len(selected)}"
+            f"parsed={len(model_rows)} identities={len(selected)}"
         )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "benchmark_model",
-        "source_name",
-        "source_record_id",
-        "candidate_title",
-        "predicted_grade",
-        "match_note",
-        "price",
-        "transaction_date",
-        "quantity",
-        "unit",
-        "total_amount",
-        "evidence_type",
-        "query_begin_date",
-        "query_end_date",
-    ]
     with args.output.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=CAPTURE_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
 

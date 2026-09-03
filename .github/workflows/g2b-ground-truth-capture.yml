@@ -1,13 +1,43 @@
 name: G2B Ground Truth Capture
 
+# Live public-API calls are made only on explicit manual dispatch. A push trigger made this
+# workflow call the API on every push that touched a listed file, which spent developer-account
+# quota on refactor commits and would have stopped firing after the branch merged.
 on:
-  push:
-    branches: [feat/f3-live-ground-truth]
-    paths:
-      - ".github/workflows/g2b-ground-truth-capture.yml"
-      - "src/purchase_price/scripts/capture_g2b_ground_truth_candidates.py"
-      - "data/g2b_product_mappings.csv"
-      - "data/phase0_products.csv"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "sample = bounded human-review sample / scan = exact-model scan in date windows"
+        required: true
+        type: choice
+        default: sample
+        options:
+          - sample
+          - scan
+      begin_date:
+        description: "조회 시작일 YYYYMMDD"
+        required: true
+        default: "20260714"
+      end_date:
+        description: "조회 종료일 YYYYMMDD"
+        required: true
+        default: "20260813"
+      chunk_days:
+        description: "scan: 한 창(window)의 최대 일수"
+        required: false
+        default: "31"
+      max_pages_per_chunk:
+        description: "scan: 창당 최대 페이지 (100행/페이지). 초과 시 해당 창은 incomplete"
+        required: false
+        default: "20"
+      sample_pages_per_model:
+        description: "sample: 모델당 조회 페이지 수"
+        required: false
+        default: "1"
+      max_rows_per_model:
+        description: "sample: 모델당 보존할 unique identity 수"
+        required: false
+        default: "25"
 
 permissions:
   contents: read
@@ -15,7 +45,7 @@ permissions:
 jobs:
   capture:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
       PYTHONPATH: src
@@ -44,17 +74,32 @@ jobs:
             exit 2
           fi
 
-      - name: Capture verified-model candidates
+      - name: Capture bounded human-review sample
+        if: inputs.mode == 'sample'
         run: |
           python -m purchase_price.scripts.capture_g2b_ground_truth_candidates \
-            --begin-date 20260714 \
-            --end-date 20260813 \
+            --begin-date "${{ inputs.begin_date }}" \
+            --end-date "${{ inputs.end_date }}" \
+            --sample-pages-per-model "${{ inputs.sample_pages_per_model }}" \
+            --max-rows-per-model "${{ inputs.max_rows_per_model }}" \
             --output artifacts/g2b-ground-truth-candidates.csv
 
+      - name: Scan exact-model candidates in date windows
+        if: inputs.mode == 'scan'
+        run: |
+          python -m purchase_price.scripts.scan_g2b_exact_model_candidates \
+            --begin-date "${{ inputs.begin_date }}" \
+            --end-date "${{ inputs.end_date }}" \
+            --chunk-days "${{ inputs.chunk_days }}" \
+            --max-pages-per-chunk "${{ inputs.max_pages_per_chunk }}" \
+            --summary-output artifacts/g2b-exact-model-scan-summary.csv \
+            --candidates-output artifacts/g2b-exact-model-candidates.csv
+
       - name: Upload public candidate artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: g2b-ground-truth-candidates
-          path: artifacts/g2b-ground-truth-candidates.csv
-          retention-days: 7
+          name: g2b-ground-truth-${{ inputs.mode }}
+          path: artifacts/
+          retention-days: 14
           if-no-files-found: error

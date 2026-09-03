@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any
 from urllib.parse import quote, unquote
 from xml.etree import ElementTree
@@ -10,6 +12,54 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 class PublicDataClientError(RuntimeError):
     pass
+
+
+_SERVICE_KEY_QUERY_PATTERN = re.compile(r"(serviceKey=)[^&\s\"']+", re.IGNORECASE)
+_HTTP_LOGGER_NAMES = ("httpx", "httpcore")
+
+
+def redact_service_key_query(text: str) -> str:
+    """Mask any `serviceKey=` query value regardless of which key was used."""
+
+    return _SERVICE_KEY_QUERY_PATTERN.sub(r"\1***", text)
+
+
+class _ServiceKeyLogFilter(logging.Filter):
+    """Rewrite HTTP transport log records so a request URL never carries the service key.
+
+    httpx logs `HTTP Request: GET <full url>` at INFO level. If an application enables INFO
+    logging (LOG_LEVEL=INFO is the documented default), that line would contain the
+    data.go.kr service key. The filter formats the record eagerly and masks the query value.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:  # pragma: no cover - defensive: never break logging
+            return True
+        redacted = redact_service_key_query(message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+def harden_http_logging() -> None:
+    """Install the service-key redaction filter and keep HTTP transport logs at WARNING.
+
+    Idempotent. The level is only raised when the logger has no explicit level so a caller
+    that deliberately enabled httpx debug logging still gets redacted output.
+    """
+
+    for name in _HTTP_LOGGER_NAMES:
+        logger = logging.getLogger(name)
+        if not any(isinstance(existing, _ServiceKeyLogFilter) for existing in logger.filters):
+            logger.addFilter(_ServiceKeyLogFilter())
+        if logger.level == logging.NOTSET:
+            logger.setLevel(logging.WARNING)
+
+
+harden_http_logging()
 
 
 def normalize_service_key(service_key: str) -> str:
