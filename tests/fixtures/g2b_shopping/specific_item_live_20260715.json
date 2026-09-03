@@ -1,0 +1,51 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "정상"
+    },
+    "body": {
+      "items": [
+        {
+          "prcrmntDivNm": "중앙조달",
+          "cntrctDivNm": "제3자단가계약",
+          "cntrctDlvrDivNm": "납품요구",
+          "cntrctDlvrReqDate": "20260715",
+          "cntrctDlvrReqNo": "R26TB02131828",
+          "cntrctDlvrReqChgOrd": "00",
+          "fnlCntrctDlvrReqChgOrdYn": "Y",
+          "dminsttNm": "문화체육관광부 한국예술종합학교",
+          "dmndInsttDivNm": "국가기관",
+          "dminsttRgnNm": "서울특별시 성북구",
+          "dminsttCd": "1371063",
+          "prdctClsfcNo": "40101902",
+          "prdctClsfcNoNm": "제습기",
+          "dtilPrdctClsfcNo": "4010190201",
+          "dtilPrdctClsfcNoNm": "제습기",
+          "prdctIdntNo": "24138760",
+          "prdctIdntNoNm": "제습기, 나우이엘, MA-045DT, 45L/d",
+          "prdctUprc": "450000",
+          "prdctQty": "1",
+          "prdctUnit": "대",
+          "prdctAmt": "450000",
+          "corpNm": "주식회사 나우이엘",
+          "cntrctDlvrReqNm": "2026년 무용원 교육용 기자재 3차 구매(다기능복사기 등 4종 6점)",
+          "masYn": "Y",
+          "masCntrct2StepYn": "N",
+          "uprcCntrctNo": "R25TA00799917",
+          "uprcCntrctCngOrd": "03",
+          "IntlCntrctDlvrReqDate": "20260715",
+          "cntrctMthdNm": "일반경쟁",
+          "incdecQty": "1",
+          "incdecAmt": "450000",
+          "dlvrTmlmtDate": "20260824",
+          "dlvryCndtnNm": "현장설치도",
+          "prdctSno": "1"
+        }
+      ],
+      "numOfRows": 1,
+      "pageNo": 1,
+      "totalCount": 427
+    }
+  }
+}
