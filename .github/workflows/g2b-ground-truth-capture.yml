@@ -13,6 +13,7 @@ jobs:
     timeout-minutes: 10
     env:
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      PYTHONPATH: src
 
     steps:
       - name: Checkout
@@ -23,8 +24,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install package
-        run: pip install -e .
+      - name: Install capture dependencies
+        run: |
+          pip install \
+            "pydantic-settings<3,>=2.4" \
+            "httpx<1,>=0.27" \
+            "tenacity<10,>=9"
 
       - name: Verify secret
         shell: bash
