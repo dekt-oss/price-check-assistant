@@ -26,6 +26,17 @@ def test_default_catalog_contains_traceable_gmsr_182_public_price() -> None:
     assert row.vat_status is None
 
 
+def test_default_catalog_contains_traceable_c5570_gk_public_price() -> None:
+    rows = load_manufacturer_public_prices()
+
+    row = next(item for item in rows if item.model_name == "ApeosPrint C5570 GK")
+    assert row.manufacturer == "FUJIFILM Business Innovation"
+    assert row.specification == "A3,55ppm"
+    assert row.price == Decimal("5500000")
+    assert row.source_url.startswith("https://store-fbkr.fujifilm.com/")
+    assert row.vat_status is None
+
+
 def test_exact_gmsr_182_query_returns_direct_a_without_inventing_conditions() -> None:
     collector = ManufacturerPublicCatalogCollector()
 
@@ -50,6 +61,29 @@ def test_exact_gmsr_182_query_returns_direct_a_without_inventing_conditions() ->
     assert result.transaction_date is None
     assert result.vat_status is None
     assert "VAT" in (result.conditions or "")
+
+
+def test_exact_c5570_gk_query_returns_direct_a_without_inventing_vat() -> None:
+    collector = ManufacturerPublicCatalogCollector()
+
+    results = collector.search(
+        ProductQuery(
+            product_name="컬러 레이저프린터",
+            manufacturer="FUJIFILM Business Innovation",
+            model_name="ApeosPrint C5570 GK",
+            specification="A3,55PPM",
+        )
+    )
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.price == Decimal("5500000")
+    assert result.match_grade == MatchGrade.A
+    assert result.evidence_type == EvidenceType.PUBLIC_SALE_PRICE
+    assert result.source_type == SourceType.MANUFACTURER
+    assert result.source_record_id == "fujifilm-apeosprint-c5570-gk-store-20260904"
+    assert result.vat_status is None
+    assert "VAT 포함 여부 미확인" in (result.conditions or "")
 
 
 def test_different_model_is_not_returned_as_public_price_evidence() -> None:
