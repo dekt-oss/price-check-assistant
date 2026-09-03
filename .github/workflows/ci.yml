@@ -37,7 +37,7 @@ jobs:
       - name: Pytest
         run: pytest -q
 
-      - name: Temporary G2B network diagnostics
+      - name: Temporary G2B auth diagnostics
         if: github.event_name == 'pull_request'
         shell: bash
         run: |
@@ -47,25 +47,22 @@ jobs:
             exit 2
           fi
 
-          echo "ipv4_dns:"
-          getent ahostsv4 apis.data.go.kr | head -5 || true
+          NORMALIZED_KEY="$(python -c 'import os, urllib.parse; print(urllib.parse.unquote(os.environ["DATA_GO_KR_SERVICE_KEY"]))')"
 
-          echo "portal_reachability:"
-          curl -4 -sS -o /dev/null \
-            --connect-timeout 8 --max-time 15 \
-            -w 'data.go.kr http=%{http_code} connect=%{time_connect} total=%{time_total}\n' \
-            https://www.data.go.kr/ || true
-
-          echo "api_host_reachability_without_auth:"
-          curl -4 -sS -o /tmp/g2b-noauth.out \
-            --connect-timeout 8 --max-time 15 \
-            -w 'apis.data.go.kr http=%{http_code} connect=%{time_connect} total=%{time_total}\n' \
-            'https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getShoppingMallPrdctInfoList?pageNo=1&numOfRows=1&type=json' || true
-          head -c 500 /tmp/g2b-noauth.out 2>/dev/null || true
+          echo "authenticated_api_response:"
+          STATUS="$(curl -4 -sS -o /tmp/g2b-auth.out \
+            --connect-timeout 8 --max-time 20 \
+            -w '%{http_code}' \
+            --get \
+            --data-urlencode "serviceKey=$NORMALIZED_KEY" \
+            --data-urlencode 'pageNo=1' \
+            --data-urlencode 'numOfRows=1' \
+            --data-urlencode 'type=json' \
+            'https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getShoppingMallPrdctInfoList')"
+          echo "http=$STATUS"
+          head -c 1200 /tmp/g2b-auth.out 2>/dev/null || true
           echo
 
-          echo "authenticated_probe:"
-          python -m purchase_price.scripts.g2b_shopping_probe \
-            getShoppingMallPrdctInfoList \
-            --param pageNo=1 \
-            --param numOfRows=1
+          if [ "$STATUS" != "200" ]; then
+            exit 3
+          fi
