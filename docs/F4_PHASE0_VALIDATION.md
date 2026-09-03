@@ -45,7 +45,7 @@ python -m purchase_price.scripts.run_phase0_validation \
 python -m purchase_price.scripts.run_phase0_validation --offline
 ```
 
-Offline 결과는 Source Hit나 Direct Evidence 성능값으로 사용하지 않는다.
+Offline 결과는 Source Hit나 Direct Evidence 성능값으로 사용하지 않는다. 대신 Mapping Readiness Rate로 현재 자동평가 준비범위를 확인한다.
 
 ## 산출물
 
@@ -72,6 +72,12 @@ Offline 결과는 Source Hit나 Direct Evidence 성능값으로 사용하지 않
 - 근거부족/오류 사유
 
 ## 지표 정의
+
+### Mapping Readiness Rate
+
+`명시적으로 verified된 source mapping이 있는 benchmark 수 / 전체 benchmark 수`
+
+매핑이 없다는 사실은 공개 source에서 제품이 없다는 뜻이 아니다. 아직 해당 source의 표준 분류를 검증하지 않았다는 뜻이므로 Source Hit 실패로 계산하지 않는다.
 
 ### Evaluation Coverage Rate
 
@@ -100,7 +106,7 @@ Direct EvidenceType:
 
 `2개 이상 독립 source에서 evidence를 확보한 품목 / 성공 평가 품목`
 
-현재 source adapter가 G2B Shopping 하나뿐이면 **N/A**다.
+두 번째 source가 단순 placeholder 상태인 것만으로 지표를 활성화하지 않는다. 최소 2개 source가 실제 성공 평가를 가진 경우에만 계산하며, 현재 source adapter가 G2B Shopping 하나뿐이면 **N/A**다.
 
 ### Traceability Rate
 
@@ -133,7 +139,7 @@ Direct EvidenceType:
 
 나머지는 표준 세부품명/번호를 검증하기 전까지 자동 실행하지 않는다.
 
-또한 실제 Ground Truth 10건은 현재 모두 X이므로 direct-match precision/recall은 아직 N/A다. F4 리포트는 이 상태를 숨기지 않고 Evaluation Coverage와 Direct Evidence 결과로 그대로 드러내야 한다.
+또한 실제 Ground Truth 10건은 현재 모두 X이므로 direct-match precision/recall은 아직 N/A다. F4 리포트는 이 상태를 숨기지 않고 Mapping Readiness, Evaluation Coverage와 Direct Evidence 결과로 그대로 드러내야 한다.
 
 ## 다음 확장
 
