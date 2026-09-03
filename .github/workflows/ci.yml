@@ -34,3 +34,6 @@ jobs:
 
       - name: Pytest
         run: pytest -q
+
+      - name: Match benchmark report
+        run: python -m purchase_price.scripts.evaluate_match_benchmark
