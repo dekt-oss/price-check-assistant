@@ -16,6 +16,6 @@ GMSR-182,약품냉장고,,,unverified,,,,,표준 세부품명 미확정
 26173KA,Laparoscopical Needle holder,,,unverified,,,,,표준 세부품명 미확정
 B61084,TEBBETTS FIBEROPTIC RETRACTOR,,,unverified,,,,,표준 세부품명 미확정
 NT960XJG-K72AG,노트북(갤럭시북6 PRO),노트북컴퓨터,4321150301,verified,20260714,20260813,1021,https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01514813&bidPbancOrd=000&fileSeq=2&fileType=&prcmBsneSeCd=01,공식 공고 세부품명번호 확인 및 live API source-hit 확인
-C5570,Color Laser Printer,,,unverified,,,,,표준 세부품명 미확정
+C5570,Color Laser Printer,레이저프린터,4321210501,verified,,,,https://www.law.go.kr/LSW/flDownload.do?bylClsCd=200201&flNm=%5B%EB%B3%84%ED%91%9C+1%5D+%EC%9B%90%EC%82%B0%EC%A7%80+%EB%AA%85%EC%8B%9C%EB%B0%A9%EB%B2%95%EC%9D%98+%ED%8A%B9%EB%A1%80+%EC%A0%81%EC%9A%A9%EC%83%81%ED%92%88+%ED%91%9C&flSeq=147929253,FUJIFILM 공식 페이지에서 ApeosPrint C5570이 A3 컬러 55ppm 프린터임을 확인하고 국가법령정보센터 조달 세부품명표에서 레이저프린터 4321210501 확인; live API source-hit 미검증
 "ThinkStation P2 Tower",컴퓨터(동영상편집용),워크스테이션,4321151501,verified,,,,https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R25BK01241731&bidPbancOrd=000&fileSeq=3&fileType=&prcmBsneSeCd=01,공식 G2B 기자재 문서에서 Lenovo ThinkStation P2 Tower를 워크스테이션으로 확인; 조달청 목록정보시스템 워크스테이션 세부품명번호 4321151501 확인; live API source-hit 미검증
 CX30N,영상 판독용 모니터,,,unverified,,,,,표준 세부품명 미확정
