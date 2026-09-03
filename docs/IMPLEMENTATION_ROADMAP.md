@@ -14,8 +14,8 @@ Phase 0 foundation. 목표는 실제 가격 수집기를 붙이기 전에 데이
 - [x] raw evidence SHA-256 중복 식별 규칙
 - [x] data.go.kr 공통 HTTP client 골격
 - [x] Phase 0 benchmark probe 스크립트
-- [ ] Alembic migration 도입
-- [ ] DB repository 계층에서 run/evidence idempotent 저장 구현
+- [x] Alembic migration 도입
+- [x] DB repository 계층에서 run/evidence idempotent 저장 구현
 
 ## F1 — 첫 실제 Collector: 나라장터쇼핑몰 품목정보
 
@@ -75,4 +75,4 @@ Phase 0 foundation. 목표는 실제 가격 수집기를 붙이기 전에 데이
 
 ## 다음 순서
 
-`Alembic → evidence repository → G2B Shopping collector → 3개 benchmark smoke test → 20개 확장`
+`G2B Shopping collector → 3개 benchmark smoke test → fixture 고정 → 20개 확장`
