@@ -48,18 +48,26 @@ jobs:
           fi
 
           NORMALIZED_KEY="$(python -c 'import os, urllib.parse; print(urllib.parse.unquote(os.environ["DATA_GO_KR_SERVICE_KEY"]))')"
+          STATUS="000"
 
-          echo "authenticated_api_response:"
-          STATUS="$(curl -4 -sS -o /tmp/g2b-auth.out \
-            --connect-timeout 8 --max-time 20 \
-            -w '%{http_code}' \
-            --get \
-            --data-urlencode "serviceKey=$NORMALIZED_KEY" \
-            --data-urlencode 'pageNo=1' \
-            --data-urlencode 'numOfRows=1' \
-            --data-urlencode 'type=json' \
-            'https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getShoppingMallPrdctInfoList')"
-          echo "http=$STATUS"
+          for ATTEMPT in 1 2 3 4; do
+            echo "authenticated_api_attempt=$ATTEMPT"
+            STATUS="$(curl -4 -sS -o /tmp/g2b-auth.out \
+              --connect-timeout 5 --max-time 12 \
+              -w '%{http_code}' \
+              --get \
+              --data-urlencode "serviceKey=$NORMALIZED_KEY" \
+              --data-urlencode 'pageNo=1' \
+              --data-urlencode 'numOfRows=1' \
+              --data-urlencode 'type=json' \
+              'https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getShoppingMallPrdctInfoList' || true)"
+            echo "http=$STATUS"
+            if [ "$STATUS" != "000" ]; then
+              break
+            fi
+            sleep 1
+          done
+
           head -c 1200 /tmp/g2b-auth.out 2>/dev/null || true
           echo
 
