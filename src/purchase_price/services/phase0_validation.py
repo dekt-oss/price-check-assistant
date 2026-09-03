@@ -51,6 +51,29 @@ class Phase0ValidationSummary:
     not_evaluated_products: int
 
 
+@dataclass(frozen=True)
+class Phase0PerSourceSummary:
+    source_name: str
+    benchmark_products: int
+    mapping_ready_products: int
+    mapping_readiness_rate: float | None
+    attempted_pairs: int
+    successful_pairs: int
+    source_hit_pairs: int
+    source_hit_rate: float | None
+    direct_evidence_products: int
+    direct_evidence_product_rate: float | None
+    evidence_records: int
+    traceable_evidence_records: int
+    traceability_rate: float | None
+    direct_evidence_records: int
+    condition_complete_direct_records: int
+    condition_completeness_rate: float | None
+    error_pairs: int
+    collector_error_rate: float | None
+    average_elapsed_ms: float | None
+
+
 def _ratio(numerator: int, denominator: int) -> float | None:
     if denominator <= 0:
         return None
@@ -200,3 +223,71 @@ def summarize_phase0_evaluations(
         collector_error_rate=_ratio(len(errors), len(attempted)),
         not_evaluated_products=len(not_evaluated_models),
     )
+
+
+def summarize_phase0_by_source(
+    rows: tuple[Phase0SourceEvaluation, ...],
+    *,
+    benchmark_products: int,
+) -> tuple[Phase0PerSourceSummary, ...]:
+    """Summarize evidence coverage independently for every source adapter.
+
+    Mapping-unverified and offline-skipped rows stay visible as readiness gaps but never enter
+    source-hit or collector-error denominators. This prevents a source with incomplete mapping
+    coverage from looking like it searched the product and found nothing.
+    """
+
+    summaries: list[Phase0PerSourceSummary] = []
+    for source_name in sorted({row.source_name for row in rows if row.source_name}):
+        source_rows = tuple(row for row in rows if row.source_name == source_name)
+        attempted = tuple(
+            row for row in source_rows if row.evaluation_status in {"success", "error"}
+        )
+        successful = tuple(row for row in source_rows if row.evaluation_status == "success")
+        errors = tuple(row for row in source_rows if row.evaluation_status == "error")
+        mapping_ready_models = {
+            row.benchmark_model
+            for row in source_rows
+            if row.mapping_status.casefold() == "verified"
+        }
+        successful_models = {row.benchmark_model for row in successful}
+        direct_models = {
+            row.benchmark_model for row in successful if row.direct_evidence_count > 0
+        }
+        source_hits = sum(row.source_hit is True for row in successful)
+        evidence_records = sum(row.evidence_count for row in successful)
+        traceable_records = sum(row.traceable_evidence_count for row in successful)
+        direct_records = sum(row.direct_evidence_count for row in successful)
+        condition_complete = sum(row.condition_complete_count for row in successful)
+        elapsed_values = [row.elapsed_ms for row in attempted if row.elapsed_ms is not None]
+        average_elapsed_ms = (
+            round(sum(elapsed_values) / len(elapsed_values), 2) if elapsed_values else None
+        )
+
+        summaries.append(
+            Phase0PerSourceSummary(
+                source_name=source_name,
+                benchmark_products=benchmark_products,
+                mapping_ready_products=len(mapping_ready_models),
+                mapping_readiness_rate=_ratio(len(mapping_ready_models), benchmark_products),
+                attempted_pairs=len(attempted),
+                successful_pairs=len(successful),
+                source_hit_pairs=source_hits,
+                source_hit_rate=_ratio(source_hits, len(successful)),
+                direct_evidence_products=len(direct_models),
+                direct_evidence_product_rate=_ratio(
+                    len(direct_models), len(successful_models)
+                ),
+                evidence_records=evidence_records,
+                traceable_evidence_records=traceable_records,
+                traceability_rate=_ratio(traceable_records, evidence_records),
+                direct_evidence_records=direct_records,
+                condition_complete_direct_records=condition_complete,
+                condition_completeness_rate=_ratio(condition_complete, direct_records),
+                error_pairs=len(errors),
+                collector_error_rate=_ratio(len(errors), len(attempted)),
+                average_elapsed_ms=average_elapsed_ms,
+            )
+        )
+
+    return tuple(summaries)
