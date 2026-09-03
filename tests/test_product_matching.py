@@ -167,3 +167,78 @@ def test_g2b_identity_parser_uses_common_live_title_shape_without_guessing_short
     assert short.product_name == "인공호흡기"
     assert short.manufacturer is None
     assert short.model_name is None
+
+
+def test_g2b_parser_splits_leading_qualifiers_without_interpreting_them() -> None:
+    laptop = parse_g2b_identity(
+        "노트북컴퓨터, (주문자상표부착)삼성전자, (CN)NT750XGK-KG56P, Intel Core 5 120U(1.4GHz)"
+    )
+
+    assert laptop.manufacturer == "삼성전자"
+    assert laptop.manufacturer_qualifier == "주문자상표부착"
+    assert laptop.model_name == "NT750XGK-KG56P"
+    assert laptop.model_qualifier == "CN"
+    assert laptop.specification == "Intel Core 5 120U(1.4GHz)"
+
+    plain = parse_g2b_identity("인공호흡기, 조선기기, CSI-2000, 운반형")
+    assert plain.manufacturer_qualifier is None
+    assert plain.model_qualifier is None
+
+
+def test_same_model_behind_unverified_origin_qualifier_stays_x_but_is_not_reported_as_conflict():
+    # Live G2B titles carry `(VN)`/`(CN)` before Samsung model codes. Before qualifier parsing the
+    # matcher reported `model=conflict` for the benchmark model itself, which would hide every
+    # real A/B positive for this benchmark and mislabel the reason.
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="노트북컴퓨터",
+            manufacturer="삼성전자",
+            model_name="NT960XJG-K72AG",
+            specification="NT960XJG-K72AG",
+        ),
+        parse_g2b_identity("노트북컴퓨터, 삼성전자, (VN)NT960XJG-K72AG, Intel Core Ultra 7 256V"),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert decision.model_state == "exact_with_unverified_qualifier"
+    assert decision.manufacturer_state == "exact_or_alias"
+    assert "model_qualifier=VN" in decision.note
+
+
+def test_different_model_behind_qualifier_is_still_an_explicit_conflict() -> None:
+    decision = grade_product_identity(
+        ProductQuery(product_name="노트북컴퓨터", manufacturer="삼성전자", model_name="NT960XJG-K72AG"),
+        parse_g2b_identity("노트북컴퓨터, 삼성전자, (VN)NT960XHA-KG71G, Intel Core Ultra 7 256V"),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert decision.model_state == "conflict"
+
+
+def test_manufacturer_qualifier_caps_exact_model_at_b_like_missing_manufacturer() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="노트북컴퓨터",
+            manufacturer="삼성전자",
+            model_name="NT750XGK-KG56P",
+            specification="Intel Core 5 120U",
+        ),
+        parse_g2b_identity("노트북컴퓨터, (주문자상표부착)삼성전자, NT750XGK-KG56P, Intel Core 5 120U(1.4GHz)"),
+    )
+
+    assert decision.grade == MatchGrade.B
+    assert decision.manufacturer_state == "alias_with_unverified_qualifier"
+    assert decision.specification_state == "compatible"
+
+
+def test_manufacturer_qualifier_does_not_unlock_c_for_model_specific_query() -> None:
+    decision = grade_product_identity(
+        ProductQuery(product_name="노트북컴퓨터", manufacturer="삼성전자", model_name="NT960XJG-K72AG"),
+        ProductIdentity(
+            product_name="노트북컴퓨터",
+            manufacturer="삼성전자",
+            manufacturer_qualifier="주문자상표부착",
+        ),
+    )
+
+    assert decision.grade == MatchGrade.X

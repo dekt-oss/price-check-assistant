@@ -21,6 +21,26 @@ class ProductIdentity:
     model_name: str | None = None
     specification: str | None = None
     source_title: str | None = None
+    # Leading parenthesised qualifiers observed in live G2B titles, e.g. `(VN)NT960XHA-KG71G`
+    # or `(주문자상표부착)삼성전자`. Their business meaning is not verified, so they are kept
+    # separate from the bare token instead of being silently dropped or merged.
+    manufacturer_qualifier: str | None = None
+    model_qualifier: str | None = None
+
+
+_LEADING_QUALIFIER_PATTERN = re.compile(r"^\((?P<qualifier>[^()]{1,30})\)\s*(?P<rest>\S.*)$")
+
+
+def split_leading_qualifier(value: str | None) -> tuple[str | None, str | None]:
+    """Split `(qualifier)token` into (`qualifier`, `token`) without interpreting the qualifier."""
+
+    if not value:
+        return None, value
+    text = value.strip()
+    match = _LEADING_QUALIFIER_PATTERN.match(text)
+    if match is None:
+        return None, text
+    return match.group("qualifier").strip(), match.group("rest").strip()
 
 
 @dataclass(frozen=True)
@@ -74,7 +94,11 @@ def canonical_manufacturer(
     return registry.get(key, key)
 
 
-def _model_state(query_model: str | None, candidate_model: str | None) -> str:
+def _model_state(
+    query_model: str | None,
+    candidate_model: str | None,
+    candidate_qualifier: str | None = None,
+) -> str:
     query_key = normalize_text(query_model)
     candidate_key = normalize_text(candidate_model)
     if not query_key:
@@ -82,6 +106,8 @@ def _model_state(query_model: str | None, candidate_model: str | None) -> str:
     if not candidate_key:
         return "missing"
     if query_key == candidate_key:
+        if candidate_qualifier:
+            return "exact_with_unverified_qualifier"
         return "exact"
     return "conflict"
 
@@ -90,6 +116,7 @@ def _manufacturer_state(
     query_manufacturer: str | None,
     candidate_manufacturer: str | None,
     aliases: dict[str, str],
+    candidate_qualifier: str | None = None,
 ) -> str:
     query_key = canonical_manufacturer(query_manufacturer, aliases)
     candidate_key = canonical_manufacturer(candidate_manufacturer, aliases)
@@ -98,6 +125,8 @@ def _manufacturer_state(
     if candidate_key is None:
         return "missing"
     if query_key == candidate_key:
+        if candidate_qualifier:
+            return "alias_with_unverified_qualifier"
         return "exact_or_alias"
     return "conflict"
 
@@ -167,15 +196,29 @@ def grade_product_identity(
     Any explicit manufacturer/model conflict fails closed to X. C is a reference-only class match
     and requires more than a bare class label when the query asks for a specific model. D is emitted
     only for an explicit curated functional alternative.
+
+    A model token that matches only after removing an unverified leading qualifier such as `(VN)`
+    is reported as `exact_with_unverified_qualifier` and stays X: the token is surfaced for human
+    review instead of being reported as a conflict, but it is not promoted to A/B until the
+    qualifier's meaning is confirmed from public evidence. A manufacturer that matches only after
+    removing a qualifier such as `(주문자상표부착)` counts as incomplete manufacturer evidence and
+    caps the grade at B, the same as a missing manufacturer.
     """
 
     aliases = manufacturer_aliases if manufacturer_aliases is not None else load_manufacturer_aliases()
-    model_state = _model_state(query.model_name, candidate.model_name)
-    manufacturer_state = _manufacturer_state(query.manufacturer, candidate.manufacturer, aliases)
+    model_state = _model_state(query.model_name, candidate.model_name, candidate.model_qualifier)
+    manufacturer_state = _manufacturer_state(
+        query.manufacturer,
+        candidate.manufacturer,
+        aliases,
+        candidate.manufacturer_qualifier,
+    )
     specification_state = _specification_state(query, candidate)
     product_state = _product_class_state(query.product_name, candidate.product_name)
 
     if model_state == "conflict" or manufacturer_state == "conflict":
+        grade = MatchGrade.X
+    elif model_state == "exact_with_unverified_qualifier":
         grade = MatchGrade.X
     elif model_state == "exact":
         if manufacturer_state == "exact_or_alias" and specification_state == "compatible":
@@ -195,6 +238,10 @@ def grade_product_identity(
         f"grade={grade.value}; model={model_state}; manufacturer={manufacturer_state}; "
         f"specification={specification_state}; product_class={product_state}"
     )
+    if candidate.model_qualifier:
+        note += f"; model_qualifier={candidate.model_qualifier}"
+    if candidate.manufacturer_qualifier:
+        note += f"; manufacturer_qualifier={candidate.manufacturer_qualifier}"
     return MatchDecision(
         grade=grade,
         note=note,
@@ -209,6 +256,10 @@ def parse_g2b_identity(title: str | None) -> ProductIdentity:
 
     Live examples observed in F1 use `제품군, 제조사, 모델, 사양...`. Records with fewer than
     three comma-separated components keep manufacturer/model unknown rather than guessing.
+
+    Leading parenthesised qualifiers seen in live titles (`(VN)NT960XHA-KG71G`,
+    `(주문자상표부착)삼성전자`) are split off into `model_qualifier` /
+    `manufacturer_qualifier`; the grader decides how much evidence they remove.
     """
 
     if not title:
@@ -219,8 +270,12 @@ def parse_g2b_identity(title: str | None) -> ProductIdentity:
         return ProductIdentity(source_title=title)
 
     product_name = parts[0]
-    manufacturer = parts[1] if len(parts) >= 3 else None
-    model_name = parts[2] if len(parts) >= 3 else None
+    manufacturer_qualifier, manufacturer = (
+        split_leading_qualifier(parts[1]) if len(parts) >= 3 else (None, None)
+    )
+    model_qualifier, model_name = (
+        split_leading_qualifier(parts[2]) if len(parts) >= 3 else (None, None)
+    )
     specification = ", ".join(parts[3:]) if len(parts) >= 4 else None
     return ProductIdentity(
         product_name=product_name,
@@ -228,4 +283,6 @@ def parse_g2b_identity(title: str | None) -> ProductIdentity:
         model_name=model_name,
         specification=specification,
         source_title=title,
+        manufacturer_qualifier=manufacturer_qualifier,
+        model_qualifier=model_qualifier,
     )
