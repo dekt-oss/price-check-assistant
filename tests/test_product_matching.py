@@ -185,10 +185,7 @@ def test_g2b_parser_splits_leading_qualifiers_without_interpreting_them() -> Non
     assert plain.model_qualifier is None
 
 
-def test_same_model_behind_unverified_origin_qualifier_stays_x_but_is_not_reported_as_conflict():
-    # Live G2B titles carry `(VN)`/`(CN)` before Samsung model codes. Before qualifier parsing the
-    # matcher reported `model=conflict` for the benchmark model itself, which would hide every
-    # real A/B positive for this benchmark and mislabel the reason.
+def test_same_model_behind_unknown_qualifier_stays_x_but_is_not_reported_as_conflict() -> None:
     decision = grade_product_identity(
         ProductQuery(
             product_name="노트북컴퓨터",
@@ -196,19 +193,66 @@ def test_same_model_behind_unverified_origin_qualifier_stays_x_but_is_not_report
             model_name="NT960XJG-K72AG",
             specification="NT960XJG-K72AG",
         ),
-        parse_g2b_identity("노트북컴퓨터, 삼성전자, (VN)NT960XJG-K72AG, Intel Core Ultra 7 256V"),
+        parse_g2b_identity(
+            "노트북컴퓨터, 삼성전자, (ZZ)NT960XJG-K72AG, Intel Core Ultra 7 256V"
+        ),
     )
 
     assert decision.grade == MatchGrade.X
     assert decision.model_state == "exact_with_unverified_qualifier"
     assert decision.manufacturer_state == "exact_or_alias"
-    assert "model_qualifier=VN" in decision.note
+    assert "model_qualifier=ZZ" in decision.note
+
+
+def test_verified_cn_origin_qualifier_does_not_reduce_exact_model_identity() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="컬러 레이저프린터",
+            manufacturer="FUJIFILM Business Innovation",
+            model_name="ApeosPrint C5570 GK",
+            specification="A3 55ppm",
+        ),
+        parse_g2b_identity(
+            "레이저프린터, Fujifilm, (CN)ApeosPrint C5570 GK, A3, 55ppm/55ppm"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.A
+    assert decision.model_state == "exact_with_verified_origin"
+    assert decision.manufacturer_state == "exact_or_alias"
+    assert decision.specification_state == "compatible"
+    assert "model_qualifier=CN" in decision.note
+
+
+def test_verified_vn_origin_qualifier_can_produce_b_when_query_has_no_real_spec() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="노트북컴퓨터",
+            manufacturer="삼성전자",
+            model_name="NT960XJG-K72AG",
+            specification="NT960XJG-K72AG",
+        ),
+        parse_g2b_identity(
+            "노트북컴퓨터, 삼성전자, (VN)NT960XJG-K72AG, Intel Core Ultra 7 256V"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.B
+    assert decision.model_state == "exact_with_verified_origin"
+    assert decision.manufacturer_state == "exact_or_alias"
+    assert decision.specification_state == "not_provided"
 
 
 def test_different_model_behind_qualifier_is_still_an_explicit_conflict() -> None:
     decision = grade_product_identity(
-        ProductQuery(product_name="노트북컴퓨터", manufacturer="삼성전자", model_name="NT960XJG-K72AG"),
-        parse_g2b_identity("노트북컴퓨터, 삼성전자, (VN)NT960XHA-KG71G, Intel Core Ultra 7 256V"),
+        ProductQuery(
+            product_name="노트북컴퓨터",
+            manufacturer="삼성전자",
+            model_name="NT960XJG-K72AG",
+        ),
+        parse_g2b_identity(
+            "노트북컴퓨터, 삼성전자, (VN)NT960XHA-KG71G, Intel Core Ultra 7 256V"
+        ),
     )
 
     assert decision.grade == MatchGrade.X
@@ -223,7 +267,9 @@ def test_manufacturer_qualifier_caps_exact_model_at_b_like_missing_manufacturer(
             model_name="NT750XGK-KG56P",
             specification="Intel Core 5 120U",
         ),
-        parse_g2b_identity("노트북컴퓨터, (주문자상표부착)삼성전자, NT750XGK-KG56P, Intel Core 5 120U(1.4GHz)"),
+        parse_g2b_identity(
+            "노트북컴퓨터, (주문자상표부착)삼성전자, NT750XGK-KG56P, Intel Core 5 120U(1.4GHz)"
+        ),
     )
 
     assert decision.grade == MatchGrade.B
@@ -233,7 +279,11 @@ def test_manufacturer_qualifier_caps_exact_model_at_b_like_missing_manufacturer(
 
 def test_manufacturer_qualifier_does_not_unlock_c_for_model_specific_query() -> None:
     decision = grade_product_identity(
-        ProductQuery(product_name="노트북컴퓨터", manufacturer="삼성전자", model_name="NT960XJG-K72AG"),
+        ProductQuery(
+            product_name="노트북컴퓨터",
+            manufacturer="삼성전자",
+            model_name="NT960XJG-K72AG",
+        ),
         ProductIdentity(
             product_name="노트북컴퓨터",
             manufacturer="삼성전자",
