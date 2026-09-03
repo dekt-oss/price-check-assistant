@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 import csv
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
-from purchase_price.collectors.g2b_shopping import G2BShoppingCollector
+from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL, G2BShoppingCollector
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_candidate_search import search_mapped_g2b_candidates
@@ -19,7 +19,7 @@ class CandidateCaptureError(RuntimeError):
     pass
 
 
-def _date(value: str):
+def _date(value: str) -> date:
     try:
         return datetime.strptime(value, "%Y%m%d").date()
     except ValueError as exc:
@@ -76,7 +76,7 @@ def main() -> None:
     verified = tuple(mapping for mapping in mappings if mapping.verified)
     collector = G2BShoppingCollector(
         settings.data_go_kr_service_key,
-        base_url=settings.g2b_shopping_base_url,
+        base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
     )
 
     rows: list[dict[str, str]] = []
