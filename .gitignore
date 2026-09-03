@@ -16,6 +16,7 @@ venv/
 
 # Local data / uploads
 uploads/
+.local/
 *.db
 
 # IDE / OS

@@ -1,0 +1,21 @@
+{
+  "response": {
+    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+    "body": {
+      "items": {
+        "item": [
+          {
+            "물품식별번호": "TEST-001",
+            "물품식별명": "테스트 의료장비",
+            "계약번호": "CNTR-001",
+            "계약단가": "36,550,000",
+            "업체": "테스트 공급사"
+          }
+        ]
+      },
+      "totalCount": 1,
+      "pageNo": 1,
+      "numOfRows": 10
+    }
+  }
+}
