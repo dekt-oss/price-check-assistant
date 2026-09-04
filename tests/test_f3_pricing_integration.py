@@ -72,7 +72,7 @@ class C5570StubCollector:
         return unwrap_g2b_page(payload), payload
 
 
-def test_only_identity_verified_g2b_price_enters_reference_range() -> None:
+def test_only_identity_verified_g2b_price_enters_observed_range() -> None:
     mapping = G2BProductMapping(
         model_name="Sophie",
         product_name="인공호흡기",
@@ -91,13 +91,14 @@ def test_only_identity_verified_g2b_price_enters_reference_range() -> None:
     assessment = assess_prices(list(result.candidate_prices), current_quote=Decimal("8000000"))
 
     assert len(result.candidate_prices) == 2
-    assert assessment.comparable_count == 1
+    assert assessment.observed_count == 1
     assert assessment.low == Decimal("7800000")
     assert assessment.high == Decimal("7800000")
-    assert assessment.quote_position == "상단 초과"
+    assert assessment.quote_comparable_count == 0
+    assert assessment.quote_position is None
 
 
-def test_c5570_g2b_and_manufacturer_prices_form_real_multi_source_direct_range() -> None:
+def test_c5570_g2b_and_manufacturer_prices_form_real_multi_source_observed_range() -> None:
     query = ProductQuery(
         product_name="컬러 레이저프린터",
         manufacturer="FUJIFILM Business Innovation",
@@ -125,9 +126,11 @@ def test_c5570_g2b_and_manufacturer_prices_form_real_multi_source_direct_range()
 
     assert len(g2b.candidate_prices) == 1
     assert len(manufacturer) == 1
-    assert assessment.comparable_count == 2
+    assert assessment.observed_count == 2
+    assert assessment.source_count == 2
     assert assessment.low == Decimal("2981000")
     assert assessment.high == Decimal("5500000")
+    assert assessment.quote_comparable_count == 0
     assert {row.source_name for row in evidence} == {
         "조달청_나라장터쇼핑몰 품목정보 서비스",
         "FUJIFILM Business Innovation Korea 공식몰",
