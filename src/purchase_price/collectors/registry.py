@@ -26,10 +26,11 @@ def build_collectors(
         collectors.append(ManufacturerPublicCatalogCollector())
 
     settings = get_settings()
-    if include_g2b and settings.data_go_kr_service_key:
+    service_key = (settings.data_go_kr_service_key or "").strip()
+    if include_g2b and service_key:
         collectors.append(
             VerifiedG2BShoppingSearchCollector(
-                settings.data_go_kr_service_key,
+                service_key,
                 lookback_days=g2b_lookback_days,
                 base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
                 timeout_seconds=settings.g2b_request_timeout_seconds,
