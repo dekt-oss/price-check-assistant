@@ -1,131 +1,137 @@
 # 다음 구현 순서
 
-Phase 0는 2026-09-04 종료했다. 최종 검증은 `docs/PHASE0_FINAL_REPORT.md`를 기준으로 한다.
+Phase 0는 2026-09-04 종료했고, 2026-09-04 기준 아래 기능이 `main`에 반영됐다.
 
-최종 판정은 **Adjust → Phase 1 진행**이다.
+- G2B Shopping/납품 verified exact-model 검색
+- G2B 계약정보 근거 조회
+- A/B/C/D/X fail-closed 매칭 + 명백한 숫자·단위 규격충돌 차단
+- 외부 가격조건 구조화
+- 출처별 성공/0건/실패 상태 분리
+- Excel `.xlsx/.xls` + 텍스트 PDF 견적 품목 추출
+- MFDS 품목/형명 exact identity, 업허가 업체, 공급사 우선순위
+- UDI-DI exact 조회
+- Safety 수동 공식확인 경로와 상태계약
 
-## 우선 결정 — 실사용 화면 1개로 통합
+상세 상태는 `docs/V2_IMPLEMENTATION_STATUS.md`를 기준으로 한다.
 
-사용자 화면을 기능별로 더 늘리지 않는다.
+## 현재 최우선 — 견적조건을 실제 비교계약까지 연결
 
-현재 `통합검색`, `견적서 분석`, `의료기기 시장조사`, `Phase0 검증`으로 분리된 UI는 개발 과정에서 생긴 중간 구조로 본다.
+최종 사용자 가치의 핵심은 아래 흐름을 완성하는 것이다.
 
-최종 실사용 UI 목표는 **`구매검토` 1화면**이다.
+```text
+견적서
+→ 제품 identity
+→ 견적단가 + 견적조건
+→ 외부 직접가격 + 외부조건
+→ 조건 일치/불일치/미확인
+→ quote_comparable 여부
+→ 현재 견적 위치 또는 판정보류
+```
 
-- 입력 방식: `직접 검색` / `견적서 업로드`
-- 공통 결과: identity → 가격근거 → 견적비교 → 의료기기 공식정보 → 경쟁/공급사 → Safety → 상세근거
-- 견적서 다품목은 별도 상세페이지 대신 같은 화면의 master-detail 패턴
-- Phase0 검증은 사용자 navigation에서 제거하고 CI/pytest/benchmark/docs로 유지
+### P1. 견적 상업조건 추출
 
-상세 계약은 `docs/SINGLE_SCREEN_PURCHASE_REVIEW.md`를 기준으로 한다.
+현재 브랜치 `feat/quote-commercial-conditions`에서 진행한다.
 
----
+추출 대상:
+- VAT
+- 배송/운송
+- 설치
+- 옵션/부속품/구성
+- 보증/무상보증
+- 유지보수/서비스계약
+- 기타조건
 
-## Phase 1-UI — Single-screen foundation
+원문에 명시되지 않은 조건은 추정하지 않는다.
 
-가격 source를 더 늘리기 전에 기존 기능을 한 화면에서 안전하게 재사용할 수 있도록 UI/domain 경계를 먼저 정리한다.
+### P2. 견적조건 ↔ 외부 가격조건 comparator
 
-1. `PurchaseReviewInput` 공통 입력 계약 정의
-2. 직접검색 입력과 견적서 row를 동일 계약으로 변환
-3. 가격검색/가격판정 renderer를 재사용 가능한 단위로 분리
-4. MFDS identity/경쟁장비/공급사 renderer 분리
-5. 결과 화면을 `핵심판정 → identity/Safety → 가격근거 → 경쟁/공급사 → 상세근거` 순으로 통합
-6. `st.navigation`으로 사용자 navigation을 1개로 축소
-7. 통합 화면 AppTest 및 legacy page parity 검증
-8. 검증 완료 후 기존 분리 페이지 제거
+P1 완료 후 바로 진행한다.
 
-이 단계에서 A/B/C/D/X, Evidence Type, ComparisonScope, direct monetary range 계약은 변경하지 않는다.
+목표 상태:
+- `match`: 조건이 명시적으로 동일
+- `conflict`: 조건이 명시적으로 상충
+- `unknown`: 한쪽 또는 양쪽 근거가 부족
 
----
+`quote_comparable` 자동 승격은 최소한의 필수조건이 모두 명시적으로 맞는 경우에만 허용한다.
+명시율이 높다는 이유만으로 승격하지 않는다.
 
-## Phase 1-A — 공개가격 수집 coverage 확대
+## P3. 근거 최신성(freshness)
 
-1. G2B Shopping verified 세부품명 mapping 확대
-2. exact model 검색·pagination·retry·실패근거 저장 강화
-3. `totalCount`가 안전 페이지 한도를 넘으면 날짜구간을 자동 이분할하는 adaptive date partitioning 추가
-4. incomplete window 재시도 큐 및 재개 가능한 수집상태 저장
-5. Manufacturer official price snapshot의 freshness/재검증 정책 추가
-6. 공식가격 변경 감지
-7. raw evidence와 normalized observation provenance 강화
+- 거래일 우선, 없으면 검증/수집일 사용
+- source 유형별 오래된 근거 경고
+- Manufacturer public snapshot 재검증 예정일 표시
+- 오래된 근거를 최신가격으로 표현하지 않음
+- 신뢰도 계산에 최신성 신호를 추가하되 source 독립성 원칙 유지
 
-YTD 복원력 검증에서 31일 구간의 레이저프린터가 2,000건을 넘어 safety limit에 도달했다. 페이지 한도를 무작정 키우기보다 날짜구간 자동분할을 우선한다. 상세는 `docs/PHASE0_YTD_RESILIENCE_CHECK.md`를 본다.
+## P4. provenance 일관화
 
-## Phase 1-B — G2B 계약정보 collector
+G2B 계약정보를 포함한 모든 신규 source에 아래를 일관되게 둔다.
 
-다음 신규 production-like collector는 `나라장터 계약정보서비스`로 한다.
+- public allow-list raw payload
+- canonical JSON
+- SHA-256 fingerprint
+- source record id
+- original/detail URL
+- normalized observation 연결
 
-목표:
-- 물품 실제 계약 목록/상세 수집
-- 계약총액·수량·단가 관계 검증
-- 공고/계약번호 provenance 연결
-- Shopping/납품요구 근거와 독립 source로 비교
+서비스키·요청 URL의 secret query·병원 내부자료는 저장하지 않는다.
 
-## Phase 1-C — 가격조건 구조화
+## P5. 실사용 E2E 검증
 
-Phase 0 Condition Completeness가 0%였으므로 우선순위가 높다.
+- 대표 제품군별 검색
+- 비식별 실제 또는 대표 견적 `.xlsx/.xls/.pdf`
+- 여러 공급조건이 포함된 견적
+- G2B hit / 0건 / API 실패 각각 검증
+- MFDS exact / ambiguous / inactive 각각 검증
+- 조건 일치 / 충돌 / 미확인 각각 검증
 
-구조화 대상:
-- VAT 포함/별도/미상
-- 수량·단위
-- 배송비
-- 설치비
-- 옵션/부속품
-- 보증
-- 유지보수/서비스 계약
-- 거래/기준일
+기능 CI와 실사용 검증을 구분한다.
 
-조건이 다른 가격은 숫자가 같아도 동일 조건 가격으로 취급하지 않는다.
+## 외부 계약 확보 즉시 진행
 
-## Phase 1-D — 결과 UX 완성
+### Safety RED 자동조회
 
-Single-screen 결과에서 다음을 명시적으로 보여준다.
+식약처 회수·판매중지정보의 공식 operation/request parameter를 확보한 뒤에만 구현한다.
 
-- 제품 동일성 A/B/C/D/X
-- Evidence Type
-- 직접비교 가능/참고만 가능/제외
-- source와 기준일
-- 가격조건 미상 항목
-- `비교근거 부족` 상태
-- 다중출처 관측범위
-- 견적 비교가 보류된 이유
-
-자동 vendor 선정이나 구매결정은 하지 않는다.
-
----
-
-## Phase 2 — 의료기기 Safety RED layer
-
-식약처 회수·판매중지정보의 **공식 operation/request contract를 확보한 뒤에만** adapter를 구현한다.
-
-목표:
-- exact 모델/허가번호 중심 safety matching
-- 회수·판매중지 hit 시 가격결과보다 우선하는 RED 경고
-- API 실패와 0건을 구분
+- exact 모델/허가번호 matching
+- hit 시 가격영역보다 우선하는 RED 경고
+- 0건과 API 실패 분리
 - `검색결과 없음=안전` 표현 금지
-- 시스템이 자동 구매중단을 결정하지 않음
+- 자동 구매중단 판단 금지
 
-공식 request parameter를 추정해서 구현하지 않는다.
+### 모델명 → UDI/상세 identity
 
----
+공식 모델 검색 request contract가 확보되면 구현한다.
+현재 UDI-DI를 알고 있는 경우의 exact 조회만 자동화되어 있다.
 
-## Phase 3 — 견적서 확장
+## 이후 source 확대
 
-현재 Excel `.xlsx/.xls` 구조적 파싱을 유지하면서 단계적으로 확장한다.
+- G2B verified 세부품명 mapping coverage 확대
+- 제조사 official price freshness/변경감지
+- 신뢰 가능한 B2B/유통/일반 공개가격 source adapter
+- 제조사 공식 총판/파트너 provenance
 
-1. 다품목 master-detail UX 완성
-2. PDF text extraction
-3. OCR은 최후 수단
-4. AI는 필드 추출/표준화 보조에 제한
+## 최종 UI 통합
 
-실제 견적파일은 Public PoC에서 영구저장하지 않는다.
+기능이 먼저 완성된 뒤 진행한다.
 
----
+최종 사용자 화면 목표:
 
-## 이후 — 내부 이식
+```text
+구매검토 1화면
+├─ 직접 검색
+└─ 견적서 업로드
+      ↓
+identity → Safety → 가격 → 조건비교 → 경쟁/공급사 → 상세근거
+```
 
-Public PoC 승인 후 별도 진행한다.
+기존 개발용 분리 페이지는 parity/AppTest 후 제거한다.
 
-- 내부 단가 Excel import부터 검토
-- PostgreSQL에 검증된 observation/evidence 축적
+## 내부 이식
+
+Public PoC의 실제 업무효과가 확인되고 승인된 뒤 진행한다.
+
+- 본원 구매단가 Excel import부터 검토
+- PostgreSQL에 내부 observation 별도 축적
 - ERP 직접연계는 후순위
-- 병원 내부 견적/단가/거래처 데이터는 public repo 또는 공개 Streamlit에 저장하지 않음
+- 진료재료/간납단가는 내부 단가 승인 이후 별도 확장
