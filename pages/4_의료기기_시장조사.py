@@ -18,6 +18,7 @@ from purchase_price.services.mfds_device_intelligence import (
     MFDS_MODEL_INFO_BASE_URL,
     MfdsBusinessLicenseClient,
     MfdsModelInfoClient,
+    resolve_exact_model_identity,
 )
 from purchase_price.services.search import search_all
 
@@ -43,6 +44,7 @@ with st.expander("시장조사 판정 기준", expanded=False):
     st.markdown(
         """
 - **1순위 경쟁장비:** 같은 식약처 품목에 등록되어 있고 취소·취하/수출전용이 아닌 국내 후보
+- **모델 identity:** 식약처 품목 조회 결과 안에서 exact-normalized 모델이 확인되어야 다른 source와 자동 연결
 - **대체탐색 예외:** 위 국내 후보가 **0건일 때만** 사용목적·주요사양을 이용한 보조탐색을 제안
 - 보조탐색 결과는 **대체 가능 판정이 아니라 추가 확인할 조사 후보**
 - **공급사 우선순위:** 나라장터 실제 납품업체 → 식약처 업허가 확인 → 웹
@@ -86,7 +88,7 @@ with st.form("mfds-device-research"):
             placeholder="예: Efficia DFM100",
             help=(
                 "형명정보 API에는 모델명 서버 필터가 없으므로, 품목 조회 결과 안에서 exact 모델을 "
-                "확인하고 나라장터 verified mapping이 있으면 공급업체 실적을 조회합니다."
+                "확인합니다. exact identity가 확인된 경우에만 나라장터와 자동 교차조회합니다."
             ),
         )
     with c2:
@@ -112,6 +114,8 @@ if submitted:
     models = ()
     active_models = ()
     inactive_models = ()
+    exact_identity = None
+    active_exact_matches = ()
     model_lookup_succeeded = False
 
     if product_name.strip():
@@ -129,27 +133,68 @@ if submitted:
             st.error(f"식약처 형명정보 조회 실패: {exc}")
             st.warning(
                 "API 조회 실패는 검색결과 0건과 다릅니다. 인증·권한·통신 오류가 해결되기 전에는 "
-                "대체장비 보조탐색을 실행하지 않습니다."
+                "대체장비 보조탐색이나 다른 source와의 자동 모델 연결을 실행하지 않습니다."
             )
 
         if model_lookup_succeeded:
             active_models = tuple(item for item in models if item.active_for_domestic_candidate)
             inactive_models = tuple(item for item in models if not item.active_for_domestic_candidate)
+            exact_identity = resolve_exact_model_identity(models, model_name)
+            active_exact_matches = tuple(
+                item for item in exact_identity.exact_matches if item.active_for_domestic_candidate
+            )
+
+            if model_name.strip():
+                st.markdown("#### 입력 모델 공식 identity 확인")
+                if exact_identity.confirmed:
+                    identity_rows = [
+                        {
+                            "품목명": item.product_name or "",
+                            "모델/형명": item.model_name or "",
+                            "상품명": item.trade_name or "",
+                            "허가번호": item.permit_number or "",
+                            "등록상태": (
+                                "국내 정상 후보"
+                                if item.active_for_domestic_candidate
+                                else "취소·취하/수출전용 제외"
+                            ),
+                        }
+                        for item in exact_identity.exact_matches
+                    ]
+                    st.dataframe(
+                        pd.DataFrame(identity_rows), use_container_width=True, hide_index=True
+                    )
+                    if exact_identity.ambiguous:
+                        st.warning(
+                            "동일 exact 모델명이 둘 이상의 품목허가번호에 연결됩니다. 자동으로 하나를 "
+                            "선택하지 않으며, 다른 source와의 자동 모델 연결은 보류합니다."
+                        )
+                    elif active_exact_matches:
+                        st.success(
+                            "입력 모델이 현재 식약처 품목 조회 결과에서 exact로 확인되었습니다. "
+                            "이 identity에 한해 나라장터 자동 교차조회를 진행할 수 있습니다."
+                        )
+                    else:
+                        st.error(
+                            "입력 모델의 exact 등록은 확인됐지만 취소·취하 또는 수출전용으로 분류됩니다. "
+                            "현재 국내 신규구매 모델로 자동 연결하지 않습니다."
+                        )
+                else:
+                    st.warning(
+                        "입력 모델과 exact로 일치하는 형명을 현재 품목 조회 결과에서 찾지 못했습니다. "
+                        "부분일치·유사문자열을 공식 identity로 승격하지 않으며 나라장터 자동 교차조회도 "
+                        "보류합니다."
+                    )
 
             c1, c2 = st.columns(2)
             c1.metric("국내 경쟁후보", f"{len(active_models)}건")
             c2.metric("전체 등록검색", f"{len(models)}건")
 
             if active_models:
-                exact_model = model_name.strip().casefold()
+                exact_records = set(exact_identity.exact_matches) if exact_identity else set()
                 model_rows = [
                     {
-                        "모델 일치": (
-                            "EXACT"
-                            if exact_model
-                            and (item.model_name or "").strip().casefold() == exact_model
-                            else ""
-                        ),
+                        "모델 일치": "EXACT" if item in exact_records else "",
                         "품목명": item.product_name or "",
                         "모델/형명": item.model_name or "",
                         "상품명": item.trade_name or "",
@@ -233,42 +278,57 @@ if submitted:
                             "이 목록은 국내 공급 가능 장비로 취급하지 않습니다."
                         )
 
-        if model_name.strip() and g2b_service_key:
+        if model_name.strip():
             st.subheader("3. 공급사 후보")
-            query = ProductQuery(
-                product_name=product_name.strip(),
-                model_name=model_name.strip(),
+            identity_ready_for_g2b = bool(
+                model_lookup_succeeded
+                and exact_identity is not None
+                and exact_identity.confirmed
+                and active_exact_matches
+                and not exact_identity.ambiguous
             )
-            run = search_all(
-                query,
-                build_collectors(g2b_lookback_days=int(g2b_lookback_days)),
-            )
-            g2b_suppliers = extract_g2b_supplier_candidates(run.results)
 
-            if run.errors:
-                st.warning("나라장터 조회 중 일부 오류: " + " / ".join(run.errors))
-
-            if g2b_suppliers:
-                st.markdown("#### ① 나라장터 · 실제 공개 납품업체")
-                st.dataframe(
-                    pd.DataFrame(
-                        [
-                            {
-                                "우선순위": 1,
-                                "업체명": supplier.name,
-                                "출처": supplier.source.value,
-                                "근거": supplier.evidence,
-                            }
-                            for supplier in g2b_suppliers
-                        ]
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
+            if g2b_service_key and identity_ready_for_g2b:
+                query = ProductQuery(
+                    product_name=product_name.strip(),
+                    model_name=model_name.strip(),
                 )
-            else:
-                st.info(
-                    "현재 verified 나라장터 mapping/검색기간에서 실제 공급업체 근거를 찾지 못했습니다. "
-                    "없다는 뜻이 아니라 현재 연결된 공개근거에서 미확인이라는 뜻입니다."
+                run = search_all(
+                    query,
+                    build_collectors(g2b_lookback_days=int(g2b_lookback_days)),
+                )
+                g2b_suppliers = extract_g2b_supplier_candidates(run.results)
+
+                if run.errors:
+                    st.warning("나라장터 조회 중 일부 오류: " + " / ".join(run.errors))
+
+                if g2b_suppliers:
+                    st.markdown("#### ① 나라장터 · 실제 공개 납품업체")
+                    st.dataframe(
+                        pd.DataFrame(
+                            [
+                                {
+                                    "우선순위": 1,
+                                    "업체명": supplier.name,
+                                    "출처": supplier.source.value,
+                                    "근거": supplier.evidence,
+                                }
+                                for supplier in g2b_suppliers
+                            ]
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info(
+                        "현재 verified 나라장터 mapping/검색기간에서 실제 공급업체 근거를 찾지 못했습니다. "
+                        "없다는 뜻이 아니라 현재 연결된 공개근거에서 미확인이라는 뜻입니다."
+                    )
+            elif g2b_service_key:
+                st.warning(
+                    "나라장터 자동 교차조회 보류: 입력 모델의 식약처 exact identity가 국내 정상 단일 "
+                    "후보로 확인되지 않았습니다. 잘못된 모델을 다른 source에 연결하지 않기 위한 "
+                    "fail-closed 동작입니다."
                 )
 
             st.markdown("#### ② 웹 · 보조 공급사 탐색")
@@ -320,6 +380,7 @@ if submitted:
     st.divider()
     st.markdown("### 안전정보")
     st.info(
-        "회수·판매중지 자동연결은 다음 safety adapter에서 추가합니다. exact 모델 회수대상이 확인되면 "
-        "구매를 자동 차단하지는 않되, 이 영역에 가격정보보다 우선하여 큰 빨간 경고를 표시합니다."
+        "회수·판매중지 자동연결은 공식 endpoint/request contract와 해당 API 접근권한을 확인한 뒤 "
+        "연결합니다. 구현 전까지 `검색결과 없음=안전`으로 해석하지 않습니다. exact 모델/허가번호 "
+        "회수대상이 확인되면 구매를 자동 차단하지는 않되 이 영역에 큰 빨간 경고를 표시합니다."
     )

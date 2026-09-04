@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -10,6 +10,7 @@ from purchase_price.clients.data_go_kr import (
     PublicDataClientError,
     PublicDataPortalClient,
 )
+from purchase_price.services.matching import exact_model_match
 
 MFDS_MODEL_INFO_BASE_URL = "https://apis.data.go.kr/1471000/MdeqModlInfoService01"
 MFDS_MODEL_INFO_OPERATION = "getMdeqModlInq01"
@@ -59,6 +60,49 @@ class MedicalDeviceBusinessRecord:
     @property
     def is_active(self) -> bool:
         return (self.business_status or "").strip() not in {"폐업", "휴업", "취소"}
+
+
+@dataclass(frozen=True)
+class MedicalDeviceIdentityResolution:
+    """Fail-closed exact-model resolution within an already verified MFDS product query.
+
+    The model-info API does not expose a server-side model filter. Therefore this resolution is
+    intentionally scoped to records returned by an official `PRDLST_NM` lookup and only accepts
+    the repository's existing exact normalized model equality. It never promotes substring or
+    semantic similarity to official identity.
+    """
+
+    query_model: str
+    exact_matches: tuple[MedicalDeviceModelRecord, ...]
+
+    @property
+    def confirmed(self) -> bool:
+        return bool(self.exact_matches)
+
+    @property
+    def ambiguous(self) -> bool:
+        permit_numbers = {
+            (item.permit_number or "").strip()
+            for item in self.exact_matches
+            if (item.permit_number or "").strip()
+        }
+        return len(permit_numbers) > 1
+
+
+def resolve_exact_model_identity(
+    records: Sequence[MedicalDeviceModelRecord],
+    model_name: str,
+) -> MedicalDeviceIdentityResolution:
+    """Resolve only exact model identities from an official product-name result set."""
+
+    query_model = model_name.strip()
+    if not query_model:
+        return MedicalDeviceIdentityResolution(query_model="", exact_matches=())
+
+    matches = tuple(
+        item for item in records if exact_model_match(query_model, item.model_name)
+    )
+    return MedicalDeviceIdentityResolution(query_model=query_model, exact_matches=matches)
 
 
 def _int_or_none(value: Any) -> int | None:
