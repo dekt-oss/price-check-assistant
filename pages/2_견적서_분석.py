@@ -12,6 +12,7 @@ from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.device_research_handoff import (
     DEVICE_RESEARCH_HANDOFF_SESSION_KEY,
+    QUOTE_REVIEW_ROWS_SESSION_KEY,
     build_device_research_prefill,
 )
 from purchase_price.services.pricing import assess_prices
@@ -39,7 +40,8 @@ with st.expander("현재 지원 범위", expanded=False):
         "- `.pdf`: 업로드는 가능하지만 아직 자동 추출하지 않습니다.\n"
         "- 추출값은 검색 전에 반드시 화면에서 확인·수정할 수 있습니다.\n"
         "- 모델 동일성과 가격판정 안전게이트는 통합검색과 동일한 규칙을 사용합니다.\n"
-        "- 추출 행의 제품명·제조사·모델명·규격만 의료기기 시장조사로 넘길 수 있습니다."
+        "- 추출 행의 제품명·제조사·모델명·규격만 의료기기 시장조사로 넘길 수 있습니다.\n"
+        "- 페이지 이동 중에는 수정한 견적 행을 현재 Streamlit 세션에만 임시 유지합니다."
     )
 
 if not g2b_enabled:
@@ -70,6 +72,8 @@ def _money(value: Decimal | None) -> str:
     return f"{value:,.0f}원" if value is not None else "산정불가"
 
 
+quote_rows: list[dict[str, object]] | None = None
+
 if uploaded is not None:
     suffix = Path(uploaded.name).suffix
     with tempfile.NamedTemporaryFile(delete=True, suffix=suffix) as tmp:
@@ -93,7 +97,7 @@ if uploaded is not None:
     if not extraction.items:
         st.stop()
 
-    rows = [
+    quote_rows = [
         {
             "검색": True,
             "제품명": item.product_name,
@@ -108,13 +112,24 @@ if uploaded is not None:
         }
         for item in extraction.items
     ]
+    st.session_state[QUOTE_REVIEW_ROWS_SESSION_KEY] = quote_rows
+else:
+    saved_rows = st.session_state.get(QUOTE_REVIEW_ROWS_SESSION_KEY)
+    if isinstance(saved_rows, list) and saved_rows:
+        quote_rows = saved_rows
+        st.info(
+            "의료기기 시장조사 페이지에서 돌아온 현재 세션의 견적 행을 복원했습니다. "
+            "업로드 원본 파일은 저장하지 않았으며, 새 파일을 업로드하면 새 추출 결과로 교체됩니다."
+        )
+
+if quote_rows:
     st.subheader("1. 추출 결과 확인")
     st.caption(
         "자동 추출값은 확정값이 아닙니다. 특히 제조사·모델명·규격과 견적단가를 확인한 뒤 "
         "필요하면 직접 수정하세요."
     )
     edited = st.data_editor(
-        pd.DataFrame(rows),
+        pd.DataFrame(quote_rows),
         use_container_width=True,
         hide_index=True,
         num_rows="fixed",
@@ -125,6 +140,7 @@ if uploaded is not None:
             "총액": st.column_config.NumberColumn("총액", format="%d"),
         },
     )
+    st.session_state[QUOTE_REVIEW_ROWS_SESSION_KEY] = edited.to_dict(orient="records")
 
     selected_count = int(edited["검색"].fillna(False).sum())
     st.caption(f"외부가격 검색 대상: {selected_count}개")
@@ -133,7 +149,7 @@ if uploaded is not None:
     st.caption(
         "의료기기로 확인할 행을 하나 선택해 식약처 등록·동일품목 경쟁장비·공급사 조사 화면으로 "
         "넘깁니다. 견적서 표기의 제품명/제조사/모델명은 공식 식약처 identity가 아니므로 이동 후 "
-        "반드시 확인·수정합니다. 견적가격·총액·파일정보는 전달하지 않습니다."
+        "반드시 확인·수정합니다. 견적가격·총액·파일정보는 의료기기 조사 화면에 전달하지 않습니다."
     )
 
     handoff_labels: dict[int, str] = {}
