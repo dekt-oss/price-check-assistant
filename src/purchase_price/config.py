@@ -10,7 +10,13 @@ class Settings(BaseSettings):
     )
     log_level: str = "INFO"
 
+    # Legacy/common key kept for backward compatibility with the original public-data setup.
     data_go_kr_service_key: str | None = None
+    # Source-specific keys take precedence when configured. They may currently have the same
+    # value, but keeping them separate avoids breaking older approved APIs when a key changes.
+    mfds_service_key: str | None = None
+    g2b_service_key: str | None = None
+
     g2b_shopping_base_url: str | None = None
     g2b_contract_base_url: str | None = None
     g2b_request_timeout_seconds: float = 20.0
@@ -22,6 +28,14 @@ class Settings(BaseSettings):
     mfds_max_retries: int = 3
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @property
+    def resolved_mfds_service_key(self) -> str | None:
+        return self.mfds_service_key or self.data_go_kr_service_key
+
+    @property
+    def resolved_g2b_service_key(self) -> str | None:
+        return self.g2b_service_key or self.data_go_kr_service_key
 
 
 @lru_cache
