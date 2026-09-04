@@ -69,6 +69,12 @@ def load_g2b_product_mappings(path: Path = DEFAULT_MAPPING_PATH) -> tuple[G2BPro
                 raise G2BMappingError(
                     f"verified mapping has no G2B detail product name: {mapping.model_name!r}"
                 )
+            # The live service matches `dtilPrdctClsfcNoNm` as a substring, so the name alone
+            # cannot pin a classification. The code is what makes the mapping enforceable.
+            if mapping.verified and not mapping.detail_product_code:
+                raise G2BMappingError(
+                    f"verified mapping has no G2B detail product code: {mapping.model_name!r}"
+                )
             mappings.append(mapping)
 
     verified_model_keys: set[str] = set()
@@ -145,3 +151,31 @@ def filter_g2b_query_candidates(
     query: ProductQuery,
 ) -> tuple[Mapping[str, Any], ...]:
     return tuple(record for record in records if g2b_record_is_query_candidate(record, query))
+
+
+def records_in_mapped_classification(
+    records: Iterable[Mapping[str, Any]],
+    mapping: G2BProductMapping,
+) -> list[dict[str, Any]]:
+    """Keep only records that really belong to the mapped classification.
+
+    The specific-item API matches `dtilPrdctClsfcNoNm` as a substring server-side: querying
+    `냉장고` also returns 김치냉장고, 대형냉장고 and 시신보관냉장고, and `프린터` returns
+    잉크젯프린터 alongside 레이저프린터. A verified mapping names one classification, so
+    records carrying a different `dtilPrdctClsfcNo` are a broader query artefact and are dropped
+    here rather than being narrowed later by model tokens alone.
+
+    A record without a classification code cannot be shown to belong to the mapping, so it is
+    dropped too.
+    """
+
+    expected = (mapping.detail_product_code or "").strip()
+    if not expected:
+        raise G2BMappingError(
+            f"cannot enforce classification without a mapped code: {mapping.model_name!r}"
+        )
+    return [
+        dict(record)
+        for record in records
+        if str(record.get("dtilPrdctClsfcNo") or "").strip() == expected
+    ]
