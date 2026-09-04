@@ -64,7 +64,9 @@ def _clean(value: object) -> str:
     if value is None:
         return UNKNOWN
     text = str(value).strip()
-    return text or UNKNOWN
+    if not text or text.casefold() in {"nan", "<na>", "none"}:
+        return UNKNOWN
+    return text
 
 
 def build_quote_condition_profile(
