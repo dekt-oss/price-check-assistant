@@ -7,19 +7,21 @@ from purchase_price.services.match_benchmark import run_match_benchmark
 
 def test_cli_reports_and_writes_predictions(tmp_path: Path, capsys) -> None:
     output = tmp_path / "predictions.csv"
+    expected = run_match_benchmark()
 
     code = evaluate_match_benchmark.main(["--fail-on-mismatch", "--output", str(output)])
 
     out = capsys.readouterr().out
     assert code == 0
-    assert "rows=10" in out
-    assert "direct_precision=N/A" in out
-    assert "direct_positive_rows=0" in out
+    assert f"rows={len(expected.predictions)}" in out
+    assert "direct_precision=100.0%" in out
+    assert "direct_recall=100.0%" in out
+    assert "direct_positive_rows=1" in out
     assert "benchmark_status=ok" in out
 
     with output.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
-    assert len(rows) == 10
+    assert len(rows) == len(expected.predictions)
     assert all(row["expected_grade"] == row["predicted_grade"] for row in rows)
     assert all(row["match_note"].startswith("grade=") for row in rows)
 
