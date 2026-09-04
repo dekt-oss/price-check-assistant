@@ -1,0 +1,50 @@
+name: Phase 0 Final Report Once
+
+on:
+  push:
+    branches:
+      - ops/phase0-final-report-20260904
+    paths:
+      - .github/workflows/phase0-final-report-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      G2B_REQUEST_TIMEOUT_SECONDS: "30"
+      G2B_MAX_RETRIES: "5"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Verify secret
+        shell: bash
+        run: |
+          test -n "$DATA_GO_KR_SERVICE_KEY"
+      - name: Run fixed-window Phase 0 validation
+        shell: bash
+        run: |
+          python -m purchase_price.scripts.run_phase0_validation \
+            --begin-date 20260714 \
+            --end-date 20260813 \
+            --max-pages 20 \
+            --output-dir artifacts/phase0-final-live
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase0-final-live-report
+          path: artifacts/phase0-final-live/
+          retention-days: 14
+          if-no-files-found: error
