@@ -28,6 +28,13 @@ class QuoteItem:
     quantity: Decimal | None = None
     unit_price: Decimal | None = None
     total_amount: Decimal | None = None
+    vat_status: str = ""
+    delivery_condition: str = ""
+    installation_condition: str = ""
+    option_condition: str = ""
+    warranty_condition: str = ""
+    maintenance_condition: str = ""
+    other_conditions: str = ""
 
 
 @dataclass(frozen=True)
@@ -88,6 +95,64 @@ _FIELD_ALIASES = {
         "amount",
         "total",
         "totalamount",
+    ),
+    "vat_status": (
+        "vat",
+        "vat여부",
+        "vat포함",
+        "vat포함여부",
+        "부가세",
+        "부가세여부",
+        "부가세포함",
+        "부가세포함여부",
+        "세금",
+    ),
+    "delivery_condition": (
+        "배송",
+        "배송비",
+        "배송조건",
+        "운송",
+        "운송비",
+        "납품조건",
+    ),
+    "installation_condition": (
+        "설치",
+        "설치비",
+        "설치조건",
+        "설치비용",
+    ),
+    "option_condition": (
+        "옵션",
+        "옵션비",
+        "옵션조건",
+        "부속품",
+        "부속",
+        "구성",
+        "구성품",
+    ),
+    "warranty_condition": (
+        "보증",
+        "보증기간",
+        "무상보증",
+        "무상보증기간",
+        "warranty",
+    ),
+    "maintenance_condition": (
+        "유지보수",
+        "유지보수조건",
+        "유지관리",
+        "서비스계약",
+        "maintenance",
+    ),
+    "other_conditions": (
+        "기타조건",
+        "기타",
+        "조건",
+        "비고",
+        "특이사항",
+        "remark",
+        "remarks",
+        "note",
     ),
 }
 _SUMMARY_LABELS = frozenset({"합계", "총계", "소계", "부가세", "vat", "공급가액합계"})
@@ -202,6 +267,13 @@ def _extract_sheet_rows(
             quantity=parse_quote_decimal(_cell(row, mapping, "quantity")),
             unit_price=parse_quote_decimal(_cell(row, mapping, "unit_price")),
             total_amount=parse_quote_decimal(_cell(row, mapping, "total_amount")),
+            vat_status=_text(_cell(row, mapping, "vat_status")),
+            delivery_condition=_text(_cell(row, mapping, "delivery_condition")),
+            installation_condition=_text(_cell(row, mapping, "installation_condition")),
+            option_condition=_text(_cell(row, mapping, "option_condition")),
+            warranty_condition=_text(_cell(row, mapping, "warranty_condition")),
+            maintenance_condition=_text(_cell(row, mapping, "maintenance_condition")),
+            other_conditions=_text(_cell(row, mapping, "other_conditions")),
         )
         if not any([item.product_name, item.manufacturer, item.model_name, item.specification]):
             continue
@@ -324,7 +396,7 @@ def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     if items:
         warnings.append(
             "PDF 표는 문서 내부 좌표에 따라 열이 어긋날 수 있습니다. 자동 추출된 제조사·모델·규격·"
-            "단가를 반드시 화면에서 확인·수정하세요."
+            "단가·VAT·배송·설치·옵션·보증·유지보수 조건을 반드시 화면에서 확인·수정하세요."
         )
     else:
         warnings.append(
