@@ -8,6 +8,7 @@ from pathlib import Path
 
 import xlrd
 from openpyxl import load_workbook
+from pypdf import PdfReader
 
 from purchase_price.schemas import ProductQuery
 
@@ -263,14 +264,86 @@ def extract_legacy_excel_quote(path: Path) -> QuoteExtractionResult:
     return QuoteExtractionResult(items=tuple(items), warnings=tuple(warnings))
 
 
+def _pdf_text_rows(text: str) -> tuple[tuple[object, ...], ...]:
+    """Convert layout-preserving PDF text into table-like rows.
+
+    Text PDFs usually preserve column gaps as repeated spaces or tabs. We only split on those
+    wider gaps, never on an ordinary single space inside a product/specification name.
+    """
+
+    rows: list[tuple[object, ...]] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        cells = tuple(cell.strip() for cell in re.split(r"(?:\t+| {2,})", line) if cell.strip())
+        if cells:
+            rows.append(cells)
+    return tuple(rows)
+
+
+def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
+    """Extract table-like rows from a text PDF; scanned PDFs deliberately require OCR later."""
+
+    try:
+        reader = PdfReader(str(path))
+    except Exception as exc:
+        raise QuoteExtractionError(f"PDF 견적서를 읽을 수 없습니다: {exc}") from exc
+
+    items: list[QuoteItem] = []
+    warnings: list[str] = []
+    saw_text = False
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        try:
+            try:
+                text = page.extract_text(extraction_mode="layout") or ""
+            except TypeError:
+                text = page.extract_text() or ""
+        except Exception as exc:
+            warnings.append(f"PDF {page_number}페이지: 텍스트 추출 실패 ({exc})")
+            continue
+
+        if not text.strip():
+            continue
+        saw_text = True
+        page_items, warning = _extract_sheet_rows(
+            f"PDF {page_number}페이지",
+            _pdf_text_rows(text),
+        )
+        items.extend(page_items)
+        if warning:
+            warnings.append(warning)
+
+    if not saw_text:
+        raise QuoteExtractionError(
+            "PDF에 추출 가능한 텍스트 레이어가 없습니다. 스캔 이미지형 PDF로 보이며 현재 단계에서는 "
+            "OCR을 자동 실행하지 않습니다. 원본 Excel 또는 텍스트 PDF를 사용하거나 OCR 단계가 필요합니다."
+        )
+
+    if items:
+        warnings.append(
+            "PDF 표는 문서 내부 좌표에 따라 열이 어긋날 수 있습니다. 자동 추출된 제조사·모델·규격·"
+            "단가를 반드시 화면에서 확인·수정하세요."
+        )
+    else:
+        warnings.append(
+            "PDF 텍스트는 읽었지만 품목/가격 표를 자동 식별하지 못했습니다. 표 헤더와 열 배치를 "
+            "확인하세요."
+        )
+    return QuoteExtractionResult(items=tuple(items), warnings=tuple(warnings))
+
+
 def extract_quote_file(path: Path) -> QuoteExtractionResult:
     suffix = path.suffix.casefold()
     if suffix == ".xlsx":
         return extract_excel_quote(path)
     if suffix == ".xls":
         return extract_legacy_excel_quote(path)
+    if suffix == ".pdf":
+        return extract_pdf_quote(path)
     raise QuoteExtractionError(
-        f"현재 자동 추출은 .xlsx/.xls 형식을 지원합니다: {suffix or '확장자 없음'}"
+        f"현재 자동 추출은 .xlsx/.xls/.pdf 형식을 지원합니다: {suffix or '확장자 없음'}"
     )
 
 
