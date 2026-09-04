@@ -5,8 +5,14 @@ from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
 
 
-def test_default_registry_excludes_mock_collector(monkeypatch) -> None:
+def _clear_public_data_keys(monkeypatch) -> None:
     monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "")
+    monkeypatch.setenv("G2B_SERVICE_KEY", "")
+    monkeypatch.setenv("MFDS_SERVICE_KEY", "")
+
+
+def test_default_registry_excludes_mock_collector(monkeypatch) -> None:
+    _clear_public_data_keys(monkeypatch)
     get_settings.cache_clear()
     try:
         collectors = build_collectors()
@@ -18,7 +24,8 @@ def test_default_registry_excludes_mock_collector(monkeypatch) -> None:
 
 
 def test_configured_registry_enables_verified_g2b_without_mock(monkeypatch) -> None:
-    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "test-service-key")
+    _clear_public_data_keys(monkeypatch)
+    monkeypatch.setenv("G2B_SERVICE_KEY", "g2b-test-service-key")
     get_settings.cache_clear()
     try:
         collectors = build_collectors(g2b_lookback_days=30)
@@ -34,8 +41,34 @@ def test_configured_registry_enables_verified_g2b_without_mock(monkeypatch) -> N
         get_settings.cache_clear()
 
 
+def test_legacy_common_key_still_enables_g2b(monkeypatch) -> None:
+    _clear_public_data_keys(monkeypatch)
+    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "legacy-test-service-key")
+    get_settings.cache_clear()
+    try:
+        collectors = build_collectors()
+        assert any(isinstance(collector, VerifiedG2BShoppingSearchCollector) for collector in collectors)
+    finally:
+        get_settings.cache_clear()
+
+
+def test_source_specific_keys_take_precedence_over_legacy_common_key(monkeypatch) -> None:
+    _clear_public_data_keys(monkeypatch)
+    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "legacy-key")
+    monkeypatch.setenv("G2B_SERVICE_KEY", "new-g2b-key")
+    monkeypatch.setenv("MFDS_SERVICE_KEY", "new-mfds-key")
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        assert settings.resolved_g2b_service_key == "new-g2b-key"
+        assert settings.resolved_mfds_service_key == "new-mfds-key"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_g2b_can_be_explicitly_disabled_even_when_key_is_configured(monkeypatch) -> None:
-    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "test-service-key")
+    _clear_public_data_keys(monkeypatch)
+    monkeypatch.setenv("G2B_SERVICE_KEY", "test-service-key")
     get_settings.cache_clear()
     try:
         collectors = build_collectors(include_g2b=False)
@@ -45,7 +78,7 @@ def test_g2b_can_be_explicitly_disabled_even_when_key_is_configured(monkeypatch)
 
 
 def test_mock_collector_remains_explicitly_available_for_development(monkeypatch) -> None:
-    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "")
+    _clear_public_data_keys(monkeypatch)
     get_settings.cache_clear()
     try:
         collectors = build_collectors(include_mock=True)
