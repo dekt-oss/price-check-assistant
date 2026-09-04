@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from purchase_price.collectors.base import PriceCollector
-from purchase_price.domain import EvidenceType, MatchGrade, SourceType
+from purchase_price.domain import ComparisonScope, EvidenceType, MatchGrade, SourceType
 from purchase_price.schemas import CollectedPrice, ProductQuery
 from purchase_price.services.product_matching import ProductIdentity, grade_product_identity
 
@@ -185,6 +185,11 @@ class ManufacturerPublicCatalogCollector(PriceCollector):
                     original_title=identity.source_title,
                     match_grade=decision.grade,
                     match_note=decision.note,
+                    comparison_scope=ComparisonScope.OBSERVED_ONLY,
+                    comparison_note=(
+                        "VAT·배송·설치·옵션·보증 조건이 완전히 구조화되지 않아 "
+                        "관측가격 범위에만 사용"
+                    ),
                 )
             )
         return results
