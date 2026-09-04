@@ -10,7 +10,9 @@ from purchase_price.services.market_research_support import (
     build_alternative_web_search_links,
     build_web_supplier_search_links,
     extract_g2b_supplier_candidates,
+    extract_mfds_business_supplier_candidates,
 )
+from purchase_price.services.mfds_device_intelligence import MedicalDeviceBusinessRecord
 
 
 def _price(*, conditions: str | None) -> CollectedPrice:
@@ -31,6 +33,17 @@ def _price(*, conditions: str | None) -> CollectedPrice:
     )
 
 
+def _business(*, name: str, status: str, permit: str) -> MedicalDeviceBusinessRecord:
+    return MedicalDeviceBusinessRecord(
+        company_name=name,
+        industry_type="의료기기 수입업",
+        business_status=status,
+        permit_date=date(2024, 1, 1),
+        address="서울",
+        business_permit_number=permit,
+    )
+
+
 def test_extract_g2b_supplier_candidates_uses_explicit_supplier_only() -> None:
     candidates = extract_g2b_supplier_candidates(
         [
@@ -44,6 +57,22 @@ def test_extract_g2b_supplier_candidates_uses_explicit_supplier_only() -> None:
     assert [item.name for item in candidates] == ["부산메디칼", "서울헬스케어"]
     assert all(item.source == SupplierSource.G2B for item in candidates)
     assert all(item.priority == SupplierPriority.G2B for item in candidates)
+
+
+def test_mfds_business_supplier_candidates_use_only_active_business_permits() -> None:
+    candidates = extract_mfds_business_supplier_candidates(
+        [
+            _business(name="예시메디칼", status="영업", permit="A-1"),
+            _business(name="예시메디칼", status="영업", permit="A-1"),
+            _business(name="폐업메디칼", status="폐업", permit="X-1"),
+        ]
+    )
+
+    assert [item.name for item in candidates] == ["예시메디칼"]
+    assert candidates[0].source == SupplierSource.MFDS
+    assert candidates[0].priority == SupplierPriority.MFDS
+    assert "업허가" in candidates[0].evidence
+    assert "총판·대리점 관계를 의미하지 않음" in candidates[0].evidence
 
 
 def test_alternative_research_gate_opens_only_on_zero_active_candidates() -> None:
