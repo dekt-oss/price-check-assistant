@@ -26,7 +26,7 @@ st.caption(
 )
 
 settings = get_settings()
-g2b_enabled = bool((settings.data_go_kr_service_key or "").strip())
+g2b_enabled = bool((settings.resolved_g2b_service_key or "").strip())
 
 with st.expander("현재 지원 범위", expanded=False):
     st.write(
@@ -38,9 +38,9 @@ with st.expander("현재 지원 범위", expanded=False):
 
 if not g2b_enabled:
     st.warning(
-        "공공데이터포털 서비스키가 설정되지 않아 나라장터 live 검색이 비활성화되어 있습니다. "
-        "Streamlit 앱 메뉴(⋮) → Settings → Secrets에 "
-        '`DATA_GO_KR_SERVICE_KEY = "..."`를 저장하면 식약처와 나라장터가 함께 활성화됩니다.'
+        "나라장터 서비스키가 설정되지 않아 G2B live 검색이 비활성화되어 있습니다. "
+        "Streamlit Secrets에 `G2B_SERVICE_KEY = \"...\"`를 저장하세요. "
+        "기존 DATA_GO_KR_SERVICE_KEY가 있으면 하위호환으로 사용합니다."
     )
 
 uploaded = st.file_uploader("PDF 또는 Excel 견적서", type=["pdf", "xlsx", "xls"])
@@ -164,7 +164,7 @@ if uploaded is not None:
                 status = assessment.message
                 if run.errors:
                     status += " / 일부 수집기 오류: " + " / ".join(run.errors)
-                if not run.results:
+                if not run.results and not run.errors:
                     status = "현재 연결된 공개가격 source에서 비교근거를 찾지 못함"
 
                 summary_rows.append(
