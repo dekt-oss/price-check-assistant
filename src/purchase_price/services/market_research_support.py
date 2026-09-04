@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 from urllib.parse import quote_plus
 
 from purchase_price.schemas import CollectedPrice
+from purchase_price.services.mfds_device_intelligence import MedicalDeviceBusinessRecord
 
 
 class SupplierPriority(IntEnum):
@@ -65,6 +67,41 @@ def extract_g2b_supplier_candidates(items: list[CollectedPrice]) -> tuple[Suppli
                 evidence="나라장터 공개 납품/구매실적에서 공급업체명 확인",
                 source_url=item.source_url,
                 priority=SupplierPriority.G2B,
+            )
+        )
+    return tuple(sorted(candidates, key=lambda item: (item.priority, item.name.casefold())))
+
+
+def extract_mfds_business_supplier_candidates(
+    records: Sequence[MedicalDeviceBusinessRecord],
+) -> tuple[SupplierCandidate, ...]:
+    """Convert active MFDS business permits into second-priority supplier evidence.
+
+    An MFDS business permit proves a medical-device business qualification. It does *not* prove
+    that the company is the official distributor/agent for a specific model, so the evidence text
+    explicitly avoids that claim.
+    """
+
+    seen: set[str] = set()
+    candidates: list[SupplierCandidate] = []
+    for record in records:
+        name = (record.company_name or "").strip()
+        key = name.casefold()
+        if not name or not record.is_active or key in seen:
+            continue
+        seen.add(key)
+        detail_parts = [part for part in (record.industry_type, record.business_permit_number) if part]
+        detail = " / ".join(detail_parts)
+        evidence = "식약처 의료기기 업허가가 현재 사용 가능한 상태로 확인됨"
+        if detail:
+            evidence += f" ({detail})"
+        evidence += "; 특정 모델의 공식 총판·대리점 관계를 의미하지 않음"
+        candidates.append(
+            SupplierCandidate(
+                name=name,
+                source=SupplierSource.MFDS,
+                evidence=evidence,
+                priority=SupplierPriority.MFDS,
             )
         )
     return tuple(sorted(candidates, key=lambda item: (item.priority, item.name.casefold())))
