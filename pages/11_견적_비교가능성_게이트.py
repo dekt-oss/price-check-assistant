@@ -10,15 +10,15 @@ import streamlit as st
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
 from purchase_price.services.pricing import assess_prices
+from purchase_price.services.quote_comparability import (
+    QuoteComparabilityContext,
+    evaluate_quote_comparability_candidate,
+)
 from purchase_price.services.quote_comparable_approval import (
     QuoteComparableApproval,
     apply_quote_comparable_approval,
     create_quote_comparable_approval,
     quote_evidence_pair_key,
-)
-from purchase_price.services.quote_comparability import (
-    QuoteComparabilityContext,
-    evaluate_quote_comparability_candidate,
 )
 from purchase_price.services.quote_condition_comparison import build_quote_condition_profile
 from purchase_price.services.quote_extraction import (
