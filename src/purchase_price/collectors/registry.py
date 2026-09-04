@@ -17,8 +17,9 @@ def build_collectors(
     """Build the user-facing collector set.
 
     Mock evidence is development-only and therefore opt-in. Verified G2B search is enabled only
-    when a local/deployment DATA_GO_KR_SERVICE_KEY is configured; the key itself is never returned
-    to the UI. Without a key, manufacturer public evidence continues to work normally.
+    when a deployment G2B_SERVICE_KEY (preferred) or legacy DATA_GO_KR_SERVICE_KEY is configured;
+    the key itself is never returned to the UI. Without a key, manufacturer public evidence
+    continues to work normally.
     """
 
     collectors: list[PriceCollector] = []
@@ -26,7 +27,7 @@ def build_collectors(
         collectors.append(ManufacturerPublicCatalogCollector())
 
     settings = get_settings()
-    service_key = (settings.data_go_kr_service_key or "").strip()
+    service_key = (settings.resolved_g2b_service_key or "").strip()
     if include_g2b and service_key:
         collectors.append(
             VerifiedG2BShoppingSearchCollector(
