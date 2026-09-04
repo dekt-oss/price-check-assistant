@@ -206,7 +206,14 @@ class PublicDataPortalClient:
                 )
             return payload
 
-        return do_request()
+        try:
+            return do_request()
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            message = _redact_secret(
+                f"Public Data Portal transport failure after retries: {type(exc).__name__}: {exc}",
+                self.service_key,
+            )
+            raise PublicDataClientError(message) from exc
 
     def get_json(self, base_url: str, endpoint: str, **params: Any) -> dict[str, Any]:
         if not base_url.strip():
