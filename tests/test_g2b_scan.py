@@ -125,16 +125,16 @@ def test_scan_paginates_every_window_and_dedupes_repeated_identities() -> None:
     assert [c.status for c in result.chunks] == ["complete", "complete"]
     assert [c.records_seen for c in result.chunks] == [3, 1]
     assert [c.candidate_count for c in result.chunks] == [2, 1]
-    assert result.chunks[0].grade_counts == {"X": 2}
+    assert result.chunks[0].grade_counts == {"B": 2}
 
     # The other model never carries the query token, so it is not a candidate at all.
-    # 3 transactions of 1 distinct identity; the exact model behind (VN) is X but visible.
+    # 3 transactions of 1 distinct identity; the exact model behind verified (VN) origin is B.
     assert result.transaction_count == 3
     assert len(result.candidates) == 1
     exact = next(c for c in result.candidates if "K72AG" in c.candidate_title)
     assert exact.transaction_count == 3
-    assert exact.predicted_grade == "X"
-    assert "model=exact_with_unverified_qualifier" in exact.match_note
+    assert exact.predicted_grade == "B"
+    assert "model=exact_with_verified_origin" in exact.match_note
     assert exact.first_transaction_date == date(2026, 7, 2)
     assert exact.last_transaction_date == date(2026, 7, 12)
     assert str(exact.min_price) == "2000000" and str(exact.max_price) == "2100000"
