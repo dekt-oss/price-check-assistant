@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+import xlrd
 from openpyxl import load_workbook
 
 from purchase_price.schemas import ProductQuery
@@ -166,6 +168,51 @@ def _is_summary_row(item: QuoteItem) -> bool:
     return label in _SUMMARY_LABELS
 
 
+def _extract_sheet_rows(
+    sheet_name: str,
+    rows: Iterable[tuple[object, ...]],
+) -> tuple[list[QuoteItem], str | None]:
+    row_iterator = iter(enumerate(rows, start=1))
+    header_row_number: int | None = None
+    mapping: dict[str, int] = {}
+
+    for row_number, values in row_iterator:
+        if row_number > _MAX_HEADER_SCAN_ROWS:
+            break
+        candidate = _header_mapping(tuple(values))
+        if _header_is_usable(candidate):
+            header_row_number = row_number
+            mapping = candidate
+            break
+
+    if header_row_number is None:
+        return [], f"{sheet_name}: 품목/가격 헤더를 찾지 못해 건너뜀"
+
+    items: list[QuoteItem] = []
+    for row_number, values in row_iterator:
+        row = tuple(values)
+        item = QuoteItem(
+            source_sheet=sheet_name,
+            source_row=row_number,
+            product_name=_text(_cell(row, mapping, "product_name")),
+            manufacturer=_text(_cell(row, mapping, "manufacturer")),
+            model_name=_text(_cell(row, mapping, "model_name")),
+            specification=_text(_cell(row, mapping, "specification")),
+            quantity=parse_quote_decimal(_cell(row, mapping, "quantity")),
+            unit_price=parse_quote_decimal(_cell(row, mapping, "unit_price")),
+            total_amount=parse_quote_decimal(_cell(row, mapping, "total_amount")),
+        )
+        if not any([item.product_name, item.manufacturer, item.model_name, item.specification]):
+            continue
+        if item.unit_price is None and item.total_amount is None:
+            continue
+        if _is_summary_row(item):
+            continue
+        items.append(item)
+
+    return items, None
+
+
 def extract_excel_quote(path: Path) -> QuoteExtractionResult:
     try:
         workbook = load_workbook(path, read_only=True, data_only=True)
@@ -176,49 +223,40 @@ def extract_excel_quote(path: Path) -> QuoteExtractionResult:
     warnings: list[str] = []
     try:
         for sheet in workbook.worksheets:
-            header_row_number: int | None = None
-            mapping: dict[str, int] = {}
-            for row_number, values in enumerate(
-                sheet.iter_rows(min_row=1, max_row=_MAX_HEADER_SCAN_ROWS, values_only=True),
-                start=1,
-            ):
-                candidate = _header_mapping(tuple(values))
-                if _header_is_usable(candidate):
-                    header_row_number = row_number
-                    mapping = candidate
-                    break
-
-            if header_row_number is None:
-                warnings.append(f"{sheet.title}: 품목/가격 헤더를 찾지 못해 건너뜀")
-                continue
-
-            for row_number, values in enumerate(
-                sheet.iter_rows(min_row=header_row_number + 1, values_only=True),
-                start=header_row_number + 1,
-            ):
-                row = tuple(values)
-                item = QuoteItem(
-                    source_sheet=sheet.title,
-                    source_row=row_number,
-                    product_name=_text(_cell(row, mapping, "product_name")),
-                    manufacturer=_text(_cell(row, mapping, "manufacturer")),
-                    model_name=_text(_cell(row, mapping, "model_name")),
-                    specification=_text(_cell(row, mapping, "specification")),
-                    quantity=parse_quote_decimal(_cell(row, mapping, "quantity")),
-                    unit_price=parse_quote_decimal(_cell(row, mapping, "unit_price")),
-                    total_amount=parse_quote_decimal(_cell(row, mapping, "total_amount")),
-                )
-                if not any(
-                    [item.product_name, item.manufacturer, item.model_name, item.specification]
-                ):
-                    continue
-                if item.unit_price is None and item.total_amount is None:
-                    continue
-                if _is_summary_row(item):
-                    continue
-                items.append(item)
+            sheet_items, warning = _extract_sheet_rows(
+                sheet.title,
+                (tuple(values) for values in sheet.iter_rows(values_only=True)),
+            )
+            items.extend(sheet_items)
+            if warning:
+                warnings.append(warning)
     finally:
         workbook.close()
+
+    if not items:
+        warnings.append("자동 추출된 견적 품목이 없습니다. 헤더명과 가격 열을 확인하세요.")
+    return QuoteExtractionResult(items=tuple(items), warnings=tuple(warnings))
+
+
+def extract_legacy_excel_quote(path: Path) -> QuoteExtractionResult:
+    try:
+        workbook = xlrd.open_workbook(str(path), on_demand=True)
+    except Exception as exc:
+        raise QuoteExtractionError(f"구형 Excel(.xls) 견적서를 읽을 수 없습니다: {exc}") from exc
+
+    items: list[QuoteItem] = []
+    warnings: list[str] = []
+    try:
+        for sheet in workbook.sheets():
+            sheet_items, warning = _extract_sheet_rows(
+                sheet.name,
+                (tuple(sheet.row_values(index)) for index in range(sheet.nrows)),
+            )
+            items.extend(sheet_items)
+            if warning:
+                warnings.append(warning)
+    finally:
+        workbook.release_resources()
 
     if not items:
         warnings.append("자동 추출된 견적 품목이 없습니다. 헤더명과 가격 열을 확인하세요.")
@@ -229,8 +267,10 @@ def extract_quote_file(path: Path) -> QuoteExtractionResult:
     suffix = path.suffix.casefold()
     if suffix == ".xlsx":
         return extract_excel_quote(path)
+    if suffix == ".xls":
+        return extract_legacy_excel_quote(path)
     raise QuoteExtractionError(
-        f"현재 자동 추출은 .xlsx 형식만 지원합니다: {suffix or '확장자 없음'}"
+        f"현재 자동 추출은 .xlsx/.xls 형식을 지원합니다: {suffix or '확장자 없음'}"
     )
 
 
