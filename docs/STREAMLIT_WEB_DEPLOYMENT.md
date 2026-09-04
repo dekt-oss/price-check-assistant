@@ -18,11 +18,20 @@
 
 ## 필수 Secret
 
-실제 식약처/나라장터 live 조회를 사용하려면 Streamlit Community Cloud의 Secrets에 서비스키를 root-level secret으로 저장한다.
+식약처와 나라장터의 활용승인/인증키가 서로 달라질 수 있으므로 source별 Secret을 분리한다.
 
 ```toml
-DATA_GO_KR_SERVICE_KEY = "<공공데이터포털 서비스키>"
+MFDS_SERVICE_KEY = "<식약처 API에 승인된 공공데이터포털 서비스키>"
+G2B_SERVICE_KEY = "<나라장터 API에 승인된 공공데이터포털 서비스키>"
 ```
+
+기존 배포와 로컬 환경의 하위호환을 위해 `DATA_GO_KR_SERVICE_KEY`도 fallback으로 계속 지원한다.
+
+```toml
+DATA_GO_KR_SERVICE_KEY = "<기존 공공데이터포털 서비스키>"
+```
+
+우선순위는 `MFDS_SERVICE_KEY` / `G2B_SERVICE_KEY`가 각각 `DATA_GO_KR_SERVICE_KEY`보다 높다. 현재 두 source의 신규 키 값이 같더라도 Secret 이름은 분리해 둔다.
 
 Streamlit의 root-level secrets는 환경변수로도 노출되므로 현재 `pydantic-settings` 환경변수 계약을 그대로 사용할 수 있다.
 
@@ -37,15 +46,25 @@ Streamlit의 root-level secrets는 환경변수로도 노출되므로 현재 `py
 5. branch `main`
 6. entrypoint `Home.py`
 7. Python은 프로젝트 지원범위인 3.11 이상 선택
-8. Advanced settings → Secrets에 `DATA_GO_KR_SERVICE_KEY` 등록
-9. Deploy
-10. 배포 URL에서 다음 smoke 확인
+8. Advanced settings → Secrets에 `MFDS_SERVICE_KEY`, `G2B_SERVICE_KEY` 등록
+9. 필요하면 기존 `DATA_GO_KR_SERVICE_KEY`도 그대로 유지
+10. Deploy 또는 Reboot
+11. 배포 URL에서 다음 smoke 확인
    - 홈 렌더
    - 통합검색 렌더
    - 견적서 분석 렌더
    - 의료기기 시장조사 렌더
-   - 식약처/나라장터 live 호출
+   - 화면의 `API 연결설정 · 식약처: 설정됨 · 나라장터: 설정됨` 확인
+   - 식약처 형명정보 live 호출
+   - 식약처 업체 업허가 live 호출
+   - 나라장터 live 호출
    - 서비스키 값이 화면/로그에 노출되지 않음
+
+## 조회 실패와 0건의 구분
+
+- API 인증/권한/통신 실패: `조회 실패`로 표시하고 0건으로 취급하지 않는다.
+- API 호출이 정상 완료됐으나 항목이 없음: 실제 `검색결과 0건`으로 취급한다.
+- 사용목적/주요사양 기반 대체탐색은 두 번째 경우에만 열어야 한다.
 
 ## 현재 한계
 
