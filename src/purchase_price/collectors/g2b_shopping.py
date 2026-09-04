@@ -7,7 +7,11 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 
-from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
+from purchase_price.clients.data_go_kr import (
+    SUCCESS_RESULT_CODES,
+    PublicDataClientError,
+    PublicDataPortalClient,
+)
 from purchase_price.domain import (
     ComparisonScope,
     EvidenceType,
@@ -42,19 +46,32 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _raise_for_result_header(container: Mapping[str, Any]) -> None:
+    header = container.get("header")
+    if not isinstance(header, Mapping):
+        return
+    result_code = str(header.get("resultCode", "")).strip()
+    result_msg = str(header.get("resultMsg", "")).strip()
+    if result_code and result_code not in SUCCESS_RESULT_CODES:
+        raise PublicDataClientError(
+            f"G2B API error resultCode={result_code} resultMsg={result_msg or '-'}"
+        )
+
+
 def unwrap_g2b_page(payload: Mapping[str, Any]) -> G2BShoppingPage:
+    # A failed request answers with a `*ResponseError` envelope instead of `response`. Without
+    # this check the fallback to `payload` finds no `header`, no `body`, and returns an empty
+    # page, so a broken call is indistinguishable from "this product had no transactions".
+    for key, value in payload.items():
+        if key.endswith("ResponseError") and isinstance(value, Mapping):
+            _raise_for_result_header(value)
+            raise PublicDataClientError(f"G2B API returned an error envelope: {key}")
+
     response = payload.get("response", payload)
     if not isinstance(response, Mapping):
         raise PublicDataClientError("G2B response must be an object")
 
-    header = response.get("header")
-    if isinstance(header, Mapping):
-        result_code = str(header.get("resultCode", "")).strip()
-        result_msg = str(header.get("resultMsg", "")).strip()
-        if result_code and result_code not in {"0", "00", "000"}:
-            raise PublicDataClientError(
-                f"G2B API error resultCode={result_code} resultMsg={result_msg or '-'}"
-            )
+    _raise_for_result_header(response)
 
     body = response.get("body", {})
     if not isinstance(body, Mapping):
