@@ -5,17 +5,33 @@ st.set_page_config(page_title="구매가격 검색·검토 보조시스템", pag
 st.title("구매가격 검색·검토 보조시스템")
 st.caption("공개정보 기반 PoC · 구매결정이 아닌 구매검토 보조도구")
 
-st.info(
-    "현재 단계는 Phase 0~1 초기 구현입니다. 실제 시장가격 수집기는 아직 연결하지 않았으며, "
-    "검색 흐름 검증용 샘플 수집기만 포함됩니다."
+st.markdown(
+    """
+현재 PoC는 **견적서 품목 추출 → 공개가격 조사 → 의료기기 등록/경쟁장비/공급사 조사** 흐름을
+Streamlit 화면에서 확인할 수 있습니다. 공개근거가 부족하면 임의로 적정가격이나 대체장비를 만들지 않습니다.
+    """
 )
 
-st.markdown("### 시작하기")
-st.page_link("pages/1_통합검색.py", label="제품명 / 제조사 / 모델 / 규격으로 검색")
-st.page_link("pages/2_견적서_분석.py", label="견적서 업로드 (초기 골격)")
-st.page_link("pages/3_Phase0_검증.py", label="Phase 0 대표품목 데이터 가능성 검증")
+st.markdown("### 업무별 시작")
+c1, c2 = st.columns(2)
+with c1:
+    st.page_link("pages/2_견적서_분석.py", label="📄 견적서 업로드 → 품목/단가 추출 → 가격 비교")
+    st.page_link("pages/1_통합검색.py", label="🔎 제품명 / 제조사 / 모델 / 규격 직접 검색")
+with c2:
+    st.page_link("pages/4_의료기기_시장조사.py", label="🏥 의료기기 등록·경쟁장비·공급사 시장조사")
+    st.page_link("pages/3_Phase0_검증.py", label="🧪 Phase 0 대표품목 데이터 가능성 검증")
+
+st.markdown("### 현재 조사 Source")
+st.markdown(
+    """
+- **나라장터:** verified exact-model mapping이 있는 경우 실제 공개 구매/납품실적과 공급업체 근거 조회
+- **식약처:** 동일 품목 등록모델과 의료기기 제조·수입·판매 등 업허가 상태 조회
+- **제조사 공개가격:** 사람이 검증한 공식 공개가격 snapshot
+- **웹:** 공급사/대체장비 보조 탐색. 반드시 `웹` 출처로 표시하며 공식근거보다 낮은 우선순위
+    """
+)
 
 st.markdown("---")
 st.markdown(
-    "**운영 원칙:** 출처·수집일·비교등급을 함께 제시하고, 근거 부족 시 임의의 적정가격을 만들지 않습니다."
+    "**운영 원칙:** 출처·수집일·제품동일성·비교범위를 함께 제시하고, 근거 부족 시 임의의 적정가격·대체장비·공식 공급사를 생성하지 않습니다."
 )
