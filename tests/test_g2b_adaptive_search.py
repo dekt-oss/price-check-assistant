@@ -2,15 +2,9 @@ from datetime import date
 
 import pytest
 
-from purchase_price.collectors.g2b_shopping import unwrap_g2b_page
-from purchase_price.collectors.g2b_verified_search import (
-    VerifiedG2BShoppingSearchCollector,
-)
+from purchase_price.collectors import g2b_shopping, g2b_verified_search
 from purchase_price.schemas import ProductQuery
-from purchase_price.services.g2b_adaptive_search import (
-    search_mapped_g2b_candidates_adaptive,
-)
-from purchase_price.services.g2b_pagination import G2BPaginationLimitError
+from purchase_price.services import g2b_adaptive_search, g2b_pagination
 from purchase_price.services.g2b_product_mapping import G2BProductMapping
 
 
@@ -86,13 +80,13 @@ class AdaptiveStubCollector:
             )
         else:
             raise AssertionError(f"unexpected window: {begin}..{end} page={page_no}")
-        return unwrap_g2b_page(payload), payload
+        return g2b_shopping.unwrap_g2b_page(payload), payload
 
 
 def test_adaptive_search_bisects_only_pagination_limit_windows() -> None:
     collector = AdaptiveStubCollector()
 
-    result = search_mapped_g2b_candidates_adaptive(
+    result = g2b_adaptive_search.search_mapped_g2b_candidates_adaptive(
         collector,
         QUERY,
         begin_date=date(2026, 7, 1),
@@ -123,12 +117,12 @@ class OneDayOverflowCollector:
             page_no=kwargs["page_no"],
             total_count=2,
         )
-        return unwrap_g2b_page(payload), payload
+        return g2b_shopping.unwrap_g2b_page(payload), payload
 
 
 def test_adaptive_search_fails_closed_when_one_day_still_exceeds_cap() -> None:
-    with pytest.raises(G2BPaginationLimitError, match="could not fully collect"):
-        search_mapped_g2b_candidates_adaptive(
+    with pytest.raises(g2b_pagination.G2BPaginationLimitError, match="could not fully collect"):
+        g2b_adaptive_search.search_mapped_g2b_candidates_adaptive(
             OneDayOverflowCollector(),
             QUERY,
             begin_date=date(2026, 7, 1),
@@ -150,12 +144,12 @@ class SingleWindowCollector:
             page_no=kwargs["page_no"],
             total_count=1,
         )
-        return unwrap_g2b_page(payload), payload
+        return g2b_shopping.unwrap_g2b_page(payload), payload
 
 
 def test_user_collector_requires_exact_model_and_verified_mapping() -> None:
     stub = SingleWindowCollector()
-    collector = VerifiedG2BShoppingSearchCollector(
+    collector = g2b_verified_search.VerifiedG2BShoppingSearchCollector(
         collector=stub,
         mappings=(VERIFIED_MAPPING,),
         lookback_days=10,
@@ -178,7 +172,7 @@ def test_user_collector_requires_exact_model_and_verified_mapping() -> None:
         detail_product_code="4227220901",
         mapping_status="unverified",
     )
-    unverified_collector = VerifiedG2BShoppingSearchCollector(
+    unverified_collector = g2b_verified_search.VerifiedG2BShoppingSearchCollector(
         collector=stub,
         mappings=(unverified,),
         lookback_days=10,
