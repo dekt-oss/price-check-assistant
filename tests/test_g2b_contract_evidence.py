@@ -23,14 +23,24 @@ class FakeClient:
         return self.payload
 
 
-def _payload(*items: dict[str, Any]) -> dict[str, Any]:
+class SequenceFakeClient:
+    def __init__(self, payloads: list[dict[str, Any]]) -> None:
+        self.payloads = iter(payloads)
+        self.calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def get_json(self, base_url: str, endpoint: str, **params: Any) -> dict[str, Any]:
+        self.calls.append((base_url, endpoint, params))
+        return next(self.payloads)
+
+
+def _payload(*items: dict[str, Any], total_count: int | None = None, page_no: int = 1) -> dict[str, Any]:
     return {
         "response": {
             "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
             "body": {
                 "items": list(items),
-                "totalCount": len(items),
-                "pageNo": 1,
+                "totalCount": len(items) if total_count is None else total_count,
+                "pageNo": page_no,
                 "numOfRows": 100,
             },
         }
@@ -111,6 +121,38 @@ def test_contract_method_filter_is_omitted_when_blank() -> None:
     )
 
     assert "cntrctMthdCd" not in fake.calls[0][2]
+
+
+def test_search_paginates_and_deduplicates_contracts() -> None:
+    first = {
+        "dcsnCntrctNo": "2026-001",
+        "prdctClsfcNoNm": "심장충격기",
+        "cntrctCnclsDate": "20260901",
+        "cntrctDtlInfoUrl": "https://example.invalid/contract/2026-001",
+    }
+    second = {
+        "dcsnCntrctNo": "2026-002",
+        "prdctClsfcNoNm": "심장충격기",
+        "cntrctCnclsDate": "20260902",
+        "cntrctDtlInfoUrl": "https://example.invalid/contract/2026-002",
+    }
+    fake = SequenceFakeClient(
+        [
+            _payload(first, total_count=3, page_no=1),
+            _payload(first, second, total_count=3, page_no=2),
+        ]
+    )
+    client = G2BContractEvidenceClient("unused-in-fake", client=fake)
+
+    records = client.search_product_contracts(
+        product_name="심장충격기",
+        begin_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 4),
+        num_of_rows=1,
+    )
+
+    assert [item.decision_contract_number for item in records] == ["2026-001", "2026-002"]
+    assert [call[2]["pageNo"] for call in fake.calls] == [1, 2]
 
 
 def test_contract_evidence_page_loads() -> None:
