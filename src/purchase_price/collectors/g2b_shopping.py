@@ -8,7 +8,12 @@ from enum import StrEnum
 from typing import Any
 
 from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
-from purchase_price.domain import EvidenceType, MatchGrade, SourceType
+from purchase_price.domain import (
+    ComparisonScope,
+    EvidenceType,
+    MatchGrade,
+    SourceType,
+)
 from purchase_price.schemas import CollectedPrice, ProductQuery
 
 G2B_SHOPPING_BASE_URL = "https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService"
@@ -91,6 +96,8 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
         "계약(납품요구)번호",
         "cntrctDlvrReqNo",
     ),
+    "delivery_request_change_order": ("cntrctDlvrReqChgOrd",),
+    "product_sequence": ("prdctSno",),
     "contract_unit_price": ("계약단가",),
     "delivery_unit_price": ("납품단가",),
     "generic_unit_price": ("단가", "prdctUprc"),
@@ -136,12 +143,34 @@ def _date_or_none(value: Any) -> date | None:
     return None
 
 
-def _record_id(record: Mapping[str, Any]) -> str | None:
-    for logical_name in ("delivery_request_number", "contract_number", "product_id"):
-        value = _first_value(record, logical_name)
-        if value not in (None, ""):
-            return str(value)
-    return None
+def build_g2b_source_record_id(record: Mapping[str, Any]) -> str | None:
+    """Build an item-level external key without pretending a delivery request is one item.
+
+    `cntrctDlvrReqNo` identifies the delivery-request container and can repeat across multiple
+    products. Where available, change-order, product-identification and line sequence are appended
+    so downstream Ground Truth and observations can distinguish individual items.
+    """
+
+    delivery_request = _first_value(record, "delivery_request_number")
+    contract_number = _first_value(record, "contract_number")
+    product_id = _first_value(record, "product_id")
+    change_order = _first_value(record, "delivery_request_change_order")
+    product_sequence = _first_value(record, "product_sequence")
+
+    parts: list[str] = []
+    if delivery_request not in (None, ""):
+        parts.append(f"delivery:{delivery_request}")
+        if change_order not in (None, ""):
+            parts.append(f"change:{change_order}")
+    elif contract_number not in (None, ""):
+        parts.append(f"contract:{contract_number}")
+
+    if product_id not in (None, ""):
+        parts.append(f"product:{product_id}")
+    if product_sequence not in (None, ""):
+        parts.append(f"line:{product_sequence}")
+
+    return "|".join(parts) or None
 
 
 def _evidence_amount(
@@ -226,11 +255,16 @@ def parse_official_report_record(
         quantity=quantity,
         unit=str(unit) if unit not in (None, "") else None,
         total_amount=total_amount,
-        source_record_id=_record_id(record),
+        source_record_id=build_g2b_source_record_id(record),
         original_title=str(product_name),
         conditions="; ".join(conditions_parts) or None,
         match_grade=MatchGrade.X,
         match_note="F1 raw procurement evidence; product identity matching deferred to F3",
+        comparison_scope=ComparisonScope.OBSERVED_ONLY,
+        comparison_note=(
+            "VAT·단위 의미·배송·설치·옵션·보증 조건이 완전히 구조화되지 않아 "
+            "관측가격 범위에만 사용"
+        ),
     )
 
 
