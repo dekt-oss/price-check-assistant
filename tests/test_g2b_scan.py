@@ -141,6 +141,43 @@ def test_scan_paginates_every_window_and_dedupes_repeated_identities() -> None:
     assert exact.source_record_ids == ("R-1", "R-3", "R-4")
 
 
+
+def test_scan_keeps_unverified_qualifier_candidates_at_x() -> None:
+    # Only (CN)/(VN) were verified as G2B origin metadata. Every other leading qualifier must
+    # still fail closed through the scan path, so an unverified one never reaches A/B and can
+    # never enter the direct reference range.
+    window = (date(2026, 7, 1), date(2026, 7, 10))
+    collector = WindowStubCollector(
+        {
+            (*window, 1): _payload(
+                [
+                    _record(
+                        "R-1",
+                        "노트북컴퓨터, 삼성전자, (재제조)NT960XJG-K72AG, Intel Core Ultra 7 256V",
+                    )
+                ],
+                page_no=1,
+                total_count=1,
+            )
+        }
+    )
+
+    result = scan_exact_model_candidates(
+        collector,
+        QUERY,
+        begin_date=window[0],
+        end_date=window[1],
+        mappings=MAPPINGS,
+        chunk_days=10,
+        num_of_rows=100,
+        max_pages_per_chunk=5,
+    )
+
+    assert result.complete
+    assert result.chunks[0].grade_counts == {"X": 1}
+    assert result.candidates[0].predicted_grade == "X"
+    assert "model=exact_with_unverified_qualifier" in result.candidates[0].match_note
+
 def test_scan_marks_truncated_window_incomplete_and_continues() -> None:
     w1 = (date(2026, 7, 1), date(2026, 7, 10))
     w2 = (date(2026, 7, 11), date(2026, 7, 15))

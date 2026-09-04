@@ -4,6 +4,8 @@ from pathlib import Path
 from purchase_price.scripts import evaluate_match_benchmark
 from purchase_price.services.match_benchmark import run_match_benchmark
 
+DIRECT_GRADES = {"A", "B"}
+
 
 def test_cli_reports_and_writes_predictions(tmp_path: Path, capsys) -> None:
     output = tmp_path / "predictions.csv"
@@ -13,11 +15,21 @@ def test_cli_reports_and_writes_predictions(tmp_path: Path, capsys) -> None:
 
     out = capsys.readouterr().out
     assert code == 0
+    positives = sum(
+        1 for row in expected.predictions if row.expected_grade.value in DIRECT_GRADES
+    )
     assert f"rows={len(expected.predictions)}" in out
-    assert "direct_precision=100.0%" in out
-    assert "direct_recall=100.0%" in out
-    assert "direct_positive_rows=1" in out
+    assert f"direct_positive_rows={positives}" in out
     assert "benchmark_status=ok" in out
+
+    # Precision/recall must read N/A exactly while no A/B positive exists to measure, and must
+    # stop reading N/A once one does. Pinning today's 100.0% would break on the next positive.
+    if positives == 0:
+        assert "direct_precision=N/A" in out
+        assert "direct_recall=N/A" in out
+    else:
+        assert "direct_precision=N/A" not in out
+        assert "direct_recall=N/A" not in out
 
     with output.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
