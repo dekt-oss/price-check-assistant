@@ -189,6 +189,8 @@ tests/                                   핵심 규칙/fixture 테스트
 ## 다음 작업
 
 1. 나머지 Phase 0 benchmark의 G2B 표준 세부품명/번호를 공개근거 기반으로 확대합니다.
-2. 제품군 문자열 부분일치만으로 C등급을 과도하게 부여하지 않도록 F3 class matching을 강화합니다.
-3. G2B 계약정보서비스를 추가해 쇼핑몰 구매실적과 독립된 공공계약 근거를 확보합니다.
-4. VAT·단위·배송·설치·옵션·보증을 구조화하고 검증된 경우에만 `quote_comparable`로 승격합니다.
+2. G2B 계약정보서비스를 추가해 쇼핑몰 구매실적과 독립된 공공계약 근거를 확보합니다.
+3. VAT·단위·배송·설치·옵션·보증을 구조화하고 검증된 경우에만 `quote_comparable`로 승격합니다.
+
+제품군 문자열 부분일치만으로 C등급을 부여하던 문제는 정규화 exact equality 요구로 처리했습니다.
+자세한 계약은 [docs/F3_PRODUCT_MATCHING.md](docs/F3_PRODUCT_MATCHING.md)를 참고하세요.

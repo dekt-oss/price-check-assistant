@@ -28,6 +28,19 @@
 - 모델 유사도나 편집거리만으로 A/B를 만들지 않는다.
 - D는 자동 유사제품 추천 결과가 아니라 curated functional-alternative 관계가 있을 때만 허용한다.
 - 판단근거는 `match_note`에 `model`, `manufacturer`, `specification`, `product_class` 상태로 남긴다.
+- **제품군 자동 호환성은 정규화 후 exact equality만 인정한다.** 단순 substring/부분문자열 포함관계는
+  동일 제품군 근거로 인정하지 않는다. 상하위 제품군·동의어 관계가 필요하면 문자열 포함이 아니라
+  별도의 검증된 alias/ontology registry를 사용한다.
+  - `query_key == candidate_key` → `product_class=compatible`. C 후보가 될 수 있다.
+  - 한쪽이 다른 쪽을 포함하기만 하면 → `product_class=related_unverified`. C 요건을 충족하지 않으며,
+    사람이 near miss를 확인할 수 있도록 상태값만 남긴다.
+  - 그 외 → `product_class=different`.
+  - 근거: `모니터`⊂`심전도모니터`, `프린터`⊂`레이저프린터`처럼 접미사만 공유하는 라벨은 더 좁거나
+    아예 다른 제품군인 경우가 많다. 실제 live G2B 표본에서도 `인공호흡기` 검색에 대해
+    `융복합인공호흡기` 후보가 관찰됐다. 모델을 지정하지 않은 검색에서 이런 후보가 참고용 C로
+    승격되면 구매담당자에게 잘못된 비교대상이 제시된다.
+  - `product_class`는 C 분기에서만 사용하므로 이 규칙은 A/B 판정에 영향을 주지 않는다. 예를 들어
+    `컬러 레이저프린터` 검색과 `레이저프린터` 후보는 exact model 경로로 계속 A가 된다.
 - 실제 G2B 제목의 선행 괄호 한정어(`(VN)NT960XHA-KG71G`, `(주문자상표부착)삼성전자`)는 토큰과 분리해
   `model_qualifier` / `manufacturer_qualifier`로 보존한다. 의미를 추정하지 않는다.
   - 한정어를 제거해야 모델이 일치하면 `model=exact_with_unverified_qualifier`로 표시하고 **X**로 둔다.

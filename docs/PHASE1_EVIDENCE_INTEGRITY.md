@@ -100,7 +100,7 @@ CI에서 최소 다음을 고정한다.
 
 별도 후속으로 남기는 항목:
 
-- `_product_class_state`의 단순 substring C 판정 개선
+- ~~`_product_class_state`의 단순 substring C 판정 개선~~ (P2-2에서 exact equality로 fail-closed 처리)
 - numeric-only raw unit(`182`)의 공식 의미 확인 및 normalized unit 분리
 - adaptive date partitioning
 - G2B 계약정보 collector
