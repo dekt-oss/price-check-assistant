@@ -184,14 +184,27 @@ def _specification_state(query: ProductQuery, candidate: ProductIdentity) -> str
 
 
 def _product_class_state(query_name: str | None, candidate_name: str | None) -> str:
+    """Only a normalized exact product-class match counts as compatible.
+
+    A substring relation (`모니터` in `심전도모니터`, `프린터` in `레이저프린터`) is not evidence
+    that two products belong to the same class: the longer label is usually a narrower or simply
+    unrelated class that happens to share a suffix. Treating it as compatible would let a
+    model-less query promote an unrelated product to a reference-only C candidate. Such pairs are
+    reported as `related_unverified` so a reviewer can see the near miss, but they never satisfy
+    the C requirement. Genuine hierarchy/synonym relations must come from a separately verified
+    alias registry, not from string containment.
+    """
+
     query_key = normalize_text(query_name)
     candidate_key = normalize_text(candidate_name)
     if not query_key:
         return "not_requested"
     if not candidate_key:
         return "missing"
-    if query_key == candidate_key or query_key in candidate_key or candidate_key in query_key:
+    if query_key == candidate_key:
         return "compatible"
+    if query_key in candidate_key or candidate_key in query_key:
+        return "related_unverified"
     return "different"
 
 
@@ -208,8 +221,9 @@ def grade_product_identity(
     compatibility and informative specification evidence from the query to be present in the
     candidate. Missing manufacturer or specification evidence downgrades the same model to B.
     Any explicit manufacturer/model conflict fails closed to X. C is a reference-only class match
-    and requires more than a bare class label when the query asks for a specific model. D is emitted
-    only for an explicit curated functional alternative.
+    and requires more than a bare class label when the query asks for a specific model, plus a
+    normalized *exact* product-class match; a mere substring relation between the two class labels
+    never satisfies C. D is emitted only for an explicit curated functional alternative.
 
     A model token that matches only after removing an unverified leading qualifier stays X. The
     qualifier is surfaced for human review instead of being reported as a model conflict. The G2B
