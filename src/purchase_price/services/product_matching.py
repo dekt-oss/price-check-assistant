@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 from purchase_price.domain import MatchGrade
@@ -36,6 +37,19 @@ class ProductIdentity:
 
 
 _LEADING_QUALIFIER_PATTERN = re.compile(r"^\((?P<qualifier>[^()]{1,30})\)\s*(?P<rest>\S.*)$")
+
+
+@dataclass(frozen=True)
+class _SpecMeasurement:
+    family: str
+    value: Decimal
+
+
+_SPEC_MEASUREMENT_PATTERN = re.compile(
+    r"(?<![a-z0-9])(?P<value>\d+(?:\.\d+)?)\s*"
+    r"(?P<unit>ml|l|kv|v|kw|w|tb|gb|개입|ea|pcs|pack|팩|세트|set)(?![a-z0-9])",
+    re.IGNORECASE,
+)
 
 
 def split_leading_qualifier(value: str | None) -> tuple[str | None, str | None]:
@@ -153,6 +167,69 @@ def _spec_tokens(value: str | None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(token for token in tokens if len(token) > 1))
 
 
+def _measurement(unit: str, value: Decimal) -> _SpecMeasurement:
+    normalized_unit = unit.casefold()
+    if normalized_unit == "ml":
+        return _SpecMeasurement("volume_ml", value)
+    if normalized_unit == "l":
+        return _SpecMeasurement("volume_ml", value * Decimal("1000"))
+    if normalized_unit == "v":
+        return _SpecMeasurement("voltage_v", value)
+    if normalized_unit == "kv":
+        return _SpecMeasurement("voltage_v", value * Decimal("1000"))
+    if normalized_unit == "w":
+        return _SpecMeasurement("power_w", value)
+    if normalized_unit == "kw":
+        return _SpecMeasurement("power_w", value * Decimal("1000"))
+    # GB and TB are kept separate. A candidate listing only RAM in GB must not be treated as
+    # contradictory evidence for a query's disk size in TB (or vice versa).
+    if normalized_unit == "gb":
+        return _SpecMeasurement("storage_gb", value)
+    if normalized_unit == "tb":
+        return _SpecMeasurement("storage_tb", value)
+    return _SpecMeasurement("package_count", value)
+
+
+def _spec_measurements(value: str | None) -> tuple[_SpecMeasurement, ...]:
+    if not value:
+        return ()
+    measurements: list[_SpecMeasurement] = []
+    for match in _SPEC_MEASUREMENT_PATTERN.finditer(value.casefold()):
+        measurements.append(
+            _measurement(match.group("unit"), Decimal(match.group("value")))
+        )
+    return tuple(measurements)
+
+
+def _has_explicit_measurement_conflict(query_spec: str | None, candidate_text: str) -> bool:
+    """Return true only for an unambiguous numeric/unit contradiction.
+
+    A query with multiple measurement families (for example `32GB 1TB`) can describe several
+    different components, so a partial candidate specification must not be promoted to an explicit
+    conflict without role-aware parsing. The strict X path is therefore opened only when the query
+    contains one safely-normalized measurement family. The candidate must state the same family and
+    all its stated values must contradict the query value(s). Missing measurements remain incomplete.
+    """
+
+    query_measurements = _spec_measurements(query_spec)
+    candidate_measurements = _spec_measurements(candidate_text)
+    if not query_measurements or not candidate_measurements:
+        return False
+
+    query_families = {measurement.family for measurement in query_measurements}
+    if len(query_families) != 1:
+        return False
+    family = next(iter(query_families))
+
+    query_values = {
+        measurement.value for measurement in query_measurements if measurement.family == family
+    }
+    candidate_values = {
+        measurement.value for measurement in candidate_measurements if measurement.family == family
+    }
+    return bool(candidate_values and query_values.isdisjoint(candidate_values))
+
+
 def _informative_query_spec_tokens(query: ProductQuery) -> tuple[str, ...]:
     specification_key = normalize_text(query.specification)
     model_key = normalize_text(query.model_name)
@@ -178,6 +255,8 @@ def _specification_state(query: ProductQuery, candidate: ProductIdentity) -> str
     candidate_tokens = set(_spec_tokens(candidate_text))
     if not candidate_tokens:
         return "missing"
+    if _has_explicit_measurement_conflict(query.specification, candidate_text):
+        return "explicit_conflict"
     if all(token in candidate_tokens for token in query_tokens):
         return "compatible"
     return "different_or_incomplete"
@@ -219,11 +298,13 @@ def grade_product_identity(
 
     A/B require an exact normalized model match. A additionally requires verified manufacturer
     compatibility and informative specification evidence from the query to be present in the
-    candidate. Missing manufacturer or specification evidence downgrades the same model to B.
-    Any explicit manufacturer/model conflict fails closed to X. C is a reference-only class match
-    and requires more than a bare class label when the query asks for a specific model, plus a
-    normalized *exact* product-class match; a mere substring relation between the two class labels
-    never satisfies C. D is emitted only for an explicit curated functional alternative.
+    candidate. Missing or merely incomplete specification evidence downgrades the same model to B,
+    but an explicit numeric/unit specification contradiction fails closed to X because B evidence
+    can enter the observed direct-price range. Any explicit manufacturer/model conflict also fails
+    closed to X. C is a reference-only class match and requires more than a bare class label when
+    the query asks for a specific model, plus a normalized *exact* product-class match; a mere
+    substring relation between the two class labels never satisfies C. D is emitted only for an
+    explicit curated functional alternative.
 
     A model token that matches only after removing an unverified leading qualifier stays X. The
     qualifier is surfaced for human review instead of being reported as a model conflict. The G2B
@@ -253,7 +334,11 @@ def grade_product_identity(
     specification_state = _specification_state(query, candidate)
     product_state = _product_class_state(query.product_name, candidate.product_name)
 
-    if model_state == "conflict" or manufacturer_state == "conflict":
+    if (
+        model_state == "conflict"
+        or manufacturer_state == "conflict"
+        or specification_state == "explicit_conflict"
+    ):
         grade = MatchGrade.X
     elif model_state == "exact_with_unverified_qualifier":
         grade = MatchGrade.X
