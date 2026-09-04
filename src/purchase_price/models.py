@@ -18,7 +18,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
-from .domain import EvidenceType, MatchGrade, SourceType
+from .domain import ComparisonScope, EvidenceType, MatchGrade, SourceType
 
 
 class Product(Base):
@@ -76,12 +76,22 @@ class RawEvidence(Base):
 
 class PriceObservation(Base):
     __tablename__ = "price_observations"
+    __table_args__ = (
+        UniqueConstraint(
+            "evidence_id",
+            "product_id",
+            "derivation_version",
+            "evidence_type",
+            name="uq_price_observation_derivation",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
-    evidence_id: Mapped[int | None] = mapped_column(
-        ForeignKey("raw_evidence.id", ondelete="SET NULL"), index=True
+    evidence_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_evidence.id", ondelete="SET NULL"), nullable=False, index=True
     )
+    derivation_version: Mapped[str] = mapped_column(String(80), default="v1")
     price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     evidence_type: Mapped[EvidenceType] = mapped_column(
         SAEnum(EvidenceType, native_enum=False), index=True
@@ -92,6 +102,10 @@ class PriceObservation(Base):
     total_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
     vat_status: Mapped[str | None] = mapped_column(String(50))
     conditions: Mapped[str | None] = mapped_column(Text)
+    comparison_scope: Mapped[ComparisonScope] = mapped_column(
+        SAEnum(ComparisonScope, native_enum=False), default=ComparisonScope.OBSERVED_ONLY
+    )
+    comparison_note: Mapped[str | None] = mapped_column(Text)
     source_type: Mapped[SourceType] = mapped_column(SAEnum(SourceType, native_enum=False))
     source_name: Mapped[str] = mapped_column(String(300))
     source_url: Mapped[str | None] = mapped_column(Text)
@@ -103,4 +117,4 @@ class PriceObservation(Base):
     match_note: Mapped[str | None] = mapped_column(Text)
 
     product: Mapped[Product] = relationship(back_populates="observations")
-    evidence: Mapped[RawEvidence | None] = relationship(back_populates="observations")
+    evidence: Mapped[RawEvidence] = relationship(back_populates="observations")
