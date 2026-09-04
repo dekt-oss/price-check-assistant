@@ -7,7 +7,7 @@ st.caption("공개정보 기반 PoC · 구매결정이 아닌 구매검토 보�
 
 st.markdown(
     """
-현재 PoC는 **견적서 품목 추출 → 공개가격 조사 → 나라장터 계약근거 → 의료기기 등록/경쟁장비/공급사 → Safety·UDI 확인** 흐름을
+현재 PoC는 **견적서 품목·조건 추출 → 공개가격 조사 → 나라장터 계약근거 → 의료기기 등록/경쟁장비/공급사 → Safety·UDI 확인** 흐름을
 Streamlit 화면에서 확인할 수 있습니다. 공개근거가 부족하면 임의로 적정가격이나 대체장비를 만들지 않습니다.
     """
 )
@@ -16,11 +16,13 @@ st.markdown("### 업무별 시작")
 c1, c2 = st.columns(2)
 with c1:
     st.page_link("pages/2_견적서_분석.py", label="📄 견적서 업로드 → 품목/단가 추출 → 가격 비교")
+    st.page_link("pages/9_견적조건_확인.py", label="🧾 견적서 VAT·배송·설치·보증 등 조건 추출")
     st.page_link("pages/1_통합검색.py", label="🔎 제품명 / 제조사 / 모델 / 규격 직접 검색")
     st.page_link("pages/7_나라장터_계약근거.py", label="📑 나라장터 물품 계약근거 조회")
-    st.page_link("pages/5_의료기기_안전_공급사.py", label="🛡️ 의료기기 Safety · 공급사 근거 확인")
+    st.page_link("pages/8_공개가격_수집상태.py", label="📡 공개가격 출처별 수집상태 확인")
 with c2:
     st.page_link("pages/4_의료기기_시장조사.py", label="🏥 의료기기 등록·경쟁장비·공급사 시장조사")
+    st.page_link("pages/5_의료기기_안전_공급사.py", label="🛡️ 의료기기 Safety · 공급사 근거 확인")
     st.page_link("pages/6_의료기기_UDI.py", label="🏷️ 의료기기 UDI-DI 공식조회")
     st.page_link("pages/3_Phase0_검증.py", label="🧪 Phase 0 대표품목 데이터 가능성 검증")
 
