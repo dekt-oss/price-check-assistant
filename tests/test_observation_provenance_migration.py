@@ -1,9 +1,9 @@
 from pathlib import Path
 
 import sqlalchemy as sa
-from alembic import command
 from alembic.config import Config
 
+from alembic import command
 from purchase_price.config import get_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
