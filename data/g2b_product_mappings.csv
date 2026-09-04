@@ -1,21 +1,21 @@
 model_name,product_name,g2b_detail_product_name,g2b_detail_product_code,mapping_status,last_smoke_begin,last_smoke_end,last_smoke_total_count,evidence_url,notes
-TN500,인큐베이터(인공보육기),,,unverified,20260714,20260813,0,,인큐베이터 검색어 0건; 표준 세부품명 확인 전 자동 사용 금지
+TN500,인큐베이터(인공보육기),,,unverified,20260607,20260904,0,,2026-09-04 재조사: 인큐베이터·보육기·신생아용인큐베이터 모두 유효 거래 없음. 표준 세부품명 확인 전 자동 사용 금지
 Sophie,인공호흡기,인공호흡기,4227220901,verified,20260714,20260813,9,https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01259646&bidPbancOrd=000&fileSeq=1&fileType=&prcmBsneSeCd=01,공식 공고 세부품명 확인 및 live API source-hit 확인
 "iTero Lumina pro",입체광학인상채득장치,,,unverified,,,,,표준 세부품명 미확정
 ROTAPRO,혈관박리카테터장치,,,unverified,,,,,표준 세부품명 미확정
-"Veriti Pro Dx",핵산증폭기,,,unverified,,,,,표준 세부품명 미확정
+"Veriti Pro Dx",핵산증폭기,유전자증폭기,4110630701,verified,20260607,20260904,47,https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getSpcifyPrdlstPrcureInfoList,2026-09-04 live 조회에서 세부품명 유전자증폭기(4110630701) 47건 확인; 동 분류에 Thermo fisher scientific (SG)QuantStudio 1 3건 및 Applied biosystems (US)SimpliAmp Thermal Cycler 2건이 관측되어 동일 제조사 계열 thermal cycler 분류임을 확인. Veriti Pro Dx 자체 거래는 해당 기간 미관측
 FT10,전기수술기(소작기),,,unverified,,,,,표준 세부품명 미확정
 "N-Pulse Pro",탄산가스레이저수술기,,,unverified,,,,,표준 세부품명 미확정
 "MinION Mk1D",염기서열분석기,,,unverified,,,,,표준 세부품명 미확정
 "Hall Titan Drill set",배터리 드릴세트,,,unverified,,,,,표준 세부품명 미확정
-L4-20t-RS,선형탐촉자(초음파 Probe),,,unverified,,,,,표준 세부품명 미확정
-"Efficia DFM100",심장 충격기,,,unverified,,,,,표준 세부품명 미확정
-MAC5,심전도기,,,unverified,20260714,20260813,0,,심전도기 검색어 0건; 표준 세부품명 확인 전 자동 사용 금지
-GMSR-182,약품냉장고,,,unverified,,,,,표준 세부품명 미확정
+L4-20t-RS,선형탐촉자(초음파 Probe),,,unverified,20260607,20260904,39,,2026-09-04 조사: 초음파영상진단장치 39건 확인했으나 Draminski·Meda·Vinno 등 장비 본체 위주이고 GE 탐촉자 단품 분류 근거 없음. 탐촉자/초음파진단장치는 0건
+"Efficia DFM100",심장 충격기,,,unverified,20260607,20260904,593,,2026-09-04 조사: 세부품명 심장충격기(4217210101) 593건 확인했으나 제조사가 나눔테크·라디안큐바이오·씨유메디칼시스템 등 공공 AED 중심이고 필립스 미관측. 병원용 제세동기가 이 분류에 속한다는 근거를 찾지 못해 fail-closed 유지
+MAC5,심전도기,,,unverified,20260607,20260904,0,,2026-09-04 재조사: 심전도기·심전도계·심전도기록기·심전도감시장치 모두 0건. 표준 세부품명 확인 전 자동 사용 금지
+GMSR-182,약품냉장고,,,unverified,20260607,20260904,21,,2026-09-04 조사 결론: 후보 2개가 경합하여 fail-closed 유지. 의약품냉장고(4219909902) 21건은 PHC·에스지엠·제이오텍만 관측되어 GMS 미확인. 실험실용일반냉장고(4110301101) 60건에는 지엠에스 8건이 있으나 모델이 GSI-680·GSI-322로 GMSR 계열과 다름. GMSR-182가 어느 분류에 속하는지 공개근거로 확정하기 전에는 verified로 올리지 않음
 30-4494,Mixter hemostatic Forceps,,,unverified,,,,,표준 세부품명 미확정
 26173KA,Laparoscopical Needle holder,,,unverified,,,,,표준 세부품명 미확정
 B61084,TEBBETTS FIBEROPTIC RETRACTOR,,,unverified,,,,,표준 세부품명 미확정
 NT960XJG-K72AG,노트북(갤럭시북6 PRO),노트북컴퓨터,4321150301,verified,20260714,20260813,1021,https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01514813&bidPbancOrd=000&fileSeq=2&fileType=&prcmBsneSeCd=01,공식 공고 세부품명번호 확인 및 live API source-hit 확인
 "ApeosPrint C5570 GK",컬러 레이저프린터,레이저프린터,4321210501,verified,20260714,20260813,750,https://www.law.go.kr/LSW/flDownload.do?bylClsCd=200201&flNm=%5B%EB%B3%84%ED%91%9C+1%5D+%EC%9B%90%EC%82%B0%EC%A7%80+%EB%AA%85%EC%8B%9C%EB%B0%A9%EB%B2%95%EC%9D%98+%ED%8A%B9%EB%A1%80+%EC%A0%81%EC%9A%A9%EC%83%81%ED%92%88+%ED%91%9C&flSeq=147929253,후지필름 공식몰·MSDS로 exact model 확인; 조달 세부품명 레이저프린터 4321210501 확인; 2026-07-14~08-13 live API 750건 중 exact-title 거래 3건 확인
 "ThinkStation P2 Tower",컴퓨터(동영상편집용),워크스테이션,4321151501,verified,20260607,20260904,0,https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R25BK01241731&bidPbancOrd=000&fileSeq=3&fileType=&prcmBsneSeCd=01,공식 G2B 기자재 문서에서 Lenovo ThinkStation P2 Tower를 워크스테이션으로 확인; 조달청 목록정보시스템 워크스테이션 세부품명번호 4321151501 확인; 2026-09-04 live user-search smoke에서 mapping 동작 확인(최근 90일 exact-model 거래 0건)
-CX30N,영상 판독용 모니터,,,unverified,,,,,표준 세부품명 미확정
+CX30N,영상 판독용 모니터,,,unverified,20260607,20260904,0,,2026-09-04 조사: 의료용모니터·영상표시장치 0건. 세부품명 모니터(4321190201)는 엘지전자 등 전산용 모니터 분류이므로 의료 영상판독용 모니터로 매핑하면 오탐. fail-closed 유지
