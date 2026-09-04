@@ -1,0 +1,243 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+
+from openpyxl import load_workbook
+
+from purchase_price.schemas import ProductQuery
+
+
+class QuoteExtractionError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class QuoteItem:
+    source_sheet: str
+    source_row: int
+    product_name: str = ""
+    manufacturer: str = ""
+    model_name: str = ""
+    specification: str = ""
+    quantity: Decimal | None = None
+    unit_price: Decimal | None = None
+    total_amount: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class QuoteExtractionResult:
+    items: tuple[QuoteItem, ...]
+    warnings: tuple[str, ...]
+
+
+_FIELD_ALIASES = {
+    "product_name": (
+        "품명",
+        "제품명",
+        "상품명",
+        "물품명",
+        "품목명",
+        "내역",
+    ),
+    "manufacturer": (
+        "제조사",
+        "제조업체",
+        "메이커",
+        "maker",
+        "브랜드",
+        "brand",
+    ),
+    "model_name": (
+        "모델",
+        "모델명",
+        "model",
+        "modelname",
+        "modelno",
+        "modelnumber",
+    ),
+    "specification": (
+        "규격",
+        "사양",
+        "spec",
+        "specification",
+    ),
+    "quantity": (
+        "수량",
+        "qty",
+        "quantity",
+    ),
+    "unit_price": (
+        "단가",
+        "견적단가",
+        "공급단가",
+        "판매단가",
+        "unitprice",
+        "price",
+    ),
+    "total_amount": (
+        "금액",
+        "합계금액",
+        "공급가액",
+        "총액",
+        "amount",
+        "total",
+        "totalamount",
+    ),
+}
+_SUMMARY_LABELS = frozenset({"합계", "총계", "소계", "부가세", "vat", "공급가액합계"})
+_MAX_HEADER_SCAN_ROWS = 30
+
+
+def _normalize_header(value: object) -> str:
+    if value is None:
+        return ""
+    return re.sub(r"[\s_./()\-]+", "", str(value).strip().casefold())
+
+
+_ALIAS_LOOKUP = {
+    _normalize_header(alias): field
+    for field, aliases in _FIELD_ALIASES.items()
+    for alias in aliases
+}
+
+
+def _text(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.endswith(".0") and text[:-2].isdigit():
+        return text[:-2]
+    return text
+
+
+def parse_quote_decimal(value: object) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        text = str(value)
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        text = re.sub(r"[,\s₩원]", "", text)
+    try:
+        result = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+    if not result.is_finite():
+        return None
+    return result
+
+
+def _header_mapping(values: tuple[object, ...]) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    for index, value in enumerate(values):
+        field = _ALIAS_LOOKUP.get(_normalize_header(value))
+        if field is not None and field not in mapping:
+            mapping[field] = index
+    return mapping
+
+
+def _header_is_usable(mapping: dict[str, int]) -> bool:
+    identifier_count = sum(
+        field in mapping
+        for field in ("product_name", "manufacturer", "model_name", "specification")
+    )
+    has_price = "unit_price" in mapping or "total_amount" in mapping
+    return identifier_count >= 1 and has_price
+
+
+def _cell(values: tuple[object, ...], mapping: dict[str, int], field: str) -> object:
+    index = mapping.get(field)
+    if index is None or index >= len(values):
+        return None
+    return values[index]
+
+
+def _is_summary_row(item: QuoteItem) -> bool:
+    label = _normalize_header(item.product_name or item.model_name)
+    return label in _SUMMARY_LABELS
+
+
+def extract_excel_quote(path: Path) -> QuoteExtractionResult:
+    try:
+        workbook = load_workbook(path, read_only=True, data_only=True)
+    except Exception as exc:
+        raise QuoteExtractionError(f"Excel 견적서를 읽을 수 없습니다: {exc}") from exc
+
+    items: list[QuoteItem] = []
+    warnings: list[str] = []
+    try:
+        for sheet in workbook.worksheets:
+            header_row_number: int | None = None
+            mapping: dict[str, int] = {}
+            for row_number, values in enumerate(
+                sheet.iter_rows(min_row=1, max_row=_MAX_HEADER_SCAN_ROWS, values_only=True),
+                start=1,
+            ):
+                candidate = _header_mapping(tuple(values))
+                if _header_is_usable(candidate):
+                    header_row_number = row_number
+                    mapping = candidate
+                    break
+
+            if header_row_number is None:
+                warnings.append(f"{sheet.title}: 품목/가격 헤더를 찾지 못해 건너뜀")
+                continue
+
+            for row_number, values in enumerate(
+                sheet.iter_rows(min_row=header_row_number + 1, values_only=True),
+                start=header_row_number + 1,
+            ):
+                row = tuple(values)
+                item = QuoteItem(
+                    source_sheet=sheet.title,
+                    source_row=row_number,
+                    product_name=_text(_cell(row, mapping, "product_name")),
+                    manufacturer=_text(_cell(row, mapping, "manufacturer")),
+                    model_name=_text(_cell(row, mapping, "model_name")),
+                    specification=_text(_cell(row, mapping, "specification")),
+                    quantity=parse_quote_decimal(_cell(row, mapping, "quantity")),
+                    unit_price=parse_quote_decimal(_cell(row, mapping, "unit_price")),
+                    total_amount=parse_quote_decimal(_cell(row, mapping, "total_amount")),
+                )
+                if not any(
+                    [item.product_name, item.manufacturer, item.model_name, item.specification]
+                ):
+                    continue
+                if item.unit_price is None and item.total_amount is None:
+                    continue
+                if _is_summary_row(item):
+                    continue
+                items.append(item)
+    finally:
+        workbook.close()
+
+    if not items:
+        warnings.append("자동 추출된 견적 품목이 없습니다. 헤더명과 가격 열을 확인하세요.")
+    return QuoteExtractionResult(items=tuple(items), warnings=tuple(warnings))
+
+
+def extract_quote_file(path: Path) -> QuoteExtractionResult:
+    suffix = path.suffix.casefold()
+    if suffix == ".xlsx":
+        return extract_excel_quote(path)
+    raise QuoteExtractionError(
+        f"현재 자동 추출은 .xlsx 형식만 지원합니다: {suffix or '확장자 없음'}"
+    )
+
+
+def quote_item_query(item: QuoteItem) -> ProductQuery:
+    return ProductQuery(
+        product_name=item.product_name,
+        manufacturer=item.manufacturer,
+        model_name=item.model_name,
+        specification=item.specification,
+    )
