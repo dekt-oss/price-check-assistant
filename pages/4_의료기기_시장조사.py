@@ -7,6 +7,10 @@ from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.device_research_handoff import (
+    DEVICE_RESEARCH_HANDOFF_SESSION_KEY,
+    parse_device_research_prefill,
+)
 from purchase_price.services.market_research_support import (
     alternative_research_gate,
     build_alternative_web_search_links,
@@ -33,12 +37,29 @@ settings = get_settings()
 mfds_service_key = (settings.resolved_mfds_service_key or "").strip()
 g2b_service_key = (settings.resolved_g2b_service_key or "").strip()
 
+quote_prefill = parse_device_research_prefill(
+    st.session_state.pop(DEVICE_RESEARCH_HANDOFF_SESSION_KEY, None)
+)
+if quote_prefill is not None:
+    st.session_state["device_research_product_name"] = quote_prefill.product_name
+    st.session_state["device_research_model_name"] = quote_prefill.model_name
+    st.session_state["device_research_company_name"] = quote_prefill.manufacturer
+
 st.caption(
     "API 연결설정 · 식약처: "
     + ("설정됨" if mfds_service_key else "미설정")
     + " · 나라장터: "
     + ("설정됨" if g2b_service_key else "미설정")
 )
+
+if quote_prefill is not None:
+    st.info(
+        "견적서 분석에서 선택한 행의 식별정보를 불러왔습니다. 이 값은 견적서 표기일 뿐 식약처 "
+        "공식 identity로 확정된 값이 아닙니다. 품목명·모델명·업체명을 확인하고 필요하면 수정한 뒤 "
+        "조회를 실행하세요."
+    )
+    if quote_prefill.specification:
+        st.caption(f"견적서 규격 참고: {quote_prefill.specification}")
 
 with st.expander("시장조사 판정 기준", expanded=False):
     st.markdown(
@@ -81,7 +102,11 @@ with st.form("mfds-device-research"):
         product_name = st.text_input(
             "식약처 품목명",
             placeholder="예: 심장충격기",
-            help="식약처 형명정보 API의 공식 품목명 필터로 조회합니다.",
+            help=(
+                "식약처 형명정보 API의 공식 품목명 필터로 조회합니다. 견적서에서 불러온 값은 "
+                "일반 제품명일 수 있으므로 공식 품목명인지 확인해야 합니다."
+            ),
+            key="device_research_product_name",
         )
         model_name = st.text_input(
             "모델명 (선택)",
@@ -90,12 +115,17 @@ with st.form("mfds-device-research"):
                 "형명정보 API에는 모델명 서버 필터가 없으므로, 품목 조회 결과 안에서 exact 모델을 "
                 "확인합니다. exact identity가 확인된 경우에만 나라장터와 자동 교차조회합니다."
             ),
+            key="device_research_model_name",
         )
     with c2:
         company_name = st.text_input(
             "확인할 업체명 (선택)",
             placeholder="예: ○○메디칼",
-            help="해당 업체의 의료기기 제조/수입/판매/임대 등 업허가 상태를 확인합니다.",
+            help=(
+                "해당 업체의 의료기기 제조/수입/판매/임대 등 업허가 상태를 확인합니다. 견적서 "
+                "제조사 표기에서 불러온 경우에도 공식 제조·수입업체라는 뜻은 아닙니다."
+            ),
+            key="device_research_company_name",
         )
         g2b_lookback_days = st.selectbox(
             "나라장터 공급실적 검색기간",
