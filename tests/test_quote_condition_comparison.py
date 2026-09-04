@@ -1,4 +1,4 @@
-from purchase_price.services.price_conditions import PriceConditionProfile, UNKNOWN
+from purchase_price.services.price_conditions import UNKNOWN, PriceConditionProfile
 from purchase_price.services.quote_condition_comparison import (
     ConditionComparisonStatus,
     build_quote_condition_profile,
