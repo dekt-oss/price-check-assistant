@@ -9,13 +9,13 @@ import streamlit as st
 
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
-from purchase_price.schemas import ProductQuery
 from purchase_price.services.device_research_handoff import (
     DEVICE_RESEARCH_HANDOFF_SESSION_KEY,
     QUOTE_REVIEW_ROWS_SESSION_KEY,
     build_device_research_prefill,
 )
 from purchase_price.services.pricing import assess_prices
+from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.quote_extraction import (
     QuoteExtractionError,
     extract_quote_file,
@@ -207,18 +207,19 @@ if quote_rows:
 
         with st.spinner("공개 가격근거를 조회하고 있습니다..."):
             for _, row in edited[edited["검색"].fillna(False)].iterrows():
-                product_name = _edited_text(row.get("제품명"))
-                manufacturer = _edited_text(row.get("제조사"))
-                model_name = _edited_text(row.get("모델명"))
-                specification = _edited_text(row.get("규격"))
-                quote = parse_quote_decimal(row.get("견적단가"))
+                review_input = build_purchase_review_input(
+                    product_name=row.get("제품명"),
+                    manufacturer=row.get("제조사"),
+                    model_name=row.get("모델명"),
+                    specification=row.get("규격"),
+                    quote_unit_price=parse_quote_decimal(row.get("견적단가")),
+                )
 
-                label = model_name or product_name or "식별정보 미입력 품목"
-                if not any([product_name, manufacturer, model_name, specification]):
+                if review_input is None:
                     summary_rows.append(
                         {
-                            "제품": label,
-                            "견적단가": float(quote) if quote is not None else None,
+                            "제품": "식별정보 미입력 품목",
+                            "견적단가": None,
                             "관측근거": 0,
                             "관측가 하단": None,
                             "관측가 상단": None,
@@ -229,14 +230,9 @@ if quote_rows:
                     )
                     continue
 
-                query = ProductQuery(
-                    product_name=product_name,
-                    manufacturer=manufacturer,
-                    model_name=model_name,
-                    specification=specification,
-                )
-                run = search_all(query, collectors)
-                assessment = assess_prices(run.results, quote)
+                label = review_input.model_name or review_input.product_name or "식별정보 미입력 품목"
+                run = search_all(review_input.to_product_query(), collectors)
+                assessment = assess_prices(run.results, review_input.quote_unit_price)
 
                 status = assessment.message
                 if run.errors:
@@ -247,7 +243,11 @@ if quote_rows:
                 summary_rows.append(
                     {
                         "제품": label,
-                        "견적단가": float(quote) if quote is not None else None,
+                        "견적단가": (
+                            float(review_input.quote_unit_price)
+                            if review_input.quote_unit_price is not None
+                            else None
+                        ),
                         "관측근거": assessment.observed_count,
                         "관측가 하단": (
                             float(assessment.low) if assessment.low is not None else None
