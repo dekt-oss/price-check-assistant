@@ -7,7 +7,7 @@ st.caption("공개정보 기반 PoC · 구매결정이 아닌 구매검토 보�
 
 st.markdown(
     """
-현재 PoC는 **견적서 품목·조건 추출 → 공개가격·조건 대조 → 비교가능성 게이트 → 나라장터 계약근거 → 의료기기 등록/경쟁장비/공급사 → Safety·UDI 확인** 흐름을
+현재 PoC는 **견적서 품목·조건 추출 → 공개가격·조건 대조 → 비교가능성/최신성 검토 → 나라장터 계약근거 → 의료기기 등록/경쟁장비/공급사 → Safety·UDI 확인** 흐름을
 Streamlit 화면에서 확인할 수 있습니다. 공개근거가 부족하면 임의로 적정가격이나 대체장비를 만들지 않습니다.
     """
 )
@@ -19,9 +19,10 @@ with c1:
     st.page_link("pages/9_견적조건_확인.py", label="🧾 견적서 VAT·배송·설치·보증 등 조건 추출")
     st.page_link("pages/10_견적_외부조건_대조.py", label="⚖️ 견적조건 ↔ 외부 가격조건 대조")
     st.page_link("pages/11_견적_비교가능성_게이트.py", label="🚦 견적가격 직접비교 가능성 안전게이트")
+    st.page_link("pages/12_가격근거_최신성.py", label="🕒 공개가격 근거 최신성 확인")
     st.page_link("pages/1_통합검색.py", label="🔎 제품명 / 제조사 / 모델 / 규격 직접 검색")
-    st.page_link("pages/7_나라장터_계약근거.py", label="📑 나라장터 물품 계약근거 조회")
 with c2:
+    st.page_link("pages/7_나라장터_계약근거.py", label="📑 나라장터 물품 계약근거 조회")
     st.page_link("pages/8_공개가격_수집상태.py", label="📡 공개가격 출처별 수집상태 확인")
     st.page_link("pages/4_의료기기_시장조사.py", label="🏥 의료기기 등록·경쟁장비·공급사 시장조사")
     st.page_link("pages/5_의료기기_안전_공급사.py", label="🛡️ 의료기기 Safety · 공급사 근거 확인")
