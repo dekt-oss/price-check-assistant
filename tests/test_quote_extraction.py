@@ -1,9 +1,11 @@
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 import xlwt
 from openpyxl import Workbook
 
+import purchase_price.services.quote_extraction as quote_extraction
 from purchase_price.services.quote_extraction import (
     QuoteExtractionError,
     extract_quote_file,
@@ -51,6 +53,19 @@ def _write_legacy_workbook(path: Path) -> None:
     workbook.save(str(path))
 
 
+class _FakePdfPage:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def extract_text(self, **_: object) -> str:
+        return self.text
+
+
+class _FakePdfReader:
+    def __init__(self, pages: list[str]) -> None:
+        self.pages = [_FakePdfPage(text) for text in pages]
+
+
 def test_extract_xlsx_quote_finds_header_and_skips_summary(tmp_path: Path) -> None:
     path = tmp_path / "quote.xlsx"
     _write_workbook(path)
@@ -90,6 +105,50 @@ def test_extract_xls_quote_finds_header_and_skips_summary(tmp_path: Path) -> Non
     assert item.total_amount == Decimal("12000000.0")
 
 
+def test_extract_text_pdf_quote_uses_layout_columns(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    text = "\n".join(
+        [
+            "병원 구매 견적서",
+            "품명  제조사  모델명  규격  수량  단가  금액",
+            "초음파진단기  예시메디칼  US-100  Console  1  12000000  12000000",
+            "합계            12000000",
+        ]
+    )
+    monkeypatch.setattr(
+        quote_extraction,
+        "PdfReader",
+        lambda _: _FakePdfReader([text]),
+    )
+    path = tmp_path / "quote.pdf"
+
+    result = extract_quote_file(path)
+
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.source_sheet == "PDF 1페이지"
+    assert item.source_row == 3
+    assert item.product_name == "초음파진단기"
+    assert item.manufacturer == "예시메디칼"
+    assert item.model_name == "US-100"
+    assert item.specification == "Console"
+    assert item.quantity == Decimal("1")
+    assert item.unit_price == Decimal("12000000")
+    assert item.total_amount == Decimal("12000000")
+    assert any("반드시 화면에서 확인" in warning for warning in result.warnings)
+
+
+def test_scanned_pdf_without_text_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        quote_extraction,
+        "PdfReader",
+        lambda _: _FakePdfReader(["", "   "]),
+    )
+    path = tmp_path / "scan.pdf"
+
+    with pytest.raises(QuoteExtractionError, match="텍스트 레이어"):
+        extract_quote_file(path)
+
+
 def test_quote_item_converts_to_existing_product_query(tmp_path: Path) -> None:
     path = tmp_path / "quote.xlsx"
     _write_workbook(path)
@@ -124,12 +183,8 @@ def test_parse_quote_decimal_handles_common_krw_display() -> None:
 
 
 def test_unsupported_file_type_fails_closed(tmp_path: Path) -> None:
-    path = tmp_path / "quote.pdf"
-    path.write_bytes(b"%PDF-1.4")
+    path = tmp_path / "quote.txt"
+    path.write_text("not a quote", encoding="utf-8")
 
-    try:
+    with pytest.raises(QuoteExtractionError, match=r"\.xlsx/\.xls/\.pdf"):
         extract_quote_file(path)
-    except QuoteExtractionError as exc:
-        assert ".xlsx/.xls" in str(exc)
-    else:
-        raise AssertionError("unsupported file type must fail closed")
