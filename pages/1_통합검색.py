@@ -4,16 +4,26 @@ import pandas as pd
 import streamlit as st
 
 from purchase_price.collectors.registry import build_collectors
+from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.search import search_all
 
 st.set_page_config(page_title="통합검색", page_icon="🔎", layout="wide")
 st.title("통합검색")
-st.caption(
-    "현재 공식 제조사 공개가격 source를 사용합니다. 개발용 mock 가격은 기본 비활성화되어 있으며, "
-    "근거가 없는 가격은 생성하지 않습니다."
-)
+
+settings = get_settings()
+g2b_enabled = bool(settings.data_go_kr_service_key)
+if g2b_enabled:
+    st.caption(
+        "공식 제조사 공개가격과 검증된 나라장터 세부품명 mapping의 최근 구매실적을 함께 검색합니다. "
+        "나라장터는 exact model + verified mapping에서만 자동 조회하며, 근거가 없는 가격은 생성하지 않습니다."
+    )
+else:
+    st.caption(
+        "현재 공식 제조사 공개가격 source를 사용합니다. 나라장터 검색은 DATA_GO_KR_SERVICE_KEY가 "
+        "설정된 환경에서만 활성화되며, 개발용 mock 가격은 기본 비활성화되어 있습니다."
+    )
 
 with st.form("search-form"):
     c1, c2 = st.columns(2)
@@ -24,6 +34,17 @@ with st.form("search-form"):
         model_name = st.text_input("모델명", placeholder="예: GMSR-182")
         specification = st.text_input("규격", placeholder="예: 182L")
     quote_text = st.text_input("현재 견적 단가 (선택)", placeholder="예: 5000000")
+    g2b_lookback_days = st.selectbox(
+        "나라장터 검색기간",
+        options=[30, 90, 180, 365],
+        index=1,
+        format_func=lambda days: f"최근 {days}일",
+        disabled=not g2b_enabled,
+        help=(
+            "검증된 exact model mapping이 있는 품목만 조회합니다. 거래량이 많아 page cap을 넘으면 "
+            "날짜구간을 자동으로 분할해 완전수집을 시도합니다."
+        ),
+    )
     submitted = st.form_submit_button("가격자료 검색", type="primary")
 
 if submitted:
@@ -45,10 +66,19 @@ if submitted:
         model_name=model_name,
         specification=specification,
     )
-    run = search_all(query, build_collectors())
+    run = search_all(
+        query,
+        build_collectors(g2b_lookback_days=int(g2b_lookback_days)),
+    )
 
     if run.errors:
         st.warning("일부 수집기 오류: " + " / ".join(run.errors))
+
+    if g2b_enabled and not model_name.strip():
+        st.info(
+            "나라장터 자동검색은 현재 exact model 입력이 있을 때만 실행합니다. "
+            "제품군만으로 세부품명을 추정하지 않습니다."
+        )
 
     if not run.results:
         st.error(
@@ -86,9 +116,13 @@ if submitted:
             "Evidence Type": x.evidence_type.value,
             "비교범위": x.comparison_scope.value,
             "자료성격": x.source_type.value,
+            "거래일": x.transaction_date.isoformat() if x.transaction_date else "",
             "VAT": x.vat_status or "미확인",
+            "수량": float(x.quantity) if x.quantity is not None else None,
+            "단위": x.unit or "",
             "조건": x.conditions or "",
             "비교메모": x.comparison_note or "",
+            "근거ID": x.source_record_id or "",
             "수집일": x.collected_at.isoformat(),
             "URL": x.source_url or "",
         }
@@ -104,6 +138,6 @@ if submitted:
     )
     st.caption(
         "관측 직접근거는 A·B 제품 동일성 + 직접가격 Evidence Type + KRW를 모두 만족해야 합니다. "
-        "현재 견적의 높고 낮음 판정은 그중 거래조건까지 명시적으로 `quote_comparable`로 "
-        "검증된 근거에만 허용합니다."
+        "나라장터 근거도 현재는 거래조건이 완전히 구조화되지 않았으므로 `observed_only`입니다. "
+        "현재 견적의 높고 낮음 판정은 거래조건까지 명시적으로 `quote_comparable`로 검증된 근거에만 허용합니다."
     )
