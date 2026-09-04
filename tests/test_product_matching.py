@@ -292,3 +292,84 @@ def test_manufacturer_qualifier_does_not_unlock_c_for_model_specific_query() -> 
     )
 
     assert decision.grade == MatchGrade.X
+
+
+def test_narrower_product_class_substring_is_not_a_c_candidate() -> None:
+    """`모니터` must not pull in `심전도모니터` just because one label contains the other."""
+
+    decision = grade_product_identity(
+        ProductQuery(product_name="모니터", manufacturer="에이서"),
+        ProductIdentity(
+            product_name="심전도모니터",
+            manufacturer="에이서",
+            model_name="ECG-9020",
+        ),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert "product_class=related_unverified" in decision.note
+
+
+def test_broader_product_class_substring_is_not_a_c_candidate() -> None:
+    """The containment direction does not matter: neither side may promote the other."""
+
+    decision = grade_product_identity(
+        ProductQuery(product_name="레이저프린터", manufacturer="Fujifilm"),
+        ProductIdentity(
+            product_name="컬러 레이저프린터",
+            manufacturer="Fujifilm",
+            model_name="ApeosPrint C5570 GK",
+        ),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert "product_class=related_unverified" in decision.note
+
+
+def test_live_g2b_class_variant_is_not_a_c_candidate() -> None:
+    """`융복합인공호흡기` is a real live G2B title observed against a `인공호흡기` search."""
+
+    decision = grade_product_identity(
+        ProductQuery(product_name="인공호흡기", manufacturer="Stephan"),
+        ProductIdentity(
+            product_name="융복합인공호흡기",
+            manufacturer="Stephan",
+            model_name="CSI-2000",
+        ),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert "product_class=related_unverified" in decision.note
+
+
+def test_punctuation_and_spacing_variants_of_one_class_still_reach_c() -> None:
+    """`인공 호흡기` normalizes to `인공호흡기`, so the exact-equality rule still admits it."""
+
+    decision = grade_product_identity(
+        ProductQuery(product_name="인공 호흡기", manufacturer="Stephan"),
+        ProductIdentity(
+            product_name="인공호흡기",
+            manufacturer="Stephan",
+            model_name="Sophie",
+        ),
+    )
+
+    assert decision.grade == MatchGrade.C
+    assert "product_class=compatible" in decision.note
+
+
+def test_exact_model_grade_is_unaffected_by_differing_product_class_labels() -> None:
+    """The A/B path never consults product class, so the C tightening cannot break it."""
+
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="컬러 레이저프린터",
+            manufacturer="FUJIFILM Business Innovation",
+            model_name="ApeosPrint C5570 GK",
+            specification="A3 55ppm",
+        ),
+        parse_g2b_identity("레이저프린터, Fujifilm, (CN)ApeosPrint C5570 GK, A3, 55ppm/55ppm"),
+    )
+
+    assert decision.grade == MatchGrade.A
+    assert "product_class=related_unverified" in decision.note
