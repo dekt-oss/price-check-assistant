@@ -3,9 +3,13 @@ from datetime import date
 import pytest
 
 from purchase_price.collectors.g2b_shopping import unwrap_g2b_page
-from purchase_price.collectors.g2b_verified_search import VerifiedG2BShoppingSearchCollector
+from purchase_price.collectors.g2b_verified_search import (
+    VerifiedG2BShoppingSearchCollector,
+)
 from purchase_price.schemas import ProductQuery
-from purchase_price.services.g2b_adaptive_search import search_mapped_g2b_candidates_adaptive
+from purchase_price.services.g2b_adaptive_search import (
+    search_mapped_g2b_candidates_adaptive,
+)
 from purchase_price.services.g2b_pagination import G2BPaginationLimitError
 from purchase_price.services.g2b_product_mapping import G2BProductMapping
 
