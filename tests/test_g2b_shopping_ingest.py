@@ -47,5 +47,5 @@ def test_g2b_raw_page_ingest_is_idempotent() -> None:
         assert second.created_count == 0
         assert second.duplicate_count == 1
         assert len(evidence) == 1
-        assert evidence[0].source_record_id == "DLVR-001"
+        assert evidence[0].source_record_id == "delivery:DLVR-001|product:TEST-002"
         assert evidence[0].original_title == "테스트 의료비품"
