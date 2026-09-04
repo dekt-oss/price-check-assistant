@@ -101,7 +101,11 @@ def test_different_model_is_not_returned_as_public_price_evidence() -> None:
 
 
 def test_registry_can_enable_real_manufacturer_source_without_mock() -> None:
-    collectors = build_collectors(include_mock=False, include_manufacturer_public=True)
+    collectors = build_collectors(
+        include_mock=False,
+        include_manufacturer_public=True,
+        include_g2b=False,
+    )
 
     assert len(collectors) == 1
     assert isinstance(collectors[0], ManufacturerPublicCatalogCollector)
