@@ -1,6 +1,7 @@
 from decimal import Decimal
 from pathlib import Path
 
+import xlwt
 from openpyxl import Workbook
 
 from purchase_price.services.quote_extraction import (
@@ -35,6 +36,21 @@ def _write_workbook(path: Path) -> None:
     workbook.save(path)
 
 
+def _write_legacy_workbook(path: Path) -> None:
+    workbook = xlwt.Workbook()
+    sheet = workbook.add_sheet("견적")
+    rows = [
+        ["병원 구매 견적서"],
+        ["품명", "제조사", "모델명", "규격", "수량", "단가", "금액"],
+        ["초음파진단기", "예시메디칼", "US-100", "Console", 1, 12000000, 12000000],
+        ["합계", "", "", "", "", "", 12000000],
+    ]
+    for row_index, row in enumerate(rows):
+        for column_index, value in enumerate(row):
+            sheet.write(row_index, column_index, value)
+    workbook.save(str(path))
+
+
 def test_extract_xlsx_quote_finds_header_and_skips_summary(tmp_path: Path) -> None:
     path = tmp_path / "quote.xlsx"
     _write_workbook(path)
@@ -53,6 +69,25 @@ def test_extract_xlsx_quote_finds_header_and_skips_summary(tmp_path: Path) -> No
     assert item.unit_price == Decimal("2500000")
     assert item.total_amount == Decimal("5000000")
     assert any("안내" in warning for warning in result.warnings)
+
+
+def test_extract_xls_quote_finds_header_and_skips_summary(tmp_path: Path) -> None:
+    path = tmp_path / "quote.xls"
+    _write_legacy_workbook(path)
+
+    result = extract_quote_file(path)
+
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.source_sheet == "견적"
+    assert item.source_row == 3
+    assert item.product_name == "초음파진단기"
+    assert item.manufacturer == "예시메디칼"
+    assert item.model_name == "US-100"
+    assert item.specification == "Console"
+    assert item.quantity == Decimal("1.0")
+    assert item.unit_price == Decimal("12000000.0")
+    assert item.total_amount == Decimal("12000000.0")
 
 
 def test_quote_item_converts_to_existing_product_query(tmp_path: Path) -> None:
@@ -95,6 +130,6 @@ def test_unsupported_file_type_fails_closed(tmp_path: Path) -> None:
     try:
         extract_quote_file(path)
     except QuoteExtractionError as exc:
-        assert ".xlsx" in str(exc)
+        assert ".xlsx/.xls" in str(exc)
     else:
         raise AssertionError("unsupported file type must fail closed")
