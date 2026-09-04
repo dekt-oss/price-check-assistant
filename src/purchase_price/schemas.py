@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from .domain import EvidenceType, MatchGrade, SourceType
+from .domain import ComparisonScope, EvidenceType, MatchGrade, SourceType
 
 
 @dataclass(frozen=True)
@@ -36,3 +36,5 @@ class CollectedPrice:
     original_title: str | None = None
     match_grade: MatchGrade = MatchGrade.X
     match_note: str | None = None
+    comparison_scope: ComparisonScope = ComparisonScope.OBSERVED_ONLY
+    comparison_note: str | None = None
