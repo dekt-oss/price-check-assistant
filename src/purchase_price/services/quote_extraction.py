@@ -26,6 +26,7 @@ class QuoteItem:
     model_name: str = ""
     specification: str = ""
     quantity: Decimal | None = None
+    unit: str = ""
     unit_price: Decimal | None = None
     total_amount: Decimal | None = None
     vat_status: str = ""
@@ -78,6 +79,13 @@ _FIELD_ALIASES = {
         "수량",
         "qty",
         "quantity",
+    ),
+    "unit": (
+        "단위",
+        "수량단위",
+        "포장단위",
+        "unit",
+        "uom",
     ),
     "unit_price": (
         "단가",
@@ -265,6 +273,7 @@ def _extract_sheet_rows(
             model_name=_text(_cell(row, mapping, "model_name")),
             specification=_text(_cell(row, mapping, "specification")),
             quantity=parse_quote_decimal(_cell(row, mapping, "quantity")),
+            unit=_text(_cell(row, mapping, "unit")),
             unit_price=parse_quote_decimal(_cell(row, mapping, "unit_price")),
             total_amount=parse_quote_decimal(_cell(row, mapping, "total_amount")),
             vat_status=_text(_cell(row, mapping, "vat_status")),
@@ -396,7 +405,7 @@ def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     if items:
         warnings.append(
             "PDF 표는 문서 내부 좌표에 따라 열이 어긋날 수 있습니다. 자동 추출된 제조사·모델·규격·"
-            "단가·VAT·배송·설치·옵션·보증·유지보수 조건을 반드시 화면에서 확인·수정하세요."
+            "단가·단위·VAT·배송·설치·옵션·보증·유지보수 조건을 반드시 화면에서 확인·수정하세요."
         )
     else:
         warnings.append(
