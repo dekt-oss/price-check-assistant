@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -6,12 +6,12 @@ import pytest
 from purchase_price.domain import ComparisonScope, EvidenceType, MatchGrade, SourceType
 from purchase_price.schemas import CollectedPrice
 from purchase_price.services.pricing import assess_prices
+from purchase_price.services.quote_comparability import QuoteComparabilityContext
 from purchase_price.services.quote_comparable_approval import (
     apply_quote_comparable_approval,
     create_quote_comparable_approval,
     quote_evidence_pair_key,
 )
-from purchase_price.services.quote_comparability import QuoteComparabilityContext
 from purchase_price.services.quote_condition_comparison import build_quote_condition_profile
 
 
@@ -79,7 +79,7 @@ def test_non_candidate_cannot_be_human_overridden_by_this_workflow() -> None:
 
 
 def test_approval_is_pair_specific_and_records_review_basis() -> None:
-    approved_at = datetime(2026, 9, 4, 14, 0, tzinfo=timezone.utc)
+    approved_at = datetime(2026, 9, 4, 14, 0, tzinfo=UTC)
     context = _context()
     evidence = _evidence()
 
@@ -96,7 +96,14 @@ def test_approval_is_pair_specific_and_records_review_basis() -> None:
     assert approval.approved_at == approved_at
     assert approval.quote_date == date(2026, 9, 1)
     assert approval.evidence_basis_date == date(2026, 8, 30)
-    assert approval.confirmed_condition_labels == ("VAT", "배송", "설치", "옵션", "보증", "유지보수")
+    assert approval.confirmed_condition_labels == (
+        "VAT",
+        "배송",
+        "설치",
+        "옵션",
+        "보증",
+        "유지보수",
+    )
     assert approval.reviewer_note == "계약 상세 원문과 견적 원문 대조"
 
 
@@ -117,7 +124,7 @@ def test_apply_returns_session_copy_and_does_not_mutate_public_source() -> None:
         context,
         evidence,
         reviewer_confirmed=True,
-        approved_at=datetime(2026, 9, 4, 14, 0, tzinfo=timezone.utc),
+        approved_at=datetime(2026, 9, 4, 14, 0, tzinfo=UTC),
     )
 
     promoted = apply_quote_comparable_approval(context, evidence, approval)
