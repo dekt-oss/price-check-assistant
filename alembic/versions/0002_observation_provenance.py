@@ -9,6 +9,7 @@ import json
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0002_observation_provenance"
