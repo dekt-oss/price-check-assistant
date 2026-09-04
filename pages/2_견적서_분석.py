@@ -207,19 +207,22 @@ if quote_rows:
 
         with st.spinner("공개 가격근거를 조회하고 있습니다..."):
             for _, row in edited[edited["검색"].fillna(False)].iterrows():
+                quote_unit_price = parse_quote_decimal(row.get("견적단가"))
                 review_input = build_purchase_review_input(
                     product_name=row.get("제품명"),
                     manufacturer=row.get("제조사"),
                     model_name=row.get("모델명"),
                     specification=row.get("규격"),
-                    quote_unit_price=parse_quote_decimal(row.get("견적단가")),
+                    quote_unit_price=quote_unit_price,
                 )
 
                 if review_input is None:
                     summary_rows.append(
                         {
                             "제품": "식별정보 미입력 품목",
-                            "견적단가": None,
+                            "견적단가": (
+                                float(quote_unit_price) if quote_unit_price is not None else None
+                            ),
                             "관측근거": 0,
                             "관측가 하단": None,
                             "관측가 상단": None,
