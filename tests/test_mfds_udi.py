@@ -1,6 +1,8 @@
+from pathlib import Path
 from typing import Any
 
 import pytest
+from streamlit.testing.v1 import AppTest
 
 from purchase_price.services.mfds_udi import (
     MFDS_UDI_CODE_BASE_URL,
@@ -90,3 +92,14 @@ def test_lookup_udi_rejects_empty_identifier() -> None:
 
     with pytest.raises(ValueError, match="udi_di is required"):
         client.lookup_udi("  ")
+
+
+def test_udi_page_loads_without_live_request() -> None:
+    root = Path(__file__).resolve().parents[1]
+    app = AppTest.from_file(root / "pages" / "6_의료기기_UDI.py")
+
+    app.run(timeout=10)
+
+    assert not app.exception
+    assert app.title[0].value == "의료기기 UDI-DI 공식조회"
+    assert any("UDIDI_CD" in item.value for item in app.caption)
