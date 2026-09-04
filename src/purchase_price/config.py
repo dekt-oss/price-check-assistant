@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     mfds_model_info_base_url: str | None = None
     mfds_business_license_base_url: str | None = None
+    mfds_udi_code_base_url: str | None = None
     mfds_request_timeout_seconds: float = 20.0
     mfds_max_retries: int = 3
 
