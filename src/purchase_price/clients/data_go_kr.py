@@ -79,6 +79,32 @@ def _redact_secret(text: str, secret: str) -> str:
     return redacted
 
 
+SUCCESS_RESULT_CODES = frozenset({"0", "00", "000"})
+
+# data.go.kr does not use a single error envelope. A malformed request to the G2B shopping
+# service answers with `{"nkoneps.com.response.ResponseError": {"header": {...}}}` rather than
+# the documented `response`/`OpenAPI_ServiceResponse` shapes. Checking only the documented keys
+# let a real error (e.g. resultCode 08 필수값 입력 에러) pass through as a successful empty page,
+# so the user surface reported "no evidence found" for what was actually a failed call.
+_ERROR_ENVELOPE_SUFFIX = "ResponseError"
+
+
+def _candidate_error_envelopes(payload: Any) -> list[dict[str, Any]]:
+    """Return every top-level object that may carry a data.go.kr result header."""
+
+    if not isinstance(payload, dict):
+        return []
+
+    envelopes: list[dict[str, Any]] = []
+    common_response = payload.get("response")
+    if isinstance(common_response, dict):
+        envelopes.append(common_response)
+    for key, value in payload.items():
+        if key.endswith(_ERROR_ENVELOPE_SUFFIX) and isinstance(value, dict):
+            envelopes.append(value)
+    return envelopes
+
+
 def _payload_error_fields(payload: Any) -> tuple[str | None, str | None, str | None]:
     if not isinstance(payload, dict):
         return None, None, None
@@ -93,12 +119,11 @@ def _payload_error_fields(payload: Any) -> tuple[str | None, str | None, str | N
                 str(header.get("returnReasonCode") or "").strip() or None,
             )
 
-    common_response = payload.get("response")
-    if isinstance(common_response, dict):
-        header = common_response.get("header")
+    for envelope in _candidate_error_envelopes(payload):
+        header = envelope.get("header")
         if isinstance(header, dict):
             result_code = str(header.get("resultCode") or "").strip()
-            if result_code and result_code not in {"0", "00", "000"}:
+            if result_code and result_code not in SUCCESS_RESULT_CODES:
                 return (
                     str(header.get("resultMsg") or "").strip() or None,
                     None,
