@@ -7,7 +7,6 @@ from purchase_price.schemas import ProductQuery
 from purchase_price.services import g2b_adaptive_search, g2b_pagination
 from purchase_price.services.g2b_product_mapping import G2BProductMapping
 
-
 QUERY = ProductQuery(
     product_name="인공호흡기",
     manufacturer="Stephan",
