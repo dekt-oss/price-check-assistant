@@ -137,7 +137,10 @@ def test_paginated_collection_persists_raw_evidence_idempotently() -> None:
         assert second.evidence_created == 0
         assert second.duplicates_seen == 2
         assert len(evidence) == 2
-        assert {row.source_record_id for row in evidence} == {"DLVR-1", "DLVR-2"}
+        assert {row.source_record_id for row in evidence} == {
+            "delivery:DLVR-1|product:P-DLVR-1",
+            "delivery:DLVR-2|product:P-DLVR-2",
+        }
 
 
 def _multi_payload(page_no: int, *, total_count: int, record_ids: list[str]) -> dict:
