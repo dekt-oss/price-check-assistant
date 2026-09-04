@@ -18,15 +18,15 @@
 
 ## 필수 Secret
 
-실제 식약처/나라장터 live 조회를 사용하려면 Streamlit Community Cloud의 Secrets에 서비스키를 저장한다.
+실제 식약처/나라장터 live 조회를 사용하려면 Streamlit Community Cloud의 Secrets에 서비스키를 root-level secret으로 저장한다.
 
 ```toml
 DATA_GO_KR_SERVICE_KEY = "<공공데이터포털 서비스키>"
 ```
 
-실제 키는 GitHub, `.env.example`, 문서, 화면, 로그에 넣지 않는다.
+Streamlit의 root-level secrets는 환경변수로도 노출되므로 현재 `pydantic-settings` 환경변수 계약을 그대로 사용할 수 있다.
 
-현재 Settings는 환경변수 계약을 사용하므로 배포환경에서 해당 secret이 프로세스 환경변수로 주입되는지 deployment smoke에서 확인한다. 만약 Community Cloud의 `st.secrets`만 노출되는 환경이면 별도 adapter를 추가한다.
+실제 키는 GitHub, `.env.example`, 문서, 화면, 로그에 넣지 않는다.
 
 ## Community Cloud 절차
 
@@ -44,6 +44,7 @@ DATA_GO_KR_SERVICE_KEY = "<공공데이터포털 서비스키>"
    - 통합검색 렌더
    - 견적서 분석 렌더
    - 의료기기 시장조사 렌더
+   - 식약처/나라장터 live 호출
    - 서비스키 값이 화면/로그에 노출되지 않음
 
 ## 현재 한계
