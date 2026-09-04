@@ -30,10 +30,17 @@ g2b_enabled = bool((settings.data_go_kr_service_key or "").strip())
 
 with st.expander("현재 지원 범위", expanded=False):
     st.write(
-        "- `.xlsx`: 품목/제조사/모델/규격/수량/단가/금액 헤더를 찾아 자동 추출합니다.\n"
-        "- `.pdf`, `.xls`: 업로드는 가능하지만 아직 자동 추출하지 않습니다.\n"
+        "- `.xlsx`, `.xls`: 품목/제조사/모델/규격/수량/단가/금액 헤더를 찾아 자동 추출합니다.\n"
+        "- `.pdf`: 업로드는 가능하지만 아직 자동 추출하지 않습니다.\n"
         "- 추출값은 검색 전에 반드시 화면에서 확인·수정할 수 있습니다.\n"
         "- 모델 동일성과 가격판정 안전게이트는 통합검색과 동일한 규칙을 사용합니다."
+    )
+
+if not g2b_enabled:
+    st.warning(
+        "공공데이터포털 서비스키가 설정되지 않아 나라장터 live 검색이 비활성화되어 있습니다. "
+        "Streamlit 앱 메뉴(⋮) → Settings → Secrets에 "
+        '`DATA_GO_KR_SERVICE_KEY = "..."`를 저장하면 식약처와 나라장터가 함께 활성화됩니다.'
     )
 
 uploaded = st.file_uploader("PDF 또는 Excel 견적서", type=["pdf", "xlsx", "xls"])
@@ -68,8 +75,8 @@ if uploaded is not None:
         except QuoteExtractionError as exc:
             st.warning(str(exc))
             st.info(
-                "현재 첫 실사용 MVP는 `.xlsx`부터 연결했습니다. PDF는 텍스트형 문서 추출을 "
-                "별도 단계로 추가할 예정이며, 스캔 PDF는 OCR 없이 자동판정하지 않습니다."
+                "Excel `.xlsx/.xls`는 자동 추출합니다. PDF는 텍스트형 문서 추출을 별도 단계로 "
+                "추가할 예정이며, 스캔 PDF는 OCR 없이 자동판정하지 않습니다."
             )
             st.stop()
 
