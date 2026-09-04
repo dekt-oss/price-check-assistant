@@ -1,0 +1,88 @@
+name: Phase 0 Final Live Once
+
+on:
+  push:
+    branches:
+      - ops/phase0-final-live-20260904
+    paths:
+      - .github/workflows/phase0-final-live-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      G2B_REQUEST_TIMEOUT_SECONDS: "30"
+      G2B_MAX_RETRIES: "5"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Verify secret
+        shell: bash
+        run: |
+          if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
+            echo "DATA_GO_KR_SERVICE_KEY secret is not configured"
+            exit 2
+          fi
+
+      - name: Run fixed-window Phase 0 validation
+        shell: bash
+        run: |
+          python -m purchase_price.scripts.run_phase0_validation \
+            --begin-date 20260714 \
+            --end-date 20260813 \
+            --max-pages 20 \
+            --output-dir artifacts/phase0-final-live
+
+      - name: Run YTD resilience scan
+        shell: bash
+        run: |
+          set +e
+          python -m purchase_price.scripts.scan_g2b_exact_model_candidates \
+            --begin-date 20260101 \
+            --end-date 20260903 \
+            --chunk-days 31 \
+            --max-pages-per-chunk 20 \
+            --summary-output artifacts/g2b-ytd-resilience/exact-model-summary.csv \
+            --candidates-output artifacts/g2b-ytd-resilience/exact-model-candidates.csv
+          code=$?
+          set -e
+          echo "ytd_scan_exit=$code"
+          if [ "$code" -gt 1 ]; then
+            exit "$code"
+          fi
+
+      - name: Upload Phase 0 live report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase0-final-live-report
+          path: artifacts/phase0-final-live/
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload YTD resilience report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2b-ytd-resilience-report
+          path: artifacts/g2b-ytd-resilience/
+          retention-days: 14
+          if-no-files-found: warn
