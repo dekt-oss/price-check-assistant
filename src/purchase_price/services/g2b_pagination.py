@@ -9,6 +9,10 @@ from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.collectors.g2b_shopping import G2BShoppingCollector, G2BShoppingPage
 
 
+class G2BPaginationLimitError(PublicDataClientError):
+    """Raised when a bounded window cannot be fully collected within the page safety cap."""
+
+
 @dataclass(frozen=True)
 class G2BCollectedPage:
     page: G2BShoppingPage
@@ -65,7 +69,7 @@ def iter_specific_item_pages(
         elif len(page.items) < num_of_rows:
             return
 
-    raise PublicDataClientError(
+    raise G2BPaginationLimitError(
         "G2B pagination safety limit reached before collection completed: "
         f"max_pages={max_pages} records_seen={records_seen} "
         f"detail_product_name={detail_product_name!r}"
