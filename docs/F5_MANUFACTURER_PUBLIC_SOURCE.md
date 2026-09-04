@@ -72,6 +72,54 @@ C5570 계열은 FUJIFILM 공식몰·MSDS에서 exact model을 확인했고, 조�
 
 현재 G2B verified mapping은 4/20이며, 제조사 snapshot은 2개 benchmark에 존재한다. Aggregate Mapping Readiness는 source 중 하나라도 verified인 unique benchmark 기준으로 계산한다.
 
+## 2026-09-04 제조사 공개가격 coverage 조사
+
+Phase 1-C에서 G2B만으로 `evaluation_coverage`를 크게 높이기 어렵다는 것이 확인되어, 공개가격 가능성이 높은 benchmark부터 제조사 공식 source를 다시 조사했다.
+
+이번 조사의 등록 기준은 기존 F5 계약보다 느슨하지 않다.
+
+- benchmark와 exact model이 일치해야 한다.
+- 가격은 제조사 공식 페이지에 직접 표시되어야 한다.
+- 현재 catalog 계약상 `KRW` 가격만 등록한다.
+- 가격이 `문의`, `Request a demo`, `Contact us`인 경우 등록하지 않는다.
+- 시리즈/세대/CTO 모델이 benchmark와 다르면 같은 제품군으로 추정해 등록하지 않는다.
+
+### 조사 결과
+
+| benchmark | 공식 source 확인 결과 | registry | 이유 |
+| --- | --- | --- | --- |
+| Samsung `NT960XJG-K72AG` | 삼성전자서비스 공식 페이지에서 exact model 존재 확인 | 미등록 | 본체 공식 판매가격을 확인하지 못함. 서비스 소모품 가격을 본체 가격으로 사용할 수 없음 |
+| Lenovo `ThinkStation P2 Tower` | Lenovo KR 공식몰에서 `ThinkStation P2 Tower Gen 2` CTO 가격과 VAT 포함 표시 확인 | 미등록 | benchmark는 `ThinkStation P2 Tower`; 공식 판매 row는 `Gen 2`로 exact model 문자열이 다름. benchmark identity를 별도 근거 없이 수정하지 않음 |
+| Oxford Nanopore `MinION Mk1D` | 공식 Nanopore store에서 `MinION Mk1D` 단품 `US$3,150`, SKU/구성 공개 | 미등록 | exact model과 공식 가격은 확인했으나 현재 F5 catalog는 KRW 외 통화를 fail-closed 거부함 |
+| Align Technology `iTero Lumina pro` | iTero 공식 사이트에서 `iTero Lumina Pro imaging system` 확인 | 미등록 | 공개 가격 없이 `Request demo`/문의 방식 |
+| Thermo Fisher Scientific `Veriti Pro Dx` | 한국 공식 catalog에서 `VeritiPro Dx Thermal Cycler` 및 한국 대체 catalog 문의 안내 확인 | 미등록 | 한국 페이지에 KRW 판매가격 없음. 해외 공식몰 EUR 가격은 현재 KRW-only 계약 때문에 사용하지 않음 |
+| Dräger `TN500` | 한국 공식 제품 페이지에서 `Babyleo TN500` exact 제품 및 `견적 요청` 확인 | 미등록 | 공개 판매가격 없음 |
+| WIDE `CX30N` | 제조사 공식 제품 페이지에서 exact model/spec 확인 | 미등록 | 공개 판매가격 없음 |
+| SNJ `N-Pulse Pro` | 국내 제품 페이지에서 exact model 확인 | 미등록 | 공개 판매가격 없음 |
+
+### 확인한 공식 URL
+
+- Samsung exact-model service identity: `https://www.samsungsvc.co.kr/download/view?code=NT960XJG-K72AG&prd1DepNm=PC%2F%EB%AA%A8%EB%8B%88%ED%84%B0&prd2DepNm=%EB%85%B8%ED%8A%B8%EB%B6%81%2F%EC%9C%88%EB%8F%84%EC%9A%B0+%ED%83%9C%EB%B8%94%EB%A6%BF`
+- Lenovo KR official listing: `https://www.lenovo.com/buy/kr/ko/womens-day-deals-on-work-tower-desktops-with-windows-11-0acz00a`
+- Oxford Nanopore official store: `https://store.nanoporetech.com/minion.html`
+- Oxford Nanopore official price list: `https://store.nanoporetech.com/us/priceList.html`
+- iTero official product site: `https://itero.com/`
+- Thermo Fisher Korea catalog: `https://www.thermofisher.com/order/catalog/product/kr/ko/A57751`
+- Dräger Korea TN500: `https://www.draeger.com/ko_kr/Products/Draeger-Babyleo-TN500`
+- WIDE CX30N: `https://widecorp.homepage.whois.co.kr/?GC=GD0900&GS=126&act=shop.goods_view`
+- N-Pulse Pro product page: `https://www.chungancorp.com/n-pulse`
+
+### 결론
+
+이번 조사에서 `data/public_manufacturer_prices.csv`에 안전하게 추가할 수 있는 신규 row는 **0건**이었다.
+
+이는 실패가 아니라 F5의 false-positive 방지 계약이 정상적으로 작동한 결과다. 특히 아래 두 후보를 억지로 등록하지 않는 것이 중요하다.
+
+1. **MinION Mk1D** — exact model + 공식가격까지 확인됐지만 `USD`다. 현재 KRW-only catalog 계약을 이 작업에서 완화하지 않는다.
+2. **ThinkStation P2 Tower Gen 2** — KRW + VAT 포함 공식 가격이 있지만 benchmark의 exact model은 `ThinkStation P2 Tower`다. `Gen 2`를 substring/시리즈 동일성으로 자동 승격하지 않는다.
+
+따라서 이 조사만으로 `mapping_readiness`나 `evaluation_coverage`가 오르지 않는 것이 기대 결과다.
+
 ## 제한사항
 
 1. v0는 실시간 웹 크롤링이 아니라 검증된 snapshot registry다.
@@ -79,10 +127,12 @@ C5570 계열은 FUJIFILM 공식몰·MSDS에서 exact model을 확인했고, 조�
 3. 제조사 페이지에 없는 VAT·배송·설치·보증 조건은 추정하지 않는다.
 4. 제조사 공식가격이 있다는 이유만으로 적정가격 또는 최저가격으로 판단하지 않는다.
 5. 제조사와 조달가격이 같은 모델이라도 계약·배송·설치·옵션 조건 차이는 별도로 해석한다.
+6. 공식 해외 가격이 존재하더라도 현재 catalog는 KRW-only이므로 registry에 넣지 않는다.
 
 ## 현재 후속 과제
 
 1. 공개가격 snapshot freshness 정책 정의
-2. 제조사 source를 추가 품목으로 확대
-3. 동일 benchmark에서 G2B + Manufacturer 근거가 동시에 존재하는 사례 확장
-4. VAT·설치·배송·옵션·보증 조건의 구조화 필드 확대
+2. **비-KRW 공식 제조사 가격을 reference-only evidence로 보존할 별도 계약이 필요한지 설계 검토**
+3. Lenovo `ThinkStation P2 Tower` benchmark가 실제 `Gen 2 / Ultra 7 265K` 구성인지 원 출처로 identity 재검증
+4. 동일 benchmark에서 G2B + Manufacturer 근거가 동시에 존재하는 사례 확장
+5. VAT·설치·배송·옵션·보증 조건의 구조화 필드 확대
