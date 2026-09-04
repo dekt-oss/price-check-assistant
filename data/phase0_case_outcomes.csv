@@ -1,0 +1,21 @@
+benchmark_id,category,manufacturer,product_name,model_name,outcome,g2b_mapping_status,verified_public_evidence,direct_price_evidence,direct_price_low_krw,direct_price_high_krw,phase0_reason
+B01,의료장비,Draeger,인큐베이터(인공보육기),TN500,identity_only,unverified,manufacturer_identity,no,,,공식 제조사 제품 식별은 가능하나 검증된 공개 직접가격 없음
+B02,의료장비,Stephan,인공호흡기,Sophie,source_hit_no_exact_price,verified,g2b_class_records,no,,,G2B 분류 source hit은 확인했으나 고정 검증기간에 Sophie exact-model 직접가격 근거 없음
+B03,의료장비,Align Technology,입체광학인상채득장치,iTero Lumina pro,service_or_identity_only,unverified,manufacturer_service_document,no,,,공식 서비스 문서는 확인했으나 본체 구매 직접가격이 아님
+B04,의료장비,Boston Scientific,혈관박리카테터장치,ROTAPRO,insufficient_public_evidence,unverified,none_verified,no,,,Phase 0 registry에서 검증된 직접가격 source와 G2B 세부품명 매핑을 확보하지 못함
+B05,의료장비,Thermo Fisher Scientific,핵산증폭기,Veriti Pro Dx,insufficient_public_evidence,unverified,none_verified,no,,,Phase 0 registry에서 검증된 직접가격 source와 G2B 세부품명 매핑을 확보하지 못함
+B06,의료장비,Medtronic,전기수술기(소작기),FT10,listing_without_numeric_price,unverified,public_listing,no,,,국내 판매 페이지에서 제품은 확인되지만 숫자 판매가격이 공개되지 않음
+B07,의료장비,에스엔제이,탄산가스레이저수술기,N-Pulse Pro,insufficient_public_evidence,unverified,none_verified,no,,,Phase 0 registry에서 검증된 직접가격 source와 G2B 세부품명 매핑을 확보하지 못함
+B08,의료장비,Oxford Nanopore,염기서열분석기,MinION Mk1D,insufficient_public_evidence,unverified,none_verified,no,,,Phase 0 registry에서 검증된 직접가격 source와 G2B 세부품명 매핑을 확보하지 못함
+B09,의료비품,ConMed,배터리 드릴세트,Hall Titan Drill set,reference_only,unverified,third_party_used_reference,no,,,중고·액세서리 포함 제3자 가격은 확인했으나 국내 신품 동일조건 직접가격으로 사용할 수 없음
+B10,의료비품,GE Healthcare,선형탐촉자(초음파 Probe),L4-20t-RS,insufficient_public_evidence,unverified,none_verified,no,,,Phase 0 registry에서 검증된 직접가격 source와 G2B 세부품명 매핑을 확보하지 못함
+B11,의료비품,필립스,심장 충격기,Efficia DFM100,insufficient_public_evidence,unverified,none_verified,no,,,Phase 0 registry에서 검증된 직접가격 source와 G2B 세부품명 매핑을 확보하지 못함
+B12,의료비품,GE HealthCare,심전도기,MAC5,identity_only,unverified,manufacturer_identity,no,,,공식 한국 제품 페이지로 모델은 확인했으나 공개 숫자 가격과 G2B 매핑은 확보하지 못함
+B13,의료비품,GMS,약품냉장고,GMSR-182,direct_single_source,unverified,manufacturer_public_price,yes,5000000,5000000,제조사 공식 구매견적문의 페이지의 5,000,000원 표시가격을 A 직접근거로 보존하되 VAT·설치·배송 조건은 미확인
+B14,수술기구,,Mixter hemostatic Forceps,30-4494,insufficient_public_evidence,unverified,none_verified,no,,,제조사 식별과 검증된 공개 직접가격 source를 Phase 0에서 확보하지 못함
+B15,수술기구,,Laparoscopical Needle holder,26173KA,insufficient_public_evidence,unverified,none_verified,no,,,제조사 식별과 검증된 공개 직접가격 source를 Phase 0에서 확보하지 못함
+B16,수술기구,BLACK & BLACK SURGICAL,TEBBETTS FIBEROPTIC RETRACTOR,B61084,identity_only,unverified,device_identity_registry,no,,,AccessGUDID로 제조사·카탈로그·규격 식별은 가능하나 직접가격은 없음
+B17,전산비품,삼성전자,노트북(갤럭시북6 PRO),NT960XJG-K72AG,direct_public_retail,verified,public_retail_and_g2b_class_records,yes,3655000,3699000,국내 공개판매가 2개 exact-model A 근거는 확보; 고정기간 G2B 분류 hit은 있으나 exact-model G2B 거래는 확인되지 않음
+B18,전산비품,FUJIFILM Business Innovation,컬러 레이저프린터,ApeosPrint C5570 GK,direct_multisource,verified,g2b_delivery_and_manufacturer_public_price,yes,2981000,5500000,G2B exact-model 납품요구 3건 2,981,000원과 제조사 공식몰 5,500,000원을 독립 A 직접근거로 확보
+B19,전산비품,,컴퓨터(동영상편집용),ThinkStation P2 Tower,mapping_verified_no_live_hit,verified,g2b_mapping_identity,no,,,공식 G2B 문서로 워크스테이션 매핑은 검증했으나 고정 검증기간 live source hit이 0건
+B20,의료비품,WIDE,영상 판독용 모니터,CX30N,identity_only,unverified,manufacturer_identity_crosscheck,no,,,공식 제품·교차규격 근거로 모델 식별은 가능하나 검증된 직접가격은 없음
