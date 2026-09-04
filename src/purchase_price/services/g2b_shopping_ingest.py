@@ -10,6 +10,7 @@ from purchase_price.collectors.g2b_shopping import (
     FIELD_ALIASES,
     SOURCE_NAME,
     G2BShoppingOperation,
+    build_g2b_source_record_id,
     unwrap_g2b_page,
 )
 from purchase_price.models import CollectionRun
@@ -31,14 +32,6 @@ def _first(record: Mapping[str, Any], logical_name: str) -> Any:
     return None
 
 
-def _source_record_id(record: Mapping[str, Any]) -> str | None:
-    for logical_name in ("delivery_request_number", "contract_number", "product_id"):
-        value = _first(record, logical_name)
-        if value not in (None, ""):
-            return str(value)
-    return None
-
-
 def persist_g2b_shopping_payload(
     session: Session,
     *,
@@ -50,6 +43,8 @@ def persist_g2b_shopping_payload(
 
     Raw evidence is intentionally saved even when no unit price can be parsed. This keeps
     collection auditable and lets later parser versions reprocess previously fetched records.
+    Item identity uses the same composite external key as the normalized parser so one delivery
+    request containing multiple products cannot collapse into a single `source_record_id`.
     """
 
     page = unwrap_g2b_page(payload)
@@ -62,9 +57,9 @@ def persist_g2b_shopping_payload(
             run=run,
             source_name=SOURCE_NAME,
             payload=record,
-            source_record_id=_source_record_id(record),
+            source_record_id=build_g2b_source_record_id(record),
             original_title=str(product_name) if product_name not in (None, "") else None,
-            parser_version=f"g2b-shopping-v1:{operation.value}",
+            parser_version=f"g2b-shopping-v2:{operation.value}",
         )
         if created:
             created_count += 1
