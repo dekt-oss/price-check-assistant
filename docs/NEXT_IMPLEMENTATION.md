@@ -8,9 +8,13 @@ Phase 0는 2026-09-04 종료했다. 최종 검증은 `docs/PHASE0_FINAL_REPORT.m
 
 1. G2B Shopping verified 세부품명 mapping 확대
 2. exact model 검색·pagination·retry·실패근거 저장 강화
-3. Manufacturer official price snapshot의 freshness/재검증 정책 추가
-4. 공식가격 변경 감지
-5. raw evidence와 normalized observation provenance 강화
+3. `totalCount`가 안전 페이지 한도를 넘으면 날짜구간을 자동 이분할하는 adaptive date partitioning 추가
+4. incomplete window 재시도 큐 및 재개 가능한 수집상태 저장
+5. Manufacturer official price snapshot의 freshness/재검증 정책 추가
+6. 공식가격 변경 감지
+7. raw evidence와 normalized observation provenance 강화
+
+YTD 복원력 검증에서 31일 구간의 레이저프린터가 2,000건을 넘어 safety limit에 도달했다. 페이지 한도를 무작정 키우기보다 날짜구간 자동분할을 우선한다. 상세는 `docs/PHASE0_YTD_RESILIENCE_CHECK.md`를 본다.
 
 ## Phase 1-B — G2B 계약정보 collector
 
