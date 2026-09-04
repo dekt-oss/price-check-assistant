@@ -12,6 +12,7 @@ from purchase_price.services.pricing import assess_prices
 def _record(record_id: str, manufacturer: str, model: str, price: str) -> dict:
     return {
         "cntrctDlvrDivNm": "납품요구",
+        "dtilPrdctClsfcNo": "4227220901",
         "cntrctDlvrReqDate": "20260715",
         "cntrctDlvrReqNo": record_id,
         "prdctIdntNo": f"P-{record_id}",
@@ -47,6 +48,7 @@ class C5570StubCollector:
     def fetch_specific_item_page(self, **kwargs):
         item = {
             "cntrctDlvrDivNm": "납품요구",
+            "dtilPrdctClsfcNo": "4321210501",
             "cntrctDlvrReqDate": "20260715",
             "cntrctDlvrReqNo": "R26TB02131898",
             "prdctIdntNo": "P-C5570",

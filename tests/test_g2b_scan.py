@@ -27,9 +27,17 @@ MAPPINGS = (
 )
 
 
-def _record(record_id: str, title: str, *, price: str = "2000000", day: str = "20260715") -> dict:
+def _record(
+    record_id: str,
+    title: str,
+    *,
+    price: str = "2000000",
+    day: str = "20260715",
+    classification_code: str = "4321150301",
+) -> dict:
     return {
         "cntrctDlvrDivNm": "납품요구",
+        "dtilPrdctClsfcNo": classification_code,
         "cntrctDlvrReqDate": day,
         "cntrctDlvrReqNo": record_id,
         "prdctIdntNo": f"P-{record_id}",

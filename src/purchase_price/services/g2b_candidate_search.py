@@ -14,6 +14,7 @@ from purchase_price.services.g2b_product_mapping import (
     G2BMappingError,
     G2BProductMapping,
     filter_g2b_query_candidates,
+    records_in_mapped_classification,
     resolve_verified_g2b_mapping,
 )
 from purchase_price.services.product_matching import grade_product_identity, parse_g2b_identity
@@ -24,6 +25,7 @@ class G2BCandidateSearchResult:
     mapping: G2BProductMapping
     pages_fetched: int
     records_seen: int
+    records_in_classification: int
     reported_total_count: int | None
     candidate_prices: tuple[CollectedPrice, ...]
 
@@ -55,6 +57,7 @@ def search_mapped_g2b_candidates(
 
     pages_fetched = 0
     records_seen = 0
+    records_in_classification = 0
     reported_total_count: int | None = None
     prices: list[CollectedPrice] = []
 
@@ -70,7 +73,12 @@ def search_mapped_g2b_candidates(
         records_seen += len(collected.page.items)
         reported_total_count = collected.page.total_count
 
-        candidates = filter_g2b_query_candidates(collected.page.items, query)
+        # The service substring-matches the classification name, so a page can contain records
+        # from neighbouring classifications. Drop those before any product matching.
+        in_classification = records_in_mapped_classification(collected.page.items, mapping)
+        records_in_classification += len(in_classification)
+
+        candidates = filter_g2b_query_candidates(in_classification, query)
         for record in candidates:
             parsed = parse_official_report_record(
                 record,
@@ -97,6 +105,7 @@ def search_mapped_g2b_candidates(
         mapping=mapping,
         pages_fetched=pages_fetched,
         records_seen=records_seen,
+        records_in_classification=records_in_classification,
         reported_total_count=reported_total_count,
         candidate_prices=tuple(prices),
     )

@@ -188,7 +188,7 @@ tests/                                   핵심 규칙/fixture 테스트
 
 ## 다음 작업
 
-1. 나머지 Phase 0 benchmark의 G2B 표준 세부품명/번호를 공개근거 기반으로 확대합니다.
+1. 나머지 Phase 0 benchmark의 G2B 표준 세부품명/번호를 공개근거 기반으로 확대합니다. 다만 조사 결과 병원 의료장비 상당수가 나라장터에 존재하지 않아 G2B만으로는 coverage 상한이 있습니다 ([조사 결과](docs/PHASE1_G2B_MAPPING_COVERAGE.md)).
 2. G2B 계약정보서비스를 추가해 쇼핑몰 구매실적과 독립된 공공계약 근거를 확보합니다.
 3. VAT·단위·배송·설치·옵션·보증을 구조화하고 검증된 경우에만 `quote_comparable`로 승격합니다.
 

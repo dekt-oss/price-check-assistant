@@ -24,6 +24,7 @@ VERIFIED_MAPPING = G2BProductMapping(
 def _record(record_id: str, *, day: str, price: str = "7800000") -> dict:
     return {
         "cntrctDlvrDivNm": "납품요구",
+        "dtilPrdctClsfcNo": "4227220901",
         "cntrctDlvrReqDate": day,
         "cntrctDlvrReqNo": record_id,
         "prdctIdntNo": f"P-{record_id}",

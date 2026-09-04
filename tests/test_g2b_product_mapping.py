@@ -16,9 +16,16 @@ from purchase_price.services.g2b_product_mapping import (
 )
 
 
-def _record(record_id: str, title: str, price: str = "5000000") -> dict:
+def _record(
+    record_id: str,
+    title: str,
+    price: str = "5000000",
+    *,
+    classification_code: str = "4227220901",
+) -> dict:
     return {
         "cntrctDlvrDivNm": "납품요구",
+        "dtilPrdctClsfcNo": classification_code,
         "cntrctDlvrReqDate": "20260715",
         "cntrctDlvrReqNo": record_id,
         "prdctIdntNo": f"P-{record_id}",
@@ -177,6 +184,7 @@ def test_mapped_search_live_c5570_shape_is_direct_a() -> None:
                     "R26TB02131898",
                     "레이저프린터, Fujifilm, (CN)ApeosPrint C5570 GK, A3, 55ppm/55ppm",
                     "2981000",
+                    classification_code="4321210501",
                 ),
                 _record(
                     "OTHER",
@@ -265,3 +273,107 @@ def test_mapped_search_refuses_unverified_classification() -> None:
             end_date=date(2026, 7, 31),
             mappings=(mapping,),
         )
+
+
+def test_records_from_a_neighbouring_classification_are_dropped() -> None:
+    """The service substring-matches the classification name, so pages carry foreign records.
+
+    Querying `인공호흡기` also returns `융복합인공호흡기` (classification 9941106301), exactly as
+    `냉장고` returns 김치냉장고 and 시신보관냉장고 in live responses. Those records are a query
+    artefact, not evidence about the mapped classification.
+    """
+
+    collector = StubCollector(
+        _payload(
+            [
+                _record("SOPHIE-1", "인공호흡기, Stephan, Sophie, 운반형", "7800000"),
+                _record(
+                    "FUSION-1",
+                    "융복합인공호흡기, Stephan, Sophie, 운반형",
+                    "9900000",
+                    classification_code="9941106301",
+                ),
+            ]
+        )
+    )
+
+    result = search_mapped_g2b_candidates(
+        collector,
+        ProductQuery(
+            product_name="인공호흡기",
+            manufacturer="Stephan",
+            model_name="Sophie",
+            specification="운반형",
+        ),
+        begin_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 31),
+        mappings=(_sophie_mapping(),),
+    )
+
+    assert result.records_seen == 2
+    assert result.records_in_classification == 1
+    assert len(result.candidate_prices) == 1
+    assert result.candidate_prices[0].price == Decimal("7800000")
+
+
+def test_records_without_a_classification_code_are_dropped() -> None:
+    """A record that cannot be shown to belong to the mapping is not evidence for it."""
+
+    record = _record("NO-CLASS-1", "인공호흡기, Stephan, Sophie, 운반형", "7800000")
+    del record["dtilPrdctClsfcNo"]
+    collector = StubCollector(_payload([record]))
+
+    result = search_mapped_g2b_candidates(
+        collector,
+        ProductQuery(product_name="인공호흡기", manufacturer="Stephan", model_name="Sophie"),
+        begin_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 31),
+        mappings=(_sophie_mapping(),),
+    )
+
+    assert result.records_seen == 1
+    assert result.records_in_classification == 0
+    assert result.candidate_prices == ()
+
+
+def test_verified_mapping_without_a_classification_code_is_rejected(tmp_path) -> None:
+    """Without the code the mapping cannot be enforced, so it must not load as verified."""
+
+    path = tmp_path / "mappings.csv"
+    path.write_text(
+        "model_name,product_name,g2b_detail_product_name,g2b_detail_product_code,"
+        "mapping_status,evidence_url,notes\n"
+        "Sophie,인공호흡기,인공호흡기,,verified,,\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(G2BMappingError, match="detail product code"):
+        load_g2b_product_mappings(path)
+
+
+def test_newly_evidenced_classification_resolves_with_its_code() -> None:
+    """Added from observed 2026-09-04 live evidence; pin name and code together."""
+
+    mappings = load_g2b_product_mappings()
+    veriti = resolve_verified_g2b_mapping(ProductQuery(model_name="Veriti Pro Dx"), mappings)
+
+    assert veriti is not None
+    assert (veriti.detail_product_name, veriti.detail_product_code) == ("유전자증폭기", "4110630701")
+
+
+def test_contested_classification_stays_unverified() -> None:
+    """GMSR-182 has two competing candidates, so it must not resolve for automatic search.
+
+    지엠에스 appears in 실험실용일반냉장고 but with a different model line (GSI-*), and
+    의약품냉장고 shows no GMS at all. Neither is evidence for GMSR-182.
+    """
+
+    mappings = load_g2b_product_mappings()
+
+    assert resolve_verified_g2b_mapping(ProductQuery(model_name="GMSR-182"), mappings) is None
+
+
+def test_every_verified_registry_row_carries_an_enforceable_code() -> None:
+    for mapping in load_g2b_product_mappings():
+        if mapping.verified:
+            assert mapping.detail_product_code, mapping.model_name
