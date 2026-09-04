@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from purchase_price.domain import ComparisonScope
@@ -115,9 +115,9 @@ def create_quote_comparable_approval(
     confirmed_labels = tuple(
         item.label for item in decision.condition_comparison.comparisons if item.status.value == "일치"
     )
-    timestamp = approved_at or datetime.now(timezone.utc)
+    timestamp = approved_at or datetime.now(UTC)
     if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
+        timestamp = timestamp.replace(tzinfo=UTC)
 
     return QuoteComparableApproval(
         pair_key=quote_evidence_pair_key(context, evidence),
