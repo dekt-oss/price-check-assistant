@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     g2b_request_timeout_seconds: float = 20.0
     g2b_max_retries: int = 3
 
+    mfds_model_info_base_url: str | None = None
+    mfds_business_license_base_url: str | None = None
+    mfds_request_timeout_seconds: float = 20.0
+    mfds_max_retries: int = 3
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
