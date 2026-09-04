@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
 from purchase_price.clients.data_go_kr import PublicDataPortalClient
 from purchase_price.collectors.g2b_shopping import G2BShoppingPage, unwrap_g2b_page
+from purchase_price.services.public_provenance import (
+    PublicEvidenceProvenance,
+    build_public_evidence_provenance,
+)
 
 G2B_CONTRACT_BASE_URL = "https://apis.data.go.kr/1230000/ao/CntrctInfoService"
 G2B_CONTRACT_PRODUCT_SEARCH_OPERATION = "getCntrctInfoListThngPPSSrch"
 G2B_CONTRACT_DATASET_URL = "https://www.data.go.kr/data/15129427/openapi.do"
+G2B_CONTRACT_SOURCE_NAME = "나라장터 계약정보서비스"
+G2B_CONTRACT_PARSER_VERSION = "g2b-contract-v1"
 
 
 @dataclass(frozen=True)
@@ -21,6 +27,7 @@ class G2BContractEvidence:
     product_name: str | None
     contract_date: date | None
     detail_url: str | None
+    provenance: PublicEvidenceProvenance | None = field(default=None, compare=False, repr=False)
 
     @property
     def dedupe_key(self) -> tuple[str, str, str, str]:
@@ -40,6 +47,10 @@ _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "contract_date": ("cntrctCnclsDate", "계약체결일자"),
     "detail_url": ("cntrctDtlInfoUrl", "계약상세정보URL"),
 }
+
+G2B_CONTRACT_PUBLIC_FIELDS = tuple(
+    dict.fromkeys(alias for aliases in _FIELD_ALIASES.values() for alias in aliases)
+)
 
 
 def _first_value(record: Mapping[str, Any], logical_name: str) -> Any:
@@ -70,15 +81,26 @@ def _date_or_none(value: Any) -> date | None:
 
 
 def parse_contract_evidence(record: Mapping[str, Any]) -> G2BContractEvidence:
+    decision_contract_number = _text_or_none(_first_value(record, "decision_contract_number"))
+    detail_url = _text_or_none(_first_value(record, "detail_url"))
+    provenance = build_public_evidence_provenance(
+        source_name=G2B_CONTRACT_SOURCE_NAME,
+        payload=record,
+        allow_fields=G2B_CONTRACT_PUBLIC_FIELDS,
+        source_record_id=decision_contract_number,
+        source_url=detail_url or G2B_CONTRACT_DATASET_URL,
+        parser_version=G2B_CONTRACT_PARSER_VERSION,
+    )
     return G2BContractEvidence(
-        decision_contract_number=_text_or_none(_first_value(record, "decision_contract_number")),
+        decision_contract_number=decision_contract_number,
         contract_method_name=_text_or_none(_first_value(record, "contract_method_name")),
         contract_institution_name=_text_or_none(
             _first_value(record, "contract_institution_name")
         ),
         product_name=_text_or_none(_first_value(record, "product_name")),
         contract_date=_date_or_none(_first_value(record, "contract_date")),
-        detail_url=_text_or_none(_first_value(record, "detail_url")),
+        detail_url=detail_url,
+        provenance=provenance,
     )
 
 
