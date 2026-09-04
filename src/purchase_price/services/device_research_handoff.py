@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 DEVICE_RESEARCH_HANDOFF_SESSION_KEY = "device_research_prefill_v1"
+QUOTE_REVIEW_ROWS_SESSION_KEY = "quote_review_rows_v1"
 _MAX_FIELD_LENGTH = 500
 
 
