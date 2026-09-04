@@ -6,7 +6,7 @@ from purchase_price.config import get_settings
 
 
 def test_default_registry_excludes_mock_collector(monkeypatch) -> None:
-    monkeypatch.delenv("DATA_GO_KR_SERVICE_KEY", raising=False)
+    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "")
     get_settings.cache_clear()
     try:
         collectors = build_collectors()
@@ -45,7 +45,7 @@ def test_g2b_can_be_explicitly_disabled_even_when_key_is_configured(monkeypatch)
 
 
 def test_mock_collector_remains_explicitly_available_for_development(monkeypatch) -> None:
-    monkeypatch.delenv("DATA_GO_KR_SERVICE_KEY", raising=False)
+    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "")
     get_settings.cache_clear()
     try:
         collectors = build_collectors(include_mock=True)
