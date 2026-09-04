@@ -19,7 +19,24 @@ def _write_workbook(path: Path) -> None:
     sheet = workbook.active
     sheet.title = "견적"
     sheet.append(["병원 구매 견적서"])
-    sheet.append(["품명", "제조사", "모델명", "규격", "수량", "단가", "금액"])
+    sheet.append(
+        [
+            "품명",
+            "제조사",
+            "모델명",
+            "규격",
+            "수량",
+            "단가",
+            "금액",
+            "VAT 포함여부",
+            "배송비",
+            "설치비",
+            "옵션",
+            "무상보증기간",
+            "유지보수",
+            "비고",
+        ]
+    )
     sheet.append(
         [
             "노트북",
@@ -29,6 +46,13 @@ def _write_workbook(path: Path) -> None:
             2,
             "2,500,000원",
             "5,000,000",
+            "포함",
+            "무료",
+            "해당없음",
+            "기본구성",
+            "1년",
+            "별도",
+            "납기 2주",
         ]
     )
     sheet.append(["합계", "", "", "", "", "", "5,000,000"])
@@ -43,8 +67,30 @@ def _write_legacy_workbook(path: Path) -> None:
     sheet = workbook.add_sheet("견적")
     rows = [
         ["병원 구매 견적서"],
-        ["품명", "제조사", "모델명", "규격", "수량", "단가", "금액"],
-        ["초음파진단기", "예시메디칼", "US-100", "Console", 1, 12000000, 12000000],
+        [
+            "품명",
+            "제조사",
+            "모델명",
+            "규격",
+            "수량",
+            "단가",
+            "금액",
+            "부가세",
+            "설치조건",
+            "보증기간",
+        ],
+        [
+            "초음파진단기",
+            "예시메디칼",
+            "US-100",
+            "Console",
+            1,
+            12000000,
+            12000000,
+            "별도",
+            "포함",
+            "2년",
+        ],
         ["합계", "", "", "", "", "", 12000000],
     ]
     for row_index, row in enumerate(rows):
@@ -66,7 +112,7 @@ class _FakePdfReader:
         self.pages = [_FakePdfPage(text) for text in pages]
 
 
-def test_extract_xlsx_quote_finds_header_and_skips_summary(tmp_path: Path) -> None:
+def test_extract_xlsx_quote_finds_header_conditions_and_skips_summary(tmp_path: Path) -> None:
     path = tmp_path / "quote.xlsx"
     _write_workbook(path)
 
@@ -83,10 +129,17 @@ def test_extract_xlsx_quote_finds_header_and_skips_summary(tmp_path: Path) -> No
     assert item.quantity == Decimal("2")
     assert item.unit_price == Decimal("2500000")
     assert item.total_amount == Decimal("5000000")
+    assert item.vat_status == "포함"
+    assert item.delivery_condition == "무료"
+    assert item.installation_condition == "해당없음"
+    assert item.option_condition == "기본구성"
+    assert item.warranty_condition == "1년"
+    assert item.maintenance_condition == "별도"
+    assert item.other_conditions == "납기 2주"
     assert any("안내" in warning for warning in result.warnings)
 
 
-def test_extract_xls_quote_finds_header_and_skips_summary(tmp_path: Path) -> None:
+def test_extract_xls_quote_finds_header_conditions_and_skips_summary(tmp_path: Path) -> None:
     path = tmp_path / "quote.xls"
     _write_legacy_workbook(path)
 
@@ -103,14 +156,24 @@ def test_extract_xls_quote_finds_header_and_skips_summary(tmp_path: Path) -> Non
     assert item.quantity == Decimal("1.0")
     assert item.unit_price == Decimal("12000000.0")
     assert item.total_amount == Decimal("12000000.0")
+    assert item.vat_status == "별도"
+    assert item.installation_condition == "포함"
+    assert item.warranty_condition == "2년"
+    assert item.delivery_condition == ""
 
 
-def test_extract_text_pdf_quote_uses_layout_columns(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_extract_text_pdf_quote_uses_layout_columns_and_conditions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     text = "\n".join(
         [
             "병원 구매 견적서",
-            "품명  제조사  모델명  규격  수량  단가  금액",
-            "초음파진단기  예시메디칼  US-100  Console  1  12000000  12000000",
+            "품명  제조사  모델명  규격  수량  단가  금액  VAT  배송비  설치비  보증기간",
+            (
+                "초음파진단기  예시메디칼  US-100  Console  1  12000000  12000000  "
+                "포함  무료  별도  2년"
+            ),
             "합계            12000000",
         ]
     )
@@ -134,7 +197,11 @@ def test_extract_text_pdf_quote_uses_layout_columns(monkeypatch: pytest.MonkeyPa
     assert item.quantity == Decimal("1")
     assert item.unit_price == Decimal("12000000")
     assert item.total_amount == Decimal("12000000")
-    assert any("반드시 화면에서 확인" in warning for warning in result.warnings)
+    assert item.vat_status == "포함"
+    assert item.delivery_condition == "무료"
+    assert item.installation_condition == "별도"
+    assert item.warranty_condition == "2년"
+    assert any("VAT·배송·설치" in warning for warning in result.warnings)
 
 
 def test_scanned_pdf_without_text_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -166,14 +233,28 @@ def test_rows_without_a_price_are_not_auto_extracted(tmp_path: Path) -> None:
     path = tmp_path / "quote.xlsx"
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["품명", "모델명", "단가"])
-    sheet.append(["노트북", "NT960XJG-K72AG", None])
+    sheet.append(["품명", "모델명", "단가", "VAT"])
+    sheet.append(["노트북", "NT960XJG-K72AG", None, "포함"])
     workbook.save(path)
 
     result = extract_quote_file(path)
 
     assert result.items == ()
     assert any("자동 추출된 견적 품목이 없습니다" in warning for warning in result.warnings)
+
+
+def test_unknown_condition_headers_do_not_get_invented(tmp_path: Path) -> None:
+    path = tmp_path / "quote.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["품명", "모델명", "단가", "납기메모"])
+    sheet.append(["노트북", "NT960XJG-K72AG", 1000000, "보증 포함 같음"])
+    workbook.save(path)
+
+    item = extract_quote_file(path).items[0]
+
+    assert item.warranty_condition == ""
+    assert item.other_conditions == ""
 
 
 def test_parse_quote_decimal_handles_common_krw_display() -> None:
