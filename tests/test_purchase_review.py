@@ -1,4 +1,7 @@
 from decimal import Decimal
+from pathlib import Path
+
+from streamlit.testing.v1 import AppTest
 
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.purchase_review import (
@@ -72,3 +75,23 @@ def test_direct_and_quote_style_inputs_share_the_same_contract() -> None:
     )
 
     assert direct == quote_row
+
+
+def test_existing_direct_search_page_loads_with_shared_contract() -> None:
+    root = Path(__file__).resolve().parents[1]
+    app = AppTest.from_file(root / "pages" / "1_통합검색.py")
+
+    app.run(timeout=10)
+
+    assert not app.exception
+    assert app.title[0].value == "통합검색"
+
+
+def test_existing_quote_page_loads_with_shared_contract() -> None:
+    root = Path(__file__).resolve().parents[1]
+    app = AppTest.from_file(root / "pages" / "2_견적서_분석.py")
+
+    app.run(timeout=10)
+
+    assert not app.exception
+    assert app.title[0].value == "견적서 분석"
