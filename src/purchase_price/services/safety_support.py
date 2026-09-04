@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Iterable
 
 MFDS_RECALL_PAGE_URL = "https://emedi.mfds.go.kr/recall/MNU20265"
 MFDS_ADMIN_SANCTION_PAGE_URL = "https://emedi.mfds.go.kr/disps/MNU20266"
