@@ -6,7 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 from purchase_price.clients.data_go_kr import PublicDataPortalClient
-from purchase_price.collectors.g2b_shopping import unwrap_g2b_page
+from purchase_price.collectors.g2b_shopping import G2BShoppingPage, unwrap_g2b_page
 
 G2B_CONTRACT_BASE_URL = "https://apis.data.go.kr/1230000/ao/CntrctInfoService"
 G2B_CONTRACT_PRODUCT_SEARCH_OPERATION = "getCntrctInfoListThngPPSSrch"
@@ -21,6 +21,15 @@ class G2BContractEvidence:
     product_name: str | None
     contract_date: date | None
     detail_url: str | None
+
+    @property
+    def dedupe_key(self) -> tuple[str, str, str, str]:
+        return (
+            self.decision_contract_number or "",
+            self.detail_url or "",
+            self.product_name or "",
+            self.contract_date.isoformat() if self.contract_date else "",
+        )
 
 
 _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
@@ -98,7 +107,7 @@ class G2BContractEvidenceClient:
             max_retries=max_retries,
         )
 
-    def search_product_contracts(
+    def fetch_product_contract_page(
         self,
         *,
         product_name: str,
@@ -107,7 +116,7 @@ class G2BContractEvidenceClient:
         contract_method_code: str = "",
         page_no: int = 1,
         num_of_rows: int = 100,
-    ) -> tuple[G2BContractEvidence, ...]:
+    ) -> G2BShoppingPage:
         product_name = product_name.strip()
         if not product_name:
             raise ValueError("product_name is required")
@@ -133,5 +142,48 @@ class G2BContractEvidenceClient:
             G2B_CONTRACT_PRODUCT_SEARCH_OPERATION,
             **params,
         )
-        page = unwrap_g2b_page(payload)
-        return tuple(parse_contract_evidence(item) for item in page.items)
+        return unwrap_g2b_page(payload)
+
+    def search_product_contracts(
+        self,
+        *,
+        product_name: str,
+        begin_date: date,
+        end_date: date,
+        contract_method_code: str = "",
+        max_pages: int = 10,
+        num_of_rows: int = 100,
+    ) -> tuple[G2BContractEvidence, ...]:
+        if max_pages < 1:
+            raise ValueError("max_pages must be positive")
+
+        results: list[G2BContractEvidence] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        fetched_raw_count = 0
+
+        for page_no in range(1, max_pages + 1):
+            page = self.fetch_product_contract_page(
+                product_name=product_name,
+                begin_date=begin_date,
+                end_date=end_date,
+                contract_method_code=contract_method_code,
+                page_no=page_no,
+                num_of_rows=num_of_rows,
+            )
+            if not page.items:
+                break
+
+            fetched_raw_count += len(page.items)
+            for raw in page.items:
+                evidence = parse_contract_evidence(raw)
+                if evidence.dedupe_key in seen:
+                    continue
+                seen.add(evidence.dedupe_key)
+                results.append(evidence)
+
+            if page.total_count is not None and fetched_raw_count >= page.total_count:
+                break
+            if len(page.items) < num_of_rows:
+                break
+
+        return tuple(results)
