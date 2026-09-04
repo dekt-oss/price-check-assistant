@@ -138,8 +138,11 @@ def test_scan_paginates_every_window_and_dedupes_repeated_identities() -> None:
     assert exact.first_transaction_date == date(2026, 7, 2)
     assert exact.last_transaction_date == date(2026, 7, 12)
     assert str(exact.min_price) == "2000000" and str(exact.max_price) == "2100000"
-    assert exact.source_record_ids == ("R-1", "R-3", "R-4")
-
+    assert exact.source_record_ids == (
+        "delivery:R-1|product:P-R-1",
+        "delivery:R-3|product:P-R-3",
+        "delivery:R-4|product:P-R-4",
+    )
 
 
 def test_scan_keeps_unverified_qualifier_candidates_at_x() -> None:
@@ -177,6 +180,7 @@ def test_scan_keeps_unverified_qualifier_candidates_at_x() -> None:
     assert result.chunks[0].grade_counts == {"X": 1}
     assert result.candidates[0].predicted_grade == "X"
     assert "model=exact_with_unverified_qualifier" in result.candidates[0].match_note
+
 
 def test_scan_marks_truncated_window_incomplete_and_continues() -> None:
     w1 = (date(2026, 7, 1), date(2026, 7, 10))
