@@ -5,8 +5,8 @@ import streamlit as st
 
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
-from purchase_price.schemas import ProductQuery
 from purchase_price.services.pricing import assess_prices
+from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.search import search_all
 
 st.set_page_config(page_title="통합검색", page_icon="🔎", layout="wide")
@@ -48,10 +48,6 @@ with st.form("search-form"):
     submitted = st.form_submit_button("가격자료 검색", type="primary")
 
 if submitted:
-    if not any([product_name, manufacturer, model_name, specification]):
-        st.warning("검색조건을 하나 이상 입력하세요.")
-        st.stop()
-
     quote = None
     if quote_text.strip():
         try:
@@ -60,21 +56,26 @@ if submitted:
             st.error("견적 단가는 숫자로 입력하세요.")
             st.stop()
 
-    query = ProductQuery(
+    review_input = build_purchase_review_input(
         product_name=product_name,
         manufacturer=manufacturer,
         model_name=model_name,
         specification=specification,
+        quote_unit_price=quote,
     )
+    if review_input is None:
+        st.warning("검색조건을 하나 이상 입력하세요.")
+        st.stop()
+
     run = search_all(
-        query,
+        review_input.to_product_query(),
         build_collectors(g2b_lookback_days=int(g2b_lookback_days)),
     )
 
     if run.errors:
         st.warning("일부 수집기 오류: " + " / ".join(run.errors))
 
-    if g2b_enabled and not model_name.strip():
+    if g2b_enabled and not review_input.model_name:
         st.info(
             "나라장터 자동검색은 현재 exact model 입력이 있을 때만 실행합니다. "
             "제품군만으로 세부품명을 추정하지 않습니다."
@@ -87,7 +88,7 @@ if submitted:
         )
         st.stop()
 
-    assessment = assess_prices(run.results, quote)
+    assessment = assess_prices(run.results, review_input.quote_unit_price)
     st.subheader("가격 요약")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("관측 직접근거", f"{assessment.observed_count}건")
@@ -97,7 +98,7 @@ if submitted:
     c5.metric("근거 신뢰도", assessment.confidence)
 
     st.write(assessment.message)
-    if quote is not None:
+    if review_input.quote_unit_price is not None:
         if assessment.quote_position is None:
             st.info(
                 "입력 견적과의 높고 낮음 비교는 보류했습니다. "
