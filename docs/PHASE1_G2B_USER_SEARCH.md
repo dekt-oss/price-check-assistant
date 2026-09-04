@@ -31,6 +31,8 @@ G2B 사용자 검색은 다음 조건을 모두 만족할 때만 실행한다.
 
 verified mapping이 없는 모델은 세부품명을 자동 추정하지 않는다.
 
+이 경로의 실제 서비스키 환경 live end-to-end 검증 결과는 [PHASE1_G2B_LIVE_SMOKE.md](PHASE1_G2B_LIVE_SMOKE.md)에 기록한다.
+
 ## Adaptive date partitioning
 
 특정 세부품명은 짧은 기간에도 거래건수가 많아 `max_pages` safety cap을 넘을 수 있다.
