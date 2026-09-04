@@ -4,9 +4,9 @@ Revision ID: 0002_observation_provenance
 Revises: 0001_phase0_foundation
 """
 
-from collections.abc import Sequence
 import hashlib
 import json
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
@@ -143,6 +143,18 @@ def upgrade() -> None:
 
     with op.batch_alter_table("price_observations") as batch_op:
         batch_op.alter_column("evidence_id", existing_type=sa.Integer(), nullable=False)
+        batch_op.alter_column(
+            "derivation_version",
+            existing_type=sa.String(length=80),
+            existing_nullable=False,
+            server_default=None,
+        )
+        batch_op.alter_column(
+            "comparison_scope",
+            existing_type=comparison_scope,
+            existing_nullable=False,
+            server_default=None,
+        )
         batch_op.create_unique_constraint(
             "uq_price_observation_derivation",
             ["evidence_id", "product_id", "derivation_version", "evidence_type"],
