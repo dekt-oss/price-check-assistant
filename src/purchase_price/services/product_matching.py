@@ -202,13 +202,13 @@ def _spec_measurements(value: str | None) -> tuple[_SpecMeasurement, ...]:
 
 
 def _has_explicit_measurement_conflict(query_spec: str | None, candidate_text: str) -> bool:
-    """Return true only for explicit numeric/unit contradictions.
+    """Return true only for an unambiguous numeric/unit contradiction.
 
-    A conflict requires both sides to state the same safely-normalized measurement family and the
-    candidate to state values for that family without the query value. Missing measurements stay
-    incomplete rather than contradictory. This avoids guessing clinical or commercial equivalence
-    from free text while catching cases such as 182L vs 200L, 220V vs 110V, 32GB vs 16GB, or
-    10개입 vs 20개입.
+    A query with multiple measurement families (for example `32GB 1TB`) can describe several
+    different components, so a partial candidate specification must not be promoted to an explicit
+    conflict without role-aware parsing. The strict X path is therefore opened only when the query
+    contains one safely-normalized measurement family. The candidate must state the same family and
+    all its stated values must contradict the query value(s). Missing measurements remain incomplete.
     """
 
     query_measurements = _spec_measurements(query_spec)
@@ -216,15 +216,18 @@ def _has_explicit_measurement_conflict(query_spec: str | None, candidate_text: s
     if not query_measurements or not candidate_measurements:
         return False
 
-    candidate_by_family: dict[str, set[Decimal]] = {}
-    for measurement in candidate_measurements:
-        candidate_by_family.setdefault(measurement.family, set()).add(measurement.value)
+    query_families = {measurement.family for measurement in query_measurements}
+    if len(query_families) != 1:
+        return False
+    family = next(iter(query_families))
 
-    for measurement in query_measurements:
-        candidate_values = candidate_by_family.get(measurement.family)
-        if candidate_values and measurement.value not in candidate_values:
-            return True
-    return False
+    query_values = {
+        measurement.value for measurement in query_measurements if measurement.family == family
+    }
+    candidate_values = {
+        measurement.value for measurement in candidate_measurements if measurement.family == family
+    }
+    return bool(candidate_values and query_values.isdisjoint(candidate_values))
 
 
 def _informative_query_spec_tokens(query: ProductQuery) -> tuple[str, ...]:
