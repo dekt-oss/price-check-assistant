@@ -13,7 +13,7 @@ st.set_page_config(page_title="통합검색", page_icon="🔎", layout="wide")
 st.title("통합검색")
 
 settings = get_settings()
-g2b_enabled = bool(settings.data_go_kr_service_key)
+g2b_enabled = bool((settings.data_go_kr_service_key or "").strip())
 if g2b_enabled:
     st.caption(
         "공식 제조사 공개가격과 검증된 나라장터 세부품명 mapping의 최근 구매실적을 함께 검색합니다. "
