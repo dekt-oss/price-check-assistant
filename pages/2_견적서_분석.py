@@ -37,8 +37,9 @@ mfds_enabled = bool((settings.resolved_mfds_service_key or "").strip())
 with st.expander("현재 지원 범위", expanded=False):
     st.write(
         "- `.xlsx`, `.xls`: 품목/제조사/모델/규격/수량/단가/금액 헤더를 찾아 자동 추출합니다.\n"
-        "- `.pdf`: 업로드는 가능하지만 아직 자동 추출하지 않습니다.\n"
-        "- 추출값은 검색 전에 반드시 화면에서 확인·수정할 수 있습니다.\n"
+        "- `.pdf`: 텍스트 레이어가 있고 표 열이 구분되는 PDF는 같은 항목을 자동 추출합니다.\n"
+        "- 스캔 이미지형 PDF는 텍스트가 없으므로 현재 자동 OCR을 실행하지 않고 명확히 중단합니다.\n"
+        "- PDF 표는 문서 레이아웃에 따라 열이 어긋날 수 있어 추출값을 반드시 확인·수정합니다.\n"
         "- 모델 동일성과 가격판정 안전게이트는 통합검색과 동일한 규칙을 사용합니다.\n"
         "- 추출 행의 제품명·제조사·모델명·규격만 의료기기 시장조사로 넘길 수 있습니다.\n"
         "- 페이지 이동 중에는 수정한 견적 행을 현재 Streamlit 세션에만 임시 유지합니다."
@@ -85,8 +86,9 @@ if uploaded is not None:
         except QuoteExtractionError as exc:
             st.warning(str(exc))
             st.info(
-                "Excel `.xlsx/.xls`는 자동 추출합니다. PDF는 텍스트형 문서 추출을 별도 단계로 "
-                "추가할 예정이며, 스캔 PDF는 OCR 없이 자동판정하지 않습니다."
+                "Excel `.xlsx/.xls`와 텍스트 레이어가 있는 PDF는 자동 추출합니다. "
+                "스캔 이미지형 PDF는 잘못된 품목·가격을 만들지 않기 위해 OCR을 자동 실행하지 않습니다. "
+                "가능하면 원본 Excel 또는 텍스트 PDF를 사용하세요."
             )
             st.stop()
 
