@@ -9,6 +9,10 @@ from purchase_price.schemas import CollectedPrice
 UNKNOWN = "미확인"
 
 
+def _is_complete_value(value: str) -> bool:
+    return bool(value) and UNKNOWN not in value
+
+
 @dataclass(frozen=True)
 class PriceConditionProfile:
     vat: str
@@ -23,7 +27,7 @@ class PriceConditionProfile:
     @property
     def known_count(self) -> int:
         return sum(
-            value != UNKNOWN
+            _is_complete_value(value)
             for value in (
                 self.vat,
                 self.quantity_unit,
@@ -56,7 +60,7 @@ class PriceConditionProfile:
             ("유지보수", self.maintenance),
             ("거래/기준일", self.basis_date),
         )
-        return tuple(label for label, value in values if value == UNKNOWN)
+        return tuple(label for label, value in values if not _is_complete_value(value))
 
 
 def _format_decimal(value: Decimal) -> str:
