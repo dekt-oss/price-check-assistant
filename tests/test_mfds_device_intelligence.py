@@ -14,6 +14,7 @@ from purchase_price.services.mfds_device_intelligence import (
     MfdsModelInfoClient,
     parse_business_record,
     parse_model_record,
+    resolve_exact_model_identity,
     unwrap_mfds_page,
 )
 
@@ -191,3 +192,58 @@ def test_business_client_uses_official_company_filter() -> None:
     assert base_url == MFDS_BUSINESS_LICENSE_BASE_URL
     assert operation == MFDS_BUSINESS_LICENSE_OPERATION
     assert params["Entrps"] == "예시메디칼"
+
+
+def test_exact_model_identity_uses_existing_normalized_exact_contract() -> None:
+    records = (
+        parse_model_record(
+            {
+                "PRDLST_NM": "심장충격기",
+                "TYPE_INFO": "Efficia DFM-100",
+                "MEDDEV_ITEM_NO": "수허 12-3456",
+                "EXPORT_YN": "아니오",
+            }
+        ),
+    )
+
+    resolution = resolve_exact_model_identity(records, "efficia dfm100")
+
+    assert resolution.confirmed is True
+    assert resolution.ambiguous is False
+    assert resolution.exact_matches[0].permit_number == "수허 12-3456"
+
+
+def test_exact_model_identity_rejects_substring_and_semantic_near_match() -> None:
+    records = (
+        parse_model_record(
+            {
+                "PRDLST_NM": "심장충격기",
+                "TYPE_INFO": "Efficia DFM100 Plus",
+                "MEDDEV_ITEM_NO": "수허 12-9999",
+            }
+        ),
+    )
+
+    resolution = resolve_exact_model_identity(records, "Efficia DFM100")
+
+    assert resolution.confirmed is False
+    assert resolution.exact_matches == ()
+
+
+def test_exact_model_identity_marks_multiple_permits_as_ambiguous() -> None:
+    records = tuple(
+        parse_model_record(
+            {
+                "PRDLST_NM": "심장충격기",
+                "TYPE_INFO": "MODEL-1",
+                "MEDDEV_ITEM_NO": permit,
+            }
+        )
+        for permit in ("수허 10-0001", "수허 10-0002")
+    )
+
+    resolution = resolve_exact_model_identity(records, "MODEL 1")
+
+    assert resolution.confirmed is True
+    assert resolution.ambiguous is True
+    assert len(resolution.exact_matches) == 2
