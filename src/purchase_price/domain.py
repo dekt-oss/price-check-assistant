@@ -38,6 +38,21 @@ class EvidenceType(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ComparisonScope(StrEnum):
+    """How an observation may be used in price analysis.
+
+    `OBSERVED_ONLY` means the monetary evidence is real and traceable enough to show in an
+    observed range, but commercial conditions are not sufficiently normalized to judge whether
+    a user's quote is high or low. `QUOTE_COMPARABLE` is an explicit, fail-closed promotion that
+    must only be used after the relevant VAT/unit/configuration/commercial conditions are checked.
+    """
+
+    OBSERVED_ONLY = "observed_only"
+    QUOTE_COMPARABLE = "quote_comparable"
+    REFERENCE_ONLY = "reference_only"
+    EXCLUDE = "exclude"
+
+
 DIRECT_PRICE_EVIDENCE_TYPES = frozenset(
     {
         EvidenceType.CONTRACT_UNIT_PRICE,
