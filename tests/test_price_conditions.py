@@ -74,6 +74,9 @@ def test_partial_quantity_is_not_treated_as_complete_quantity_unit() -> None:
 
     assert profile.quantity_unit == "수량 3 · 단위 미확인"
     assert profile.quantity_unit != UNKNOWN
+    assert "수량·단위" in profile.missing_labels
+    # Only the collection/verification date is fully known in this fixture.
+    assert profile.completeness_percent == 12
 
 
 def test_explicit_phrase_is_detected_without_guessing() -> None:
