@@ -5,6 +5,7 @@ import streamlit as st
 
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
+from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.search import search_all
@@ -13,7 +14,7 @@ st.set_page_config(page_title="통합검색", page_icon="🔎", layout="wide")
 st.title("통합검색")
 
 settings = get_settings()
-g2b_enabled = bool((settings.data_go_kr_service_key or "").strip())
+g2b_enabled = bool((settings.resolved_g2b_service_key or "").strip())
 if g2b_enabled:
     st.caption(
         "공식 제조사 공개가격과 검증된 나라장터 세부품명 mapping의 최근 구매실적을 함께 검색합니다. "
@@ -21,8 +22,8 @@ if g2b_enabled:
     )
 else:
     st.caption(
-        "현재 공식 제조사 공개가격 source를 사용합니다. 나라장터 검색은 DATA_GO_KR_SERVICE_KEY가 "
-        "설정된 환경에서만 활성화되며, 개발용 mock 가격은 기본 비활성화되어 있습니다."
+        "현재 공식 제조사 공개가격 source를 사용합니다. 나라장터 검색은 G2B_SERVICE_KEY 또는 "
+        "하위호환 DATA_GO_KR_SERVICE_KEY가 설정된 환경에서만 활성화됩니다."
     )
 
 with st.form("search-form"):
@@ -89,56 +90,91 @@ if submitted:
         st.stop()
 
     assessment = assess_prices(run.results, review_input.quote_unit_price)
+    profiles = [build_price_condition_profile(item) for item in run.results]
+    condition_average = round(
+        sum(profile.completeness_percent for profile in profiles) / len(profiles)
+    )
+
     st.subheader("가격 요약")
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("관측 직접근거", f"{assessment.observed_count}건")
     c2.metric("관측가 하단", f"{assessment.low:,.0f}원" if assessment.low is not None else "산정불가")
     c3.metric("관측가 상단", f"{assessment.high:,.0f}원" if assessment.high is not None else "산정불가")
     c4.metric("독립 출처", f"{assessment.source_count}개")
     c5.metric("근거 신뢰도", assessment.confidence)
+    c6.metric("평균 조건명시", f"{condition_average}%")
 
     st.write(assessment.message)
     if review_input.quote_unit_price is not None:
         if assessment.quote_position is None:
             st.info(
-                "입력 견적과의 높고 낮음 비교는 보류했습니다. "
-                "현재 근거의 VAT·단위·배송·설치·옵션·보증 등 거래조건이 "
-                "`quote_comparable`로 검증되지 않았습니다."
+                "입력 견적과의 높고 낮음 비교는 보류했습니다. 아래 `가격조건 구조화`에서 "
+                "VAT·수량/단위·배송·설치·옵션·보증·유지보수·기준일 중 빠진 조건을 확인할 수 있습니다. "
+                "조건이 많이 채워져도 별도 검증 없이 자동으로 `quote_comparable`로 승격하지 않습니다."
             )
         else:
             st.success(f"견적 위치: {assessment.quote_position}")
 
-    rows = [
-        {
-            "출처": x.source_name,
-            "가격": float(x.price),
-            "통화": x.currency,
-            "등급": x.match_grade.value,
-            "Evidence Type": x.evidence_type.value,
-            "비교범위": x.comparison_scope.value,
-            "자료성격": x.source_type.value,
-            "거래일": x.transaction_date.isoformat() if x.transaction_date else "",
-            "VAT": x.vat_status or "미확인",
-            "수량": float(x.quantity) if x.quantity is not None else None,
-            "단위": x.unit or "",
-            "조건": x.conditions or "",
-            "비교메모": x.comparison_note or "",
-            "근거ID": x.source_record_id or "",
-            "수집일": x.collected_at.isoformat(),
-            "URL": x.source_url or "",
-        }
-        for x in run.results
-    ]
-    df = pd.DataFrame(rows)
+    rows = []
+    condition_rows = []
+    for item, profile in zip(run.results, profiles, strict=True):
+        rows.append(
+            {
+                "출처": item.source_name,
+                "가격": float(item.price),
+                "통화": item.currency,
+                "등급": item.match_grade.value,
+                "Evidence Type": item.evidence_type.value,
+                "비교범위": item.comparison_scope.value,
+                "자료성격": item.source_type.value,
+                "거래일": item.transaction_date.isoformat() if item.transaction_date else "",
+                "VAT": profile.vat,
+                "수량·단위": profile.quantity_unit,
+                "조건명시": f"{profile.completeness_percent}%",
+                "조건": item.conditions or "",
+                "비교메모": item.comparison_note or "",
+                "근거ID": item.source_record_id or "",
+                "수집일": item.collected_at.isoformat(),
+                "URL": item.source_url or "",
+            }
+        )
+        condition_rows.append(
+            {
+                "출처": item.source_name,
+                "근거ID": item.source_record_id or "",
+                "VAT": profile.vat,
+                "수량·단위": profile.quantity_unit,
+                "배송": profile.delivery,
+                "설치": profile.installation,
+                "옵션/부속": profile.options,
+                "보증": profile.warranty,
+                "유지보수": profile.maintenance,
+                "거래/기준일": profile.basis_date,
+                "명시율": f"{profile.completeness_percent}%",
+                "미확인 조건": ", ".join(profile.missing_labels) or "없음",
+            }
+        )
+
     st.subheader("가격 근거자료")
     st.dataframe(
-        df,
+        pd.DataFrame(rows),
         use_container_width=True,
         hide_index=True,
         column_config={"가격": st.column_config.NumberColumn(format="%d")},
     )
+
+    st.subheader("가격조건 구조화")
+    st.dataframe(
+        pd.DataFrame(condition_rows),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(
+        "`미확인`은 조건이 없다는 뜻이 아니라 현재 공개근거에서 확인하지 못했다는 뜻입니다. "
+        "구조화는 원문에 명시된 조건만 사용하며 배송·설치·옵션·보증을 추정하지 않습니다."
+    )
+
     st.caption(
         "관측 직접근거는 A·B 제품 동일성 + 직접가격 Evidence Type + KRW를 모두 만족해야 합니다. "
-        "나라장터 근거도 현재는 거래조건이 완전히 구조화되지 않았으므로 `observed_only`입니다. "
         "현재 견적의 높고 낮음 판정은 거래조건까지 명시적으로 `quote_comparable`로 검증된 근거에만 허용합니다."
     )
