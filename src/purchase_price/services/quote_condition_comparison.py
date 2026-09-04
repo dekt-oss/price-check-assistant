@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from purchase_price.services.price_conditions import PriceConditionProfile, UNKNOWN
+from purchase_price.services.price_conditions import UNKNOWN, PriceConditionProfile
 
 
 class ConditionComparisonStatus(StrEnum):
