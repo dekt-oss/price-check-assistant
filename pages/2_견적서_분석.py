@@ -21,6 +21,10 @@ from purchase_price.services.quote_extraction import (
     extract_quote_file,
     parse_quote_decimal,
 )
+from purchase_price.services.quote_extraction_diagnostics import (
+    diagnose_quote_extraction,
+    diagnose_quote_extraction_error,
+)
 from purchase_price.services.search import search_all
 
 st.set_page_config(page_title="견적서 분석", page_icon="📄", layout="wide")
@@ -37,7 +41,8 @@ mfds_enabled = bool((settings.resolved_mfds_service_key or "").strip())
 with st.expander("현재 지원 범위", expanded=False):
     st.write(
         "- `.xlsx`, `.xls`: 품목/제조사/모델/규격/수량/단가/금액 헤더를 찾아 자동 추출합니다.\n"
-        "- `.pdf`: 텍스트 레이어가 있고 표 열이 구분되는 PDF는 같은 항목을 자동 추출합니다.\n"
+        "- `.pdf`: 텍스트 레이어가 있으면 표 선/셀 구조를 우선 사용하고, 실패 시 단어 X/Y 좌표와 "
+        "텍스트 fallback을 순서대로 사용합니다.\n"
         "- 스캔 이미지형 PDF는 텍스트가 없으므로 현재 자동 OCR을 실행하지 않고 명확히 중단합니다.\n"
         "- PDF 표는 문서 레이아웃에 따라 열이 어긋날 수 있어 추출값을 반드시 확인·수정합니다.\n"
         "- 모델 동일성과 가격판정 안전게이트는 통합검색과 동일한 규칙을 사용합니다.\n"
@@ -80,11 +85,16 @@ if uploaded is not None:
     with tempfile.NamedTemporaryFile(delete=True, suffix=suffix) as tmp:
         tmp.write(uploaded.getbuffer())
         tmp.flush()
+        quote_path = Path(tmp.name)
 
         try:
-            extraction = extract_quote_file(Path(tmp.name))
+            extraction = extract_quote_file(quote_path)
         except QuoteExtractionError as exc:
+            diagnostics = diagnose_quote_extraction_error(quote_path, exc)
             st.warning(str(exc))
+            st.caption(f"추출 경로 진단: {diagnostics.strategy_label}")
+            with st.expander("추출 진단", expanded=False):
+                st.json(diagnostics.to_public_dict())
             st.info(
                 "Excel `.xlsx/.xls`와 텍스트 레이어가 있는 PDF는 자동 추출합니다. "
                 "스캔 이미지형 PDF는 잘못된 품목·가격을 만들지 않기 위해 OCR을 자동 실행하지 않습니다. "
@@ -92,7 +102,15 @@ if uploaded is not None:
             )
             st.stop()
 
+        diagnostics = diagnose_quote_extraction(quote_path, extraction)
+
     st.success(f"{uploaded.name}: {len(extraction.items)}개 품목을 자동 추출했습니다.")
+    st.caption(
+        f"추출 경로: {diagnostics.strategy_label} · 자동 추출 {diagnostics.extracted_item_count}건 · "
+        "담당자 원문 대조 필수"
+    )
+    with st.expander("추출 진단", expanded=False):
+        st.json(diagnostics.to_public_dict())
     for warning in extraction.warnings:
         st.warning(warning)
 
