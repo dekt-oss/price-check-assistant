@@ -24,7 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      # Workflow-local compatibility alias for older CLI entry points.
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      INPUT_DETAIL_PRODUCT_NAME: ${{ inputs.detail_product_name }}
+      INPUT_BEGIN_DATE: ${{ inputs.begin_date }}
+      INPUT_END_DATE: ${{ inputs.end_date }}
 
     steps:
       - name: Checkout
@@ -38,23 +44,24 @@ jobs:
       - name: Install package
         run: pip install -e .
 
-      - name: Verify secret
+      - name: Verify G2B secret
         shell: bash
         run: |
-          if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
-            echo "DATA_GO_KR_SERVICE_KEY secret is not configured"
+          if [ -z "$G2B_SERVICE_KEY" ]; then
+            echo "G2B_SERVICE_KEY, DATA_GO_KR_MARKET_SERVICE_KEY, or legacy DATA_GO_KR_SERVICE_KEY secret must be configured"
             exit 2
           fi
 
       - name: Probe specific-item procurement API
+        shell: bash
         run: |
           python -m purchase_price.scripts.g2b_shopping_probe \
             getSpcifyPrdlstPrcureInfoList \
             --param pageNo=1 \
             --param numOfRows=1 \
             --param inqryDiv=1 \
-            --param inqryBgnDate=${{ inputs.begin_date }} \
-            --param inqryEndDate=${{ inputs.end_date }} \
+            --param "inqryBgnDate=$INPUT_BEGIN_DATE" \
+            --param "inqryEndDate=$INPUT_END_DATE" \
             --param inqryPrdctDiv=2 \
             --param fnlCntrctDlvrReqChgOrdYn=Y \
-            --param dtilPrdctClsfcNoNm=${{ inputs.detail_product_name }}
+            --param "dtilPrdctClsfcNoNm=$INPUT_DETAIL_PRODUCT_NAME"

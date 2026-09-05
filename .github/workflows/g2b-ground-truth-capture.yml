@@ -47,8 +47,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      # Workflow-local compatibility alias for older CLI entry points.
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
       PYTHONPATH: src
+      INPUT_BEGIN_DATE: ${{ inputs.begin_date }}
+      INPUT_END_DATE: ${{ inputs.end_date }}
+      INPUT_CHUNK_DAYS: ${{ inputs.chunk_days }}
+      INPUT_MAX_PAGES_PER_CHUNK: ${{ inputs.max_pages_per_chunk }}
+      INPUT_SAMPLE_PAGES_PER_MODEL: ${{ inputs.sample_pages_per_model }}
+      INPUT_MAX_ROWS_PER_MODEL: ${{ inputs.max_rows_per_model }}
 
     steps:
       - name: Checkout
@@ -66,32 +75,34 @@ jobs:
             "httpx<1,>=0.27" \
             "tenacity<10,>=9"
 
-      - name: Verify secret
+      - name: Verify G2B secret
         shell: bash
         run: |
-          if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
-            echo "DATA_GO_KR_SERVICE_KEY secret is not configured"
+          if [ -z "$G2B_SERVICE_KEY" ]; then
+            echo "G2B_SERVICE_KEY, DATA_GO_KR_MARKET_SERVICE_KEY, or legacy DATA_GO_KR_SERVICE_KEY secret must be configured"
             exit 2
           fi
 
       - name: Capture bounded human-review sample
         if: inputs.mode == 'sample'
+        shell: bash
         run: |
           python -m purchase_price.scripts.capture_g2b_ground_truth_candidates \
-            --begin-date "${{ inputs.begin_date }}" \
-            --end-date "${{ inputs.end_date }}" \
-            --sample-pages-per-model "${{ inputs.sample_pages_per_model }}" \
-            --max-rows-per-model "${{ inputs.max_rows_per_model }}" \
+            --begin-date "$INPUT_BEGIN_DATE" \
+            --end-date "$INPUT_END_DATE" \
+            --sample-pages-per-model "$INPUT_SAMPLE_PAGES_PER_MODEL" \
+            --max-rows-per-model "$INPUT_MAX_ROWS_PER_MODEL" \
             --output artifacts/g2b-ground-truth-candidates.csv
 
       - name: Scan exact-model candidates in date windows
         if: inputs.mode == 'scan'
+        shell: bash
         run: |
           python -m purchase_price.scripts.scan_g2b_exact_model_candidates \
-            --begin-date "${{ inputs.begin_date }}" \
-            --end-date "${{ inputs.end_date }}" \
-            --chunk-days "${{ inputs.chunk_days }}" \
-            --max-pages-per-chunk "${{ inputs.max_pages_per_chunk }}" \
+            --begin-date "$INPUT_BEGIN_DATE" \
+            --end-date "$INPUT_END_DATE" \
+            --chunk-days "$INPUT_CHUNK_DAYS" \
+            --max-pages-per-chunk "$INPUT_MAX_PAGES_PER_CHUNK" \
             --summary-output artifacts/g2b-exact-model-scan-summary.csv \
             --candidates-output artifacts/g2b-exact-model-candidates.csv
 
