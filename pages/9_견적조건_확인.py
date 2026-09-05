@@ -11,18 +11,20 @@ from purchase_price.services.quote_extraction import QuoteExtractionError, extra
 st.set_page_config(page_title="견적조건 확인", page_icon="🧾", layout="wide")
 st.title("견적서 상업조건 자동추출")
 st.caption(
-    "Excel 또는 텍스트 PDF에서 명시된 VAT·배송·설치·옵션·보증·유지보수 조건을 추출합니다. "
+    "Excel 또는 PDF에서 명시된 VAT·배송·설치·옵션·보증·유지보수 조건을 추출합니다. "
     "문서에 없는 조건은 추정하지 않으며 업로드 파일은 영구 저장하지 않습니다."
 )
 
 with st.expander("추출 원칙", expanded=False):
     st.markdown(
         """
-- 지원: `.xlsx`, `.xls`, 텍스트 레이어가 있는 `.pdf`
+- 지원: `.xlsx`, `.xls`, 텍스트 PDF, 스캔 이미지형 `.pdf`
+- 텍스트 PDF: 표 선/셀 구조 → 단어 X/Y 좌표 → 텍스트 fallback 순으로 처리합니다.
+- 스캔 PDF: 텍스트 레이어가 없을 때만 **로컬 Tesseract(kor+eng) OCR**을 실행합니다. 문서를 외부 Vision API로 전송하지 않습니다.
+- OCR은 자원 보호를 위해 앞 12페이지까지만 처리하며 오인식 가능성이 있으므로 원문 이미지 대조가 필수입니다.
 - 추출: 품명/제조사/모델/규격/수량/단가/총액 + VAT/배송/설치/옵션/보증/유지보수/기타조건
 - **빈 값은 `해당 없음`이 아니라 `견적서에서 확인되지 않음`**을 의미합니다.
-- 자유문장을 해석해 조건을 만들어내지 않고, 표의 명시적 헤더/값만 사용합니다.
-- 스캔 PDF는 OCR을 자동 실행하지 않습니다.
+- 자유문장을 해석해 조건을 만들어내지 않고, 명시적으로 인식된 표/문맥만 사용합니다.
         """
     )
 

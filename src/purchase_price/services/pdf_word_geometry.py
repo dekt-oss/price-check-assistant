@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 _CANONICAL_HEADERS = {
@@ -193,34 +193,13 @@ def _merge_cells(left: list[str], right: list[str]) -> list[str]:
     return merged
 
 
-def extract_word_geometry_rows(
-    page: object,
+def extract_word_geometry_rows_from_words(
+    raw_words: Sequence[Mapping[str, object]],
     resolve_header: Callable[[str], str | None],
     *,
     y_tolerance: float = 3.0,
 ) -> tuple[tuple[object, ...], ...]:
-    """Reconstruct a text table from word coordinates when ruled-line detection fails.
-
-    This fallback is deliberately conservative: it requires a recognizable identity column and
-    a price column, and only emits rows that contain an explicit price. Text-only continuations
-    may be merged into the immediately following priced row, but free-form prose is never emitted
-    as an item on its own.
-    """
-
-    extractor = getattr(page, "extract_words", None)
-    if extractor is None:
-        return ()
-    try:
-        raw_words = extractor(
-            x_tolerance=1,
-            y_tolerance=y_tolerance,
-            keep_blank_chars=False,
-            use_text_flow=True,
-        ) or []
-    except TypeError:
-        raw_words = extractor() or []
-    except Exception:
-        return ()
+    """Reconstruct conservative table rows from generic word bounding boxes."""
 
     words = [word for raw in raw_words if (word := _word_from_mapping(raw)) is not None]
     if not words:
@@ -254,3 +233,39 @@ def extract_word_geometry_rows(
         pending = None
 
     return tuple(rows) if len(rows) > 1 else ()
+
+
+def extract_word_geometry_rows(
+    page: object,
+    resolve_header: Callable[[str], str | None],
+    *,
+    y_tolerance: float = 3.0,
+) -> tuple[tuple[object, ...], ...]:
+    """Reconstruct a text table from word coordinates when ruled-line detection fails.
+
+    This fallback is deliberately conservative: it requires a recognizable identity column and
+    a price column, and only emits rows that contain an explicit price. Text-only continuations
+    may be merged into the immediately following priced row, but free-form prose is never emitted
+    as an item on its own.
+    """
+
+    extractor = getattr(page, "extract_words", None)
+    if extractor is None:
+        return ()
+    try:
+        raw_words = extractor(
+            x_tolerance=1,
+            y_tolerance=y_tolerance,
+            keep_blank_chars=False,
+            use_text_flow=True,
+        ) or []
+    except TypeError:
+        raw_words = extractor() or []
+    except Exception:
+        return ()
+
+    return extract_word_geometry_rows_from_words(
+        raw_words,
+        resolve_header,
+        y_tolerance=y_tolerance,
+    )

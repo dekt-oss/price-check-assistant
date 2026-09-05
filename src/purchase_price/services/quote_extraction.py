@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.pdf_ocr import PdfOcrUnavailableError, run_local_pdf_ocr
 from purchase_price.services.pdf_word_geometry import extract_word_geometry_rows
 
 
@@ -706,6 +707,57 @@ def _extract_pypdf_text(path: Path) -> tuple[list[str], list[str], bool]:
     return texts, warnings, saw_text
 
 
+def _extract_scanned_pdf_quote(path: Path, existing_warnings: list[str]) -> QuoteExtractionResult:
+    try:
+        ocr = run_local_pdf_ocr(path, _resolve_header_field)
+    except PdfOcrUnavailableError as exc:
+        raise QuoteExtractionError(
+            "스캔 PDF로 감지했지만 로컬 OCR을 실행할 수 없습니다. "
+            "pytesseract/pypdfium2 및 tesseract-ocr kor/eng 배포 의존성을 확인하세요."
+        ) from exc
+
+    warnings = [*existing_warnings, *ocr.warnings]
+    texts = [page.text for page in ocr.pages if page.text.strip()]
+    if not texts:
+        raise QuoteExtractionError(
+            "스캔 PDF에 로컬 OCR을 실행했지만 인식 가능한 텍스트를 찾지 못했습니다. "
+            "해상도가 높은 원본 또는 원본 Excel을 사용하세요."
+        )
+
+    items: list[QuoteItem] = []
+    for page in ocr.pages:
+        page_items: list[QuoteItem] = []
+        if page.table_rows:
+            page_items, _ = _extract_sheet_rows(
+                f"PDF {page.page_number}페이지 OCR 단어좌표",
+                page.table_rows,
+            )
+        if not page_items and page.text:
+            page_items.extend(_extract_pdf_line_candidates(page.text, page.page_number))
+        if not page_items and page.text:
+            text_items, _ = _extract_sheet_rows(
+                f"PDF {page.page_number}페이지 OCR 텍스트",
+                _pdf_text_rows(page.text),
+            )
+            page_items.extend(text_items)
+        items.extend(item for item in page_items if _has_meaningful_identity(item))
+
+    items = _dedupe_quote_items(items)
+    items = _apply_pdf_context(items, _extract_pdf_context(texts))
+    if items:
+        warnings.append(
+            "텍스트 레이어가 없는 스캔 PDF를 로컬 Tesseract(kor+eng) OCR로 처리했습니다. "
+            "OCR은 오인식 가능성이 높으므로 제품명·모델·규격·수량·가격·VAT·설치·보증을 "
+            "반드시 원문 이미지와 대조하세요."
+        )
+    else:
+        warnings.append(
+            "로컬 OCR로 텍스트는 인식했지만 의미 있는 품목/가격 행을 식별하지 못했습니다. "
+            "세액·합계를 품목으로 임의 생성하지 않고 자동 추출을 보류했습니다."
+        )
+    return QuoteExtractionResult(items=tuple(items), warnings=tuple(warnings))
+
+
 def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     structured_items, plumber_texts, warnings, plumber_saw_text = _extract_with_pdfplumber(path)
     pypdf_texts, fallback_warnings, pypdf_saw_text = _extract_pypdf_text(path)
@@ -719,10 +771,7 @@ def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
 
     saw_text = plumber_saw_text or pypdf_saw_text
     if not saw_text:
-        raise QuoteExtractionError(
-            "PDF에 추출 가능한 텍스트 레이어가 없습니다. 스캔 이미지형 PDF로 보이며 현재 단계에서는 "
-            "OCR을 자동 실행하지 않습니다. 원본 Excel 또는 텍스트 PDF를 사용하거나 OCR 단계가 필요합니다."
-        )
+        return _extract_scanned_pdf_quote(path, warnings)
 
     items = [item for item in structured_items if _has_meaningful_identity(item)]
     used_structured_table = bool(items)
