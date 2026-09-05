@@ -25,7 +25,8 @@ jobs:
     timeout-minutes: 5
     env:
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
-      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      # Workflow-local compatibility alias for older CLI entry points.
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
 
     steps:
       - name: Checkout
