@@ -24,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
 
     steps:
@@ -38,11 +39,11 @@ jobs:
       - name: Install package
         run: pip install -e .
 
-      - name: Verify secret
+      - name: Verify G2B secret
         shell: bash
         run: |
-          if [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
-            echo "DATA_GO_KR_SERVICE_KEY secret is not configured"
+          if [ -z "$G2B_SERVICE_KEY" ] && [ -z "$DATA_GO_KR_SERVICE_KEY" ]; then
+            echo "G2B_SERVICE_KEY or legacy DATA_GO_KR_SERVICE_KEY secret must be configured"
             exit 2
           fi
 
