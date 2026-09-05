@@ -1,11 +1,11 @@
 from decimal import Decimal
 from pathlib import Path
 
+import pypdf
 import pytest
 import xlwt
 from openpyxl import Workbook
 
-import purchase_price.services.quote_extraction as quote_extraction
 from purchase_price.services.quote_extraction import (
     QuoteExtractionError,
     extract_quote_file,
@@ -178,7 +178,7 @@ def test_extract_text_pdf_quote_uses_layout_columns_and_conditions(
         ]
     )
     monkeypatch.setattr(
-        quote_extraction,
+        pypdf,
         "PdfReader",
         lambda _: _FakePdfReader([text]),
     )
@@ -206,7 +206,7 @@ def test_extract_text_pdf_quote_uses_layout_columns_and_conditions(
 
 def test_scanned_pdf_without_text_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
-        quote_extraction,
+        pypdf,
         "PdfReader",
         lambda _: _FakePdfReader(["", "   "]),
     )
