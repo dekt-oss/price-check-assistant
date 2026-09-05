@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -31,6 +32,8 @@ with st.expander("UAT 운영 원칙", expanded=False):
         "- 최소 5건을 담당자가 원문 대조 완료해야 1차 UAT 표본 목표를 충족합니다.\n"
         "- 자동 추출값을 그대로 정답으로 간주하지 않습니다. 원문을 보고 수정한 뒤 `원문 대조 완료`를 체크하세요.\n"
         "- 품목이 누락됐으면 정답표에 행을 추가하고, 잘못 추출된 품목은 정답표에서 삭제하세요.\n"
+        "- 품목 FP는 원문에 없는데 추출된 품목, FN은 원문에는 있는데 누락된 품목입니다.\n"
+        "- 한 품목의 추가/누락이 뒤 행 전체의 필드 오류로 번지지 않도록 순서를 보존해 행을 정렬한 뒤 필드 정확도를 계산합니다.\n"
         "- 이 화면의 통계는 parser 성능 측정용이며 가격 적정성 판정이나 `QUOTE_COMPARABLE` 승인과 무관합니다.\n"
         "- 텍스트 레이어가 없는 스캔 PDF는 로컬 Tesseract(kor+eng) OCR을 사용하며 `PDF 로컬 OCR` 전략으로 별도 집계합니다.\n"
         "- OCR은 앞 12페이지까지만 처리하며, 외부 Vision API로 견적 원문을 전송하지 않습니다."
@@ -74,15 +77,25 @@ def _expected_rows(frame: pd.DataFrame) -> list[dict[str, object]]:
     return rows
 
 
+def _rate_text(value: object) -> str:
+    return "N/A" if value is None else f"{float(value):.1%}"
+
+
+def _seconds_text(value: object) -> str:
+    return "N/A" if value is None else f"{float(value):.2f}초"
+
+
 confirmed_metrics = []
 
 for case_index, uploaded in enumerate(uploaded_files or (), start=1):
     case_id = f"UAT-{case_index:03d}"
     payload = uploaded.getvalue()
     fingerprint = hashlib.sha256(payload).hexdigest()[:12]
+    case_key = f"{case_index}_{fingerprint}"
     suffix = Path(uploaded.name).suffix.casefold()
 
     extraction_error: QuoteExtractionError | None = None
+    extraction_started = time.perf_counter()
     with tempfile.NamedTemporaryFile(delete=True, suffix=suffix) as tmp:
         tmp.write(payload)
         tmp.flush()
@@ -97,15 +110,17 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
             diagnostics = diagnose_quote_extraction_error(path, exc)
             actual_items = ()
             warnings = (str(exc),)
+    processing_seconds = time.perf_counter() - extraction_started
 
     with st.expander(
         f"{case_id} · {uploaded.name} · {diagnostics.strategy_label}",
         expanded=case_index == 1,
     ):
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("자동 추출 품목", len(actual_items))
         c2.metric("경고", len(warnings))
         c3.metric("추출 경로", diagnostics.strategy_label)
+        c4.metric("parser 처리시간", _seconds_text(processing_seconds))
 
         if extraction_error is not None:
             st.error(str(extraction_error))
@@ -127,7 +142,7 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
         )
         reviewed = st.data_editor(
             auto_frame,
-            key=f"quote_uat_editor_{fingerprint}",
+            key=f"quote_uat_editor_{case_key}",
             use_container_width=True,
             hide_index=True,
             num_rows="dynamic",
@@ -139,9 +154,19 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
         )
         expected_rows = _expected_rows(reviewed)
 
+        review_seconds_input = st.number_input(
+            "담당자 원문 대조 소요시간(초, 선택)",
+            min_value=0.0,
+            value=0.0,
+            step=10.0,
+            key=f"quote_uat_review_seconds_{case_key}",
+            help="수작업 대비 시간절감 측정용입니다. 측정하지 않았으면 0으로 두세요.",
+        )
+        review_seconds = float(review_seconds_input) if review_seconds_input > 0 else None
+
         confirmed = st.checkbox(
             "원문 대조 완료 — 이 케이스를 UAT 통계에 포함",
-            key=f"quote_uat_confirmed_{fingerprint}",
+            key=f"quote_uat_confirmed_{case_key}",
         )
         if confirmed:
             metric = compare_review_rows(
@@ -150,30 +175,45 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
                 actual_items=actual_items,
                 expected_rows=expected_rows,
                 extraction_failed=extraction_error is not None,
+                processing_seconds=processing_seconds,
+                review_seconds=review_seconds,
             )
             confirmed_metrics.append(metric)
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("품목 수", "일치" if metric.exact_item_count else "불일치")
-            m2.metric("평가 필드", metric.scored_fields)
-            m3.metric("필드 오류", metric.field_errors)
-            rate = metric.field_error_rate
-            m4.metric("필드 오류율", "N/A" if rate is None else f"{rate:.1%}")
+            m1, m2, m3, m4, m5, m6 = st.columns(6)
+            m1.metric("품목 precision", _rate_text(metric.item_precision))
+            m2.metric("품목 recall", _rate_text(metric.item_recall))
+            m3.metric("오인 품목 FP", metric.false_positive_item_count)
+            m4.metric("누락 품목 FN", metric.false_negative_item_count)
+            m5.metric("필드 오류", metric.field_errors)
+            m6.metric("처리시간", _seconds_text(metric.processing_seconds))
             if metric.status == "PASS":
-                st.success("이 케이스는 현재 입력한 ground truth 기준으로 품목 수와 평가 필드가 일치합니다.")
+                st.success("현재 ground truth 기준으로 품목 대응과 평가 필드가 모두 일치합니다.")
+            elif metric.extraction_failed:
+                st.error("추출 자체가 실패했습니다. 실패 원인과 원문 유형을 함께 기록하세요.")
             else:
-                fields = ", ".join(metric.error_fields) or "품목 수"
-                st.warning(f"검토 필요: {fields}")
+                fields = ", ".join(metric.error_fields) or "필드 오류 없음"
+                st.warning(
+                    "검토 필요: "
+                    f"FP {metric.false_positive_item_count} / FN {metric.false_negative_item_count} / "
+                    f"필드 오류 {fields}"
+                )
 
 st.divider()
 st.subheader("UAT 집계")
 summary = build_redacted_uat_summary(confirmed_metrics, minimum_cases=5)
 
-s1, s2, s3, s4 = st.columns(4)
+s1, s2, s3, s4, s5, s6 = st.columns(6)
 s1.metric("원문 대조 완료", summary["total_confirmed_cases"])
 s2.metric("추출 실패", summary["extraction_failures"])
-s3.metric("품목 수 정확 일치", summary["exact_item_count_cases"])
-field_rate = summary["field_error_rate"]
-s4.metric("전체 필드 오류율", "N/A" if field_rate is None else f"{field_rate:.1%}")
+s3.metric("품목 precision", _rate_text(summary["item_precision"]))
+s4.metric("품목 recall", _rate_text(summary["item_recall"]))
+s5.metric("전체 필드 오류율", _rate_text(summary["field_error_rate"]))
+s6.metric("평균 처리시간", _seconds_text(summary["average_processing_seconds"]))
+
+f1, f2, f3 = st.columns(3)
+f1.metric("오인 품목 FP", summary["false_positive_items"])
+f2.metric("누락 품목 FN", summary["false_negative_items"])
+f3.metric("평균 원문대조 시간", _seconds_text(summary["average_review_seconds"]))
 
 if summary["minimum_case_target_met"]:
     st.success("실제 견적 최소 5건 UAT 표본 목표를 충족했습니다.")
@@ -182,11 +222,20 @@ else:
     st.info(f"1차 UAT 표본 목표까지 원문 대조 완료 견적 {remaining}건이 더 필요합니다.")
 
 if confirmed_metrics:
+    st.markdown("**케이스별 비식별 결과**")
     st.dataframe(
         pd.DataFrame(metric.to_redacted_dict() for metric in confirmed_metrics),
         use_container_width=True,
         hide_index=True,
     )
+
+    strategy_metrics = summary["strategy_metrics"]
+    if strategy_metrics:
+        st.markdown("**추출 전략별 집계**")
+        strategy_frame = pd.DataFrame.from_dict(strategy_metrics, orient="index").reset_index()
+        strategy_frame = strategy_frame.rename(columns={"index": "strategy"})
+        st.dataframe(strategy_frame, use_container_width=True, hide_index=True)
+
     st.download_button(
         "비식별 UAT 결과 JSON 다운로드",
         data=redacted_uat_summary_json(confirmed_metrics, minimum_cases=5),
