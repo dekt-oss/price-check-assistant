@@ -5,6 +5,11 @@ import streamlit as st
 
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
+from purchase_price.services.g2b_search_policy import (
+    G2B_DEFAULT_LOOKBACK_DAYS,
+    G2B_LOOKBACK_OPTIONS,
+    g2b_lookback_label,
+)
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_review import build_purchase_review_input
@@ -17,13 +22,14 @@ settings = get_settings()
 g2b_enabled = bool((settings.resolved_g2b_service_key or "").strip())
 if g2b_enabled:
     st.caption(
-        "공식 제조사 공개가격과 검증된 나라장터 세부품명 mapping의 최근 구매실적을 함께 검색합니다. "
-        "나라장터는 exact model + verified mapping에서만 자동 조회하며, 근거가 없는 가격은 생성하지 않습니다."
+        "공식 제조사 공개가격과 검증된 나라장터 세부품명 mapping의 구매실적을 함께 검색합니다. "
+        "나라장터 직접가격은 exact model + verified mapping에서만 자동 조회하며, mapping이 없으면 "
+        "0건으로 숨기지 않고 `미검색`으로 표시합니다."
     )
 else:
     st.caption(
-        "현재 공식 제조사 공개가격 source를 사용합니다. 나라장터 검색은 G2B_SERVICE_KEY 또는 "
-        "하위호환 DATA_GO_KR_SERVICE_KEY가 설정된 환경에서만 활성화됩니다."
+        "현재 공식 제조사 공개가격 source를 사용합니다. 나라장터 검색은 G2B_SERVICE_KEY, "
+        "DATA_GO_KR_MARKET_SERVICE_KEY 또는 하위호환 DATA_GO_KR_SERVICE_KEY가 설정된 환경에서 활성화됩니다."
     )
 
 with st.form("search-form"):
@@ -37,13 +43,14 @@ with st.form("search-form"):
     quote_text = st.text_input("현재 견적 단가 (선택)", placeholder="예: 5000000")
     g2b_lookback_days = st.selectbox(
         "나라장터 검색기간",
-        options=[30, 90, 180, 365],
-        index=1,
-        format_func=lambda days: f"최근 {days}일",
+        options=G2B_LOOKBACK_OPTIONS,
+        index=G2B_LOOKBACK_OPTIONS.index(G2B_DEFAULT_LOOKBACK_DAYS),
+        format_func=g2b_lookback_label,
         disabled=not g2b_enabled,
         help=(
-            "검증된 exact model mapping이 있는 품목만 조회합니다. 거래량이 많아 page cap을 넘으면 "
-            "날짜구간을 자동으로 분할해 완전수집을 시도합니다."
+            "기본은 최근 1년이며 2·3·5년까지 조회할 수 있습니다. 검증된 exact model mapping이 "
+            "있는 품목의 직접가격만 자동 조회합니다. 거래량이 많아 page cap을 넘으면 날짜구간을 "
+            "자동 분할해 완전수집을 시도합니다."
         ),
     )
     submitted = st.form_submit_button("가격자료 검색", type="primary")
@@ -73,19 +80,33 @@ if submitted:
         build_collectors(g2b_lookback_days=int(g2b_lookback_days)),
     )
 
+    st.subheader("출처별 검색상태")
+    source_rows = [
+        {
+            "출처": status.source_name,
+            "상태": status.status_label,
+            "건수": status.result_count,
+            "메모": status.note or status.error or "",
+        }
+        for status in run.source_statuses
+    ]
+    if source_rows:
+        st.dataframe(pd.DataFrame(source_rows), use_container_width=True, hide_index=True)
+
     if run.errors:
         st.warning("일부 수집기 오류: " + " / ".join(run.errors))
 
-    if g2b_enabled and not review_input.model_name:
+    skipped_sources = [status for status in run.source_statuses if status.skipped]
+    if skipped_sources:
         st.info(
-            "나라장터 자동검색은 현재 exact model 입력이 있을 때만 실행합니다. "
-            "제품군만으로 세부품명을 추정하지 않습니다."
+            "`미검색`은 API를 실행했는데 0건이라는 뜻이 아닙니다. 안전한 직접가격 조회에 필요한 "
+            "검증된 세부품명 mapping이 없어 해당 API 호출 자체를 보류한 상태입니다."
         )
 
     if not run.results:
         st.error(
-            "현재 연결된 공개가격 source에서 비교자료를 찾지 못했습니다. "
-            "비교근거 부족 상태로 처리합니다."
+            "현재 연결된 공개가격 source에서 비교자료를 확보하지 못했습니다. 위 출처별 상태에서 "
+            "`미검색`, `성공 · 0건`, `실패`를 구분해 확인하세요."
         )
         st.stop()
 
