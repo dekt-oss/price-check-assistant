@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import hashlib
+import tempfile
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+from purchase_price.services.quote_extraction import QuoteExtractionError, extract_quote_file
+from purchase_price.services.quote_extraction_diagnostics import (
+    diagnose_quote_extraction,
+    diagnose_quote_extraction_error,
+)
+from purchase_price.services.quote_uat_review import (
+    build_redacted_uat_summary,
+    compare_review_rows,
+    quote_item_to_review_row,
+    redacted_uat_summary_json,
+)
+
+st.set_page_config(page_title="견적추출 UAT", page_icon="🧪", layout="wide")
+st.title("견적추출 UAT")
+st.caption(
+    "실제 견적서를 여러 건 업로드해 자동 추출값과 담당자 원문 대조값을 비교합니다. "
+    "업로드 원본과 수정한 정답값은 서버에 영구 저장하지 않으며, 다운로드 결과는 비식별 통계만 포함합니다."
+)
+
+with st.expander("UAT 운영 원칙", expanded=False):
+    st.write(
+        "- 최소 5건을 담당자가 원문 대조 완료해야 1차 UAT 표본 목표를 충족합니다.\n"
+        "- 자동 추출값을 그대로 정답으로 간주하지 않습니다. 원문을 보고 수정한 뒤 `원문 대조 완료`를 체크하세요.\n"
+        "- 품목이 누락됐으면 정답표에 행을 추가하고, 잘못 추출된 품목은 정답표에서 삭제하세요.\n"
+        "- 이 화면의 통계는 parser 성능 측정용이며 가격 적정성 판정이나 `QUOTE_COMPARABLE` 승인과 무관합니다.\n"
+        "- 스캔 PDF는 현재 OCR을 실행하지 않고 `OCR 대상`으로만 분류합니다."
+    )
+
+uploaded_files = st.file_uploader(
+    "UAT 견적 파일",
+    type=["pdf", "xlsx", "xls"],
+    accept_multiple_files=True,
+    help="가능하면 서로 다른 업체/양식의 견적을 5건 이상 선택하세요.",
+)
+
+_UI_COLUMNS = {
+    "product_name": "제품명",
+    "manufacturer": "제조사",
+    "model_name": "모델명",
+    "specification": "규격",
+    "quantity": "수량",
+    "unit": "단위",
+    "unit_price": "단가",
+    "total_amount": "총액",
+    "vat_status": "VAT",
+}
+_REVERSE_UI_COLUMNS = {label: field for field, label in _UI_COLUMNS.items()}
+
+
+def _review_frame(items: tuple[object, ...]) -> pd.DataFrame:
+    rows = [quote_item_to_review_row(item) for item in items]
+    if not rows:
+        rows = [{field: None for field in _UI_COLUMNS}]
+    return pd.DataFrame(rows).rename(columns=_UI_COLUMNS)
+
+
+def _expected_rows(frame: pd.DataFrame) -> list[dict[str, object]]:
+    normalized = frame.rename(columns=_REVERSE_UI_COLUMNS)
+    rows: list[dict[str, object]] = []
+    for row in normalized.to_dict(orient="records"):
+        if not any(pd.notna(value) and str(value).strip() for value in row.values()):
+            continue
+        rows.append(row)
+    return rows
+
+
+confirmed_metrics = []
+
+for case_index, uploaded in enumerate(uploaded_files or (), start=1):
+    case_id = f"UAT-{case_index:03d}"
+    payload = uploaded.getvalue()
+    fingerprint = hashlib.sha256(payload).hexdigest()[:12]
+    suffix = Path(uploaded.name).suffix.casefold()
+
+    extraction_error: QuoteExtractionError | None = None
+    with tempfile.NamedTemporaryFile(delete=True, suffix=suffix) as tmp:
+        tmp.write(payload)
+        tmp.flush()
+        path = Path(tmp.name)
+        try:
+            extraction = extract_quote_file(path)
+            diagnostics = diagnose_quote_extraction(path, extraction)
+            actual_items = extraction.items
+            warnings = extraction.warnings
+        except QuoteExtractionError as exc:
+            extraction_error = exc
+            diagnostics = diagnose_quote_extraction_error(path, exc)
+            actual_items = ()
+            warnings = (str(exc),)
+
+    with st.expander(
+        f"{case_id} · {uploaded.name} · {diagnostics.strategy_label}",
+        expanded=case_index == 1,
+    ):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("자동 추출 품목", len(actual_items))
+        c2.metric("경고", len(warnings))
+        c3.metric("추출 경로", diagnostics.strategy_label)
+
+        if extraction_error is not None:
+            st.error(str(extraction_error))
+        for warning in warnings:
+            if extraction_error is None:
+                st.warning(warning)
+
+        st.markdown("**자동 추출값**")
+        auto_frame = _review_frame(actual_items)
+        if actual_items:
+            st.dataframe(auto_frame, use_container_width=True, hide_index=True)
+        else:
+            st.info("자동 추출 품목이 없습니다. 아래 정답표에 원문 기준 품목을 직접 추가하세요.")
+
+        st.markdown("**담당자 원문 대조 정답표**")
+        st.caption(
+            "원문을 직접 확인해 수정하세요. 누락 품목은 행 추가, 오인 품목은 행 삭제가 가능합니다. "
+            "빈 값은 해당 필드 정확도 계산에서 제외됩니다."
+        )
+        reviewed = st.data_editor(
+            auto_frame,
+            key=f"quote_uat_editor_{fingerprint}",
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            column_config={
+                "수량": st.column_config.NumberColumn(format="%.4f"),
+                "단가": st.column_config.NumberColumn(format="%.0f"),
+                "총액": st.column_config.NumberColumn(format="%.0f"),
+            },
+        )
+        expected_rows = _expected_rows(reviewed)
+
+        confirmed = st.checkbox(
+            "원문 대조 완료 — 이 케이스를 UAT 통계에 포함",
+            key=f"quote_uat_confirmed_{fingerprint}",
+        )
+        if confirmed:
+            metric = compare_review_rows(
+                case_id=case_id,
+                strategy=diagnostics.strategy_label,
+                actual_items=actual_items,
+                expected_rows=expected_rows,
+                extraction_failed=extraction_error is not None,
+            )
+            confirmed_metrics.append(metric)
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("품목 수", "일치" if metric.exact_item_count else "불일치")
+            m2.metric("평가 필드", metric.scored_fields)
+            m3.metric("필드 오류", metric.field_errors)
+            rate = metric.field_error_rate
+            m4.metric("필드 오류율", "N/A" if rate is None else f"{rate:.1%}")
+            if metric.status == "PASS":
+                st.success("이 케이스는 현재 입력한 ground truth 기준으로 품목 수와 평가 필드가 일치합니다.")
+            else:
+                fields = ", ".join(metric.error_fields) or "품목 수"
+                st.warning(f"검토 필요: {fields}")
+
+st.divider()
+st.subheader("UAT 집계")
+summary = build_redacted_uat_summary(confirmed_metrics, minimum_cases=5)
+
+s1, s2, s3, s4 = st.columns(4)
+s1.metric("원문 대조 완료", summary["total_confirmed_cases"])
+s2.metric("추출 실패", summary["extraction_failures"])
+s3.metric("품목 수 정확 일치", summary["exact_item_count_cases"])
+field_rate = summary["field_error_rate"]
+s4.metric("전체 필드 오류율", "N/A" if field_rate is None else f"{field_rate:.1%}")
+
+if summary["minimum_case_target_met"]:
+    st.success("실제 견적 최소 5건 UAT 표본 목표를 충족했습니다.")
+else:
+    remaining = 5 - int(summary["total_confirmed_cases"])
+    st.info(f"1차 UAT 표본 목표까지 원문 대조 완료 견적 {remaining}건이 더 필요합니다.")
+
+if confirmed_metrics:
+    st.dataframe(
+        pd.DataFrame(metric.to_redacted_dict() for metric in confirmed_metrics),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.download_button(
+        "비식별 UAT 결과 JSON 다운로드",
+        data=redacted_uat_summary_json(confirmed_metrics, minimum_cases=5),
+        file_name="quote-extraction-uat-redacted.json",
+        mime="application/json",
+    )
+
+st.caption(
+    "UAT 결과 파일에는 실제 파일명·견적 원문·제품명·제조사명·모델명·규격·단가·총액 값을 포함하지 않습니다. "
+    "자동 추출값 및 수정값은 현재 Streamlit 세션에서만 사용합니다."
+)
