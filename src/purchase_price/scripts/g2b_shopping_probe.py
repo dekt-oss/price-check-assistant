@@ -49,14 +49,16 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
     settings = get_settings()
-    if not settings.data_go_kr_service_key:
+    service_key = settings.resolved_g2b_service_key
+    if not service_key:
         raise SystemExit(
-            "DATA_GO_KR_SERVICE_KEY is not configured. Add it only to local .env after approval."
+            "G2B_SERVICE_KEY or legacy DATA_GO_KR_SERVICE_KEY is not configured. "
+            "Add it only to an approved secret store for live API calls."
         )
 
     params: dict[str, Any] = dict(args.param)
     client = PublicDataPortalClient(
-        settings.data_go_kr_service_key,
+        service_key,
         timeout_seconds=settings.g2b_request_timeout_seconds,
         max_retries=settings.g2b_max_retries,
     )
