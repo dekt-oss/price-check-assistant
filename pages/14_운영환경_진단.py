@@ -36,7 +36,8 @@ for start in range(0, len(checks), 4):
             st.caption(check.detail)
 st.info(
     "READY는 설치/인증 준비상태일 뿐 실제 API 성공이나 OCR 정확도를 뜻하지 않습니다. "
-    "아래 live smoke는 제출 버튼을 누를 때만 공식 API를 호출합니다. 재시도 설정에 따라 물리 HTTP 요청은 복수일 수 있습니다."
+    "아래 live smoke는 제출 버튼을 누를 때만 공식 API를 호출합니다. "
+    "각 실행은 논리 API 요청 1회로 제한되며 재시도 설정을 포함한 최대 HTTP 시도 횟수도 결과에 표시합니다."
 )
 
 
@@ -53,10 +54,14 @@ def _render_live_result(session_key: str) -> None:
         st.error("실패 — 외부 API 요청 오류")
     elif result.status in {LIVE_NOT_READY, LIVE_INVALID}:
         st.warning("미실행")
-    m1, m2, m3 = st.columns(3)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("응답 품목", "-" if result.record_count is None else result.record_count)
     m2.metric("전체 건수", "-" if result.total_count is None else result.total_count)
     m3.metric("응답시간", f"{result.elapsed_ms:.0f} ms")
+    request_budget = "-" if result.logical_requests == 0 else (
+        f"{result.logical_requests} / 최대 {result.max_http_attempts} HTTP"
+    )
+    m4.metric("요청 예산", request_budget)
     st.caption(result.detail)
 
 

@@ -35,6 +35,8 @@ class LiveSmokeResult:
     total_count: int | None
     elapsed_ms: float
     detail: str
+    logical_requests: int = 0
+    max_http_attempts: int = 0
 
     @property
     def ok(self) -> bool:
@@ -50,6 +52,8 @@ class LiveSmokeResult:
             "total_count": self.total_count,
             "elapsed_ms": round(self.elapsed_ms, 1),
             "detail": self.detail,
+            "logical_requests": self.logical_requests,
+            "max_http_attempts": self.max_http_attempts,
         }
 
 
@@ -82,7 +86,12 @@ def _invalid(*, source_key: str, label: str, field_label: str) -> LiveSmokeResul
 
 
 def _failure(
-    *, source_key: str, label: str, started: float, error: Exception
+    *,
+    source_key: str,
+    label: str,
+    started: float,
+    error: Exception,
+    max_http_attempts: int,
 ) -> LiveSmokeResult:
     return LiveSmokeResult(
         source_key,
@@ -92,6 +101,8 @@ def _failure(
         None,
         _elapsed_ms(started),
         f"외부 API 요청 실패 ({type(error).__name__}). 0건 조회와 구분됩니다.",
+        logical_requests=1,
+        max_http_attempts=max_http_attempts,
     )
 
 
@@ -102,6 +113,7 @@ def _success_result(
     started: float,
     record_count: int,
     total_count: int | None,
+    max_http_attempts: int,
 ) -> LiveSmokeResult:
     has_records = record_count > 0 or bool(total_count and total_count > 0)
     status = LIVE_SUCCESS if has_records else LIVE_SUCCESS_0
@@ -118,6 +130,8 @@ def _success_result(
         total_count,
         _elapsed_ms(started),
         detail,
+        logical_requests=1,
+        max_http_attempts=max_http_attempts,
     )
 
 
@@ -139,6 +153,7 @@ def run_g2b_live_smoke(
     service_key = (settings.resolved_g2b_service_key or "").strip()
     if not service_key:
         return _not_ready(source_key=source_key, label=label)
+    max_http_attempts = 1 + max(0, settings.g2b_max_retries)
     end_date = today or date.today()
     begin_date = end_date - timedelta(days=lookback_days)
     client = portal_client or PublicDataPortalClient(
@@ -162,13 +177,20 @@ def run_g2b_live_smoke(
         )
         page = unwrap_g2b_page(payload)
     except (PublicDataClientError, ValueError, OSError) as exc:
-        return _failure(source_key=source_key, label=label, started=started, error=exc)
+        return _failure(
+            source_key=source_key,
+            label=label,
+            started=started,
+            error=exc,
+            max_http_attempts=max_http_attempts,
+        )
     return _success_result(
         source_key=source_key,
         label=label,
         started=started,
         record_count=len(page.items),
         total_count=page.total_count,
+        max_http_attempts=max_http_attempts,
     )
 
 
@@ -186,6 +208,7 @@ def run_mfds_model_live_smoke(
     service_key = (settings.resolved_mfds_service_key or "").strip()
     if not service_key:
         return _not_ready(source_key=source_key, label=label)
+    max_http_attempts = 1 + max(0, settings.mfds_max_retries)
     client = model_client or MfdsModelInfoClient(
         service_key,
         base_url=settings.mfds_model_info_base_url or MFDS_MODEL_INFO_BASE_URL,
@@ -196,13 +219,20 @@ def run_mfds_model_live_smoke(
     try:
         page = client.fetch_page(product_name=query, page_no=1, num_of_rows=1)
     except (PublicDataClientError, ValueError, OSError) as exc:
-        return _failure(source_key=source_key, label=label, started=started, error=exc)
+        return _failure(
+            source_key=source_key,
+            label=label,
+            started=started,
+            error=exc,
+            max_http_attempts=max_http_attempts,
+        )
     return _success_result(
         source_key=source_key,
         label=label,
         started=started,
         record_count=len(page.items),
         total_count=page.total_count,
+        max_http_attempts=max_http_attempts,
     )
 
 
@@ -220,6 +250,7 @@ def run_mfds_business_live_smoke(
     service_key = (settings.resolved_mfds_service_key or "").strip()
     if not service_key:
         return _not_ready(source_key=source_key, label=label)
+    max_http_attempts = 1 + max(0, settings.mfds_max_retries)
     client = business_client or MfdsBusinessLicenseClient(
         service_key,
         base_url=settings.mfds_business_license_base_url or MFDS_BUSINESS_LICENSE_BASE_URL,
@@ -230,13 +261,20 @@ def run_mfds_business_live_smoke(
     try:
         records = client.search_company(query, page_no=1, num_of_rows=1)
     except (PublicDataClientError, ValueError, OSError) as exc:
-        return _failure(source_key=source_key, label=label, started=started, error=exc)
+        return _failure(
+            source_key=source_key,
+            label=label,
+            started=started,
+            error=exc,
+            max_http_attempts=max_http_attempts,
+        )
     return _success_result(
         source_key=source_key,
         label=label,
         started=started,
         record_count=len(records),
         total_count=None,
+        max_http_attempts=max_http_attempts,
     )
 
 
@@ -253,4 +291,6 @@ def result_from_public_dict(payload: dict[str, Any]) -> LiveSmokeResult:
         ),
         elapsed_ms=float(payload.get("elapsed_ms") or 0.0),
         detail=str(payload["detail"]),
+        logical_requests=int(payload.get("logical_requests") or 0),
+        max_http_attempts=int(payload.get("max_http_attempts") or 0),
     )
