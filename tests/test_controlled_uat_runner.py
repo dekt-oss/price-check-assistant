@@ -1,4 +1,7 @@
-from purchase_price.scripts.run_controlled_uat import run_controlled_uat
+import csv
+from pathlib import Path
+
+from purchase_price.scripts.run_controlled_uat import _write_outputs, run_controlled_uat
 
 
 def test_controlled_uat_runner_executes_offline_cases_without_blockers() -> None:
@@ -17,6 +20,21 @@ def test_controlled_uat_runner_executes_offline_cases_without_blockers() -> None
     assert summary["provenance_secret_filter_and_fingerprint_ok"] is True
     assert summary["release_blocker_count"] == 0
     assert summary["live_required_cases"] == ["UAT-04", "UAT-14", "UAT-15"]
+
+
+def test_controlled_uat_results_write_with_exact_template_schema(tmp_path: Path) -> None:
+    cases, summary = run_controlled_uat()
+
+    _write_outputs(tmp_path, cases, summary)
+
+    with (tmp_path / "controlled-uat-results.csv").open(
+        "r", encoding="utf-8-sig", newline=""
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert len(rows) == 15
+    assert all(None not in row for row in rows)
+    assert (tmp_path / "controlled-uat-summary.json").is_file()
 
 
 def test_quantity_mismatch_is_recorded_as_known_conservative_false_negative() -> None:
