@@ -1,0 +1,6 @@
+case_id,file_path,item_index,product_name,manufacturer,model_name,specification,quantity,unit_price,total_amount
+QUOTE-01,private_uat/quote01.pdf,1,샘플 품목,샘플 제조사,MODEL-001,규격 A,1,1000000,1000000
+QUOTE-02,private_uat/quote02.pdf,1,샘플 품목 2,샘플 제조사,MODEL-002,규격 B,2,500000,1000000
+QUOTE-03,private_uat/quote03.xlsx,1,샘플 품목 3,샘플 제조사,MODEL-003,규격 C,1,1500000,1500000
+QUOTE-04,private_uat/quote04.pdf,1,샘플 품목 4,샘플 제조사,MODEL-004,규격 D,3,700000,2100000
+QUOTE-05,private_uat/quote05.xls,1,샘플 품목 5,샘플 제조사,MODEL-005,규격 E,1,900000,900000
