@@ -20,6 +20,9 @@ def test_controlled_uat_runner_executes_offline_cases_without_blockers() -> None
     assert summary["provenance_secret_filter_and_fingerprint_ok"] is True
     assert summary["release_blocker_count"] == 0
     assert summary["live_required_cases"] == ["UAT-04", "UAT-14", "UAT-15"]
+    assert all(
+        case.assertion_status == "PASS" for case in cases if case.automated
+    ), "every deterministic automated UAT case must remain green against the current base"
 
 
 def test_controlled_uat_results_write_with_exact_template_schema(tmp_path: Path) -> None:
