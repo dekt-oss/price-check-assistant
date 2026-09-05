@@ -169,10 +169,36 @@ def _looks_like_price(value: str) -> bool:
     return number > 0
 
 
+def _looks_like_quantity(value: str) -> bool:
+    text = value.replace(",", "").strip().strip("()")
+    if not text:
+        return False
+    try:
+        number = float(text)
+    except ValueError:
+        return False
+    return number >= 0
+
+
 def _row_has_price(cells: list[str], anchors: list[_HeaderAnchor]) -> bool:
     for index, anchor in enumerate(anchors):
         if anchor.field in _PRICE_FIELDS and _looks_like_price(cells[index]):
             return True
+    return False
+
+
+def _row_has_invalid_quantity(cells: list[str], anchors: list[_HeaderAnchor]) -> bool:
+    """Reject geometry rows whose populated quantity cell is visibly shifted/non-numeric.
+
+    Quantity remains optional. This only treats a non-empty, non-numeric reconstructed quantity
+    as evidence that column geometry is unreliable, so the caller can use a safer fallback.
+    """
+
+    for index, anchor in enumerate(anchors):
+        if anchor.field != "quantity":
+            continue
+        value = cells[index].strip()
+        return bool(value) and not _looks_like_quantity(value)
     return False
 
 
@@ -223,6 +249,8 @@ def extract_word_geometry_rows_from_words(
             if pending is not None:
                 cells = _merge_cells(pending, cells)
                 pending = None
+            if _row_has_invalid_quantity(cells, anchors):
+                continue
             rows.append(tuple(cells))
             continue
 

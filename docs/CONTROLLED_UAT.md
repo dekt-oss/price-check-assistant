@@ -1,6 +1,6 @@
 # Controlled UAT 프로토콜
 
-기준일: 2026-09-04
+기준일: 2026-09-05
 
 ## 1. 목적
 
@@ -223,8 +223,55 @@ provenance 재검증 가능률
 
 표본이 적으면 비율만 단독으로 강조하지 않고 반드시 분자/분모를 같이 표시한다.
 
-## 10. 현재 상태
+## 10. deterministic offline pre-UAT
 
-이 문서는 UAT **프로토콜과 빈 기록양식**이다.
+`purchase_price.scripts.run_controlled_uat`는 실제 업무 UAT 전에 안전계약의 주요 경로를 반복 검증하는 **deterministic pre-UAT**다.
 
-2026-09-04 현재 이 문서 자체로 실제 UAT가 수행된 것은 아니다. 실제 샘플을 실행하지 않은 항목은 `미검증`으로 유지한다.
+CI에서는 다음처럼 실행한다.
+
+```bash
+python -m purchase_price.scripts.run_controlled_uat \
+  --fail-on-blocker \
+  --output-dir artifacts/controlled-uat-offline
+```
+
+현재 자동화 범위는 15개 프로토콜 케이스 중 12개다.
+
+자동 실행:
+
+- UAT-01~03
+- UAT-05~13
+
+실제 MFDS 공식 API/Production live 표본이 필요한 다음 3개는 offline runner가 성공으로 꾸미지 않고 `NOT_RUN_LIVE_REQUIRED`로 남긴다.
+
+- UAT-04 exact MFDS identity
+- UAT-14 ambiguous permit
+- UAT-15 취소/취하/수출전용 상태
+
+CI artifact:
+
+- `controlled-uat-results.csv`
+- `controlled-uat-summary.json`
+
+### 이 결과를 실제 UAT와 혼동하지 않는다
+
+offline runner의 사람판정은 시스템 계약을 검증하기 위해 사전에 고정한 synthetic ground truth다. 따라서 다음을 증명하지 않는다.
+
+- 실제 병원/공급사 견적 양식의 추출 성공률
+- 실제 시장에서의 source coverage
+- 실제 업무시간 절감
+- 실제 담당자 재사용 가치
+- 실제 MFDS/G2B live availability
+
+특히 UAT-11은 `동일 모델 + 동일 단위 + 명시 단가 + 수량만 차이`인 synthetic pair를 의도적으로 만들어 현재 quantity equality가 **comparison false negative 1건**을 만드는지 감시한다. 이는 보수성 신호이지, 규칙을 즉시 완화하라는 근거가 아니다.
+
+## 11. 현재 상태
+
+2026-09-05 기준:
+
+- 프로토콜/기록양식: 구축
+- deterministic offline pre-UAT: 구현 진행
+- 실제 승인된 샘플/비식별 문서를 이용한 업무 UAT: **미검증**
+- Production G2B/MFDS/UDI live smoke: **별도 검증 필요**
+
+실제 샘플을 실행하지 않은 항목은 계속 `미검증`으로 유지한다.
