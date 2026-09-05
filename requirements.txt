@@ -1,7 +1,7 @@
 -e .
 
 # Streamlit Community Cloud runtime parser manifest.
-# Revision 2026-09-05d: include local scanned-PDF OCR dependencies.
+# Revision 2026-09-05e: force a full dependency rebuild after OCR runtime diagnosis.
 openpyxl>=3.1,<4
 xlrd>=2.0,<3
 pypdf>=6.17,<7
