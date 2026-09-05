@@ -14,6 +14,11 @@ from purchase_price.services.device_research_handoff import (
     QUOTE_REVIEW_ROWS_SESSION_KEY,
     build_device_research_prefill,
 )
+from purchase_price.services.g2b_search_policy import (
+    G2B_DEFAULT_LOOKBACK_DAYS,
+    G2B_LOOKBACK_OPTIONS,
+    g2b_lookback_label,
+)
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.quote_extraction import (
@@ -46,6 +51,7 @@ with st.expander("현재 지원 범위", expanded=False):
         "- 로컬 OCR은 자원 보호를 위해 앞 12페이지까지만 처리하며 인식값은 반드시 원문과 대조합니다.\n"
         "- PDF 표는 문서 레이아웃에 따라 열이 어긋날 수 있어 추출값을 반드시 확인·수정합니다.\n"
         "- 모델 동일성과 가격판정 안전게이트는 통합검색과 동일한 규칙을 사용합니다.\n"
+        "- 나라장터 직접가격은 exact model + verified mapping에서만 조회하며 mapping이 없으면 `미검색`으로 표시합니다.\n"
         "- 추출 행의 제품명·제조사·모델명·규격만 의료기기 시장조사로 넘길 수 있습니다.\n"
         "- 페이지 이동 중에는 수정한 견적 행을 현재 Streamlit 세션에만 임시 유지합니다."
     )
@@ -53,18 +59,20 @@ with st.expander("현재 지원 범위", expanded=False):
 if not g2b_enabled:
     st.warning(
         "나라장터 서비스키가 설정되지 않아 G2B live 검색이 비활성화되어 있습니다. "
-        "Streamlit Secrets에 `G2B_SERVICE_KEY = \"...\"`를 저장하세요. "
-        "기존 DATA_GO_KR_SERVICE_KEY가 있으면 하위호환으로 사용합니다."
+        "Streamlit Secrets에 G2B source-specific 또는 DATA_GO_KR_MARKET_SERVICE_KEY를 설정하세요."
     )
 
 uploaded = st.file_uploader("PDF 또는 Excel 견적서", type=["pdf", "xlsx", "xls"])
 g2b_lookback_days = st.selectbox(
     "나라장터 검색기간",
-    options=[30, 90, 180, 365],
-    index=1,
-    format_func=lambda days: f"최근 {days}일",
+    options=G2B_LOOKBACK_OPTIONS,
+    index=G2B_LOOKBACK_OPTIONS.index(G2B_DEFAULT_LOOKBACK_DAYS),
+    format_func=g2b_lookback_label,
     disabled=not g2b_enabled,
-    help="exact model + verified G2B mapping이 있는 품목만 자동 조회합니다.",
+    help=(
+        "기본은 최근 1년이며 2·3·5년까지 조회할 수 있습니다. exact model + verified G2B "
+        "mapping이 있는 품목만 직접가격으로 자동 조회합니다."
+    ),
 )
 
 
@@ -209,9 +217,7 @@ if quote_rows:
             if prefill is None:
                 st.warning("선택 행에 의료기기 시장조사로 넘길 식별정보가 없습니다.")
             else:
-                st.session_state[DEVICE_RESEARCH_HANDOFF_SESSION_KEY] = (
-                    prefill.to_session_payload()
-                )
+                st.session_state[DEVICE_RESEARCH_HANDOFF_SESSION_KEY] = prefill.to_session_payload()
                 st.switch_page("pages/4_의료기기_시장조사.py")
     else:
         st.info("제품명·제조사·모델명·규격 중 하나 이상 입력하면 시장조사로 연결할 수 있습니다.")
@@ -224,6 +230,7 @@ if quote_rows:
         collectors = build_collectors(g2b_lookback_days=int(g2b_lookback_days))
         summary_rows: list[dict[str, object]] = []
         detail_runs: list[tuple[str, list[dict[str, object]]]] = []
+        source_status_runs: list[tuple[str, list[dict[str, object]]]] = []
 
         with st.spinner("공개 가격근거를 조회하고 있습니다..."):
             for _, row in edited[edited["검색"].fillna(False)].iterrows():
@@ -240,9 +247,7 @@ if quote_rows:
                     summary_rows.append(
                         {
                             "제품": "식별정보 미입력 품목",
-                            "견적단가": (
-                                float(quote_unit_price) if quote_unit_price is not None else None
-                            ),
+                            "견적단가": float(quote_unit_price) if quote_unit_price is not None else None,
                             "관측근거": 0,
                             "관측가 하단": None,
                             "관측가 상단": None,
@@ -257,11 +262,27 @@ if quote_rows:
                 run = search_all(review_input.to_product_query(), collectors)
                 assessment = assess_prices(run.results, review_input.quote_unit_price)
 
+                source_rows = [
+                    {
+                        "출처": source_status.source_name,
+                        "상태": source_status.status_label,
+                        "건수": source_status.result_count,
+                        "메모": source_status.note or source_status.error or "",
+                    }
+                    for source_status in run.source_statuses
+                ]
+                source_status_runs.append((label, source_rows))
+
                 status = assessment.message
                 if run.errors:
                     status += " / 일부 수집기 오류: " + " / ".join(run.errors)
-                if not run.results and not run.errors:
-                    status = "현재 연결된 공개가격 source에서 비교근거를 찾지 못함"
+                skipped = [s for s in run.source_statuses if s.skipped]
+                if skipped:
+                    status += " / " + " / ".join(
+                        f"{s.source_name}: 미검색 ({s.note or '안전조건 미충족'})" for s in skipped
+                    )
+                if not run.results and not run.errors and not skipped:
+                    status = "현재 연결된 공개가격 source를 정상 검색했으나 비교근거 0건"
 
                 summary_rows.append(
                     {
@@ -272,12 +293,8 @@ if quote_rows:
                             else None
                         ),
                         "관측근거": assessment.observed_count,
-                        "관측가 하단": (
-                            float(assessment.low) if assessment.low is not None else None
-                        ),
-                        "관측가 상단": (
-                            float(assessment.high) if assessment.high is not None else None
-                        ),
+                        "관측가 하단": float(assessment.low) if assessment.low is not None else None,
+                        "관측가 상단": float(assessment.high) if assessment.high is not None else None,
                         "신뢰도": assessment.confidence,
                         "견적 위치": assessment.quote_position or "판정보류",
                         "상태": status,
@@ -314,12 +331,24 @@ if quote_rows:
             },
         )
         st.info(
+            "`미검색`은 API 0건이 아니라 안전한 직접가격 조회에 필요한 verified mapping이 없어 "
+            "해당 API를 실행하지 않았다는 뜻입니다. `성공 · 0건` 및 `실패`와 구분합니다."
+        )
+        st.info(
             "현재 외부가격 근거는 대부분 `observed_only`입니다. 따라서 견적단가가 입력돼 있어도 "
             "VAT·배송·설치·옵션·보증 등 거래조건이 `quote_comparable`로 검증되지 않으면 "
             "높다/낮다 판정은 보류합니다."
         )
 
-        st.subheader("5. 품목별 근거자료")
+        st.subheader("5. 출처별 검색상태")
+        for label, source_rows in source_status_runs:
+            with st.expander(f"{label} 출처 상태"):
+                if source_rows:
+                    st.dataframe(pd.DataFrame(source_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.write("실행된 공개가격 source가 없습니다.")
+
+        st.subheader("6. 품목별 근거자료")
         for label, evidence_rows in detail_runs:
             with st.expander(f"{label} 근거 {len(evidence_rows)}건"):
                 if evidence_rows:
