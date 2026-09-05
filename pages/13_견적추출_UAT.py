@@ -32,7 +32,8 @@ with st.expander("UAT 운영 원칙", expanded=False):
         "- 자동 추출값을 그대로 정답으로 간주하지 않습니다. 원문을 보고 수정한 뒤 `원문 대조 완료`를 체크하세요.\n"
         "- 품목이 누락됐으면 정답표에 행을 추가하고, 잘못 추출된 품목은 정답표에서 삭제하세요.\n"
         "- 이 화면의 통계는 parser 성능 측정용이며 가격 적정성 판정이나 `QUOTE_COMPARABLE` 승인과 무관합니다.\n"
-        "- 스캔 PDF는 현재 OCR을 실행하지 않고 `OCR 대상`으로만 분류합니다."
+        "- 텍스트 레이어가 없는 스캔 PDF는 로컬 Tesseract(kor+eng) OCR을 사용하며 `PDF 로컬 OCR` 전략으로 별도 집계합니다.\n"
+        "- OCR은 앞 12페이지까지만 처리하며, 외부 Vision API로 견적 원문을 전송하지 않습니다."
     )
 
 uploaded_files = st.file_uploader(
