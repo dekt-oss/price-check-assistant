@@ -1,8 +1,7 @@
 -e .
 
-# Streamlit Community Cloud caches installs from requirements.txt. Keep quote-upload
-# runtime parsers explicit here so a pyproject-only dependency change cannot leave an
-# existing deployment without the modules needed to open the quote-analysis page.
+# Streamlit Community Cloud runtime parser manifest.
+# Revision 2026-09-05b: keep these explicit so dependency-cache rebuilds include quote parsers.
 openpyxl>=3.1,<4
 xlrd>=2.0,<3
-pypdf>=5,<7
+pypdf>=6.17,<7
