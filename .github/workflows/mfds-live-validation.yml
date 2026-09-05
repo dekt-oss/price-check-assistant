@@ -35,6 +35,10 @@ jobs:
     env:
       MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY }}
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      INPUT_PRODUCT_NAME: ${{ inputs.product_name }}
+      INPUT_MODEL_NAME: ${{ inputs.model_name }}
+      INPUT_COMPANY_NAME: ${{ inputs.company_name }}
+      INPUT_EXPECTATION: ${{ inputs.expectation }}
 
     steps:
       - name: Checkout
@@ -55,10 +59,10 @@ jobs:
         shell: bash
         run: |
           python -m purchase_price.scripts.run_mfds_live_validation \
-            --product-name "${{ inputs.product_name }}" \
-            --model-name "${{ inputs.model_name }}" \
-            --company-name "${{ inputs.company_name }}" \
-            --expectation "${{ inputs.expectation }}" \
+            --product-name "$INPUT_PRODUCT_NAME" \
+            --model-name "$INPUT_MODEL_NAME" \
+            --company-name "$INPUT_COMPANY_NAME" \
+            --expectation "$INPUT_EXPECTATION" \
             --output artifacts/mfds-live-validation/report.json
 
       - name: Upload MFDS validation report
