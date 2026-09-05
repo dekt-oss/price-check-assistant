@@ -1,0 +1,71 @@
+name: MFDS Live Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_name:
+        description: "식약처 공식 품목명 (PRDLST_NM)"
+        required: true
+      model_name:
+        description: "exact 형명 검증값 (선택)"
+        required: false
+        default: ""
+      company_name:
+        description: "업허가 업체명 Entrps 조회값 (선택)"
+        required: false
+        default: ""
+      expectation:
+        description: "검증 기대값. 모르면 api-only"
+        required: true
+        type: choice
+        default: api-only
+        options:
+          - api-only
+          - exact-active
+          - exact-ambiguous
+          - exact-inactive
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run official MFDS validation
+        shell: bash
+        run: |
+          python -m purchase_price.scripts.run_mfds_live_validation \
+            --product-name "${{ inputs.product_name }}" \
+            --model-name "${{ inputs.model_name }}" \
+            --company-name "${{ inputs.company_name }}" \
+            --expectation "${{ inputs.expectation }}" \
+            --output artifacts/mfds-live-validation/report.json
+
+      - name: Upload MFDS validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfds-live-validation
+          path: artifacts/mfds-live-validation/report.json
+          retention-days: 14
+          if-no-files-found: error
