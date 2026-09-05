@@ -13,8 +13,10 @@ class QuoteExtractionStrategy(StrEnum):
     PDF_RULED_TABLE = "pdf_ruled_table"
     PDF_WORD_GEOMETRY = "pdf_word_geometry"
     PDF_TEXT_FALLBACK = "pdf_text_fallback"
+    PDF_LOCAL_OCR = "pdf_local_ocr"
     PDF_TEXT_UNRESOLVED = "pdf_text_unresolved"
     PDF_SCAN_NO_TEXT = "pdf_scan_no_text"
+    PDF_OCR_UNAVAILABLE = "pdf_ocr_unavailable"
     UNKNOWN = "unknown"
 
 
@@ -24,8 +26,10 @@ _STRATEGY_LABELS = {
     QuoteExtractionStrategy.PDF_RULED_TABLE: "PDF 표 선/셀 구조",
     QuoteExtractionStrategy.PDF_WORD_GEOMETRY: "PDF 단어 X/Y 좌표 재구성",
     QuoteExtractionStrategy.PDF_TEXT_FALLBACK: "PDF 텍스트 fallback",
+    QuoteExtractionStrategy.PDF_LOCAL_OCR: "PDF 로컬 OCR(Tesseract kor+eng)",
     QuoteExtractionStrategy.PDF_TEXT_UNRESOLVED: "PDF 텍스트는 있으나 품목 구조 미식별",
     QuoteExtractionStrategy.PDF_SCAN_NO_TEXT: "PDF 텍스트 레이어 없음(OCR 대상)",
+    QuoteExtractionStrategy.PDF_OCR_UNAVAILABLE: "PDF OCR 실행 불가",
     QuoteExtractionStrategy.UNKNOWN: "추출 경로 미확인",
 }
 
@@ -57,7 +61,9 @@ def _pdf_strategies(result: QuoteExtractionResult) -> tuple[QuoteExtractionStrat
     strategies: list[QuoteExtractionStrategy] = []
     for item in result.items:
         source = item.source_sheet
-        if "단어좌표" in source:
+        if "OCR" in source:
+            strategy = QuoteExtractionStrategy.PDF_LOCAL_OCR
+        elif "단어좌표" in source:
             strategy = QuoteExtractionStrategy.PDF_WORD_GEOMETRY
         elif "표" in source:
             strategy = QuoteExtractionStrategy.PDF_RULED_TABLE
@@ -67,7 +73,10 @@ def _pdf_strategies(result: QuoteExtractionResult) -> tuple[QuoteExtractionStrat
             strategies.append(strategy)
 
     if not strategies:
-        strategies.append(QuoteExtractionStrategy.PDF_TEXT_UNRESOLVED)
+        if any("로컬 OCR" in warning or "OCR" in warning for warning in result.warnings):
+            strategies.append(QuoteExtractionStrategy.PDF_LOCAL_OCR)
+        else:
+            strategies.append(QuoteExtractionStrategy.PDF_TEXT_UNRESOLVED)
     return tuple(strategies)
 
 
@@ -99,7 +108,13 @@ def diagnose_quote_extraction_error(
 ) -> QuoteExtractionDiagnostics:
     suffix = path.suffix.casefold()
     message = str(error)
-    if suffix == ".pdf" and "텍스트 레이어가 없습니다" in message:
+    if suffix == ".pdf" and (
+        "OCR을 실행할 수 없습니다" in message
+        or "OCR Python 모듈" in message
+        or "tesseract-ocr" in message
+    ):
+        strategies = (QuoteExtractionStrategy.PDF_OCR_UNAVAILABLE,)
+    elif suffix == ".pdf" and "텍스트 레이어가 없습니다" in message:
         strategies = (QuoteExtractionStrategy.PDF_SCAN_NO_TEXT,)
     else:
         strategies = (QuoteExtractionStrategy.UNKNOWN,)
