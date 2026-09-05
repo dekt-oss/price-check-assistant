@@ -42,6 +42,7 @@ def _is_summary_row(item: QuoteItem) -> bool:  # noqa: F405
 
 
 _original_extract_pdf_context = _core._extract_pdf_context
+_original_extract_pdf_quote = _core.extract_pdf_quote
 
 
 def _extract_pdf_context(texts):
@@ -64,17 +65,27 @@ def _extract_pdf_context(texts):
     return context
 
 
-# The extraction pipeline is implemented in quote_extraction_core. Patch its two
-# policy hooks so all Excel/PDF/OCR paths use the hardened behavior while this
-# compatibility module keeps the established import path stable.
+def _sync_core_test_seams() -> None:
+    """Mirror patchable compatibility-module seams into the extracted core."""
+    for name in ("run_local_pdf_ocr", "_extract_with_pdfplumber", "_extract_pypdf_text"):
+        if name in globals():
+            setattr(_core, name, globals()[name])
+
+
+def extract_pdf_quote(path):
+    _sync_core_test_seams()
+    return _original_extract_pdf_quote(path)
+
+
+# The extraction pipeline is implemented in quote_extraction_core. Patch its policy
+# hooks while keeping the established module import and test seams stable.
 _core._is_summary_row = _is_summary_row
 _core._extract_pdf_context = _extract_pdf_context
+_core.extract_pdf_quote = extract_pdf_quote
 
-# Private helpers used by regression tests and internal callers.
 parse_quote_decimal = _core.parse_quote_decimal
 extract_excel_quote = _core.extract_excel_quote
 extract_legacy_excel_quote = _core.extract_legacy_excel_quote
-extract_pdf_quote = _core.extract_pdf_quote
 extract_quote_file = _core.extract_quote_file
 quote_item_query = _core.quote_item_query
 QuoteExtractionError = _core.QuoteExtractionError
