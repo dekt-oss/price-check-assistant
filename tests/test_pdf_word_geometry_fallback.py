@@ -172,3 +172,60 @@ def test_ruled_table_wins_over_conflicting_word_fallback(monkeypatch, tmp_path: 
     assert result.items[0].product_name == "정상 장비"
     assert result.items[0].specification == "GOOD-1"
     assert result.items[0].unit_price == Decimal("1000000")
+
+
+def test_misaligned_geometry_with_non_numeric_quantity_falls_back_to_layout_text(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Mirrors a real PDF failure mode: proportional text makes a visually space-separated row
+    # drift left relative to its header anchors. Geometry would otherwise put "EA 5000000" in
+    # Quantity and still accept the later price as a valid row.
+    words = [
+        _word("Brand", 72.0, 98.68, 10),
+        _word("Model", 104.24, 131.47, 10),
+        _word("Specification", 137.03, 193.72, 10),
+        _word("Quantity", 199.28, 236.52, 10),
+        _word("Unit", 242.08, 259.86, 10),
+        _word("UnitPrice", 265.42, 305.98, 10),
+        _word("Amount", 311.54, 346.0, 10),
+        _word("GMS", 72.0, 94.78, 30),
+        _word("GMSR-182", 100.34, 150.35, 30),
+        _word("182L", 155.91, 178.15, 30),
+        _word("1", 183.71, 189.27, 30),
+        _word("EA", 194.83, 208.17, 30),
+        _word("5000000", 213.73, 252.65, 30),
+        _word("5000000", 258.21, 297.13, 30),
+    ]
+    plumber_page = _FakePlumberPage(
+        text=(
+            "Brand Model Specification Quantity Unit UnitPrice Amount\n"
+            "GMS GMSR-182 182L 1 EA 5000000 5000000"
+        ),
+        words=words,
+    )
+    monkeypatch.setattr(pdfplumber, "open", lambda _: _FakePlumberPdf([plumber_page]))
+    monkeypatch.setattr(
+        pypdf,
+        "PdfReader",
+        lambda _: _FakePyPdfReader(
+            [
+                "Brand  Model  Specification  Quantity  Unit  UnitPrice  Amount\n"
+                "GMS  GMSR-182  182L  1  EA  5000000  5000000"
+            ]
+        ),
+    )
+    path = tmp_path / "misaligned.pdf"
+    path.write_bytes(b"fixture")
+
+    result = extract_quote_file(path)
+
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.manufacturer == "GMS"
+    assert item.model_name == "GMSR-182"
+    assert item.specification == "182L"
+    assert item.quantity == Decimal("1")
+    assert item.unit == "EA"
+    assert item.unit_price == Decimal("5000000")
+    assert item.total_amount == Decimal("5000000")
+    assert "단어좌표" not in item.source_sheet
