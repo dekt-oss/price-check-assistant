@@ -1,11 +1,9 @@
 from decimal import Decimal
 from pathlib import Path
 
+from purchase_price.services.quote_extraction import extract_quote_file
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen.canvas import Canvas
-
-from purchase_price.services.quote_extraction import extract_quote_file
-
 
 _HEADERS = (
     ("Description", 40),
