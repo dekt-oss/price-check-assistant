@@ -34,10 +34,15 @@ def iter_specific_item_pages(
     requested `num_of_rows`: if the server silently caps a page at fewer rows than requested,
     counting requested rows would stop early and present a truncated result as complete.
 
+    The first page is also a request-budget probe. When its `totalCount` already proves that
+    the requested window cannot fit inside `max_pages * num_of_rows`, fail immediately so the
+    adaptive caller can split the date window instead of spending the whole page allowance
+    on a window that is known to be incomplete.
+
     The iterator fails closed when the explicit page cap would truncate the API result, and
-    when the API returns an empty page while `totalCount` says records remain.
-    It deliberately contains no SQLAlchemy/model imports so live probes and evidence
-    capture can run without a database driver.
+    when the API returns an empty page while `totalCount` says records remain. It deliberately
+    contains no SQLAlchemy/model imports so live probes and evidence capture can run without
+    a database driver.
     """
 
     if max_pages < 1:
@@ -60,6 +65,13 @@ def iter_specific_item_pages(
         if page.total_count is not None:
             if records_seen >= page.total_count:
                 return
+            if page_no == 1 and page.total_count > max_pages * num_of_rows:
+                raise G2BPaginationLimitError(
+                    "G2B totalCount exceeds the bounded page budget; split the date window: "
+                    f"total_count={page.total_count} capacity={max_pages * num_of_rows} "
+                    f"max_pages={max_pages} num_of_rows={num_of_rows} "
+                    f"detail_product_name={detail_product_name!r}"
+                )
             if not page.items:
                 raise PublicDataClientError(
                     "G2B page returned no items before totalCount was reached: "
