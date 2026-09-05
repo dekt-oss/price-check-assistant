@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from purchase_price.collectors import g2b_shopping, g2b_verified_search
+from purchase_price.collectors.base import CollectorSkipped
 from purchase_price.schemas import ProductQuery
 from purchase_price.services import g2b_adaptive_search, g2b_pagination
 from purchase_price.services.g2b_product_mapping import G2BProductMapping
@@ -162,7 +163,8 @@ def test_user_collector_requires_exact_model_and_verified_mapping() -> None:
     assert stub.calls == [(date(2026, 7, 1), date(2026, 7, 10))]
 
     no_model = ProductQuery(product_name="인공호흡기", manufacturer="Stephan")
-    assert collector.search(no_model) == []
+    with pytest.raises(CollectorSkipped, match="exact 모델명이 없어"):
+        collector.search(no_model)
     assert len(stub.calls) == 1
 
     unverified = G2BProductMapping(
@@ -178,5 +180,6 @@ def test_user_collector_requires_exact_model_and_verified_mapping() -> None:
         lookback_days=10,
         end_date=date(2026, 7, 10),
     )
-    assert unverified_collector.search(QUERY) == []
+    with pytest.raises(CollectorSkipped, match="verified|검증된|mapping"):
+        unverified_collector.search(QUERY)
     assert len(stub.calls) == 1
