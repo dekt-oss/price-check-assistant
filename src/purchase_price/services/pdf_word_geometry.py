@@ -76,6 +76,20 @@ def _group_lines(words: list[_Word], *, y_tolerance: float) -> list[list[_Word]]
     return lines
 
 
+def _has_same_field_prefix(
+    line: list[_Word],
+    index: int,
+    width: int,
+    field: str,
+    resolve_header: Callable[[str], str | None],
+) -> bool:
+    for prefix_width in range(1, width):
+        prefix = " ".join(word.text for word in line[index : index + prefix_width])
+        if resolve_header(prefix) == field:
+            return True
+    return False
+
+
 def _find_header_anchors(
     line: list[_Word],
     resolve_header: Callable[[str], str | None],
@@ -90,6 +104,8 @@ def _find_header_anchors(
             phrase = " ".join(word.text for word in line[index : index + width])
             field = resolve_header(phrase)
             if field is None or field in used_fields:
+                continue
+            if _has_same_field_prefix(line, index, width, field, resolve_header):
                 continue
             best = (width, field)
             break
