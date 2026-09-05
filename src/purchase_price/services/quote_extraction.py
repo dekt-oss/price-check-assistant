@@ -176,7 +176,20 @@ _FIELD_ALIASES = {
         "note",
     ),
 }
-_SUMMARY_LABELS = frozenset({"합계", "총계", "소계", "부가세", "vat", "공급가액합계"})
+_SUMMARY_LABELS = frozenset(
+    {
+        "합계",
+        "합계금액",
+        "총계",
+        "총액",
+        "소계",
+        "부가세",
+        "세액",
+        "vat",
+        "공급가액합계",
+        "공급가총액",
+    }
+)
 _MAX_HEADER_SCAN_ROWS = 30
 
 
@@ -644,8 +657,10 @@ def _extract_with_pdfplumber(path: Path) -> tuple[list[QuoteItem], list[str], li
 def _extract_pypdf_text(path: Path) -> tuple[list[str], list[str], bool]:
     try:
         from pypdf import PdfReader
-    except ImportError:
-        return [], ["PDF fallback 모듈 pypdf를 불러올 수 없습니다."], False
+    except ImportError as exc:
+        raise QuoteExtractionError(
+            "PDF fallback 모듈 pypdf를 불러올 수 없습니다. 배포 의존성을 확인하세요."
+        ) from exc
 
     try:
         reader = PdfReader(str(path))
