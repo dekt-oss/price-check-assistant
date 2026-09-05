@@ -6,6 +6,8 @@ import pytest
 import xlwt
 from openpyxl import Workbook
 
+from purchase_price.services import quote_extraction
+from purchase_price.services.pdf_ocr import PdfOcrUnavailableError
 from purchase_price.services.quote_extraction import (
     QuoteExtractionError,
     extract_quote_file,
@@ -204,15 +206,23 @@ def test_extract_text_pdf_quote_uses_layout_columns_and_conditions(
     assert any("VAT·배송·설치" in warning for warning in result.warnings)
 
 
-def test_scanned_pdf_without_text_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_scanned_pdf_ocr_unavailable_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     monkeypatch.setattr(
         pypdf,
         "PdfReader",
         lambda _: _FakePdfReader(["", "   "]),
     )
+
+    def unavailable(*_: object, **__: object) -> object:
+        raise PdfOcrUnavailableError("missing tesseract")
+
+    monkeypatch.setattr(quote_extraction, "run_local_pdf_ocr", unavailable)
     path = tmp_path / "scan.pdf"
 
-    with pytest.raises(QuoteExtractionError, match="텍스트 레이어"):
+    with pytest.raises(QuoteExtractionError, match="로컬 OCR을 실행할 수 없습니다"):
         extract_quote_file(path)
 
 
