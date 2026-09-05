@@ -9,12 +9,16 @@ def build_configured_g2b_collector(settings: Settings) -> G2BShoppingCollector:
     """Build the G2B collector with the repository's configured timeout/retry policy.
 
     Every live G2B entry point should use this helper instead of relying on the collector's
-    default client. This keeps diagnostics and production validation on the same network policy.
+    default client. Source-specific G2B_SERVICE_KEY takes precedence, followed by the shared
+    DATA_GO_KR_MARKET_SERVICE_KEY and then the legacy DATA_GO_KR_SERVICE_KEY fallback.
     """
 
-    service_key = settings.data_go_kr_service_key
+    service_key = settings.resolved_g2b_service_key
     if not service_key:
-        raise ValueError("DATA_GO_KR_SERVICE_KEY is not configured")
+        raise ValueError(
+            "G2B_SERVICE_KEY, DATA_GO_KR_MARKET_SERVICE_KEY, or legacy "
+            "DATA_GO_KR_SERVICE_KEY is not configured"
+        )
 
     client = PublicDataPortalClient(
         service_key,
