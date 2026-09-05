@@ -1,10 +1,11 @@
+# ruff: noqa: I001
 from __future__ import annotations
 
 import re
 from dataclasses import replace
 
-from purchase_price.services.quote_extraction_core import *  # noqa: F403
 from purchase_price.services import quote_extraction_core as _core
+from purchase_price.services.quote_extraction_core import *  # noqa: F403
 
 
 _SUMMARY_LABELS = frozenset(
