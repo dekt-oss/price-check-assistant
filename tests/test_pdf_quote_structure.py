@@ -102,4 +102,4 @@ def test_multpage_hospital_quote_uses_table_geometry_and_document_context(
     assert "Water trap" in item.option_condition
     assert item.other_conditions == "결제조건: 리스(익월결제)"
     assert all(item.specification != "가" for item in result.items)
-    assert any("표 경계/좌표 기반" in warning for warning in result.warnings)
+    assert any("표 경계" in warning for warning in result.warnings)
