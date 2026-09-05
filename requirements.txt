@@ -1,7 +1,8 @@
 -e .
 
 # Streamlit Community Cloud runtime parser manifest.
-# Revision 2026-09-05b: keep these explicit so dependency-cache rebuilds include quote parsers.
+# Revision 2026-09-05c: include coordinate-aware PDF table extraction dependencies.
 openpyxl>=3.1,<4
 xlrd>=2.0,<3
 pypdf>=6.17,<7
+pdfplumber>=0.11,<1
