@@ -4,25 +4,38 @@ from pathlib import Path
 from purchase_price.scripts.run_controlled_uat import _write_outputs, run_controlled_uat
 
 
+def _failed_case_summary(cases: list[object]) -> list[tuple[object, object, object]]:
+    return [
+        (
+            case.row.get("case_id"),
+            case.assertion_status,
+            case.row.get("reviewer_notes"),
+        )
+        for case in cases
+        if case.automated and case.assertion_status != "PASS"
+    ]
+
+
 def test_controlled_uat_runner_executes_offline_cases_without_blockers() -> None:
     cases, summary = run_controlled_uat()
+    failed_cases = _failed_case_summary(cases)
 
     assert len(cases) == 15
     assert summary["mode"] == "deterministic_offline_pre_uat"
     assert summary["automated_cases"] == 12
     assert summary["not_run_live_cases"] == 3
-    assert summary["passed_automated_cases"] == 12
-    assert summary["failed_automated_cases"] == 0
+    assert summary["passed_automated_cases"] == 12, failed_cases
+    assert summary["failed_automated_cases"] == 0, failed_cases
     assert summary["identity_false_positive_count"] == 0
     assert summary["comparison_false_positive_count"] == 0
     assert summary["comparison_false_negative_count"] == 1
     assert summary["zero_vs_failure_error_count"] == 0
     assert summary["provenance_secret_filter_and_fingerprint_ok"] is True
-    assert summary["release_blocker_count"] == 0
+    assert summary["release_blocker_count"] == 0, failed_cases
     assert summary["live_required_cases"] == ["UAT-04", "UAT-14", "UAT-15"]
     assert all(
         case.assertion_status == "PASS" for case in cases if case.automated
-    ), "every deterministic automated UAT case must remain green against the current base"
+    ), f"deterministic UAT failures: {failed_cases}"
 
 
 def test_controlled_uat_results_write_with_exact_template_schema(tmp_path: Path) -> None:
