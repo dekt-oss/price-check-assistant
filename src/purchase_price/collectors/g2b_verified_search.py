@@ -10,7 +10,7 @@ from purchase_price.services.g2b_product_mapping import (
     resolve_verified_g2b_mapping,
 )
 
-from .base import PriceCollector
+from .base import CollectorSkipped, PriceCollector
 from .g2b_shopping import G2B_SHOPPING_BASE_URL, SOURCE_NAME, G2BShoppingCollector
 
 
@@ -31,7 +31,7 @@ class VerifiedG2BShoppingSearchCollector(PriceCollector):
         *,
         collector: G2BShoppingCollector | None = None,
         mappings: tuple[G2BProductMapping, ...] | None = None,
-        lookback_days: int = 90,
+        lookback_days: int = 365,
         end_date: date | None = None,
         base_url: str = G2B_SHOPPING_BASE_URL,
         timeout_seconds: float = 20.0,
@@ -66,12 +66,17 @@ class VerifiedG2BShoppingSearchCollector(PriceCollector):
         self.max_split_depth = max_split_depth
 
     def search(self, query: ProductQuery) -> list[CollectedPrice]:
-        if not query.model_name.strip():
-            return []
+        model_name = query.model_name.strip()
+        if not model_name:
+            raise CollectorSkipped(
+                "exact 모델명이 없어 검증된 나라장터 세부품명 mapping을 선택할 수 없음"
+            )
 
         mapping = resolve_verified_g2b_mapping(query, self.mappings)
         if mapping is None:
-            return []
+            raise CollectorSkipped(
+                f"모델 {model_name!r}의 검증된 나라장터 세부품명 mapping이 없어 직접가격 API를 호출하지 않음"
+            )
 
         end_date = self.end_date or date.today()
         begin_date = end_date - timedelta(days=self.lookback_days - 1)

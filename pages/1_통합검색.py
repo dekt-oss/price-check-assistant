@@ -3,8 +3,15 @@ from decimal import Decimal, InvalidOperation
 import pandas as pd
 import streamlit as st
 
+from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL, SOURCE_NAME
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
+from purchase_price.services.g2b_search_policy import (
+    G2B_DEFAULT_LOOKBACK_DAYS,
+    G2B_LOOKBACK_OPTIONS,
+    g2b_lookback_label,
+)
+from purchase_price.services.g2b_unmapped_discovery import discover_unmapped_g2b_candidates
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_review import build_purchase_review_input
@@ -17,13 +24,14 @@ settings = get_settings()
 g2b_enabled = bool((settings.resolved_g2b_service_key or "").strip())
 if g2b_enabled:
     st.caption(
-        "공식 제조사 공개가격과 검증된 나라장터 세부품명 mapping의 최근 구매실적을 함께 검색합니다. "
-        "나라장터는 exact model + verified mapping에서만 자동 조회하며, 근거가 없는 가격은 생성하지 않습니다."
+        "공식 제조사 공개가격과 나라장터 구매실적을 함께 검색합니다. verified mapping이 있는 exact "
+        "모델은 직접가격 검색을 수행하고, mapping이 없는 모델도 나라장터 후보 탐색은 수행하되 "
+        "검증 전 후보가격을 직접 시세로 자동 승격하지 않습니다."
     )
 else:
     st.caption(
-        "현재 공식 제조사 공개가격 source를 사용합니다. 나라장터 검색은 G2B_SERVICE_KEY 또는 "
-        "하위호환 DATA_GO_KR_SERVICE_KEY가 설정된 환경에서만 활성화됩니다."
+        "현재 공식 제조사 공개가격 source를 사용합니다. 나라장터 검색은 G2B_SERVICE_KEY, "
+        "DATA_GO_KR_MARKET_SERVICE_KEY 또는 하위호환 DATA_GO_KR_SERVICE_KEY가 설정된 환경에서 활성화됩니다."
     )
 
 with st.form("search-form"):
@@ -37,13 +45,13 @@ with st.form("search-form"):
     quote_text = st.text_input("현재 견적 단가 (선택)", placeholder="예: 5000000")
     g2b_lookback_days = st.selectbox(
         "나라장터 검색기간",
-        options=[30, 90, 180, 365],
-        index=1,
-        format_func=lambda days: f"최근 {days}일",
+        options=G2B_LOOKBACK_OPTIONS,
+        index=G2B_LOOKBACK_OPTIONS.index(G2B_DEFAULT_LOOKBACK_DAYS),
+        format_func=g2b_lookback_label,
         disabled=not g2b_enabled,
         help=(
-            "검증된 exact model mapping이 있는 품목만 조회합니다. 거래량이 많아 page cap을 넘으면 "
-            "날짜구간을 자동으로 분할해 완전수집을 시도합니다."
+            "기본은 최근 1년이며 2·3·5년까지 조회할 수 있습니다. verified mapping이 있는 품목의 "
+            "직접가격은 완전수집을 시도하고, mapping이 없는 품목은 bounded 후보 탐색을 수행합니다."
         ),
     )
     submitted = st.form_submit_button("가격자료 검색", type="primary")
@@ -68,24 +76,105 @@ if submitted:
         st.warning("검색조건을 하나 이상 입력하세요.")
         st.stop()
 
+    query = review_input.to_product_query()
     run = search_all(
-        review_input.to_product_query(),
+        query,
         build_collectors(g2b_lookback_days=int(g2b_lookback_days)),
     )
+
+    st.subheader("출처별 검색상태")
+    source_rows = [
+        {
+            "출처": status.source_name,
+            "상태": status.status_label,
+            "건수": status.result_count,
+            "메모": status.note or status.error or "",
+        }
+        for status in run.source_statuses
+    ]
+    if source_rows:
+        st.dataframe(pd.DataFrame(source_rows), use_container_width=True, hide_index=True)
 
     if run.errors:
         st.warning("일부 수집기 오류: " + " / ".join(run.errors))
 
-    if g2b_enabled and not review_input.model_name:
+    skipped_g2b = next(
+        (
+            status
+            for status in run.source_statuses
+            if status.source_name == SOURCE_NAME and status.skipped
+        ),
+        None,
+    )
+    discovery = None
+    if (
+        skipped_g2b is not None
+        and g2b_enabled
+        and query.product_name.strip()
+        and (settings.resolved_g2b_service_key or "").strip()
+    ):
+        with st.spinner("verified mapping이 없어 나라장터 미검증 후보를 별도로 탐색하고 있습니다..."):
+            discovery = discover_unmapped_g2b_candidates(
+                query,
+                service_key=(settings.resolved_g2b_service_key or "").strip(),
+                lookback_days=int(g2b_lookback_days),
+                base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
+                timeout_seconds=settings.g2b_request_timeout_seconds,
+                max_retries=settings.g2b_max_retries,
+                pages_per_term_window=1,
+            )
+
+        st.subheader("나라장터 미검증 후보 탐색")
+        st.caption(
+            "이 표는 verified mapping이 없는 모델을 위해 나라장터를 실제로 탐색한 결과입니다. "
+            "모델 토큰이 포함된 후보만 보여주지만 세부품명 mapping이 검증되기 전에는 가격범위·견적판정에 넣지 않습니다."
+        )
+        st.write(
+            f"상태: **{discovery.status_label}** · 검색어: {', '.join(discovery.terms) or '-'} · "
+            f"API 요청 {discovery.request_count}회 · 원자료 확인 {discovery.records_seen}건"
+        )
+        if discovery.status == "failure":
+            st.warning(f"나라장터 후보 탐색 실패: {discovery.error_type or 'unknown error'}")
+        elif discovery.candidates:
+            discovery_rows = [
+                {
+                    "거래일": (
+                        candidate.transaction_date.isoformat()
+                        if candidate.transaction_date is not None
+                        else ""
+                    ),
+                    "나라장터 표기": candidate.title,
+                    "세부품명": candidate.classification_name,
+                    "세부품명코드": candidate.classification_code,
+                    "후보가격": float(candidate.price),
+                    "근거ID": candidate.source_record_id,
+                }
+                for candidate in discovery.candidates
+            ]
+            st.dataframe(
+                pd.DataFrame(discovery_rows),
+                use_container_width=True,
+                hide_index=True,
+                column_config={"후보가격": st.column_config.NumberColumn(format="%d")},
+            )
+            st.warning(
+                "위 후보가격은 나라장터에서 실제 관측됐지만 아직 `미검증 후보`입니다. 세부품명/제품 identity를 "
+                "검증하기 전에는 A/B 직접가격이나 적정가격 범위로 사용하지 않습니다."
+            )
+        else:
+            st.info("선택 기간과 탐색어에서 입력 모델 토큰이 포함된 나라장터 후보를 찾지 못했습니다.")
+
+    skipped_sources = [status for status in run.source_statuses if status.skipped]
+    if skipped_sources:
         st.info(
-            "나라장터 자동검색은 현재 exact model 입력이 있을 때만 실행합니다. "
-            "제품군만으로 세부품명을 추정하지 않습니다."
+            "`미검색`은 API를 실행했는데 0건이라는 뜻이 아닙니다. 직접가격 검색 안전조건이 충족되지 "
+            "않은 상태이며, 가능한 경우 위 별도 후보 탐색으로 실제 나라장터 존재 여부를 확인합니다."
         )
 
     if not run.results:
         st.error(
-            "현재 연결된 공개가격 source에서 비교자료를 찾지 못했습니다. "
-            "비교근거 부족 상태로 처리합니다."
+            "검증된 직접 비교가격은 확보하지 못했습니다. 위 출처별 상태와 나라장터 미검증 후보를 "
+            "구분해서 확인하세요. 후보가 있어도 검증 전에는 견적의 높고 낮음을 자동 판정하지 않습니다."
         )
         st.stop()
 

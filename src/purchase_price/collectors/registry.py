@@ -12,12 +12,12 @@ def build_collectors(
     include_mock: bool = False,
     include_manufacturer_public: bool = True,
     include_g2b: bool = True,
-    g2b_lookback_days: int = 90,
+    g2b_lookback_days: int = 365,
 ) -> list[PriceCollector]:
     """Build the user-facing collector set.
 
     Mock evidence is development-only and therefore opt-in. Verified G2B search is enabled only
-    when a deployment G2B_SERVICE_KEY (preferred) or legacy DATA_GO_KR_SERVICE_KEY is configured;
+    when a deployment G2B_SERVICE_KEY (preferred) or shared/legacy data.go.kr key is configured;
     the key itself is never returned to the UI. Without a key, manufacturer public evidence
     continues to work normally.
     """
