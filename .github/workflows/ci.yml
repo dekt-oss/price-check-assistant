@@ -33,6 +33,9 @@ jobs:
       - name: Ruff
         run: ruff check .
 
+      - name: Streamlit page startup smoke
+        run: pytest -q tests/test_streamlit_startup_smoke.py
+
       - name: Pytest
         run: pytest -q
 
