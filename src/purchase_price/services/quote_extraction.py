@@ -80,3 +80,8 @@ quote_item_query = _core.quote_item_query
 QuoteExtractionError = _core.QuoteExtractionError
 QuoteItem = _core.QuoteItem
 QuoteExtractionResult = _core.QuoteExtractionResult
+
+
+def __getattr__(name: str):
+    """Delegate unchanged private helpers to the extracted core module."""
+    return getattr(_core, name)
