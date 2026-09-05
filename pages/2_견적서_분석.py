@@ -41,9 +41,9 @@ mfds_enabled = bool((settings.resolved_mfds_service_key or "").strip())
 with st.expander("현재 지원 범위", expanded=False):
     st.write(
         "- `.xlsx`, `.xls`: 품목/제조사/모델/규격/수량/단가/금액 헤더를 찾아 자동 추출합니다.\n"
-        "- `.pdf`: 텍스트 레이어가 있으면 표 선/셀 구조를 우선 사용하고, 실패 시 단어 X/Y 좌표와 "
-        "텍스트 fallback을 순서대로 사용합니다.\n"
-        "- 스캔 이미지형 PDF는 텍스트가 없으므로 현재 자동 OCR을 실행하지 않고 명확히 중단합니다.\n"
+        "- `.pdf`: 텍스트 레이어가 있으면 표 선/셀 구조 → 단어 X/Y 좌표 → 텍스트 fallback 순서로 처리합니다.\n"
+        "- 텍스트 레이어가 없는 스캔 PDF만 로컬 Tesseract(kor+eng) OCR을 사용하며, 외부 Vision API로 문서를 전송하지 않습니다.\n"
+        "- 로컬 OCR은 자원 보호를 위해 앞 12페이지까지만 처리하며 인식값은 반드시 원문과 대조합니다.\n"
         "- PDF 표는 문서 레이아웃에 따라 열이 어긋날 수 있어 추출값을 반드시 확인·수정합니다.\n"
         "- 모델 동일성과 가격판정 안전게이트는 통합검색과 동일한 규칙을 사용합니다.\n"
         "- 추출 행의 제품명·제조사·모델명·규격만 의료기기 시장조사로 넘길 수 있습니다.\n"
@@ -96,9 +96,9 @@ if uploaded is not None:
             with st.expander("추출 진단", expanded=False):
                 st.json(diagnostics.to_public_dict())
             st.info(
-                "Excel `.xlsx/.xls`와 텍스트 레이어가 있는 PDF는 자동 추출합니다. "
-                "스캔 이미지형 PDF는 잘못된 품목·가격을 만들지 않기 위해 OCR을 자동 실행하지 않습니다. "
-                "가능하면 원본 Excel 또는 텍스트 PDF를 사용하세요."
+                "Excel과 텍스트 PDF는 구조 파서를 사용하고, 스캔 PDF는 로컬 OCR을 사용합니다. "
+                "현재 오류는 OCR 배포 의존성 또는 문서 인식 실패일 수 있습니다. "
+                "가능하면 원본 Excel/텍스트 PDF를 우선 사용하고 자동값은 반드시 원문과 대조하세요."
             )
             st.stop()
 
