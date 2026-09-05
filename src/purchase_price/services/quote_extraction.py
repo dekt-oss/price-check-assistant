@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -40,6 +40,18 @@ class QuoteExtractionResult:
     warnings: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _PdfDocumentContext:
+    manufacturer: str = ""
+    model_name: str = ""
+    unit: str = ""
+    vat_status: str = ""
+    installation_condition: str = ""
+    option_condition: str = ""
+    warranty_condition: str = ""
+    other_conditions: str = ""
+
+
 _FIELD_ALIASES = {
     "product_name": (
         "품명",
@@ -48,12 +60,17 @@ _FIELD_ALIASES = {
         "물품명",
         "품목명",
         "내역",
+        "commodity",
+        "description",
+        "commoditydescription",
+        "commoditydescriptions",
     ),
     "manufacturer": (
         "제조사",
         "제조업체",
         "메이커",
         "maker",
+        "manufacturer",
         "브랜드",
         "brand",
     ),
@@ -179,9 +196,23 @@ _ALIAS_LOOKUP = {
 def _text(value: object) -> str:
     if value is None:
         return ""
-    text = str(value).strip()
+    text = re.sub(r"\s+", " ", str(value).strip())
     if text.endswith(".0") and text[:-2].isdigit():
         return text[:-2]
+    return text
+
+
+def _normalize_vat(value: object) -> str:
+    text = _text(value)
+    folded = text.casefold()
+    if not text:
+        return ""
+    if "면세" in text:
+        return "면세"
+    if "별도" in text or "미포함" in text or "excluded" in folded or "exclude" in folded:
+        return "별도"
+    if "포함" in text or "included" in folded or "include" in folded:
+        return "포함"
     return text
 
 
@@ -198,7 +229,8 @@ def parse_quote_decimal(value: object) -> Decimal | None:
         text = str(value).strip()
         if not text:
             return None
-        text = re.sub(r"[,\s₩원]", "", text)
+        text = re.sub(r"[,\s₩원\\]", "", text)
+        text = text.strip("()")
     try:
         result = Decimal(text)
     except (InvalidOperation, ValueError):
@@ -211,7 +243,12 @@ def parse_quote_decimal(value: object) -> Decimal | None:
 def _header_mapping(values: tuple[object, ...]) -> dict[str, int]:
     mapping: dict[str, int] = {}
     for index, value in enumerate(values):
-        field = _ALIAS_LOOKUP.get(_normalize_header(value))
+        normalized = _normalize_header(value)
+        field = _ALIAS_LOOKUP.get(normalized)
+        if field is None and normalized.startswith("품명"):
+            field = "product_name"
+        if field is None and normalized.startswith("규격"):
+            field = "specification"
         if field is not None and field not in mapping:
             mapping[field] = index
     return mapping
@@ -234,8 +271,16 @@ def _cell(values: tuple[object, ...], mapping: dict[str, int], field: str) -> ob
 
 
 def _is_summary_row(item: QuoteItem) -> bool:
-    label = _normalize_header(item.product_name or item.model_name)
+    label = _normalize_header(item.product_name or item.model_name or item.specification)
     return label in _SUMMARY_LABELS
+
+
+def _has_meaningful_identity(item: QuoteItem) -> bool:
+    for value in (item.product_name, item.manufacturer, item.model_name, item.specification):
+        compact = re.sub(r"[^0-9A-Za-z가-힣]", "", value)
+        if len(compact) >= 2 and not compact.isdigit():
+            return True
+    return False
 
 
 def _extract_sheet_rows(
@@ -272,7 +317,7 @@ def _extract_sheet_rows(
             unit=_text(_cell(row, mapping, "unit")),
             unit_price=parse_quote_decimal(_cell(row, mapping, "unit_price")),
             total_amount=parse_quote_decimal(_cell(row, mapping, "total_amount")),
-            vat_status=_text(_cell(row, mapping, "vat_status")),
+            vat_status=_normalize_vat(_cell(row, mapping, "vat_status")),
             delivery_condition=_text(_cell(row, mapping, "delivery_condition")),
             installation_condition=_text(_cell(row, mapping, "installation_condition")),
             option_condition=_text(_cell(row, mapping, "option_condition")),
@@ -280,7 +325,7 @@ def _extract_sheet_rows(
             maintenance_condition=_text(_cell(row, mapping, "maintenance_condition")),
             other_conditions=_text(_cell(row, mapping, "other_conditions")),
         )
-        if not any([item.product_name, item.manufacturer, item.model_name, item.specification]):
+        if not _has_meaningful_identity(item):
             continue
         if item.unit_price is None and item.total_amount is None:
             continue
@@ -292,9 +337,6 @@ def _extract_sheet_rows(
 
 
 def extract_excel_quote(path: Path) -> QuoteExtractionResult:
-    # Parser dependencies are imported only when the matching file type is actually used.
-    # A missing optional runtime parser must never make every quote-related Streamlit page fail
-    # during module import/startup.
     try:
         from openpyxl import load_workbook
     except ImportError as exc:
@@ -360,12 +402,6 @@ def extract_legacy_excel_quote(path: Path) -> QuoteExtractionResult:
 
 
 def _pdf_text_rows(text: str) -> tuple[tuple[object, ...], ...]:
-    """Convert layout-preserving PDF text into table-like rows.
-
-    Text PDFs usually preserve column gaps as repeated spaces or tabs. We only split on those
-    wider gaps, never on an ordinary single space inside a product/specification name.
-    """
-
     rows: list[tuple[object, ...]] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -377,25 +413,248 @@ def _pdf_text_rows(text: str) -> tuple[tuple[object, ...], ...]:
     return tuple(rows)
 
 
-def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
-    """Extract table-like rows from a text PDF; scanned PDFs deliberately require OCR later."""
+def _clean_pdf_table(table: list[list[object | None]]) -> tuple[tuple[object, ...], ...]:
+    cleaned: list[tuple[object, ...]] = []
+    for row in table:
+        values = tuple(_text(value) for value in row)
+        if any(values):
+            cleaned.append(values)
+    return tuple(cleaned)
 
+
+def _extract_pdf_line_candidates(text: str, page_number: int) -> list[QuoteItem]:
+    amount = r"(?:₩|\\)?\s*\d{1,3}(?:,\d{3})+(?:\.\d+)?"
+    row_pattern = re.compile(
+        rf"(?P<product>[A-Za-z가-힣][^\n]{{1,100}}?)\s+"
+        rf"(?P<spec>[A-Za-z][A-Za-z0-9._/-]{{1,30}})\s+"
+        rf"(?P<qty>\d+(?:\.\d+)?)\s+"
+        rf"(?P<unit_price>{amount})\s+"
+        rf"(?P<total>{amount})(?:\s+(?P<vat>\(?\s*(?:포함|별도|미포함)\s*\)?))?",
+        re.IGNORECASE,
+    )
+    items: list[QuoteItem] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        match = row_pattern.search(line)
+        if not match:
+            continue
+        item = QuoteItem(
+            source_sheet=f"PDF {page_number}페이지",
+            source_row=line_number,
+            product_name=_text(match.group("product")),
+            specification=_text(match.group("spec")),
+            quantity=parse_quote_decimal(match.group("qty")),
+            unit_price=parse_quote_decimal(match.group("unit_price")),
+            total_amount=parse_quote_decimal(match.group("total")),
+            vat_status=_normalize_vat(match.group("vat") or ""),
+        )
+        if _has_meaningful_identity(item) and not _is_summary_row(item):
+            items.append(item)
+    return items
+
+
+def _extract_pdf_context(texts: Iterable[str]) -> _PdfDocumentContext:
+    document = "\n".join(text for text in texts if text)
+    if not document:
+        return _PdfDocumentContext()
+
+    manufacturer = ""
+    model_name = ""
+    unit = ""
+    vat_status = ""
+    installation = ""
+    option = ""
+    warranty = ""
+    other_parts: list[str] = []
+
+    manufacturer_match = re.search(
+        r"(?im)^\s*(?:manufacturer|제조사)\s*[:：]\s*([^\r\n]+)", document
+    )
+    if manufacturer_match:
+        manufacturer = _text(manufacturer_match.group(1)).split("  ", 1)[0]
+
+    model_match = re.search(
+        r"(?im)\bmodel\s*[-:：]\s*([A-Za-z0-9][A-Za-z0-9._/-]{1,40})", document
+    )
+    if model_match:
+        model_name = _text(model_match.group(1))
+    else:
+        model_match = re.search(r"(?im)^\s*모델(?:명)?\s*[:：]\s*([^\r\n]+)", document)
+        if model_match:
+            model_name = _text(model_match.group(1)).split()[0]
+
+    unit_match = re.search(r"(?im)\b1\s+(set|ea|unit|kit|pcs?)\b", document)
+    if unit_match:
+        unit = unit_match.group(1)
+
+    if re.search(r"(?is)(?:V\.?\s*A\.?\s*T\.?|VAT)[^\n]{0,30}(?:Included|포함)", document):
+        vat_status = "포함"
+    elif re.search(
+        r"(?is)(?:V\.?\s*A\.?\s*T\.?|VAT)[^\n]{0,30}(?:Excluded|별도|미포함)",
+        document,
+    ):
+        vat_status = "별도"
+
+    installation_match = re.search(
+        r"(?im)^.*installation and operation.*provided by Contractor.*$", document
+    )
+    if installation_match:
+        installation = "Contractor 설치·운영 제공"
+    else:
+        installation_match = re.search(r"(?im)^.*설치.*(?:포함|제공).*$", document)
+        if installation_match:
+            installation = _text(installation_match.group(0))
+
+    warranty_number = re.search(r"(?i)warranty[^\n]{0,100}?\b(\d+)\s*years?\b", document)
+    if warranty_number:
+        warranty = f"{warranty_number.group(1)}년"
+    else:
+        word_to_year = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5"}
+        warranty_word = re.search(
+            r"(?i)warranty[^\n]{0,120}?\b(one|two|three|four|five)\s+years?\b",
+            document,
+        )
+        if warranty_word:
+            warranty = f"{word_to_year[warranty_word.group(1).casefold()]}년"
+        else:
+            warranty_korean = re.search(r"(?im)(?:보증|warranty)[^\n]{0,50}?(\d+)\s*년", document)
+            if warranty_korean:
+                warranty = f"{warranty_korean.group(1)}년"
+
+    payment_match = re.search(r"(?im)결제조건\s*[:：]\s*([^\r\n]+)", document)
+    if payment_match:
+        other_parts.append(f"결제조건: {_text(payment_match.group(1))}")
+
+    option_match = re.search(r"(?im)기타제안\s*[:：]\s*([^\r\n]+)", document)
+    if option_match:
+        option = _text(option_match.group(1))
+
+    return _PdfDocumentContext(
+        manufacturer=manufacturer,
+        model_name=model_name,
+        unit=unit,
+        vat_status=vat_status,
+        installation_condition=installation,
+        option_condition=option,
+        warranty_condition=warranty,
+        other_conditions="; ".join(other_parts),
+    )
+
+
+def _merge_conditions(existing: str, inferred: str) -> str:
+    if not existing:
+        return inferred
+    if not inferred or inferred in existing:
+        return existing
+    return f"{existing}; {inferred}"
+
+
+def _apply_pdf_context(items: list[QuoteItem], context: _PdfDocumentContext) -> list[QuoteItem]:
+    single = len(items) == 1
+    enriched: list[QuoteItem] = []
+    for item in items:
+        enriched.append(
+            replace(
+                item,
+                manufacturer=item.manufacturer or (context.manufacturer if single else ""),
+                model_name=item.model_name or (context.model_name if single else ""),
+                unit=item.unit or (context.unit if single else ""),
+                vat_status=item.vat_status or context.vat_status,
+                installation_condition=(
+                    item.installation_condition or context.installation_condition
+                ),
+                option_condition=item.option_condition or context.option_condition,
+                warranty_condition=item.warranty_condition or context.warranty_condition,
+                other_conditions=_merge_conditions(item.other_conditions, context.other_conditions),
+            )
+        )
+    return enriched
+
+
+def _dedupe_quote_items(items: Iterable[QuoteItem]) -> list[QuoteItem]:
+    deduped: list[QuoteItem] = []
+    seen: set[tuple[object, ...]] = set()
+    for item in items:
+        key = (
+            item.product_name.casefold(),
+            item.manufacturer.casefold(),
+            item.model_name.casefold(),
+            item.specification.casefold(),
+            item.quantity,
+            item.unit.casefold(),
+            item.unit_price,
+            item.total_amount,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _extract_with_pdfplumber(path: Path) -> tuple[list[QuoteItem], list[str], list[str], bool]:
+    try:
+        import pdfplumber
+    except ImportError:
+        return [], [], [], False
+
+    items: list[QuoteItem] = []
+    texts: list[str] = []
+    warnings: list[str] = []
+    saw_text = False
+    try:
+        with pdfplumber.open(path) as pdf:
+            for page_number, page in enumerate(pdf.pages, start=1):
+                try:
+                    text = page.extract_text(x_tolerance=1, y_tolerance=3) or ""
+                except Exception as exc:
+                    warnings.append(f"PDF {page_number}페이지: 좌표 텍스트 추출 실패 ({exc})")
+                    text = ""
+                texts.append(text)
+                saw_text = saw_text or bool(text.strip())
+
+                try:
+                    tables = page.extract_tables(
+                        table_settings={
+                            "vertical_strategy": "lines",
+                            "horizontal_strategy": "lines",
+                            "snap_tolerance": 3,
+                            "join_tolerance": 3,
+                            "intersection_tolerance": 5,
+                        }
+                    ) or []
+                except Exception as exc:
+                    warnings.append(f"PDF {page_number}페이지: 표 경계 추출 실패 ({exc})")
+                    tables = []
+
+                for table_number, table in enumerate(tables, start=1):
+                    rows = _clean_pdf_table(table)
+                    if not rows:
+                        continue
+                    table_items, _ = _extract_sheet_rows(
+                        f"PDF {page_number}페이지 표{table_number}", rows
+                    )
+                    items.extend(table_items)
+    except Exception as exc:
+        warnings.append(f"PDF 좌표 기반 파서 사용 실패 ({exc})")
+        return [], [], warnings, False
+
+    return items, texts, warnings, saw_text
+
+
+def _extract_pypdf_text(path: Path) -> tuple[list[str], list[str], bool]:
     try:
         from pypdf import PdfReader
-    except ImportError as exc:
-        raise QuoteExtractionError(
-            "PDF 지원 모듈 pypdf를 불러올 수 없습니다. 배포 의존성을 확인하세요."
-        ) from exc
+    except ImportError:
+        return [], ["PDF fallback 모듈 pypdf를 불러올 수 없습니다."], False
 
     try:
         reader = PdfReader(str(path))
     except Exception as exc:
-        raise QuoteExtractionError(f"PDF 견적서를 읽을 수 없습니다: {exc}") from exc
+        return [], [f"PDF fallback 파서를 사용할 수 없습니다 ({exc})"], False
 
-    items: list[QuoteItem] = []
+    texts: list[str] = []
     warnings: list[str] = []
     saw_text = False
-
     for page_number, page in enumerate(reader.pages, start=1):
         try:
             try:
@@ -403,36 +662,67 @@ def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
             except TypeError:
                 text = page.extract_text() or ""
         except Exception as exc:
-            warnings.append(f"PDF {page_number}페이지: 텍스트 추출 실패 ({exc})")
-            continue
+            warnings.append(f"PDF {page_number}페이지: fallback 텍스트 추출 실패 ({exc})")
+            text = ""
+        texts.append(text)
+        saw_text = saw_text or bool(text.strip())
+    return texts, warnings, saw_text
 
-        if not text.strip():
-            continue
-        saw_text = True
-        page_items, warning = _extract_sheet_rows(
-            f"PDF {page_number}페이지",
-            _pdf_text_rows(text),
-        )
-        items.extend(page_items)
-        if warning:
-            warnings.append(warning)
 
+def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
+    structured_items, plumber_texts, warnings, plumber_saw_text = _extract_with_pdfplumber(path)
+    pypdf_texts, fallback_warnings, pypdf_saw_text = _extract_pypdf_text(path)
+    warnings.extend(fallback_warnings)
+
+    all_texts: list[str] = []
+    for texts in (plumber_texts, pypdf_texts):
+        for text in texts:
+            if text and text not in all_texts:
+                all_texts.append(text)
+
+    saw_text = plumber_saw_text or pypdf_saw_text
     if not saw_text:
         raise QuoteExtractionError(
             "PDF에 추출 가능한 텍스트 레이어가 없습니다. 스캔 이미지형 PDF로 보이며 현재 단계에서는 "
             "OCR을 자동 실행하지 않습니다. 원본 Excel 또는 텍스트 PDF를 사용하거나 OCR 단계가 필요합니다."
         )
 
+    items = [item for item in structured_items if _has_meaningful_identity(item)]
+    used_structured_table = bool(items)
+
+    if not items:
+        for page_number, text in enumerate(all_texts, start=1):
+            items.extend(_extract_pdf_line_candidates(text, page_number))
+
+    if not items:
+        for page_number, text in enumerate(pypdf_texts, start=1):
+            page_items, _ = _extract_sheet_rows(
+                f"PDF {page_number}페이지",
+                _pdf_text_rows(text),
+            )
+            items.extend(item for item in page_items if _has_meaningful_identity(item))
+
+    items = _dedupe_quote_items(items)
+    context = _extract_pdf_context(all_texts)
+    items = _apply_pdf_context(items, context)
+
     if items:
-        warnings.append(
-            "PDF 표는 문서 내부 좌표에 따라 열이 어긋날 수 있습니다. 자동 추출된 제조사·모델·규격·"
-            "단가·단위·VAT·배송·설치·옵션·보증·유지보수 조건을 반드시 화면에서 확인·수정하세요."
-        )
+        if used_structured_table:
+            warnings.append(
+                "PDF 표 경계/좌표 기반으로 품목을 추출하고, 후속 페이지의 제조사·모델·VAT·설치·"
+                "보증·기타조건을 문서 전체에서 보강했습니다. 원문과 대조해 확인하세요."
+            )
+        else:
+            warnings.append(
+                "PDF 표 경계를 안정적으로 복원하지 못해 텍스트 fallback으로 추출했습니다. "
+                "VAT·배송·설치·옵션·보증·유지보수 조건을 반드시 원문과 대조하세요."
+            )
     else:
         warnings.append(
-            "PDF 텍스트는 읽었지만 품목/가격 표를 자동 식별하지 못했습니다. 표 헤더와 열 배치를 "
-            "확인하세요."
+            "PDF 텍스트는 읽었지만 의미 있는 품목/가격 행을 식별하지 못했습니다. "
+            "세액·합계 같은 숫자를 품목으로 오인하지 않도록 자동 추출을 보류했습니다."
         )
+
     return QuoteExtractionResult(items=tuple(items), warnings=tuple(warnings))
 
 
