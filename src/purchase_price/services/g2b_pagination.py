@@ -67,7 +67,8 @@ def iter_specific_item_pages(
                 return
             if page_no == 1 and page.total_count > max_pages * num_of_rows:
                 raise G2BPaginationLimitError(
-                    "G2B totalCount exceeds the bounded page budget; split the date window: "
+                    "G2B pagination safety limit: totalCount exceeds the bounded page budget; "
+                    "split the date window: "
                     f"total_count={page.total_count} capacity={max_pages * num_of_rows} "
                     f"max_pages={max_pages} num_of_rows={num_of_rows} "
                     f"detail_product_name={detail_product_name!r}"
