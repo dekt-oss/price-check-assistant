@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-
 _CANONICAL_HEADERS = {
     "product_name": "품명",
     "manufacturer": "제조사",
