@@ -6,9 +6,6 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from openpyxl import load_workbook
-from pypdf import PdfReader
-
 from purchase_price.schemas import ProductQuery
 
 
@@ -295,6 +292,16 @@ def _extract_sheet_rows(
 
 
 def extract_excel_quote(path: Path) -> QuoteExtractionResult:
+    # Parser dependencies are imported only when the matching file type is actually used.
+    # A missing optional runtime parser must never make every quote-related Streamlit page fail
+    # during module import/startup.
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise QuoteExtractionError(
+            "Excel(.xlsx) 지원 모듈 openpyxl을 불러올 수 없습니다. 배포 의존성을 확인하세요."
+        ) from exc
+
     try:
         workbook = load_workbook(path, read_only=True, data_only=True)
     except Exception as exc:
@@ -320,13 +327,11 @@ def extract_excel_quote(path: Path) -> QuoteExtractionResult:
 
 
 def extract_legacy_excel_quote(path: Path) -> QuoteExtractionResult:
-    # `.xls` support is optional at page-import time. A missing legacy parser must not make the
-    # entire quote-analysis page unavailable for `.xlsx`/PDF users.
     try:
         import xlrd
-    except ModuleNotFoundError as exc:
+    except ImportError as exc:
         raise QuoteExtractionError(
-            "구형 Excel(.xls) 지원 모듈 xlrd가 설치되지 않았습니다. "
+            "구형 Excel(.xls) 지원 모듈 xlrd를 불러올 수 없습니다. "
             "배포 의존성을 확인하거나 .xlsx 파일로 저장해 다시 업로드하세요."
         ) from exc
 
@@ -374,6 +379,13 @@ def _pdf_text_rows(text: str) -> tuple[tuple[object, ...], ...]:
 
 def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     """Extract table-like rows from a text PDF; scanned PDFs deliberately require OCR later."""
+
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise QuoteExtractionError(
+            "PDF 지원 모듈 pypdf를 불러올 수 없습니다. 배포 의존성을 확인하세요."
+        ) from exc
 
     try:
         reader = PdfReader(str(path))
