@@ -1,8 +1,8 @@
+from importlib import import_module
 from pathlib import Path
 
-from streamlit.testing.v1 import AppTest
 
-
+AppTest = import_module("streamlit.testing.v1").AppTest
 ROOT = Path(__file__).resolve().parents[1]
 APP_FILES = (ROOT / "Home.py", *sorted((ROOT / "pages").glob("*.py")))
 
