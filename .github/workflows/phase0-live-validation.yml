@@ -25,7 +25,8 @@ jobs:
     timeout-minutes: 20
     env:
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
-      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      # Workflow-local compatibility alias for older CLI entry points.
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
       PHASE0_BEGIN_DATE: ${{ inputs.begin_date }}
       PHASE0_END_DATE: ${{ inputs.end_date }}
       PHASE0_MAX_PAGES: ${{ inputs.max_pages }}
