@@ -1,134 +1,177 @@
 # 다음 구현 순서
 
-기준: 2026-09-04 `main` (`0f143319d5827ec630d237f7f80eefbac335a06d`).
+기준: 2026-09-05 `main` (`37c9c29c0fa8eb1efd530dd18e7d895aa07ab1ed`).
 
-Phase 0는 종료했고, 현재 핵심 엔진은 **Controlled UAT 진입 가능** 상태다.
+현재 핵심 엔진은 기능 추가 단계보다 **실제 live 검증 + 실제 견적 UAT**가 우선인 상태다. 일반 CI와 synthetic fixture가 통과했다는 사실을 실제 병원/공급사 견적이나 외부 API의 운영 성공으로 해석하지 않는다.
 
-`main` 반영 완료:
+## 현재 main 반영 완료
 
 - G2B Shopping/납품 verified exact-model 검색
 - G2B 계약정보 근거 조회
+- G2B 계약정보 public provenance allow-list + canonical JSON + SHA-256 fingerprint
 - A/B/C/D/X fail-closed 매칭 + 핵심 숫자·단위 규격충돌 차단
 - 외부 가격조건 구조화
 - 견적서 상업조건 추출
 - 견적조건 ↔ 외부조건 `match/conflict/unknown` comparator
 - quote comparability **candidate** gate
+- 현재 session의 quote/evidence pair에 대한 명시적 `QUOTE_COMPARABLE` 승인 workflow
 - evidence freshness
-- 출처별 성공/0건/실패 상태 분리
-- Excel `.xlsx/.xls` + text PDF 견적 추출
+- 출처별 성공 N건 / 정상 0건 / 실패 상태 분리
+- Excel `.xlsx/.xls` + text PDF 구조추출
+- 스캔 PDF 로컬 OCR (`pypdfium2` + Tesseract `kor+eng`)
+- 실제 image-only synthetic PDF → Tesseract → production parser E2E CI
 - MFDS 품목/형명 exact identity, 경쟁장비, 업허가 업체, 공급사 우선순위
-- UDI-DI exact 조회
+- UDI-DI known-value exact 조회
 - Safety 수동 공식확인 경로와 상태계약
+- Controlled UAT deterministic offline gate: 15개 중 12개 자동 PASS, 3개 live-required
+- Streamlit 전체 페이지 startup smoke
+- G2B/MFDS live workflow의 shared key fallback
+  - source-specific → `DATA_GO_KR_MARKET_SERVICE_KEY` → legacy `DATA_GO_KR_SERVICE_KEY`
 
-상세 상태는 `docs/V2_IMPLEMENTATION_STATUS.md`를 기준으로 한다.
+상세 상태는 `docs/V2_IMPLEMENTATION_STATUS.md`, live 실행법은 `docs/LIVE_UAT_RUNBOOK.md`를 기준으로 한다.
 
-## P1. Provenance 일관화 마무리
+---
 
-현재 PR #53 `Add safe public evidence provenance for G2B contracts`가 open 상태다.
+## P1. 실제 Live smoke
 
-목표:
+일반 GitHub CI와 분리한다. 외부 API workflow는 `workflow_dispatch` 수동 실행만 허용한다.
 
-- public response allow-list
-- secret-like field 차단
-- canonical JSON
-- SHA-256 fingerprint
-- source record id
-- original/detail URL
-- normalized 계약근거와 raw provenance 연결
-- UI fingerprint 표시
+### 확인 대상
 
-PR #53 CI는 별도 확인하되 **사용자 승인 전 merge하지 않는다**. 일반 CI 성공은 live contract API 성공으로 보지 않는다.
+1. G2B Shopping live smoke
+2. G2B verified mapping/Phase 0 live validation
+3. MFDS 품목/모델 exact identity
+4. MFDS 업체조회
+5. UDI-DI known-value exact lookup
+6. Production Streamlit 대표제품 검색
+7. Production Streamlit text PDF / scan PDF 업로드
 
-## P2. Controlled UAT
+### 반드시 구분할 상태
 
-새 기능을 계속 추가하기 전에 실제 업무 표본에서 현재 보수적 계약이 어떻게 작동하는지 측정한다.
+- `성공 N건`
+- `정상 0건`
+- `실패`
+- `미검증`
 
-### 최소 케이스
+API 0건을 실패로 바꾸지 않고, 실패를 0건으로 숨기지도 않는다. GitHub Actions 성공 자체는 Production Streamlit 성공을 의미하지 않는다.
 
-1. 일반 전산제품 — 정확 모델
-2. 일반 전산제품 — 부정확 제품명
-3. 병원 일반 비품
-4. 의료장비 — MFDS exact identity 가능
-5. 다품목 Excel
-6. text PDF
-7. 조건이 상세한 견적
-8. 조건이 거의 없는 견적
-9. exact 모델이지만 외부근거 부족
-10. 명백히 다른 규격 제품
+### 현재 미검증 경계
 
-추가 권장:
+- 현재 shared key를 이용한 최신 G2B/MFDS workflow의 실제 live 호출
+- Streamlit Community Cloud에서 Tesseract `kor+eng` 실제 실행
+- 최신 main의 Production 브라우저 동작
 
-11. 동일 모델 + 수량 차이
-12. API 정상 0건
-13. API 실패
-14. MFDS ambiguous permit
-15. 취소/취하 또는 수출전용 의료기기
+Secret 값은 로그·artifact·문서에 기록하지 않는다.
+
+---
+
+## P2. 실제 견적 UAT — 최소 5건부터 시작
+
+현재 가장 중요한 업무 검증이다. 실제 본원/공급사 원문은 Public repo에 커밋하지 않는다.
+
+`pages/13_견적추출_UAT.py`에서 여러 견적을 올리고 담당자가 원문을 직접 대조한다. 원본과 수정된 정답값은 영구 저장하지 않고, 다운로드 결과에는 비식별 통계만 포함한다.
+
+### 최소 표본
+
+가능하면 서로 다른 업체/양식으로 최소 5건:
+
+1. `.xlsx` 다품목 견적
+2. `.xls` 또는 다른 Excel 양식
+3. text-layer PDF
+4. 스캔 PDF/OCR
+5. 조건이 상세하거나 다페이지인 실제 견적
+
+표본 수가 늘어나면 일반 전산제품·병원 비품·의료장비를 분리해 본다.
 
 ### 측정값
 
-- `extraction_status`
-- `identity_human_grade` / `identity_system_grade`
-- 제조사/모델/규격 정확도
-- 직접가격 Evidence 확보 여부
-- false positive / false negative
-- 조건별 `match/conflict/unknown` 사람판정 일치
-- candidate gate 결과와 보류 이유
-- API success-zero / failure 구분
-- source record / URL / fingerprint 재검증 가능 여부
-- 수동 조사시간 / 시스템 이용시간
-- 재사용 가치
+- extraction success/failure
+- extraction strategy
+- parser 처리시간
+- 담당자 원문대조 시간
+- expected / actual / matched item 수
+- 품목 false positive(FP)
+- 품목 false negative(FN)
+- item precision / recall
+- 제조사/모델/규격/수량/단위/단가/총액/VAT 필드 오류율
+- OCR vs text PDF vs Excel 전략별 성능
+- 실제 업무 재사용 가치
 
-실제 본원 견적이나 비공개 자료는 Public repo에 올리지 않는다. 샘플·비식별·사용승인이 명확한 자료만 사용한다.
+한 품목의 추가/누락 때문에 뒤 행 전체가 오류로 계산되지 않도록 UAT 비교는 순서보존 alignment를 사용한다. 이 alignment는 **UAT 측정용**이며 생산 제품 identity/가격판정 규칙을 변경하지 않는다.
 
-## P3. 담당자 승인형 `QUOTE_COMPARABLE` workflow
+### 개인정보/내부정보 경계
 
-현재 구조는 candidate gate까지만 구현되어 있다.
+Public repo에 저장하지 않음:
 
-목표 흐름:
+- 실제 견적 원본
+- 실제 파일명
+- 제품/업체/모델의 실제 정답값
+- 내부 구매단가
+- 실제 견적 단가/총액
+- 병원 내부정보
+
+비식별 UAT JSON에는 케이스 ID, 추출전략, 개수·오류수·비율·시간만 남긴다.
+
+---
+
+## P3. 전체 구매검토 UAT
+
+견적 parser 자체가 안정되면 end-to-end 업무 흐름을 검증한다.
 
 ```text
-candidate gate
+견적/제품 입력
+→ 제품 identity
+→ 공개 직접가격 Evidence
+→ 견적조건 ↔ 외부조건 대조
+→ candidate gate
 → 담당자 원문/조건 확인
-→ 명시적 승인
-→ 현재 검토 session의 quote/evidence pair에만 승인상태 부여
-→ 해당 pair만 QUOTE_COMPARABLE로 평가
+→ 현재 session pair 명시적 승인
+→ QUOTE_COMPARABLE
 → assess_prices
-→ 견적 위치 표시
+→ 현재 견적 위치
 ```
 
-### 필수 안전계약
+### 반드시 측정
 
-- candidate 통과만으로 자동승격 금지
-- 원본 public source record의 영구 `comparison_scope`를 무조건 변경하지 않음
-- 승인상태는 **현재 견적 + 현재 외부근거 pair** 기준
-- 승인자 확인시점·확인조건·근거ID를 추적 가능하게 설계
-- 승인 취소 가능
-- session 밖으로 실제 병원 견적정보를 영구 저장하지 않음
+- A/B/C/D/X 사람판정 일치
+- 잘못된 직접비교 FP
+- 비교 가능한데 보류되는 FN
+- 조건 `match/conflict/unknown` 사람판정 일치
+- candidate gate 통과/보류 사유
+- 승인 취소/재승인 동작
+- source URL / evidence ID / fingerprint 재검증 가능 여부
+- 공개 직접가격 Evidence 확보율
+- 수작업 대비 검토시간
 
 ### 수량 equality
 
-현재 candidate gate의 양쪽 수량 일치 요구는 의도적으로 보수적이다.
+현재 candidate gate의 수량 equality는 계속 유지한다.
 
-단가 비교에서는 수량이 달라도 비교 가능한 사례가 있을 수 있지만, **규칙을 먼저 완화하지 않는다**. UAT에서 이 규칙 때문에 실제 비교 가능한 사례가 반복적으로 false negative가 되는지 측정한 뒤 변경 여부를 판단한다.
+Synthetic UAT-11에서 quantity mismatch로 알려진 comparison FN 1건이 존재하지만, **이 한 건만으로 규칙을 완화하지 않는다.** 실제 업무 UAT에서 비교 가능한 사례가 반복적으로 막히는지 확인한 뒤 별도 설계 변경으로 검토한다.
 
-## P4. Live smoke
+---
 
-일반 GitHub CI와 분리한다.
+## P4. UAT 발견 결함 보정
 
-확인 대상:
+실제 UAT에서 확인된 오류를 우선순위로 수정한다.
 
-- G2B Shopping live smoke
-- G2B 계약정보 대표 품목 live 조회
-- production Streamlit 대표제품 검색
-- MFDS 품목/모델 exact identity
-- MFDS 업체조회
-- UDI-DI known-value exact lookup
+우선순위:
 
-각 결과는 `성공 N건 / 정상 0건 / 실패 / 미검증`을 구분해 기록한다.
+1. 잘못된 직접비교 FP
+2. 잘못된 identity 확정
+3. 가격/수량/단위 오추출
+4. API failure/0건 혼동
+5. OCR 누락/오인
+6. 조건 comparator 오판
+7. 반복되는 보수적 FN
+
+정확도를 높인다는 이유로 fail-closed 계약을 임의 완화하지 않는다.
+
+---
 
 ## P5. Source coverage 확대
 
-UAT에서 실제로 가격근거 확보율이 병목임을 확인한 뒤 진행한다.
+실제 UAT에서 **가격근거 확보율이 업무 병목**이라는 것이 확인된 뒤 진행한다.
 
 우선순위:
 
@@ -144,10 +187,13 @@ UAT에서 실제로 가격근거 확보율이 병목임을 확인한 뒤 진행�
 - 환율 환산값을 KRW 직접 관측가격으로 취급
 - 문의가격 추정
 - 모델군 가격을 exact 모델가격으로 사용
+- 계약총액을 제품 단가로 환산
 
-G2B mapping 숫자만 늘리는 것을 목표로 하지 않는다. 현재 verified mapping은 5개이고, 병원 의료장비 상당수는 G2B exact 거래가 없다는 Phase 1 조사 결과가 이미 있다.
+G2B mapping 숫자 자체를 성과목표로 삼지 않는다.
 
-## 외부 계약 확보 즉시 진행
+---
+
+## 외부 계약 확보 후 구현
 
 ### Safety RED 자동조회
 
@@ -156,16 +202,18 @@ G2B mapping 숫자만 늘리는 것을 목표로 하지 않는다. 현재 verifi
 - exact 모델/허가번호 matching
 - hit 시 가격정보보다 우선하는 RED 경고
 - 0건과 API 실패 분리
-- `검색결과 없음=안전` 표현 금지
+- `검색결과 없음 = 안전` 표현 금지
 - 자동 구매중단 판단 금지
 
 ### 모델명 → UDI/상세 identity
 
 공식 모델 검색 request contract가 확보되면 구현한다. 현재는 UDI-DI를 알고 있는 경우의 exact 조회만 자동화되어 있다.
 
-## P6. 최종 UI 통합
+---
 
-Controlled UAT와 승인 workflow 안정화 후 진행한다.
+## P6. 최종 single-screen UI
+
+실제 UAT 결과를 반영한 뒤 진행한다.
 
 ```text
 구매검토 1화면
@@ -180,27 +228,31 @@ Controlled UAT와 승인 workflow 안정화 후 진행한다.
 → 상세 provenance
 ```
 
-다품목 견적은 master-detail로 유지한다. 기존 개발용 분리 페이지는 parity/AppTest/production smoke 후 사용자 navigation에서 제거한다.
+다품목 견적은 master-detail을 유지한다. 기존 개발/검증용 분리 페이지는 parity, AppTest, Production smoke를 통과한 뒤 사용자 navigation에서 정리한다.
+
+---
 
 ## P7. 내부 이식
 
-Public PoC의 업무효과가 UAT에서 확인되고 내부 승인을 받은 뒤 진행한다.
+Public PoC의 업무효과가 실제 UAT에서 확인되고 내부 승인을 받은 뒤 진행한다.
 
 - 본원 구매단가 Excel import부터 검토
 - PostgreSQL에 내부 observation 별도 축적
 - ERP 직접연계는 후순위
-- 진료재료/간납단가는 내부 단가 승인 이후 별도 확장
+- 진료재료/간납단가는 내부 단가 활용 승인 이후 별도 확장
 
-## 작업 우선순위 요약
+---
+
+## 현재 우선순위 요약
 
 ```text
-PR #53 provenance
-→ Controlled UAT
-→ 담당자 승인형 QUOTE_COMPARABLE
-→ live smoke
-→ source coverage
+actual live smoke
+→ 실제 견적 최소 5건 UAT
+→ 전체 구매검토 UAT
+→ 실제 발견 결함 보정
+→ 필요 시 source coverage 확대
 → single-screen UI
-→ 내부 이식
+→ 내부 이식 검토
 ```
 
-기능을 더 많이 만드는 것보다 **잘못된 직접비교를 하지 않으면서 실제 구매검토 시간을 줄이는지**를 먼저 증명한다.
+현재 목표는 기능 개수를 늘리는 것이 아니라 **잘못된 직접비교를 하지 않으면서 실제 구매검토 시간을 줄이는지 증명하는 것**이다.
