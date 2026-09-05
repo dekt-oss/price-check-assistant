@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.pdf_word_geometry import extract_word_geometry_rows
 
 
 class QuoteExtractionError(RuntimeError):
@@ -206,6 +207,16 @@ _ALIAS_LOOKUP = {
 }
 
 
+def _resolve_header_field(value: object) -> str | None:
+    normalized = _normalize_header(value)
+    field = _ALIAS_LOOKUP.get(normalized)
+    if field is None and normalized.startswith("품명"):
+        field = "product_name"
+    if field is None and normalized.startswith("규격"):
+        field = "specification"
+    return field
+
+
 def _text(value: object) -> str:
     if value is None:
         return ""
@@ -256,12 +267,7 @@ def parse_quote_decimal(value: object) -> Decimal | None:
 def _header_mapping(values: tuple[object, ...]) -> dict[str, int]:
     mapping: dict[str, int] = {}
     for index, value in enumerate(values):
-        normalized = _normalize_header(value)
-        field = _ALIAS_LOOKUP.get(normalized)
-        if field is None and normalized.startswith("품명"):
-            field = "product_name"
-        if field is None and normalized.startswith("규격"):
-            field = "specification"
+        field = _resolve_header_field(value)
         if field is not None and field not in mapping:
             mapping[field] = index
     return mapping
@@ -639,6 +645,7 @@ def _extract_with_pdfplumber(path: Path) -> tuple[list[QuoteItem], list[str], li
                     warnings.append(f"PDF {page_number}페이지: 표 경계 추출 실패 ({exc})")
                     tables = []
 
+                page_items: list[QuoteItem] = []
                 for table_number, table in enumerate(tables, start=1):
                     rows = _clean_pdf_table(table)
                     if not rows:
@@ -646,7 +653,22 @@ def _extract_with_pdfplumber(path: Path) -> tuple[list[QuoteItem], list[str], li
                     table_items, _ = _extract_sheet_rows(
                         f"PDF {page_number}페이지 표{table_number}", rows
                     )
-                    items.extend(table_items)
+                    page_items.extend(table_items)
+
+                if not page_items:
+                    word_rows = extract_word_geometry_rows(page, _resolve_header_field)
+                    if word_rows:
+                        word_items, _ = _extract_sheet_rows(
+                            f"PDF {page_number}페이지 단어좌표", word_rows
+                        )
+                        if word_items:
+                            page_items.extend(word_items)
+                            warnings.append(
+                                f"PDF {page_number}페이지: 표 선을 찾지 못해 단어 X/Y 좌표로 "
+                                "열을 재구성했습니다."
+                            )
+
+                items.extend(page_items)
     except Exception as exc:
         warnings.append(f"PDF 좌표 기반 파서 사용 실패 ({exc})")
         return [], [], warnings, False
@@ -724,12 +746,12 @@ def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     if items:
         if used_structured_table:
             warnings.append(
-                "PDF 표 경계/좌표 기반으로 품목을 추출하고, 후속 페이지의 제조사·모델·VAT·설치·"
-                "보증·기타조건을 문서 전체에서 보강했습니다. 원문과 대조해 확인하세요."
+                "PDF 표 경계 또는 단어 좌표 기반으로 품목을 추출하고, 후속 페이지의 제조사·모델·"
+                "VAT·설치·보증·기타조건을 문서 전체에서 보강했습니다. 원문과 대조해 확인하세요."
             )
         else:
             warnings.append(
-                "PDF 표 경계를 안정적으로 복원하지 못해 텍스트 fallback으로 추출했습니다. "
+                "PDF 표 구조를 안정적으로 복원하지 못해 텍스트 fallback으로 추출했습니다. "
                 "VAT·배송·설치·옵션·보증·유지보수 조건을 반드시 원문과 대조하세요."
             )
     else:
