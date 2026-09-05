@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-import xlrd
 from openpyxl import load_workbook
 from pypdf import PdfReader
 
@@ -321,6 +320,16 @@ def extract_excel_quote(path: Path) -> QuoteExtractionResult:
 
 
 def extract_legacy_excel_quote(path: Path) -> QuoteExtractionResult:
+    # `.xls` support is optional at page-import time. A missing legacy parser must not make the
+    # entire quote-analysis page unavailable for `.xlsx`/PDF users.
+    try:
+        import xlrd
+    except ModuleNotFoundError as exc:
+        raise QuoteExtractionError(
+            "구형 Excel(.xls) 지원 모듈 xlrd가 설치되지 않았습니다. "
+            "배포 의존성을 확인하거나 .xlsx 파일로 저장해 다시 업로드하세요."
+        ) from exc
+
     try:
         workbook = xlrd.open_workbook(str(path), on_demand=True)
     except Exception as exc:
@@ -423,9 +432,7 @@ def extract_quote_file(path: Path) -> QuoteExtractionResult:
         return extract_legacy_excel_quote(path)
     if suffix == ".pdf":
         return extract_pdf_quote(path)
-    raise QuoteExtractionError(
-        f"현재 자동 추출은 .xlsx/.xls/.pdf 형식을 지원합니다: {suffix or '확장자 없음'}"
-    )
+    raise QuoteExtractionError("지원하지 않는 파일 형식입니다. .xlsx/.xls/.pdf만 업로드하세요.")
 
 
 def quote_item_query(item: QuoteItem) -> ProductQuery:

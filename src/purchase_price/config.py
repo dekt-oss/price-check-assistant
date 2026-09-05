@@ -12,6 +12,10 @@ class Settings(BaseSettings):
 
     # Legacy/common key kept for backward compatibility with the original public-data setup.
     data_go_kr_service_key: str | None = None
+    # Shared key alias used for the currently approved market/public-data APIs. This may be the
+    # same issued key across multiple data.go.kr services; source-specific keys still take
+    # precedence if they are configured later.
+    data_go_kr_market_service_key: str | None = None
     # Source-specific keys take precedence when configured. They may currently have the same
     # value, but keeping them separate avoids breaking older approved APIs when a key changes.
     mfds_service_key: str | None = None
@@ -32,11 +36,19 @@ class Settings(BaseSettings):
 
     @property
     def resolved_mfds_service_key(self) -> str | None:
-        return self.mfds_service_key or self.data_go_kr_service_key
+        return (
+            self.mfds_service_key
+            or self.data_go_kr_market_service_key
+            or self.data_go_kr_service_key
+        )
 
     @property
     def resolved_g2b_service_key(self) -> str | None:
-        return self.g2b_service_key or self.data_go_kr_service_key
+        return (
+            self.g2b_service_key
+            or self.data_go_kr_market_service_key
+            or self.data_go_kr_service_key
+        )
 
 
 @lru_cache
