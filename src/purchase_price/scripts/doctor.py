@@ -2,12 +2,10 @@
 
 Required checks must pass before code work is meaningful (interpreter, package import,
 lint/test tooling, data registries). Optional checks describe capabilities that only some
-tasks need: a PostgreSQL connection is needed for the Streamlit demo and ingestion, a
-data.go.kr service key is needed only for live G2B calls, and a .env file only overrides
-settings that already have working defaults. Optional failures are reported as SKIP so a
-developer without Docker or without a key, and CI without a .env, still get a usable verdict.
+tasks need: PostgreSQL for persistence, G2B/MFDS credentials for live public-data calls, and
+local Tesseract kor+eng for scanned-PDF OCR.
 
-The service key is never printed; only whether one is configured.
+Secret values are never printed. Runtime readiness checks never make an external API request.
 """
 
 from __future__ import annotations
@@ -71,7 +69,6 @@ def _package_check() -> CheckResult:
 
 def _tooling_check() -> CheckResult:
     missing = [name for name in ("ruff", "pytest") if shutil.which(name) is None]
-    # A console script can be absent while the module is importable (e.g. `python -m pytest`).
     missing = [name for name in missing if importlib.util.find_spec(name) is None]
     if missing:
         return CheckResult(
@@ -95,11 +92,7 @@ def _streamlit_check() -> CheckResult:
 
 
 def _env_file_check() -> CheckResult:
-    """A .env only overrides defaults, so its absence is reported, never treated as broken.
-
-    Settings falls back to the values in Settings itself and to the process environment, which
-    is how CI runs the whole suite without a .env at all.
-    """
+    """A .env only overrides defaults, so its absence is information, not a failure."""
 
     env_path = PROJECT_ROOT / ".env"
     if env_path.exists():
@@ -108,7 +101,10 @@ def _env_file_check() -> CheckResult:
         "env file",
         SKIP,
         ".env not found; using built-in defaults and the process environment",
-        hint="Copy .env.example to .env to change DATABASE_URL or add a service key. Never commit the real key.",
+        hint=(
+            "Copy .env.example to .env to change DATABASE_URL or add a service key. "
+            "Never commit the real key."
+        ),
         required=False,
     )
 
@@ -147,31 +143,51 @@ def _data_registry_check() -> CheckResult:
     )
 
 
-def _service_key_check() -> CheckResult:
-    try:
-        from purchase_price.config import get_settings
+def _runtime_capability_checks() -> list[CheckResult]:
+    """Map secret-free runtime readiness into optional doctor checks."""
 
-        configured = bool(get_settings().data_go_kr_service_key)
-    except Exception as exc:  # settings parsing is the only thing that can fail here
-        return CheckResult("g2b service key", SKIP, f"settings unreadable: {exc}", required=False)
-    if configured:
-        # Never print the value, only that one is present.
-        return CheckResult("g2b service key", OK, "configured (value not shown)", required=False)
-    return CheckResult(
-        "g2b service key",
-        SKIP,
-        "not configured; live G2B calls unavailable",
-        hint="Local live calls need DATA_GO_KR_SERVICE_KEY in .env. Everything else works without it.",
-        required=False,
-    )
+    try:
+        from purchase_price.services.runtime_readiness import runtime_readiness
+
+        readiness = runtime_readiness()
+    except Exception as exc:
+        return [
+            CheckResult(
+                "runtime capabilities",
+                SKIP,
+                f"readiness check failed: {type(exc).__name__}",
+                required=False,
+            )
+        ]
+
+    hints = {
+        "g2b_credential": (
+            "Configure G2B_SERVICE_KEY, DATA_GO_KR_MARKET_SERVICE_KEY, or legacy "
+            "DATA_GO_KR_SERVICE_KEY in an approved secret store."
+        ),
+        "mfds_credential": (
+            "Configure MFDS_SERVICE_KEY, DATA_GO_KR_MARKET_SERVICE_KEY, or legacy "
+            "DATA_GO_KR_SERVICE_KEY in an approved secret store."
+        ),
+        "local_ocr": (
+            "Install tesseract-ocr plus kor/eng language packs; Python OCR dependencies are "
+            "installed by the project package."
+        ),
+    }
+    return [
+        CheckResult(
+            check.label,
+            OK if check.ready else SKIP,
+            check.detail,
+            hint=None if check.ready else hints.get(check.key),
+            required=False,
+        )
+        for check in readiness
+    ]
 
 
 def database_error() -> str | None:
-    """Return None when DATABASE_URL accepts a connection, else a one-line reason.
-
-    The setup scripts call this to decide whether to apply migrations, so that a developer
-    running a local PostgreSQL without Docker is not treated as having no database.
-    """
+    """Return None when DATABASE_URL accepts a connection, else a one-line reason."""
 
     try:
         from sqlalchemy import create_engine, text
@@ -182,7 +198,8 @@ def database_error() -> str | None:
 
     try:
         engine = create_engine(
-            get_settings().database_url, connect_args={"connect_timeout": 3}
+            get_settings().database_url,
+            connect_args={"connect_timeout": 3},
         )
         with engine.connect() as connection:
             connection.execute(text("select 1"))
@@ -199,7 +216,10 @@ def _database_check() -> CheckResult:
         "database",
         SKIP,
         f"not reachable: {reason}",
-        hint="Start it with `docker compose up -d db`, or point DATABASE_URL at a local PostgreSQL 16.",
+        hint=(
+            "Start it with `docker compose up -d db`, or point DATABASE_URL at a local "
+            "PostgreSQL 16."
+        ),
         required=False,
     )
 
@@ -221,12 +241,18 @@ def _migration_check(database_reachable: bool) -> CheckResult:
         config = Config(str(PROJECT_ROOT / "alembic.ini"))
         config.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))
         heads = set(ScriptDirectory.from_config(config).get_heads())
-        engine = create_engine(get_settings().database_url, connect_args={"connect_timeout": 3})
+        engine = create_engine(
+            get_settings().database_url,
+            connect_args={"connect_timeout": 3},
+        )
         with engine.connect() as connection:
             current = set(MigrationContext.configure(connection).get_current_heads())
     except Exception as exc:
         return CheckResult(
-            "migrations", SKIP, f"could not be read: {str(exc).splitlines()[0][:160]}", required=False
+            "migrations",
+            SKIP,
+            f"could not be read: {str(exc).splitlines()[0][:160]}",
+            required=False,
         )
 
     if not current:
@@ -256,8 +282,8 @@ def run_checks() -> list[CheckResult]:
         _streamlit_check(),
         _env_file_check(),
         _data_registry_check(),
-        _service_key_check(),
     ]
+    results.extend(_runtime_capability_checks())
     database = _database_check()
     results.append(database)
     results.append(_migration_check(database.status == OK))
@@ -287,13 +313,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Check whether this machine can run the project. Required checks gate the exit "
-            "code; the database and the G2B service key are optional and reported as SKIP."
+            "code; database, live API credentials and local OCR are optional capabilities."
         )
     )
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Also exit 1 when an optional capability (database, service key) is unavailable.",
+        help="Also exit 1 when an optional capability is unavailable.",
     )
     args = parser.parse_args(argv)
 
