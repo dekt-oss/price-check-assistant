@@ -1,0 +1,40 @@
+from purchase_price.scripts.run_controlled_uat import run_controlled_uat
+
+
+def test_controlled_uat_runner_executes_offline_cases_without_blockers() -> None:
+    cases, summary = run_controlled_uat()
+
+    assert len(cases) == 15
+    assert summary["mode"] == "deterministic_offline_pre_uat"
+    assert summary["automated_cases"] == 12
+    assert summary["not_run_live_cases"] == 3
+    assert summary["passed_automated_cases"] == 12
+    assert summary["failed_automated_cases"] == 0
+    assert summary["identity_false_positive_count"] == 0
+    assert summary["comparison_false_positive_count"] == 0
+    assert summary["comparison_false_negative_count"] == 1
+    assert summary["zero_vs_failure_error_count"] == 0
+    assert summary["provenance_secret_filter_and_fingerprint_ok"] is True
+    assert summary["release_blocker_count"] == 0
+    assert summary["live_required_cases"] == ["UAT-04", "UAT-14", "UAT-15"]
+
+
+def test_quantity_mismatch_is_recorded_as_known_conservative_false_negative() -> None:
+    cases, _ = run_controlled_uat()
+    uat11 = next(case for case in cases if case.row["case_id"] == "UAT-11")
+
+    assert uat11.assertion_status == "PASS"
+    assert uat11.row["candidate_gate_result"] == "비교 보류"
+    assert uat11.row["false_negative_comparison"] == "true"
+    assert "수량 불일치" in uat11.row["candidate_gate_reasons"]
+
+
+def test_mfds_live_cases_are_explicitly_not_run_offline() -> None:
+    cases, _ = run_controlled_uat()
+    by_id = {case.row["case_id"]: case for case in cases}
+
+    for case_id in ("UAT-04", "UAT-14", "UAT-15"):
+        case = by_id[case_id]
+        assert case.assertion_status == "NOT_RUN"
+        assert case.automated is False
+        assert case.row["extraction_status"] == "NOT_RUN_LIVE_REQUIRED"
