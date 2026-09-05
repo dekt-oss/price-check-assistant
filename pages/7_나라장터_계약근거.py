@@ -101,6 +101,7 @@ if submitted:
                 "계약방법": item.contract_method_name or "",
                 "계약기관": item.contract_institution_name or "",
                 "상세원문": item.detail_url or "",
+                "근거지문(SHA-256)": item.provenance.fingerprint if item.provenance else "",
             }
             for item in records
         ]
@@ -109,6 +110,10 @@ if submitted:
             use_container_width=True,
             hide_index=True,
             column_config={"상세원문": st.column_config.LinkColumn("상세원문")},
+        )
+        st.caption(
+            "근거지문은 계약정보 API 응답 중 명시적으로 허용한 공개 필드만 canonical JSON으로 만든 뒤 "
+            "계산한 SHA-256입니다. serviceKey·token·password·secret 같은 비밀정보는 포함하지 않습니다."
         )
         st.caption(
             "계약근거는 구매시장 존재 여부와 조달기관·계약방법을 확인하는 참고자료입니다. "
