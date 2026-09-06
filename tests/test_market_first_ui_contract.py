@@ -26,14 +26,14 @@ def test_market_research_pipeline_keeps_procurement_context_outside_direct_price
     assert "None of those records are passed to `search_all` or `assess_prices`." in text
 
 
-def test_quick_search_runs_full_procurement_research_without_verified_mapping_gate() -> None:
+def test_quick_search_uses_full_market_research_pipeline_without_verified_mapping_gate() -> None:
     text = (REPO_ROOT / "pages" / "3_빠른_검색.py").read_text(encoding="utf-8")
 
-    assert "research_g2b_market(" in text
-    assert "enrich_market_bundle_with_bid_items(" in text
-    assert "enrich_market_bundle_with_contracts(" in text
-    assert "discover_unmapped_g2b_candidates(" in text
+    assert "run_market_research(" in text
+    assert "render_procurement_research(market_bundle)" in text
+    assert "render_market_reference_summary(" in text
     assert "research_needed" not in text
+    assert "verified mapping" in text
 
 
 def test_quote_market_surface_persists_procurement_bundle_per_item() -> None:
