@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head>
+  <title>02-대시보드</title>
+  <meta charset="utf-8">
+</head>
+<body>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f6f5f2; color: #1c1b19; font-size: 14px; line-height: 1.45; }
+    a { color: #1f6f8b; } a:hover { color: #174f63; }
+    .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .ok { background: #e4f2ea; color: #1f5e42; } .warn { background: #f7ecd6; color: #7a5410; } .err { background: #f8e1e1; color: #8a2a2a; } .muted { background: #eeece7; color: #5a5750; } .info { background: #e3eef3; color: #1f6f8b; }
+    .nav a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 8px; color: #3b3935; text-decoration: none; font-weight: 500; }
+    .nav a.on { background: #e3eef3; color: #1f6f8b; font-weight: 600; }
+    .card { background: #fff; border: 1px solid #e2dfd8; border-radius: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 18px; border-radius: 8px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+    .primary { background: #1f6f8b; color: #fff; } .ghost { border: 1px solid #cfcbc2; background: #fff; color: #1c1b19; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-size: 12px; color: #6b6862; font-weight: 500; padding: 10px 12px; border-bottom: 1px solid #e2dfd8; }
+    td { padding: 12px; border-bottom: 1px solid #efece6; font-size: 13px; vertical-align: middle; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  </style>
+
+<div style="width: 1440px; min-height: 900px; display: flex; box-sizing: border-box;">
+  <div class="nav" style="width: 220px; background: #fff; border-right: 1px solid #e2dfd8; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+    <div style="padding: 6px 14px 18px; font-weight: 700; font-size: 15px;">시장가격조사기</div>
+    <a class="on" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"></rect><rect x="13" y="3" width="8" height="8" rx="1"></rect><rect x="3" y="13" width="8" height="8" rx="1"></rect><rect x="13" y="13" width="8" height="8" rx="1"></rect></svg>대시보드</a>
+    <a href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M14 3v6h6"></path></svg>견적 검토</a>
+    <a href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>빠른 검색</a>
+    <a href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M7 21h10"></path></svg>의료기기 조회</a>
+    <div style="flex-grow: 1;"></div>
+    <a href="#" style="color: #8a877f;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5a7 7 0 0 0 .1-1z"></path></svg>관리 <span class="chip muted" style="margin-left: auto;">관리자</span></a>
+  </div>
+
+  <div style="flex-grow: 1; padding: 32px 40px; display: flex; flex-direction: column; gap: 24px; box-sizing: border-box;">
+    <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;">
+      <div>
+        <div style="font-size: 24px; font-weight: 700;">대시보드</div>
+        <div style="color: #6b6862;">진행 중인 견적 검토와 오늘 확인할 것</div>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <a class="btn ghost" href="#">빠른 검색</a>
+        <a class="btn primary" href="#">새 견적 검토</a>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px;">
+      <div class="card" style="padding: 16px 18px;"><div style="font-size: 12px; color: #6b6862;">검토 중</div><div style="font-size: 28px; font-weight: 700;">2</div></div>
+      <div class="card" style="padding: 16px 18px;"><div style="font-size: 12px; color: #6b6862;">승인 대기 (품목–근거 쌍)</div><div style="font-size: 28px; font-weight: 700;">2</div></div>
+      <div class="card" style="padding: 16px 18px;"><div style="font-size: 12px; color: #6b6862;">근거 없음 · 사람 조사 필요</div><div style="font-size: 28px; font-weight: 700;">2</div></div>
+      <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 12px; color: #6b6862;">시스템 상태</div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;"><span class="chip ok"><span class="dot" style="background: #2e7d5b; margin-right: 6px;"></span>나라장터</span><span class="chip ok"><span class="dot" style="background: #2e7d5b; margin-right: 6px;"></span>식약처</span><span class="chip err"><span class="dot" style="background: #b23a3a; margin-right: 6px;"></span>스캔 OCR</span></div>
+        <div style="font-size: 12px; color: #8a2a2a;">스캔 PDF는 지금 처리할 수 없습니다 · 관리자 확인 중</div>
+      </div>
+    </div>
+
+    <div class="card" style="padding: 0;">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid #e2dfd8;">
+        <div style="font-weight: 600; font-size: 15px;">내 견적 검토</div>
+        <div style="display: flex; gap: 8px;"><span class="chip info">전체 4</span><span class="chip muted">완료 1</span></div>
+      </div>
+      <table>
+        <thead><tr><th style="width: 32%;">견적</th><th>품목</th><th>진행</th><th>판정</th><th>갱신</th><th></th></tr></thead>
+        <tbody>
+          <tr>
+            <td><div style="font-weight: 600;">2025-206 마취기</div><div style="font-size: 12px; color: #6b6862;">PDF · 3페이지 · 텍스트</div></td>
+            <td>1</td>
+            <td><span class="chip warn">4/6 근거 수집</span></td>
+            <td><span class="chip muted">보류 — 검증 mapping 없음</span></td>
+            <td style="color: #6b6862;">10분 전</td>
+            <td><a href="#">이어서</a></td>
+          </tr>
+          <tr>
+            <td><div style="font-weight: 600;">사무용 노트북 12대</div><div style="font-size: 12px; color: #6b6862;">xlsx · 1시트</div></td>
+            <td>2</td>
+            <td><span class="chip warn">5/6 조건 대조</span></td>
+            <td><span class="chip warn">승인 대기 2</span></td>
+            <td style="color: #6b6862;">어제</td>
+            <td><a href="#">이어서</a></td>
+          </tr>
+          <tr>
+            <td><div style="font-weight: 600;">컬러 레이저프린터</div><div style="font-size: 12px; color: #6b6862;">xlsx · 1시트</div></td>
+            <td>1</td>
+            <td><span class="chip ok">6/6 완료</span></td>
+            <td><span class="chip ok">범위 내 · 승인 1</span></td>
+            <td style="color: #6b6862;">3일 전</td>
+            <td><a href="#">보기</a></td>
+          </tr>
+          <tr>
+            <td><div style="font-weight: 600;">약품냉장고 2대</div><div style="font-size: 12px; color: #6b6862;">PDF · 스캔</div></td>
+            <td>—</td>
+            <td><span class="chip err">추출 실패 · OCR 불가</span></td>
+            <td><span class="chip muted">—</span></td>
+            <td style="color: #6b6862;">3일 전</td>
+            <td><a href="#">원본 Excel 요청</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+      <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-weight: 600;">사람이 조사해야 하는 품목</div>
+        <div style="font-size: 12px; color: #6b6862;">공개 근거가 없어 시스템이 멈춘 품목. 조사 결과를 근거 레지스트리에 넣으면 다음부터 자동입니다.</div>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <div style="display: flex; justify-content: space-between; padding: 8px 10px; border: 1px solid #efece6; border-radius: 6px;"><span>가스 마취기 · Maquet Flow-C</span><span class="chip muted">나라장터 mapping 없음</span></div>
+          <div style="display: flex; justify-content: space-between; padding: 8px 10px; border: 1px solid #efece6; border-radius: 6px;"><span>심전도기 · GE MAC5</span><span class="chip muted">공개 근거 0건</span></div>
+        </div>
+      </div>
+      <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-weight: 600;">근거 최신성</div>
+        <div style="font-size: 12px; color: #6b6862;">승인된 pair의 근거가 오래되면 여기서 알립니다.</div>
+        <div style="display: flex; justify-content: space-between; padding: 8px 10px; border: 1px solid #efece6; border-radius: 6px;"><span>레이저프린터 · 나라장터 12건</span><span class="chip ok">최근 30일 내</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

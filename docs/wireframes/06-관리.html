@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+  <title>06-관리</title>
+  <meta charset="utf-8">
+</head>
+<body>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f6f5f2; color: #1c1b19; font-size: 14px; line-height: 1.45; }
+    a { color: #1f6f8b; } a:hover { color: #174f63; }
+    .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .ok { background: #e4f2ea; color: #1f5e42; } .warn { background: #f7ecd6; color: #7a5410; } .err { background: #f8e1e1; color: #8a2a2a; } .muted { background: #eeece7; color: #5a5750; } .info { background: #e3eef3; color: #1f6f8b; }
+    .nav a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 8px; color: #3b3935; text-decoration: none; font-weight: 500; }
+    .nav a.on { background: #e3eef3; color: #1f6f8b; font-weight: 600; }
+    .card { background: #fff; border: 1px solid #e2dfd8; border-radius: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 14px; border-radius: 8px; font-weight: 600; font-size: 13px; white-space: nowrap; }
+    .primary { background: #1f6f8b; color: #fff; } .ghost { border: 1px solid #cfcbc2; background: #fff; color: #1c1b19; }
+    .tab { padding: 10px 4px; font-weight: 500; color: #6b6862; border-bottom: 2px solid transparent; }
+    .tab.on { color: #1f6f8b; border-bottom-color: #1f6f8b; font-weight: 600; }
+    .stage { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border: 1px solid #efece6; border-radius: 6px; font-size: 13px; }
+    .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-size: 12px; color: #6b6862; font-weight: 500; padding: 8px 10px; border-bottom: 1px solid #e2dfd8; }
+    td { padding: 9px 10px; border-bottom: 1px solid #efece6; font-size: 13px; vertical-align: middle; }
+  </style>
+
+<div style="width: 1440px; min-height: 940px; display: flex; box-sizing: border-box;">
+  <div class="nav" style="width: 220px; background: #fff; border-right: 1px solid #e2dfd8; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+    <div style="padding: 6px 14px 18px; font-weight: 700; font-size: 15px;">시장가격조사기</div>
+    <a href="#">대시보드</a>
+    <a href="#">견적 검토</a>
+    <a href="#">빠른 검색</a>
+    <a href="#">의료기기 조회</a>
+    <div style="flex-grow: 1;"></div>
+    <a class="on" href="#">관리</a>
+  </div>
+
+  <div style="flex-grow: 1; padding: 28px 32px; display: flex; flex-direction: column; gap: 18px; box-sizing: border-box;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+      <div>
+        <div style="font-size: 24px; font-weight: 700;">관리</div>
+        <div style="color: #6b6862;">담당자 화면에 나오지 않는 운영·품질 도구</div>
+      </div>
+      <span class="chip warn">배포 commit 미확인 · Python 3.14 (CI 3.11)</span>
+    </div>
+
+    <div style="display: flex; gap: 24px; border-bottom: 1px solid #e2dfd8;">
+      <div class="tab on">근거 레지스트리</div>
+      <div class="tab">운영환경 진단</div>
+      <div class="tab">추출 UAT</div>
+      <div class="tab">벤치마크</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; align-items: start;">
+      <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-weight: 600;">나라장터 세부품명 mapping</div>
+          <div style="display: flex; gap: 8px;"><span class="chip ok">검증 5</span><span class="chip warn">조사 요청 2</span><span class="chip muted">미검증 13</span></div>
+        </div>
+        <table>
+          <thead><tr><th>모델</th><th>제품명</th><th>세부품명 (코드)</th><th>상태</th><th>근거</th><th></th></tr></thead>
+          <tbody>
+            <tr><td>Flow-C</td><td>가스 마취기</td><td style="color: #8a877f;">후보: 마취기 (42182001)</td><td><span class="chip warn">조사 요청</span></td><td style="color: #6b6862;">담당자 요청 · 후보 3건 관측</td><td><a href="#">검증하기</a></td></tr>
+            <tr><td>ApeosPrint C5570 GK</td><td>컬러 레이저프린터</td><td>레이저프린터 (4321210501)</td><td><span class="chip ok">검증</span></td><td><a href="#">법령 별표</a></td><td><a href="#">보기</a></td></tr>
+            <tr><td>Veriti Pro Dx</td><td>핵산증폭기</td><td>유전자증폭기 (4110630701)</td><td><span class="chip ok">검증</span></td><td><a href="#">live 관측</a></td><td><a href="#">보기</a></td></tr>
+            <tr><td>GMSR-182</td><td>약품냉장고</td><td style="color: #8a877f;">경합: 의약품냉장고 / 실험실용일반냉장고</td><td><span class="chip muted">보류</span></td><td style="color: #6b6862;">GMS 미관측</td><td><a href="#">조사 기록</a></td></tr>
+          </tbody>
+        </table>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+          <div style="font-size: 12px; color: #6b6862;">검증 없이는 자동검색에 쓰이지 않습니다. 검증에는 공개 근거 URL이 필수입니다.</div>
+          <a class="btn ghost" href="#">분류 탐색 도구 열기</a>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 18px;">
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 600;">운영환경 진단</div><a href="#" style="font-size: 13px;">자세히</a></div>
+          <div class="stage"><span>실행 환경</span><span class="mono">commit unknown · Py 3.14.7</span></div>
+          <div class="stage"><span>나라장터 인증 · live smoke</span><span><span class="chip err">smoke 오류</span></span></div>
+          <div class="stage"><span>식약처 인증 · live smoke</span><span><span class="chip ok">성공 781ms</span></span></div>
+          <div class="stage"><span>OCR 모듈 / 실행파일 / 언어팩</span><span><span class="chip err">3/3 없음</span></span></div>
+          <div class="stage"><span>합성 스캔 PDF OCR 실행</span><span><span class="chip muted">미실행</span></span></div>
+          <a class="btn primary" href="#" style="margin-top: 4px;">전체 smoke 실행 (요청 3회)</a>
+        </div>
+
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 600;">추출 UAT · Release Gate</div><span class="chip err">NOT READY</span></div>
+          <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px;">
+            <div style="padding: 8px; border-radius: 6px; background: #e4f2ea; text-align: center; font-size: 12px;">xlsx<br><b>2</b></div>
+            <div style="padding: 8px; border-radius: 6px; background: #e4f2ea; text-align: center; font-size: 12px;">xls<br><b>1</b></div>
+            <div style="padding: 8px; border-radius: 6px; background: #e4f2ea; text-align: center; font-size: 12px;">텍스트 PDF<br><b>1</b></div>
+            <div style="padding: 8px; border-radius: 6px; background: #f8e1e1; text-align: center; font-size: 12px;">스캔 PDF<br><b>0</b></div>
+            <div style="padding: 8px; border-radius: 6px; background: #f8e1e1; text-align: center; font-size: 12px;">상업조건 PDF<br><b>0</b></div>
+          </div>
+          <div style="font-size: 12px; color: #8a2a2a;">막힌 조건: 포맷 2종 미확인 · FP 1건 (UAT-003)</div>
+          <div style="font-size: 12px; color: #6b6862;">케이스별로 "상업조건 중심"을 사람이 표시합니다. 결과 파일은 비식별 통계만 담습니다.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

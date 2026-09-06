@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+<head>
+  <title>S2-품목확인</title>
+  <meta charset="utf-8">
+</head>
+<body>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f6f5f2; color: #1c1b19; font-size: 14px; line-height: 1.45; }
+    a { color: #1f6f8b; } a:hover { color: #174f63; }
+    .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .ok { background: #e4f2ea; color: #1f5e42; } .warn { background: #f7ecd6; color: #7a5410; } .err { background: #f8e1e1; color: #8a2a2a; } .muted { background: #eeece7; color: #5a5750; } .info { background: #e3eef3; color: #1f6f8b; }
+    .nav a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 8px; color: #3b3935; text-decoration: none; font-weight: 500; }
+    .nav a.on { background: #e3eef3; color: #1f6f8b; font-weight: 600; }
+    .card { background: #fff; border: 1px solid #e2dfd8; border-radius: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 18px; border-radius: 8px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+    .primary { background: #1f6f8b; color: #fff; } .ghost { border: 1px solid #cfcbc2; background: #fff; color: #1c1b19; } .disabled { opacity: 0.45; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-size: 12px; color: #6b6862; font-weight: 500; padding: 8px 10px; border-bottom: 1px solid #e2dfd8; }
+    td { padding: 9px 10px; border-bottom: 1px solid #efece6; font-size: 13px; vertical-align: middle; }
+    .step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #8a877f; }
+    .step .n { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #cfcbc2; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+    .step.done .n { background: #2e7d5b; border-color: #2e7d5b; color: #fff; }
+    .step.now { color: #1c1b19; font-weight: 600; } .step.now .n { border-color: #1f6f8b; color: #1f6f8b; }
+    .item { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-bottom: 1px solid #efece6; }
+    .item.on { background: #e3eef3; border-left: 3px solid #1f6f8b; }
+    .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #efece6; gap: 12px; }
+    .kv span:last-child { font-weight: 600; text-align: right; }
+    .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 12px; color: #6b6862; }
+    .field div { height: 40px; border: 1px solid #cfcbc2; border-radius: 8px; background: #fff; padding: 0 12px; display: flex; align-items: center; font-size: 13px; }
+    .field.edited div { border-color: #1f6f8b; background: #f3f8fa; }
+    .src { font-size: 12px; color: #6b6862; background: #fbfaf8; border: 1px dashed #cfcbc2; border-radius: 6px; padding: 8px 10px; }
+    .todo { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+  </style>
+
+<div style="width: 1440px; min-height: 1000px; display: flex; box-sizing: border-box;">
+  <div class="nav" style="width: 220px; background: #fff; border-right: 1px solid #e2dfd8; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+    <div style="padding: 6px 14px 18px; font-weight: 700; font-size: 15px;">시장가격조사기</div>
+    <a href="#">대시보드</a>
+    <a class="on" href="#">견적 검토</a>
+    <a href="#">빠른 검색</a>
+    <a href="#">의료기기 조회</a>
+    <div style="flex-grow: 1;"></div>
+    <a href="#" style="color: #8a877f;">관리</a>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; box-sizing: border-box;">
+    <div style="background: #fff; border-bottom: 1px solid #e2dfd8; padding: 18px 32px; display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <a href="#" style="font-size: 13px; color: #6b6862; text-decoration: none;">← 대시보드</a>
+          <div style="font-size: 20px; font-weight: 700;">전산비품 견적 2026-09</div>
+          <span class="chip muted">xlsx · 1시트</span>
+          <span class="chip warn">2단계 · 원문 대조 중</span>
+        </div>
+        <div style="display: flex; gap: 8px;"><a class="btn ghost" href="#">원문 보기</a><a class="btn ghost" href="#">검토 보고서</a></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 28px;">
+        <div class="step done"><span class="n">✓</span>업로드·추출</div>
+        <div class="step now"><span class="n">2</span>품목 확인</div>
+        <div class="step"><span class="n">3</span>제품 식별</div>
+        <div class="step"><span class="n">4</span>근거 수집</div>
+        <div class="step"><span class="n">5</span>조건 대조</div>
+        <div class="step"><span class="n">6</span>승인·판정</div>
+      </div>
+    </div>
+    <div style="display: grid; grid-template-columns: 300px 1fr 340px; gap: 0; flex-grow: 1; min-height: 0;">
+      <div style="background: #fff; border-right: 1px solid #e2dfd8; display: flex; flex-direction: column;">
+        <div style="padding: 14px 14px 8px; display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">품목 1건</span><a href="#" style="font-size: 12px;">품목 추가</a></div>
+        <div class="item on">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">컬러 레이저프린터</span><span class="chip muted">1대</span></div>
+          <div style="font-size: 12px; color: #6b6862;">FUJIFILM Business Innovation · ApeosPrint C5570 GK · 3,500,000원</div>
+          <div style="display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap;"><span class="chip ok">추출 ✓</span><span class="chip warn">확인 중</span></div>
+        </div>
+        <div style="padding: 14px; font-size: 12px; color: #6b6862; border-top: 1px solid #efece6; margin-top: auto;">
+          <div style="font-weight: 600; color: #3b3935; margin-bottom: 6px;">수정 메모</div>
+          <div>단가 3,500,000 원문 입력 · VAT 상충 → 포함으로 확정(8행 근거)</div>
+        </div>
+      </div>
+      <div style="padding: 22px 26px; display: flex; flex-direction: column; gap: 18px; overflow: hidden;">
+        <div style="display: flex; align-items: center; justify-content: space-between;"><div style="font-size: 17px; font-weight: 700;">2. 품목 확인 — 원문 대조</div><a href="#" style="font-size: 13px;">원문 나란히 보기</a></div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-weight: 600;">품목 필드 <span style="font-weight: 400; color: #6b6862;">· 파란 테두리는 담당자가 수정한 값</span></div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+            <div class="field"><label>제품명</label><div>컬러 레이저프린터</div></div>
+            <div class="field"><label>제조사</label><div>FUJIFILM Business Innovation</div></div>
+            <div class="field"><label>모델명</label><div>ApeosPrint C5570 GK</div></div>
+            <div class="field"><label>규격</label><div>A3, 55PPM</div></div>
+            <div class="field"><label>수량 / 단위</label><div>1 / 대</div></div>
+            <div class="field edited"><label>단가 <span style="color: #1f6f8b;">· 원문에서 입력</span></label><div>3,500,000</div></div>
+          </div>
+          <div class="src">원문 6행: "컬러 레이저프린터 | ApeosPrint C5570 GK | 1 | | 3,500,000 | (포함)"</div>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-weight: 600;">상업조건 <span style="font-weight: 400; color: #6b6862;">· 빈 값은 "해당 없음"이 아니라 "미확인"</span></div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+            <div class="field edited"><label>VAT <span style="color: #7a5410;">· 상충 → 담당자 확정</span></label><div>포함</div></div>
+            <div class="field"><label>배송</label><div>포함</div></div>
+            <div class="field"><label>설치</label><div>포함</div></div>
+            <div class="field"><label>옵션</label><div style="color: #8a877f;">미확인</div></div>
+            <div class="field"><label>보증</label><div>3년</div></div>
+            <div class="field"><label>유지보수</label><div style="color: #8a877f;">미확인</div></div>
+          </div>
+          <div class="src">VAT 근거: 원문 8행 "세액 (포함)" 채택 · 원문 12행 "VAT 별도"는 소모품 단가에 대한 문구로 판단 — 메모 저장됨</div>
+        </div>
+        <div class="card" style="padding: 12px 16px; display: flex; align-items: center; gap: 12px;">
+          <input type="checkbox" checked style="width: 18px; height: 18px;"><span style="font-weight: 600;">원문 대조 완료</span><span style="font-size: 12px; color: #6b6862;">체크해야 다음 단계로 갑니다. 수정한 값과 메모는 검토 기록에 남습니다.</span>
+        </div>
+      </div>
+      <div style="background: #fff; border-left: 1px solid #e2dfd8; padding: 22px 20px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="font-weight: 700; font-size: 15px;">확인 상태</div>
+        <div class="kv"><span>식별 필드 (4)</span><span>4 확인</span></div>
+        <div class="kv"><span>수량·단위·단가</span><span>3 확인 · 1 수정</span></div>
+        <div class="kv"><span>상업조건 (6)</span><span>4 확인 · 2 미확인</span></div>
+        <div style="padding: 12px; border-radius: 8px; background: #f7ecd6; font-size: 13px; color: #7a5410;">옵션·유지보수가 미확인이면 5단계에서 그 조건은 "미확인"으로 남아 판정을 막습니다. 원문에 없으면 그대로 두세요 — 지어내지 않습니다.</div>
+        <div style="flex-grow: 1;"></div>
+        <a class="btn primary" href="#">3. 제품 식별로</a>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

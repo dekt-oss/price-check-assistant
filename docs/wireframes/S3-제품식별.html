@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+  <title>S3-제품식별</title>
+  <meta charset="utf-8">
+</head>
+<body>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f6f5f2; color: #1c1b19; font-size: 14px; line-height: 1.45; }
+    a { color: #1f6f8b; } a:hover { color: #174f63; }
+    .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .ok { background: #e4f2ea; color: #1f5e42; } .warn { background: #f7ecd6; color: #7a5410; } .err { background: #f8e1e1; color: #8a2a2a; } .muted { background: #eeece7; color: #5a5750; } .info { background: #e3eef3; color: #1f6f8b; }
+    .nav a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 8px; color: #3b3935; text-decoration: none; font-weight: 500; }
+    .nav a.on { background: #e3eef3; color: #1f6f8b; font-weight: 600; }
+    .card { background: #fff; border: 1px solid #e2dfd8; border-radius: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 18px; border-radius: 8px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+    .primary { background: #1f6f8b; color: #fff; } .ghost { border: 1px solid #cfcbc2; background: #fff; color: #1c1b19; } .disabled { opacity: 0.45; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-size: 12px; color: #6b6862; font-weight: 500; padding: 8px 10px; border-bottom: 1px solid #e2dfd8; }
+    td { padding: 9px 10px; border-bottom: 1px solid #efece6; font-size: 13px; vertical-align: middle; }
+    .step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #8a877f; }
+    .step .n { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #cfcbc2; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+    .step.done .n { background: #2e7d5b; border-color: #2e7d5b; color: #fff; }
+    .step.now { color: #1c1b19; font-weight: 600; } .step.now .n { border-color: #1f6f8b; color: #1f6f8b; }
+    .item { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-bottom: 1px solid #efece6; }
+    .item.on { background: #e3eef3; border-left: 3px solid #1f6f8b; }
+    .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #efece6; gap: 12px; }
+    .kv span:last-child { font-weight: 600; text-align: right; }
+    .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 12px; color: #6b6862; }
+    .field div { height: 40px; border: 1px solid #cfcbc2; border-radius: 8px; background: #fff; padding: 0 12px; display: flex; align-items: center; font-size: 13px; }
+    .field.edited div { border-color: #1f6f8b; background: #f3f8fa; }
+    .src { font-size: 12px; color: #6b6862; background: #fbfaf8; border: 1px dashed #cfcbc2; border-radius: 6px; padding: 8px 10px; }
+    .todo { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+  </style>
+
+<div style="width: 1440px; min-height: 980px; display: flex; box-sizing: border-box;">
+  <div class="nav" style="width: 220px; background: #fff; border-right: 1px solid #e2dfd8; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+    <div style="padding: 6px 14px 18px; font-weight: 700; font-size: 15px;">시장가격조사기</div>
+    <a href="#">대시보드</a>
+    <a class="on" href="#">견적 검토</a>
+    <a href="#">빠른 검색</a>
+    <a href="#">의료기기 조회</a>
+    <div style="flex-grow: 1;"></div>
+    <a href="#" style="color: #8a877f;">관리</a>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; box-sizing: border-box;">
+    <div style="background: #fff; border-bottom: 1px solid #e2dfd8; padding: 18px 32px; display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <a href="#" style="font-size: 13px; color: #6b6862; text-decoration: none;">← 대시보드</a>
+          <div style="font-size: 20px; font-weight: 700;">전산비품 견적 2026-09</div>
+          <span class="chip muted">xlsx · 1시트</span>
+          <span class="chip info">3단계 · 식별</span>
+        </div>
+        <div style="display: flex; gap: 8px;"><a class="btn ghost" href="#">원문 보기</a><a class="btn ghost" href="#">검토 보고서</a></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 28px;">
+        <div class="step done"><span class="n">✓</span>업로드·추출</div>
+        <div class="step done"><span class="n">✓</span>품목 확인</div>
+        <div class="step now"><span class="n">3</span>제품 식별</div>
+        <div class="step"><span class="n">4</span>근거 수집</div>
+        <div class="step"><span class="n">5</span>조건 대조</div>
+        <div class="step"><span class="n">6</span>승인·판정</div>
+      </div>
+    </div>
+    <div style="display: grid; grid-template-columns: 300px 1fr 340px; gap: 0; flex-grow: 1; min-height: 0;">
+      <div style="background: #fff; border-right: 1px solid #e2dfd8; display: flex; flex-direction: column;">
+        <div style="padding: 14px 14px 8px; display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">품목 1건</span><a href="#" style="font-size: 12px;">품목 추가</a></div>
+        <div class="item on">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">컬러 레이저프린터</span><span class="chip muted">1대</span></div>
+          <div style="font-size: 12px; color: #6b6862;">FUJIFILM Business Innovation · ApeosPrint C5570 GK · 3,500,000원</div>
+          <div style="display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap;"><span class="chip ok">확인 ✓</span><span class="chip ok">식별 ✓</span></div>
+        </div>
+        <div style="padding: 14px; font-size: 12px; color: #6b6862; border-top: 1px solid #efece6; margin-top: auto;">
+          <div style="font-weight: 600; color: #3b3935; margin-bottom: 6px;">식별 메모</div>
+          <div>제조사 alias 확인 · 나라장터 mapping 검증됨(법령 별표)</div>
+        </div>
+      </div>
+      <div style="padding: 22px 26px; display: flex; flex-direction: column; gap: 18px; overflow: hidden;">
+        <div style="font-size: 17px; font-weight: 700;">3. 제품 식별 — 이 품목이 정확히 무엇인가</div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 600;">제조사 정규화</div><span class="chip ok">alias 확인</span></div>
+          <div class="kv"><span>견적 표기</span><span>FUJIFILM Business Innovation</span></div>
+          <div class="kv"><span>정규 제조사</span><span>FUJIFILM Business Innovation (alias: Fujifilm, 후지필름)</span></div>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 600;">나라장터 세부품명 mapping</div><span class="chip ok">검증됨</span></div>
+          <div class="kv"><span>모델 ApeosPrint C5570 GK</span><span>레이저프린터 (4321210501)</span></div>
+          <div class="kv"><span>검증 근거</span><span><a href="#">법령 별표 · 공식 품목 상세</a></span></div>
+          <div style="font-size: 12px; color: #6b6862;">mapping이 없으면 이 카드는 "조사 요청" 상태가 되고, 4단계에서 직접검색 대신 후보 탐색만 실행됩니다.</div>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 600;">식약처 identity</div><span class="chip muted">해당 없음</span></div>
+          <div style="font-size: 13px; color: #6b6862;">의료기기가 아니므로 식약처 품목허가 확인을 생략합니다. 의료기기라면 여기서 품목허가·단일 후보·국내 정상 여부를 확정한 뒤에만 다음 단계로 갑니다.</div>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: #fbfaf8;">
+          <div style="font-weight: 600;">식별 결과 요약</div>
+          <div class="kv"><span>exact model</span><span>ApeosPrint C5570 GK</span></div>
+          <div class="kv"><span>규격 토큰</span><span>A3 · 55ppm</span></div>
+          <div class="kv"><span>동일성 판정 기준</span><span>모델 exact + 제조사 alias + 규격 토큰 → A / B</span></div>
+        </div>
+      </div>
+      <div style="background: #fff; border-left: 1px solid #e2dfd8; padding: 22px 20px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="font-weight: 700; font-size: 15px;">식별 상태</div>
+        <div class="todo"><span class="chip ok">✓</span>제조사 alias 확인</div>
+        <div class="todo"><span class="chip ok">✓</span>나라장터 mapping 검증됨</div>
+        <div class="todo"><span class="chip muted">–</span>식약처 identity 해당 없음</div>
+        <div style="padding: 12px; border-radius: 8px; background: #e4f2ea; font-size: 13px; color: #1f5e42;">직접검색 조건 충족. 4단계에서 나라장터 직접검색과 제조사 공개가격을 함께 수집합니다.</div>
+        <div style="flex-grow: 1;"></div>
+        <a class="btn primary" href="#">4. 근거 수집 시작</a>
+        <div style="font-size: 12px; color: #6b6862; text-align: center;">최근 1년 · 최대 120요청 · 약 3~4분</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

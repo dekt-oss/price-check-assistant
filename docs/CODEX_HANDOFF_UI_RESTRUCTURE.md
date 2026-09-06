@@ -6,8 +6,13 @@ Production: `https://bp-price-research.streamlit.app/`
 이 세션은 이전 대화를 모른다고 가정한다.
 **GitHub 최신 `main`을 Source of Truth로 복구한 뒤 시작한다.** 작성 시점 `main`은 `9c95e07`(PR #88까지 반영)이지만 고정 사실로 가정하지 말고 `git fetch origin` 후 재확인한다.
 
-설계 문서(필독): 저장소의 `docs/RESTRUCTURE_QUOTE_REVIEW.md`
-(없으면 이 프롬프트 §3의 요약으로 작업하되, 사용자에게 파일을 커밋해 달라고 먼저 요청한다.)
+필독 자료 세 가지:
+
+- `docs/RESTRUCTURE_QUOTE_REVIEW.md` — **구조** (파일 배치, 상태 객체, 함수 시그니처, 단계별 재사용 함수)
+- `docs/wireframes/README.md` — **시각 명세** (3열 레이아웃, 색 의미, 근거/후보 구분 규칙, 판정 문구 규칙)
+- `docs/wireframes/*.html` — 화면별 와이어프레임. 독립 실행 HTML이니 **브라우저로 직접 열어 보고** 만든다. S1~S6은 같은 견적이 흐르는 하나의 시나리오다.
+
+구조 문서와 시각 명세가 다르면 구조 문서의 계약이 우선이고, 화면 모양은 wireframes가 기준이다.
 
 ---
 
@@ -142,14 +147,16 @@ def search_progress(label: str)                                   # st.status �
 |---|---|---|---|
 | R1 | `ui/quote-review-state` | `ui/quote_review_state.py` + `can_enter` + 테스트 | 6개 게이트 각각 통과/차단 + reasons 문장 테스트 |
 | R2 | `ui/shared-widgets` | `ui/widgets.py` + `pages/1_통합검색.py`를 위젯으로 교체 (동작 동일) | `evidence_table`에 X등급 넣으면 예외; `observation_cards`가 VAT 상태 다른 근거를 합치지 않는 테스트; startup smoke 통과 |
-| R3 | `ui/quote-review-s1-s3` | `2_견적_검토.py` S1–S3 (S4 이후 "준비 중") + 서비스 최소변경 1·2 | synthetic xlsx 업로드 → S3 도달 (테스트는 render 함수를 state로 호출) |
+| R3 | `ui/quote-review-s1-s3` | `2_견적_검토.py` 3열 레이아웃 + 스텝퍼 + S1–S3 (S4 이후 "준비 중") + 서비스 최소변경 1·2 | synthetic xlsx 업로드 → S3 도달 (테스트는 render 함수를 state로 호출) |
 | R4 | `ui/quote-review-s4` | S4 + `st.status` 진행 (요청수는 기존 `SourceRunStatus` 필드를 읽기만) | 요청수가 출처 상태 표에 표시 |
 | R5 | `ui/quote-review-s5-s6` | S5·S6 + `quote_review_export` | 승인 → 판정 → JSON 다운로드; JSON에 파일명·원문 텍스트 없음 |
 | R6 | `ui/navigation-and-cleanup` | 대시보드, `st.navigation` 섹션(관리자 플래그), 의료기기 조회·관리 탭 통합, 구 페이지 6개 삭제 | 담당자 메뉴 4개, 관리자 메뉴 5개; startup smoke |
 
 R1·R2는 기존 화면을 깨지 않는다. R3부터는 구 페이지와 병행하고 R6에서 삭제한다.
 
-한 세션에서 R1→R2→R3까지를 목표로 한다. R4 이후는 앞 PR이 머지된 뒤 진행한다.
+**한 세션의 목표는 R1→R5다.** R3에서 멈추면 3단계에서 끊긴 화면만 남아 아무도 흐름을 평가할 수 없다. 견적 하나가 업로드부터 판정까지 실제로 흐르는 R5까지 가야 이 설계가 검증 가능해진다. R6(대시보드·네비게이션·구 페이지 삭제)은 구조 작업이라 다음 세션으로 미뤄도 된다.
+
+시간이 부족하면 R5를 줄이지 말고 **R6을 버린다.** 각 PR은 독립적으로 리뷰 가능해야 하고, 앞 PR 머지를 기다리지 않고 이어서 만들어도 된다.
 
 ---
 
