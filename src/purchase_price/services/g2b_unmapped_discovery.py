@@ -106,11 +106,12 @@ def build_g2b_research_terms(
     deduped: list[str] = []
     seen: set[str] = set()
     for term in output:
-        key = normalize_text(term)
+        request_term = re.sub(r"\s+", " ", term).strip()
+        key = request_term.casefold()
         if not key or key in seen:
             continue
         seen.add(key)
-        deduped.append(term.strip())
+        deduped.append(request_term)
     return tuple(deduped[:8])
 
 
