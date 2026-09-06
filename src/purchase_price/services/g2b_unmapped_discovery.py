@@ -45,13 +45,6 @@ class G2BUnmappedDiscoveryResult:
 
 
 def build_g2b_discovery_terms(product_name: str) -> tuple[str, ...]:
-    """Build at most two conservative classification-name discovery terms.
-
-    Terms are discovery inputs only. They never establish a verified G2B classification mapping.
-    English/parenthetical quote descriptions are removed first, then the final Korean token is
-    used as a broader fallback (e.g. `가스 마취기` -> `마취기`).
-    """
-
     without_parenthetical = re.sub(r"\([^)]*\)", " ", product_name)
     korean_and_space = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", without_parenthetical)
     cleaned = re.sub(r"\s+", " ", korean_and_space).strip()
@@ -67,6 +60,27 @@ def build_g2b_discovery_terms(product_name: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(terms))[:2]
 
 
+def _normalized_identity_tokens(value: str) -> tuple[str, ...]:
+    return tuple(normalize_text(token) for token in re.findall(r"[0-9A-Za-z가-힣]+", value) if token)
+
+
+def _model_matches_title(model_name: str, title: str) -> bool:
+    """Require a bounded model identity instead of accepting arbitrary short substrings.
+
+    Model strings of three normalized characters or fewer are especially collision-prone
+    (for example `M1`, `A3`, `X1`). They must match a complete alphanumeric/Korean title token.
+    Longer model names retain the existing normalized substring behavior so punctuation variants
+    such as `C-5570` versus `C5570` can still be discovered.
+    """
+
+    model_key = normalize_text(model_name)
+    if not model_key:
+        return True
+    if len(model_key) <= 3:
+        return model_key in _normalized_identity_tokens(title)
+    return model_key in normalize_text(title)
+
+
 def _candidate_from_record(record: dict, query: ProductQuery) -> G2BDiscoveryCandidate | None:
     parsed = parse_official_report_record(
         record,
@@ -77,7 +91,7 @@ def _candidate_from_record(record: dict, query: ProductQuery) -> G2BDiscoveryCan
 
     title = parsed.original_title or parsed.product_name
     model_key = normalize_text(query.model_name)
-    if model_key and model_key not in normalize_text(title):
+    if model_key and not _model_matches_title(query.model_name, title):
         return None
 
     manufacturer_key = normalize_text(query.manufacturer)
@@ -106,15 +120,7 @@ def discover_unmapped_g2b_candidates(
     num_of_rows: int = 100,
     today: date | None = None,
 ) -> G2BUnmappedDiscoveryResult:
-    """Search unverified classifications without promoting candidates to direct-price evidence.
-
-    The official specific-item endpoint substring-matches classification names. This function is
-    therefore intentionally a discovery surface only: it returns sanitized candidate metadata and
-    never emits `CollectedPrice`, MatchGrade A/B, or a verified mapping.
-
-    Long lookbacks are searched newest-first in windows of at most one year. Each term/window is
-    bounded to a small number of pages to keep interactive traffic predictable.
-    """
+    """Search unverified classifications without promoting candidates to direct-price evidence."""
 
     if lookback_days < 1:
         raise ValueError("lookback_days must be positive")
@@ -123,19 +129,9 @@ def discover_unmapped_g2b_candidates(
 
     terms = build_g2b_discovery_terms(query.product_name)
     if not terms:
-        return G2BUnmappedDiscoveryResult(
-            status="success_0",
-            terms=(),
-            request_count=0,
-            records_seen=0,
-            candidates=(),
-        )
+        return G2BUnmappedDiscoveryResult("success_0", (), 0, 0, ())
 
-    client = PublicDataPortalClient(
-        service_key,
-        timeout_seconds=timeout_seconds,
-        max_retries=max_retries,
-    )
+    client = PublicDataPortalClient(service_key, timeout_seconds=timeout_seconds, max_retries=max_retries)
     collector = G2BShoppingCollector(service_key, base_url=base_url, client=client)
 
     end = today or date.today()
@@ -158,32 +154,22 @@ def discover_unmapped_g2b_candidates(
                 fetched_for_query = 0
                 for page_no in range(1, pages_per_term_window + 1):
                     page, _ = collector.fetch_specific_item_page(
-                        detail_product_name=term,
-                        begin_date=window_begin,
-                        end_date=window_end,
-                        page_no=page_no,
-                        num_of_rows=num_of_rows,
+                        detail_product_name=term, begin_date=window_begin, end_date=window_end,
+                        page_no=page_no, num_of_rows=num_of_rows,
                     )
                     request_count += 1
                     records_seen += len(page.items)
                     fetched_for_query += len(page.items)
-
                     for raw in page.items:
                         candidate = _candidate_from_record(raw, query)
                         if candidate is None:
                             continue
-                        key = (
-                            candidate.source_record_id,
-                            candidate.title,
-                            candidate.transaction_date.isoformat()
-                            if candidate.transaction_date
-                            else "",
-                        )
+                        key = (candidate.source_record_id, candidate.title,
+                               candidate.transaction_date.isoformat() if candidate.transaction_date else "")
                         if key in seen:
                             continue
                         seen.add(key)
                         candidates.append(candidate)
-
                     if not page.items:
                         break
                     if page.total_count is not None and fetched_for_query >= page.total_count:
@@ -192,26 +178,14 @@ def discover_unmapped_g2b_candidates(
                         break
     except (PublicDataClientError, ValueError) as exc:
         return G2BUnmappedDiscoveryResult(
-            status="failure",
-            terms=terms,
-            request_count=request_count,
-            records_seen=records_seen,
-            candidates=tuple(candidates),
-            error_type=type(exc).__name__,
+            "failure", terms, request_count, records_seen, tuple(candidates), type(exc).__name__
         )
 
     candidates.sort(
-        key=lambda item: (
-            item.transaction_date or date.min,
-            item.title,
-            item.source_record_id,
-        ),
+        key=lambda item: (item.transaction_date or date.min, item.title, item.source_record_id),
         reverse=True,
     )
     return G2BUnmappedDiscoveryResult(
-        status="success" if candidates else "success_0",
-        terms=terms,
-        request_count=request_count,
-        records_seen=records_seen,
-        candidates=tuple(candidates[:50]),
+        "success" if candidates else "success_0", terms, request_count, records_seen,
+        tuple(candidates[:50]),
     )
