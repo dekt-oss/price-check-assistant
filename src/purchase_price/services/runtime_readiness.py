@@ -63,18 +63,40 @@ def public_data_credential_readiness(
     )
 
 
+def _resolve_build_commit() -> tuple[str, str]:
+    for key in ("STREAMLIT_GIT_COMMIT", "GIT_COMMIT", "COMMIT_SHA"):
+        value = (os.getenv(key) or "").strip()
+        if value:
+            return value, key
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        value = result.stdout.strip()
+        if value:
+            return value, "git"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown", "none"
+
+
 def build_identity_readiness() -> RuntimeReadinessCheck:
-    commit = (
-        os.getenv("STREAMLIT_GIT_COMMIT")
-        or os.getenv("GIT_COMMIT")
-        or os.getenv("COMMIT_SHA")
-        or "unknown"
+    commit, source = _resolve_build_commit()
+    known = commit != "unknown"
+    detail = (
+        f"commit={commit[:12]}; source={source}; Python {platform.python_version()}"
+        if known
+        else f"commit=unknown; Python {platform.python_version()} — 배포 버전을 식별할 수 없음"
     )
     return RuntimeReadinessCheck(
         "build_identity",
         "실행 환경",
-        READY,
-        f"commit={commit[:12]}; Python {platform.python_version()}",
+        READY if known else UNAVAILABLE,
+        detail,
     )
 
 
@@ -92,7 +114,6 @@ def _tesseract_version_line(stdout: str) -> str:
 
 
 def _run_synthetic_ocr_execution() -> tuple[bool, str]:
-    """Exercise PDF rasterization and Tesseract with generated, non-user data."""
     try:
         import pypdfium2 as pdfium
         import pytesseract
@@ -104,20 +125,17 @@ def _run_synthetic_ocr_execution() -> tuple[bool, str]:
         pdf_path = Path(temp_dir) / "synthetic.pdf"
         image = Image.new("RGB", (1600, 500), "white")
         font = ImageFont.load_default(size=64)
-        ImageDraw.Draw(image).text((100, 180), _OCR_EXECUTION_TOKEN, fill="black", font=font)
+        ImageDraw.Draw(image).text(
+            (100, 180), _OCR_EXECUTION_TOKEN, fill="black", font=font
+        )
         image.save(pdf_path, "PDF", resolution=150.0)
-
         document = page = bitmap = None
         try:
             document = pdfium.PdfDocument(str(pdf_path))
             page = document[0]
             bitmap = page.render(scale=2.0)
-            rendered = bitmap.to_pil()
             text = pytesseract.image_to_string(
-                rendered,
-                lang="eng",
-                config="--psm 6",
-                timeout=10,
+                bitmap.to_pil(), lang="eng", config="--psm 6", timeout=10
             )
         except Exception as exc:
             return False, f"execution failed: {type(exc).__name__}"
@@ -127,7 +145,7 @@ def _run_synthetic_ocr_execution() -> tuple[bool, str]:
                 if callable(closer):
                     closer()
 
-    normalized = "".join(character for character in text.upper() if character.isalnum())
+    normalized = "".join(c for c in text.upper() if c.isalnum())
     if _OCR_EXECUTION_TOKEN not in normalized:
         return False, "execution completed but synthetic token was not recognized"
     return True, "synthetic PDF rasterize -> Tesseract OCR succeeded"
@@ -143,17 +161,13 @@ def _ocr_execution_check(prerequisites_ready: bool) -> RuntimeReadinessCheck:
         )
     ready, detail = _run_synthetic_ocr_execution()
     return RuntimeReadinessCheck(
-        "ocr_execution",
-        "OCR 실행 검증",
-        READY if ready else UNAVAILABLE,
-        detail,
+        "ocr_execution", "OCR 실행 검증", READY if ready else UNAVAILABLE, detail
     )
 
 
 def ocr_runtime_readiness_checks() -> tuple[RuntimeReadinessCheck, ...]:
-    """Return dependency and real execution stages without reading user documents or network."""
-    module_details = []
-    missing_modules = []
+    module_details: list[str] = []
+    missing_modules: list[str] = []
     for name in ("pypdfium2", "pytesseract"):
         version = _package_version(name)
         if importlib.util.find_spec(name) is None:
@@ -161,13 +175,13 @@ def ocr_runtime_readiness_checks() -> tuple[RuntimeReadinessCheck, ...]:
             module_details.append(f"{name}=missing")
         else:
             module_details.append(f"{name}={version or 'installed'}")
+
     module_check = RuntimeReadinessCheck(
         "ocr_python_modules",
         "OCR Python 모듈",
         READY if not missing_modules else UNAVAILABLE,
         "; ".join(module_details),
     )
-
     executable = shutil.which("tesseract")
     binary_check = RuntimeReadinessCheck(
         "ocr_tesseract_binary",
@@ -175,22 +189,32 @@ def ocr_runtime_readiness_checks() -> tuple[RuntimeReadinessCheck, ...]:
         READY if executable else UNAVAILABLE,
         executable or "실행파일을 찾지 못함",
     )
+
     version = "unknown"
     languages: set[str] = set()
-    command_error: str | None = None
+    command_error = None
     if executable:
         try:
             version_result = subprocess.run(
-                [executable, "--version"], check=True, capture_output=True, text=True, timeout=5
+                [executable, "--version"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             language_result = subprocess.run(
-                [executable, "--list-langs"], check=True, capture_output=True, text=True, timeout=5
+                [executable, "--list-langs"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             version = _tesseract_version_line(version_result.stdout)
             languages = {
                 line.strip()
                 for line in language_result.stdout.splitlines()
-                if line.strip() and not line.lower().startswith("list of available languages")
+                if line.strip()
+                and not line.lower().startswith("list of available languages")
             }
         except (OSError, subprocess.SubprocessError) as exc:
             command_error = type(exc).__name__
@@ -201,30 +225,39 @@ def ocr_runtime_readiness_checks() -> tuple[RuntimeReadinessCheck, ...]:
         )
     elif command_error:
         command_check = RuntimeReadinessCheck(
-            "ocr_tesseract_command", "Tesseract 상태", UNAVAILABLE, f"상태 확인 실패: {command_error}"
+            "ocr_tesseract_command",
+            "Tesseract 상태",
+            UNAVAILABLE,
+            f"상태 확인 실패: {command_error}",
         )
     else:
         command_check = RuntimeReadinessCheck(
             "ocr_tesseract_command", "Tesseract 상태", READY, f"version={version}"
         )
 
-    required_languages = {"kor", "eng"}
-    missing_languages = sorted(required_languages - languages)
+    missing_languages = sorted({"kor", "eng"} - languages)
     language_ready = bool(executable and not command_error and not missing_languages)
+    language_detail = (
+        "kor+eng 사용 가능"
+        if language_ready
+        else f"누락: {', '.join(missing_languages) or '확인 불가'}"
+    )
     language_check = RuntimeReadinessCheck(
         "ocr_languages",
         "OCR 언어팩",
         READY if language_ready else UNAVAILABLE,
-        "kor+eng 사용 가능" if language_ready else f"누락: {', '.join(missing_languages) or '확인 불가'}",
+        language_detail,
     )
     execution_check = _ocr_execution_check(
-        module_check.ready and binary_check.ready and command_check.ready and language_check.ready
+        module_check.ready
+        and binary_check.ready
+        and command_check.ready
+        and language_check.ready
     )
     return module_check, binary_check, command_check, language_check, execution_check
 
 
 def ocr_runtime_readiness() -> RuntimeReadinessCheck:
-    """Compatibility aggregate for callers that expect one local OCR status."""
     checks = ocr_runtime_readiness_checks()
     failed = [check for check in checks if not check.ready]
     if failed:
@@ -234,14 +267,20 @@ def ocr_runtime_readiness() -> RuntimeReadinessCheck:
             UNAVAILABLE,
             " / ".join(f"{check.label}: {check.detail}" for check in failed),
         )
-    version = next((check.detail for check in checks if check.key == "ocr_tesseract_command"), "")
+    version = next(
+        (check.detail for check in checks if check.key == "ocr_tesseract_command"), ""
+    )
     return RuntimeReadinessCheck(
-        "local_ocr", "PDF 로컬 OCR", READY, f"{version}; kor+eng; synthetic execution verified"
+        "local_ocr",
+        "PDF 로컬 OCR",
+        READY,
+        f"{version}; kor+eng; synthetic execution verified",
     )
 
 
-def runtime_readiness(settings: Settings | None = None) -> tuple[RuntimeReadinessCheck, ...]:
-    """Return secret-free local capability checks. No external API request is performed."""
+def runtime_readiness(
+    settings: Settings | None = None,
+) -> tuple[RuntimeReadinessCheck, ...]:
     return (
         build_identity_readiness(),
         *public_data_credential_readiness(settings),
