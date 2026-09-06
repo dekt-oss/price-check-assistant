@@ -10,17 +10,17 @@ with c1:
     with st.container(border=True):
         st.markdown("### 📋 견적 검토")
         st.write("견적 업로드부터 제품 식별, 근거 수집, 조건 대조, 승인·판정까지 한 화면에서 진행합니다.")
-        st.page_link("pages/2_견적_검토.py", label="견적 검토 시작", use_container_width=True)
+        st.caption("왼쪽 업무 메뉴에서 `견적 검토`를 선택하세요.")
 with c2:
     with st.container(border=True):
         st.markdown("### 🔎 빠른 검색")
         st.write("제품명·제조사·모델·규격으로 공개 가격근거와 나라장터 계약근거를 직접 조회합니다.")
-        st.page_link("pages/3_빠른_검색.py", label="빠른 검색 열기", use_container_width=True)
+        st.caption("왼쪽 업무 메뉴에서 `빠른 검색`을 선택하세요.")
 with c3:
     with st.container(border=True):
         st.markdown("### 🏥 의료기기 조회")
         st.write("식약처 등록모델, 업허가·Safety 확인, UDI-DI 공식조회를 한 영역에서 확인합니다.")
-        st.page_link("pages/4_의료기기_조회.py", label="의료기기 조회 열기", use_container_width=True)
+        st.caption("왼쪽 업무 메뉴에서 `의료기기 조회`를 선택하세요.")
 
 st.markdown("## 검토 흐름")
 st.markdown(
