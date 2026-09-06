@@ -36,6 +36,7 @@ def build_collectors(
                 base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
                 timeout_seconds=settings.g2b_request_timeout_seconds,
                 max_retries=settings.g2b_max_retries,
+                request_budget=settings.g2b_search_request_budget,
             )
         )
 

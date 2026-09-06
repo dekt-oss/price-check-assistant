@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     g2b_contract_base_url: str | None = None
     g2b_request_timeout_seconds: float = 20.0
     g2b_max_retries: int = 3
+    g2b_search_request_budget: int = 120
 
     mfds_model_info_base_url: str | None = None
     mfds_business_license_base_url: str | None = None
