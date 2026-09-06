@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import replace
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 from purchase_price.services import quote_extraction_core as _core
 from purchase_price.services.quote_extraction_core import *  # noqa: F403
@@ -26,6 +28,20 @@ _SUMMARY_LABELS = frozenset(
     }
 )
 _SUMMARY_PREFIXES = ("합계", "총계", "소계", "공급가액", "부가세", "부가가치세", "세액", "견적금액")
+_EXCLUDED_ROWS: ContextVar[tuple[str, ...]] = ContextVar("quote_excluded_rows", default=())
+_VAT_CONFLICT: ContextVar[bool] = ContextVar("quote_vat_conflict", default=False)
+_VAT_CONFLICT_WARNING = (
+    '문서에 "VAT 포함"과 "VAT 별도/미포함" 표현이 함께 있어 VAT를 확정하지 않았습니다. '
+    "원문을 대조해 직접 확인하세요."
+)
+
+
+def _record_excluded_row(item: QuoteItem) -> None:  # noqa: F405
+    label = item.product_name or item.model_name or item.specification or "요약행"
+    row = f"{item.source_sheet} {item.source_row}행: {label}"
+    current = _EXCLUDED_ROWS.get()
+    if row not in current:
+        _EXCLUDED_ROWS.set((*current, row))
 
 
 def _is_summary_row(item: QuoteItem) -> bool:  # noqa: F405
@@ -36,9 +52,12 @@ def _is_summary_row(item: QuoteItem) -> bool:  # noqa: F405
     )
     if not label or has_secondary_identity:
         return False
-    if label in _SUMMARY_LABELS:
-        return True
-    return any(label.startswith(prefix) for prefix in _SUMMARY_PREFIXES)
+    is_summary = label in _SUMMARY_LABELS or any(
+        label.startswith(prefix) for prefix in _SUMMARY_PREFIXES
+    )
+    if is_summary:
+        _record_excluded_row(item)
+    return is_summary
 
 
 _original_extract_pdf_context = _core._extract_pdf_context
@@ -61,8 +80,35 @@ def _extract_pdf_context(texts):
         re.search(rf"(?is){vat_anchor}[\s:：()\-]{{0,30}}(?:Excluded?|별도|미포함)", document)
     )
     if included and excluded:
+        _VAT_CONFLICT.set(True)
         return replace(context, vat_status="")
     return context
+
+
+@dataclass(frozen=True)
+class QuoteExtractionResult(_core.QuoteExtractionResult):
+    excluded_rows: tuple[str, ...] = ()
+
+
+def _adapt_result(result: _core.QuoteExtractionResult) -> QuoteExtractionResult:
+    warnings = result.warnings
+    if _VAT_CONFLICT.get() and _VAT_CONFLICT_WARNING not in warnings:
+        warnings = (*warnings, _VAT_CONFLICT_WARNING)
+    return QuoteExtractionResult(
+        items=result.items,
+        warnings=warnings,
+        excluded_rows=_EXCLUDED_ROWS.get(),
+    )
+
+
+def _run_with_tracking(extractor, path: Path) -> QuoteExtractionResult:
+    excluded_token = _EXCLUDED_ROWS.set(())
+    vat_token = _VAT_CONFLICT.set(False)
+    try:
+        return _adapt_result(extractor(path))
+    finally:
+        _EXCLUDED_ROWS.reset(excluded_token)
+        _VAT_CONFLICT.reset(vat_token)
 
 
 def _sync_core_test_seams() -> None:
@@ -72,9 +118,30 @@ def _sync_core_test_seams() -> None:
             setattr(_core, name, globals()[name])
 
 
-def extract_pdf_quote(path):
+def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     _sync_core_test_seams()
-    return _original_extract_pdf_quote(path)
+    return _run_with_tracking(_original_extract_pdf_quote, path)
+
+
+def extract_excel_quote(path: Path) -> QuoteExtractionResult:
+    return _run_with_tracking(_core.extract_excel_quote, path)
+
+
+def extract_legacy_excel_quote(path: Path) -> QuoteExtractionResult:
+    return _run_with_tracking(_core.extract_legacy_excel_quote, path)
+
+
+def extract_quote_file(path: Path) -> QuoteExtractionResult:
+    suffix = path.suffix.casefold()
+    if suffix == ".xlsx":
+        return extract_excel_quote(path)
+    if suffix == ".xls":
+        return extract_legacy_excel_quote(path)
+    if suffix == ".pdf":
+        return extract_pdf_quote(path)
+    raise QuoteExtractionError(  # noqa: F405
+        "지원하지 않는 파일 형식입니다. .xlsx/.xls/.pdf만 업로드하세요."
+    )
 
 
 # The extraction pipeline is implemented in quote_extraction_core. Patch its policy
@@ -84,13 +151,9 @@ _core._extract_pdf_context = _extract_pdf_context
 _core.extract_pdf_quote = extract_pdf_quote
 
 parse_quote_decimal = _core.parse_quote_decimal
-extract_excel_quote = _core.extract_excel_quote
-extract_legacy_excel_quote = _core.extract_legacy_excel_quote
-extract_quote_file = _core.extract_quote_file
 quote_item_query = _core.quote_item_query
 QuoteExtractionError = _core.QuoteExtractionError
 QuoteItem = _core.QuoteItem
-QuoteExtractionResult = _core.QuoteExtractionResult
 
 
 def __getattr__(name: str):
