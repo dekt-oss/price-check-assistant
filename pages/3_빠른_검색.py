@@ -19,10 +19,12 @@ from purchase_price.services.g2b_search_policy import (
     g2b_lookback_label,
 )
 from purchase_price.services.g2b_unmapped_discovery import discover_unmapped_g2b_candidates
+from purchase_price.services.market_research import research_g2b_market
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.search import search_all
+from purchase_price.ui.g2b_market_research import render_g2b_market_research
 from purchase_price.ui.widgets import (
     render_condition_table,
     render_discovery_candidates,
@@ -33,19 +35,22 @@ from purchase_price.ui.widgets import (
 
 st.set_page_config(page_title="빠른 검색", page_icon="🔎", layout="wide")
 st.title("빠른 검색")
-st.caption("제품 공개가격과 나라장터 계약 존재 근거를 같은 업무 영역에서 조회합니다.")
+st.caption(
+    "제품명만으로도 나라장터 입찰공고·낙찰·사전규격을 먼저 조사하고, "
+    "동일제품으로 검증된 가격근거는 별도로 엄격하게 표시합니다."
+)
 
 settings = get_settings()
 g2b_key = (settings.resolved_g2b_service_key or "").strip()
 g2b_enabled = bool(g2b_key)
-price_tab, contract_tab = st.tabs(["가격 근거 검색", "나라장터 계약근거"])
+price_tab, contract_tab = st.tabs(["시장가격 조사", "나라장터 계약근거"])
 
 with price_tab:
     if g2b_enabled:
-        st.caption(
-            "verified exact mapping은 직접가격 Evidence를 수집하고, mapping이 없거나 직접가격이 0건이면 "
-            "Research Layer가 관련 세부품명·모델·제조사 후보를 넓게 탐색합니다. Research 후보는 자동 "
-            "가격판정에 들어가지 않습니다."
+        st.info(
+            "나라장터 Research는 exact 모델이나 verified mapping이 없어도 실행됩니다. "
+            "입찰 추정가격·낙찰총액·사전규격 예산은 시장조사 참고자료이며, "
+            "동일모델 단가로 확인되기 전에는 가격판정에 사용하지 않습니다."
         )
     else:
         st.caption(
@@ -55,12 +60,12 @@ with price_tab:
     with st.form("quick-price-search-form"):
         c1, c2 = st.columns(2)
         with c1:
-            product_name = st.text_input("제품명", placeholder="예: 약품냉장고")
-            manufacturer = st.text_input("제조사", placeholder="예: GMS")
+            product_name = st.text_input("제품명", placeholder="예: 마취, 가스마취기")
+            manufacturer = st.text_input("제조사", placeholder="예: Maquet")
         with c2:
-            model_name = st.text_input("모델명", placeholder="예: GMSR-182")
-            specification = st.text_input("규격", placeholder="예: 182L")
-        quote_text = st.text_input("현재 견적 단가 (선택)", placeholder="예: 5000000")
+            model_name = st.text_input("모델명", placeholder="예: FLOW-C")
+            specification = st.text_input("규격", placeholder="선택")
+        quote_text = st.text_input("현재 견적 단가 (선택)", placeholder="예: 66000000")
         g2b_lookback_days = st.selectbox(
             "나라장터 검색기간",
             options=G2B_LOOKBACK_OPTIONS,
@@ -68,11 +73,11 @@ with price_tab:
             format_func=g2b_lookback_label,
             disabled=not g2b_enabled,
             help=(
-                "1~5년 모두 API 허용범위 이내의 기간창으로 나눠 검색합니다. 직접가격은 전체 수집이 "
-                "완료돼야 사용하며 Research 후보는 부분결과도 명시적으로 구분합니다."
+                "직접가격 검색은 선택 기간 전체를 안전한 기간창으로 나눠 조회합니다. "
+                "입찰·낙찰·사전규격 Research는 응답시간을 위해 최근 최대 90일을 우선 조사합니다."
             ),
         )
-        submitted = st.form_submit_button("가격자료 검색", type="primary")
+        submitted = st.form_submit_button("시장가격 조사", type="primary")
 
     if submitted:
         quote = None
@@ -95,9 +100,32 @@ with price_tab:
             st.stop()
 
         query = review_input.to_product_query()
-        run = search_all(query, build_collectors(g2b_lookback_days=int(g2b_lookback_days)))
 
-        st.subheader("출처별 검색상태")
+        # Research Layer: broad recall first. No verified mapping is consulted here.
+        if g2b_enabled:
+            research_days = min(int(g2b_lookback_days), 90)
+            with st.status(
+                "나라장터 입찰·낙찰·사전규격 조사 중",
+                expanded=True,
+            ) as research_status:
+                market_bundle = research_g2b_market(
+                    query,
+                    service_key=g2b_key,
+                    lookback_days=research_days,
+                    timeout_seconds=settings.g2b_request_timeout_seconds,
+                    max_retries=min(settings.g2b_max_retries, 2),
+                    max_terms=6,
+                    max_pages_per_window=1,
+                )
+                research_status.update(
+                    label=f"나라장터 전체 Research 완료 · {len(market_bundle.records)}건",
+                    state="complete",
+                )
+            render_g2b_market_research(market_bundle)
+
+        # Verdict/Evidence Layer: existing strict collectors are deliberately unchanged.
+        run = search_all(query, build_collectors(g2b_lookback_days=int(g2b_lookback_days)))
+        st.subheader("검증된 직접가격 검색상태")
         render_source_status(run)
         failed_sources = [
             status for status in run.source_statuses if not status.succeeded and not status.skipped
@@ -105,8 +133,8 @@ with price_tab:
         if failed_sources:
             failed_names = ", ".join(status.source_name for status in failed_sources)
             st.error(
-                "수집 미완료: 일부 출처가 실패했습니다. 현재 표시되는 가격은 성공한 출처만의 부분 "
-                f"근거입니다. 실패 출처: {failed_names}"
+                "직접가격 수집 미완료: 일부 출처가 실패했습니다. 실패는 가격 0건과 다릅니다. "
+                f"실패 출처: {failed_names}"
             )
         if run.errors:
             st.warning("일부 수집기 오류: " + " / ".join(run.errors))
@@ -130,31 +158,31 @@ with price_tab:
             and (g2b_status.skipped or (g2b_status.succeeded and g2b_status.result_count == 0))
         )
         if research_needed and g2b_enabled and query.product_name.strip():
-            with st.status("나라장터 Research 후보 확장 탐색 중", expanded=True) as status:
-                discovery = discover_unmapped_g2b_candidates(
-                    query,
-                    service_key=g2b_key,
-                    lookback_days=int(g2b_lookback_days),
-                    base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
-                    timeout_seconds=settings.g2b_request_timeout_seconds,
-                    max_retries=settings.g2b_max_retries,
-                    pages_per_term_window=2,
+            with st.expander("종합쇼핑몰 관련 단가 후보", expanded=False):
+                with st.status("쇼핑몰 후보 탐색 중", expanded=False) as status:
+                    discovery = discover_unmapped_g2b_candidates(
+                        query,
+                        service_key=g2b_key,
+                        lookback_days=min(int(g2b_lookback_days), 365),
+                        base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
+                        timeout_seconds=settings.g2b_request_timeout_seconds,
+                        max_retries=settings.g2b_max_retries,
+                        pages_per_term_window=1,
+                    )
+                    status.update(
+                        label=f"쇼핑몰 후보 탐색 완료 · {discovery.status_label}",
+                        state="complete",
+                    )
+                st.caption(
+                    "쇼핑몰 후보도 검증 전에는 동일제품 직접가격으로 사용하지 않습니다."
                 )
-                status.update(
-                    label=f"나라장터 Research 완료 · {discovery.status_label}",
-                    state="complete",
-                )
-            st.subheader("나라장터 Research 후보")
-            st.caption(
-                "직접가격 검색이 불가능하거나 0건일 때 관련 시장거래를 넓게 찾는 조사층입니다. "
-                "관련성 점수는 검토 순서이며 MatchGrade A/B와 무관합니다."
-            )
-            render_discovery_candidates(discovery)
+                render_discovery_candidates(discovery)
 
         if not run.results:
-            st.error(
-                "검증된 직접 비교가격은 확보하지 못했습니다. 아래 Research 후보가 있더라도 담당자 "
-                "검증 전에는 직접가격으로 사용하지 않습니다."
+            st.warning(
+                "검증된 동일제품 직접가격은 아직 확보하지 못했습니다. 위 입찰·낙찰·사전규격은 "
+                "시장에 관련 구매가 존재하는지 확인하는 Research 결과이며, 다음 단계에서 제조사·모델을 "
+                "검증한 뒤 동일제품 가격근거로 승격합니다."
             )
         else:
             assessment = assess_prices(run.results, review_input.quote_unit_price)
@@ -163,7 +191,7 @@ with price_tab:
                 sum(profile.completeness_percent for profile in profiles) / len(profiles)
             )
 
-            st.subheader("가격 요약")
+            st.subheader("검증된 동일제품 가격 요약")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("관측 직접근거", f"{assessment.observed_count}건")
             c2.metric("독립 출처", f"{assessment.source_count}개")
@@ -173,19 +201,19 @@ with price_tab:
             st.write(assessment.message)
             if failed_sources:
                 st.warning(
-                    "위 가격 요약은 수집이 완료된 출처만 반영한 부분 요약입니다. "
+                    "위 가격 요약은 수집 완료 출처만 반영한 부분 요약입니다. "
                     "실패 출처 복구 전 최종 구매판정에 사용하지 마세요."
                 )
             if review_input.quote_unit_price is not None:
                 if assessment.quote_position is None:
-                    st.info("입력 견적과의 높고 낮음 비교는 거래조건 검증 전까지 보류합니다.")
+                    st.info("입력 견적과의 엄격한 높고 낮음 판정은 거래조건 검증 전까지 보류합니다.")
                 else:
                     st.success(f"견적 위치: {assessment.quote_position}")
 
-            st.subheader("가격 근거자료")
+            st.subheader("검증된 가격 근거자료")
             render_evidence_table(run.results)
-            st.subheader("가격조건 구조화")
-            render_condition_table(run.results)
+            with st.expander("상세 가격조건", expanded=False):
+                render_condition_table(run.results)
 
 with contract_tab:
     st.caption(
@@ -197,7 +225,7 @@ with contract_tab:
 
     with st.form("quick-g2b-contract-evidence"):
         contract_product_name = st.text_input(
-            "계약 품명", placeholder="예: 심장충격기, 의료용냉장고"
+            "계약 품명", placeholder="예: 가스마취기, 심장충격기"
         )
         c1, c2 = st.columns(2)
         with c1:
