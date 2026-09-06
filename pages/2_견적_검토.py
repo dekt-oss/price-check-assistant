@@ -1,5 +1,6 @@
 import streamlit as st
 
+from purchase_price.ui.quote_review_s4 import render_s4
 from purchase_price.ui.quote_review_state import (
     QUOTE_REVIEW_STATE_SESSION_KEY,
     QuoteReviewState,
@@ -35,7 +36,9 @@ with center:
         render_s2(state, selected_index)
     elif state.step == 3:
         render_s3(state, selected_index)
+    elif state.step == 4:
+        render_s4(state, selected_index)
     else:
-        st.info("다음 단계 구현은 이어지는 R4/R5 PR에서 이 상태 객체를 그대로 사용합니다.")
+        st.info("조건 대조와 승인·판정은 이어지는 R5 PR에서 이 상태 객체를 그대로 사용합니다.")
 with right:
     render_path_card(state)
