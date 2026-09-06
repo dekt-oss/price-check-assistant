@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import Any
 
 from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
-from purchase_price.collectors.g2b_shopping import G2BShoppingCollector
+from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL, G2BShoppingCollector
 from purchase_price.config import Settings, get_settings
 from purchase_price.services.mfds_device_intelligence import (
     MFDS_BUSINESS_LICENSE_BASE_URL,
@@ -104,7 +104,7 @@ def run_g2b_live_smoke(
     )
     collector = G2BShoppingCollector(
         service_key,
-        base_url=settings.g2b_shopping_base_url,
+        base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
         client=portal,
     )
     started = perf_counter()
