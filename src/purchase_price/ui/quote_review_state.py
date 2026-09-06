@@ -47,6 +47,7 @@ class QuoteReviewState:
     items: list[QuoteItem] = field(default_factory=list)
     item_confirmed: dict[int, bool] = field(default_factory=dict)
     item_notes: dict[int, str] = field(default_factory=dict)
+    condition_notes: dict[int, dict[str, str]] = field(default_factory=dict)
     vat_conflict: bool = False
     identity: dict[int, IdentityResult] = field(default_factory=dict)
     search_runs: dict[int, SearchRun] = field(default_factory=dict)
@@ -95,11 +96,15 @@ def can_enter(step: int, state: QuoteReviewState) -> tuple[bool, tuple[str, ...]
         return True, ()
 
     reasons: list[str] = []
-    if state.extraction is None or not state.items:
-        reasons.append("견적서를 업로드하고 품목 추출을 완료하세요.")
+    if state.extraction is None:
+        reasons.append("견적서를 업로드하고 추출을 실행하세요.")
         return False, tuple(reasons)
     if step == 2:
         return True, ()
+
+    if not state.items:
+        reasons.append("자동 추출 품목이 없어 수동 품목을 1건 이상 입력하세요.")
+        return False, tuple(reasons)
 
     unconfirmed = [
         index
