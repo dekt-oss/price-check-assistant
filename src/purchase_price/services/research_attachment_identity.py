@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import io
 import ipaddress
-import socket
 import zipfile
 from dataclasses import dataclass
 from enum import StrEnum
@@ -143,9 +142,7 @@ def extract_attachment_text(
     elif suffix in {".txt", ".csv"}:
         text = _decode_text(data)
         if suffix == ".csv":
-            text = "\n".join(
-                " | ".join(row) for row in csv.reader(io.StringIO(text))
-            )
+            text = "\n".join(" | ".join(row) for row in csv.reader(io.StringIO(text)))
     elif suffix == ".hwp":
         raise UnsupportedAttachmentError("binary HWP parsing is not configured")
     else:
@@ -167,7 +164,10 @@ def _query_manufacturer_aliases(query_manufacturer: str) -> tuple[str, ...]:
     return tuple(sorted(value for value in values if value))
 
 
-def classify_attachment_identity(text: str, query: ProductQuery) -> tuple[AttachmentIdentityStatus, bool, bool, str]:
+def classify_attachment_identity(
+    text: str,
+    query: ProductQuery,
+) -> tuple[AttachmentIdentityStatus, bool, bool, str]:
     """Classify explicit text evidence without treating category similarity as exact identity."""
 
     normalized = normalize_text(text)
