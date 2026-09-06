@@ -14,6 +14,13 @@ from purchase_price.services.mfds_device_intelligence import (
     MfdsModelInfoClient,
     resolve_exact_model_identity,
 )
+from purchase_price.services.product_matching import (
+    ManufacturerAliasError,
+    ProductIdentity,
+    canonical_manufacturer,
+    grade_product_identity,
+    load_manufacturer_aliases,
+)
 from purchase_price.services.quote_extraction import (
     QuoteExtractionError,
     QuoteItem,
@@ -27,6 +34,11 @@ from purchase_price.services.quote_extraction_diagnostics import (
 )
 from purchase_price.services.runtime_readiness import ocr_runtime_readiness
 from purchase_price.ui.mapping_requests import register_mapping_request
+from purchase_price.ui.quote_review_contract import (
+    build_extracted_item_snippet,
+    build_manual_quote_item,
+    changed_item_field_labels,
+)
 from purchase_price.ui.quote_review_state import (
     QUOTE_REVIEW_STEPS,
     IdentityResult,
@@ -64,7 +76,10 @@ def render_stepper(state: QuoteReviewState) -> None:
 def render_item_list(state: QuoteReviewState) -> int:
     st.markdown(f"**품목 {len(state.items)}건**")
     if not state.items:
-        st.caption("견적서를 업로드하면 품목이 표시됩니다.")
+        if state.extraction is not None:
+            st.caption("자동 추출 품목이 없습니다. 2단계에서 수동 품목을 입력하세요.")
+        else:
+            st.caption("견적서를 업로드하면 품목이 표시됩니다.")
         return 0
     selected = st.radio(
         "품목 선택",
@@ -130,6 +145,7 @@ def _store_extraction(uploaded_file, state: QuoteReviewState) -> None:
     state.items = list(result.items)
     state.item_confirmed = {index: False for index in range(len(state.items))}
     state.item_notes.clear()
+    state.condition_notes.clear()
     state.vat_conflict = any(
         "VAT 포함" in warning and "VAT 별도" in warning for warning in result.warnings
     )
@@ -169,7 +185,18 @@ def render_s1(state: QuoteReviewState) -> None:
         excluded = state.extraction.excluded_rows
         st.write(f"품목에서 제외한 행: **{len(excluded)}건**")
         if excluded:
-            st.caption(" / ".join(excluded))
+            st.dataframe(
+                [
+                    {
+                        "라벨": row.label,
+                        "원문 위치": f"{row.source_sheet} {row.source_row}행",
+                        "금액": f"{row.amount:,.0f}원" if row.amount is not None else "미확인",
+                    }
+                    for row in excluded
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
 
     if state.extraction.warnings:
         with st.container(border=True):
@@ -177,8 +204,14 @@ def render_s1(state: QuoteReviewState) -> None:
             for warning in state.extraction.warnings:
                 st.warning(warning)
 
+    if not state.items:
+        st.warning(
+            "자동 추출 품목이 0건입니다. 2단계에서 품목을 직접 입력한 뒤 원문 대조를 완료해야 합니다."
+        )
+
     allowed, _ = can_enter(2, state)
-    if st.button("2. 품목 확인으로", type="primary", disabled=not allowed):
+    next_label = "2. 수동 품목 입력으로" if not state.items else "2. 품목 확인으로"
+    if st.button(next_label, type="primary", disabled=not allowed):
         state.step = 2
         st.rerun()
 
@@ -187,12 +220,81 @@ def _text_decimal(value) -> str:
     return "" if value is None else format(value, "f")
 
 
+def _render_manual_item_form(state: QuoteReviewState) -> None:
+    st.warning("자동 추출 결과가 없습니다. 원문을 보면서 품목을 직접 입력하세요.")
+    with st.form("quote_manual_item"):
+        c1, c2 = st.columns(2)
+        product_name = c1.text_input("품명")
+        manufacturer = c2.text_input("제조사")
+        model_name = c1.text_input("모델명")
+        specification = c2.text_input("규격")
+        quantity = c1.text_input("수량")
+        unit = c2.text_input("단위")
+        unit_price = c1.text_input("단가")
+        total_amount = c2.text_input("금액")
+        vat = c1.text_input("VAT")
+        delivery = c2.text_input("배송")
+        installation = c1.text_input("설치")
+        options = c2.text_input("옵션/구성")
+        warranty = c1.text_input("보증")
+        maintenance = c2.text_input("유지보수")
+        other = st.text_input("기타 조건")
+        submitted = st.form_submit_button("수동 품목 추가", type="primary")
+    if not submitted:
+        return
+    try:
+        item = build_manual_quote_item(
+            product_name=product_name,
+            manufacturer=manufacturer,
+            model_name=model_name,
+            specification=specification,
+            quantity=parse_quote_decimal(quantity),
+            unit=unit,
+            unit_price=parse_quote_decimal(unit_price),
+            total_amount=parse_quote_decimal(total_amount),
+            vat_status=vat,
+            delivery_condition=delivery,
+            installation_condition=installation,
+            option_condition=options,
+            warranty_condition=warranty,
+            maintenance_condition=maintenance,
+            other_conditions=other,
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    state.items = [item]
+    state.item_confirmed = {0: False}
+    state.item_notes = {0: "자동 추출 0건 — 담당자 수동 입력"}
+    state.condition_notes = {0: {}}
+    state.reset_downstream(after_step=2)
+    st.success("수동 품목을 추가했습니다. 이제 원문 대조 완료를 확인하세요.")
+    st.rerun()
+
+
 def render_s2(state: QuoteReviewState, index: int) -> None:
     st.subheader("2. 품목 확인")
     if not state.items:
-        st.warning("확인할 품목이 없습니다.")
+        _render_manual_item_form(state)
         return
+
     item = state.items[index]
+    original = (
+        state.extraction.items[index]
+        if state.extraction is not None and index < len(state.extraction.items)
+        else None
+    )
+    if original is not None:
+        st.caption(f"원문 위치: {original.source_sheet} {original.source_row}행")
+        with st.expander("자동 추출 행 스니펫", expanded=True):
+            st.code(build_extracted_item_snippet(original), language=None)
+        changed = changed_item_field_labels(original, item)
+        if changed:
+            st.info("수정된 필드: " + ", ".join(changed))
+    else:
+        st.caption("수동 입력 품목입니다. 업로드 원문을 직접 보면서 모든 필드를 확인하세요.")
+
+    condition_notes = state.condition_notes.get(index, {})
     with st.form(f"quote_item_confirm_{index}"):
         c1, c2 = st.columns(2)
         product_name = c1.text_input("품명", value=item.product_name)
@@ -213,15 +315,37 @@ def render_s2(state: QuoteReviewState, index: int) -> None:
         options = c1.text_input("옵션/구성", value=item.option_condition)
         warranty = c2.text_input("보증", value=item.warranty_condition)
         maintenance = c1.text_input("유지보수", value=item.maintenance_condition)
-        note = c2.text_input("확인 메모", value=state.item_notes.get(index, ""))
+        note = c2.text_input(
+            "원문 대조/수정 근거 메모",
+            value=state.item_notes.get(index, ""),
+        )
         other = st.text_input("기타 조건", value=item.other_conditions)
+        st.markdown("**상업조건별 원문 근거 메모**")
+        n1, n2 = st.columns(2)
+        vat_note = n1.text_input("VAT 근거", value=condition_notes.get("vat", ""))
+        delivery_note = n2.text_input("배송 근거", value=condition_notes.get("delivery", ""))
+        installation_note = n1.text_input(
+            "설치 근거", value=condition_notes.get("installation", "")
+        )
+        options_note = n2.text_input("옵션 근거", value=condition_notes.get("options", ""))
+        warranty_note = n1.text_input("보증 근거", value=condition_notes.get("warranty", ""))
+        maintenance_note = n2.text_input(
+            "유지보수 근거", value=condition_notes.get("maintenance", "")
+        )
+        source_checked = st.checkbox(
+            "업로드 원문과 추출·수정값을 직접 대조했습니다.",
+            value=state.item_confirmed.get(index, False),
+        )
         confirmed = st.form_submit_button("이 품목 확인", type="primary")
 
     if confirmed:
+        if not source_checked:
+            st.error("원문 대조 완료를 확인해야 이 품목을 완료할 수 있습니다.")
+            return
         if state.vat_conflict and not vat.strip():
             st.error("VAT 상충 경고가 있으므로 원문을 확인해 VAT 상태를 직접 입력하세요.")
             return
-        state.items[index] = replace(
+        updated = replace(
             item,
             product_name=product_name.strip(),
             manufacturer=manufacturer.strip(),
@@ -239,10 +363,23 @@ def render_s2(state: QuoteReviewState, index: int) -> None:
             maintenance_condition=maintenance.strip(),
             other_conditions=other.strip(),
         )
+        state.items[index] = updated
         state.item_confirmed[index] = True
         state.item_notes[index] = note.strip()
+        state.condition_notes[index] = {
+            "vat": vat_note.strip(),
+            "delivery": delivery_note.strip(),
+            "installation": installation_note.strip(),
+            "options": options_note.strip(),
+            "warranty": warranty_note.strip(),
+            "maintenance": maintenance_note.strip(),
+        }
         state.reset_downstream(after_step=2)
-        st.success("이 품목의 추출값을 확인했습니다.")
+        st.success("이 품목의 추출·수정값을 원문과 대조해 확인했습니다.")
+        if original is not None:
+            changed = changed_item_field_labels(original, updated)
+            if changed:
+                st.info("수정된 필드: " + ", ".join(changed))
 
     allowed, reasons = can_enter(3, state)
     for reason in reasons:
@@ -286,6 +423,31 @@ def render_s3(state: QuoteReviewState, index: int) -> None:
     query = quote_item_query(item)
     mapping = resolve_verified_g2b_mapping(query)
     previous = state.identity.get(index)
+
+    aliases = None
+    with st.container(border=True):
+        st.markdown("**제조사 alias / 식별 입력 점검**")
+        try:
+            aliases = load_manufacturer_aliases()
+            canonical = canonical_manufacturer(item.manufacturer, aliases)
+        except ManufacturerAliasError as exc:
+            st.warning(f"제조사 alias 레지스트리 확인 실패: {type(exc).__name__}")
+        else:
+            st.write(f"견적 표기: **{item.manufacturer or '미확인'}**")
+            st.write(f"정규화 결과: **{canonical or '미확인'}**")
+            candidate = ProductIdentity(
+                product_name=item.product_name or None,
+                manufacturer=item.manufacturer or None,
+                model_name=item.model_name or None,
+                specification=item.specification or None,
+            )
+            decision = grade_product_identity(query, candidate, manufacturer_aliases=aliases)
+            st.caption(
+                "현재 식별 입력 점검 · "
+                f"model={decision.model_state} · manufacturer={decision.manufacturer_state} · "
+                f"specification={decision.specification_state}. "
+                "이 표시는 외부 근거의 MatchGrade를 새로 승인하지 않습니다."
+            )
 
     with st.container(border=True):
         st.markdown("**나라장터 verified mapping**")
