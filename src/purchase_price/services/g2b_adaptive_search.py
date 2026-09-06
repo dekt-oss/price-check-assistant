@@ -14,6 +14,10 @@ from purchase_price.services.g2b_product_mapping import (
 )
 
 
+class G2BRequestBudgetExceeded(G2BPaginationLimitError):
+    """Raised before another HTTP request can exceed the search-wide request budget."""
+
+
 @dataclass(frozen=True)
 class AdaptiveWindowResult:
     begin_date: date
@@ -30,6 +34,8 @@ class G2BAdaptiveSearchResult:
     mapping: G2BProductMapping
     windows: tuple[AdaptiveWindowResult, ...]
     candidate_prices: tuple[CollectedPrice, ...]
+    request_count: int = 0
+    request_budget: int = 0
 
     @property
     def records_seen(self) -> int:
@@ -77,21 +83,22 @@ def search_mapped_g2b_candidates_adaptive(
     num_of_rows: int = 100,
     max_pages: int = 20,
     max_split_depth: int = 12,
+    request_budget: int = 120,
 ) -> G2BAdaptiveSearchResult:
-    """Collect a verified G2B classification, splitting only page-cap overflow windows.
+    """Collect a verified G2B classification under page and search-wide request budgets.
 
-    A busy classification may exceed the explicit pagination safety cap even over a short period.
-    In that case the inclusive date window is bisected and both halves are collected completely.
-    Other API/payload failures are not disguised as density problems and therefore propagate.
-
-    If a one-day window still exceeds the cap, collection fails closed rather than presenting a
-    partial result as complete.
+    Dense windows are bisected when they cannot fit the page cap. Every physical collector page
+    fetch is counted across all split windows. Before a fetch that would exceed `request_budget`,
+    the search raises `G2BRequestBudgetExceeded`; no partial result is returned for downstream
+    price assessment.
     """
 
     if begin_date > end_date:
         raise ValueError("begin_date must not be after end_date")
     if max_split_depth < 0:
         raise ValueError("max_split_depth must not be negative")
+    if request_budget < 1:
+        raise ValueError("request_budget must be positive")
 
     mapping = resolve_verified_g2b_mapping(query, mappings)
     if mapping is None or not mapping.detail_product_name:
@@ -101,11 +108,25 @@ def search_mapped_g2b_candidates_adaptive(
 
     windows: list[AdaptiveWindowResult] = []
     prices: list[CollectedPrice] = []
+    request_count = 0
+
+    class BudgetedCollector:
+        def fetch_specific_item_page(self, **kwargs):
+            nonlocal request_count
+            if request_count >= request_budget:
+                raise G2BRequestBudgetExceeded(
+                    "G2B search request budget exhausted before collection completed: "
+                    f"request_count={request_count} request_budget={request_budget}"
+                )
+            request_count += 1
+            return collector.fetch_specific_item_page(**kwargs)
+
+    budgeted_collector = BudgetedCollector()
 
     def collect_window(window_begin: date, window_end: date, depth: int) -> None:
         try:
             result = search_mapped_g2b_candidates(
-                collector,
+                budgeted_collector,
                 query,
                 begin_date=window_begin,
                 end_date=window_end,
@@ -113,6 +134,8 @@ def search_mapped_g2b_candidates_adaptive(
                 num_of_rows=num_of_rows,
                 max_pages=max_pages,
             )
+        except G2BRequestBudgetExceeded:
+            raise
         except G2BPaginationLimitError as exc:
             if window_begin == window_end or depth >= max_split_depth:
                 raise G2BPaginationLimitError(
@@ -146,4 +169,6 @@ def search_mapped_g2b_candidates_adaptive(
         mapping=mapping,
         windows=tuple(windows),
         candidate_prices=_dedupe_candidate_prices(prices),
+        request_count=request_count,
+        request_budget=request_budget,
     )
