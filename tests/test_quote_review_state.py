@@ -73,11 +73,16 @@ def _context() -> QuoteComparabilityContext:
 def test_gate_walks_from_extraction_to_identity_and_search() -> None:
     item = _item()
     state = QuoteReviewState()
-    assert can_enter(2, state) == (False, ("견적서를 업로드하고 품목 추출을 완료하세요.",))
+    assert can_enter(2, state) == (False, ("견적서를 업로드하고 추출을 실행하세요.",))
 
-    state.extraction = QuoteExtractionResult(items=(item,), warnings=())
-    state.items = [item]
+    state.extraction = QuoteExtractionResult(items=(), warnings=())
     assert can_enter(2, state) == (True, ())
+    assert can_enter(3, state) == (
+        False,
+        ("자동 추출 품목이 없어 수동 품목을 1건 이상 입력하세요.",),
+    )
+
+    state.items = [item]
     assert can_enter(3, state)[0] is False
 
     state.item_confirmed[0] = True

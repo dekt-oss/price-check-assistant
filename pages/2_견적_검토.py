@@ -40,8 +40,15 @@ with center:
     elif state.step == 4:
         render_s4(state, selected_index)
     elif state.step == 5:
+        if st.button("2. 품목·견적 조건 수정으로 돌아가기"):
+            state.step = 2
+            st.rerun()
         render_s5(state, selected_index)
     else:
+        st.info(
+            "조건이 미확인이거나 충돌인 근거는 승인·판정에서 제외되며 참고용으로만 남습니다. "
+            "담당자가 동일 비교조건을 명시적으로 확인한 pair만 견적 위치 계산에 사용합니다."
+        )
         render_s6(state, selected_index)
 with right:
     render_path_card(state)
