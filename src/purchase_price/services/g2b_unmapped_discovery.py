@@ -13,6 +13,7 @@ from purchase_price.collectors.g2b_shopping import (
     parse_official_report_record,
 )
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_research_terms import research_terms_for_query
 from purchase_price.services.matching import normalize_text
 
 
@@ -24,6 +25,10 @@ class G2BDiscoveryCandidate:
     price: Decimal
     transaction_date: date | None
     source_record_id: str
+    search_term: str = ""
+    relevance: str = "분류 후보"
+    score: int = 0
+    match_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -34,14 +39,23 @@ class G2BUnmappedDiscoveryResult:
     records_seen: int
     candidates: tuple[G2BDiscoveryCandidate, ...]
     error_type: str = ""
+    request_budget: int = 0
+    failed_query_count: int = 0
+    error_types: tuple[str, ...] = ()
 
     @property
     def status_label(self) -> str:
         if self.status == "success":
             return f"후보 {len(self.candidates)}건"
+        if self.status == "partial":
+            return f"부분완료 · 후보 {len(self.candidates)}건"
         if self.status == "success_0":
             return "정상 0건"
         return "실패"
+
+    @property
+    def complete(self) -> bool:
+        return self.status in {"success", "success_0"}
 
 
 def build_g2b_discovery_terms(product_name: str) -> tuple[str, ...]:
@@ -60,28 +74,71 @@ def build_g2b_discovery_terms(product_name: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(terms))[:2]
 
 
+def build_g2b_research_terms(
+    query: ProductQuery,
+    *,
+    curated_terms: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    """Build recall-oriented detail-product search terms without asserting a mapping.
+
+    The server-side operation accepts a detail-product-name substring, not a model-name search.
+    Therefore model/manufacturer strings are used for local ranking, while request terms stay
+    product/classification-oriented. Curated terms are research-only aliases and never become a
+    verified mapping through this function.
+    """
+
+    output: list[str] = list(build_g2b_discovery_terms(query.product_name))
+
+    cleaned = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", re.sub(r"\([^)]*\)", " ", query.product_name))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    compact = re.sub(r"\s+", "", cleaned)
+    if compact and compact != cleaned and re.search(r"[가-힣]", compact):
+        output.append(compact)
+
+    for parenthetical in re.findall(r"\(([^)]*)\)", query.product_name):
+        parenthetical = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", parenthetical)
+        parenthetical = re.sub(r"\s+", " ", parenthetical).strip()
+        if parenthetical and re.search(r"[가-힣]", parenthetical):
+            output.append(parenthetical)
+
+    output.extend(curated_terms if curated_terms is not None else research_terms_for_query(query))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for term in output:
+        key = normalize_text(term)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(term.strip())
+    return tuple(deduped[:8])
+
+
 def _normalized_identity_tokens(value: str) -> tuple[str, ...]:
-    return tuple(normalize_text(token) for token in re.findall(r"[0-9A-Za-z가-힣]+", value) if token)
+    return tuple(
+        normalize_text(token)
+        for token in re.findall(r"[0-9A-Za-z가-힣]+", value)
+        if token
+    )
 
 
 def _model_matches_title(model_name: str, title: str) -> bool:
-    """Require a bounded model identity instead of accepting arbitrary short substrings.
-
-    Model strings of three normalized characters or fewer are especially collision-prone
-    (for example `M1`, `A3`, `X1`). They must match a complete alphanumeric/Korean title token.
-    Longer model names retain the existing normalized substring behavior so punctuation variants
-    such as `C-5570` versus `C5570` can still be discovered.
-    """
+    """Require a bounded model identity instead of accepting arbitrary short substrings."""
 
     model_key = normalize_text(model_name)
     if not model_key:
-        return True
+        return False
     if len(model_key) <= 3:
         return model_key in _normalized_identity_tokens(title)
     return model_key in normalize_text(title)
 
 
-def _candidate_from_record(record: dict, query: ProductQuery) -> G2BDiscoveryCandidate | None:
+def _candidate_from_record(
+    record: dict,
+    query: ProductQuery,
+    *,
+    search_term: str,
+) -> G2BDiscoveryCandidate | None:
     parsed = parse_official_report_record(
         record,
         operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS,
@@ -90,22 +147,58 @@ def _candidate_from_record(record: dict, query: ProductQuery) -> G2BDiscoveryCan
         return None
 
     title = parsed.original_title or parsed.product_name
-    model_key = normalize_text(query.model_name)
-    if model_key and not _model_matches_title(query.model_name, title):
-        return None
-
+    title_key = normalize_text(title)
+    model_hit = bool(query.model_name.strip()) and _model_matches_title(query.model_name, title)
     manufacturer_key = normalize_text(query.manufacturer)
-    if not model_key and manufacturer_key and manufacturer_key not in normalize_text(title):
-        return None
+    manufacturer_hit = bool(manufacturer_key) and manufacturer_key in title_key
+
+    classification_name = str(record.get("dtilPrdctClsfcNoNm") or "")
+    classification_exact = bool(classification_name) and (
+        normalize_text(classification_name) == normalize_text(search_term)
+    )
+
+    if model_hit:
+        relevance = "모델 표기 후보"
+        score = 100
+        reasons = ["모델 토큰 일치"]
+        if manufacturer_hit:
+            score += 20
+            reasons.append("제조사 표기 일치")
+    elif manufacturer_hit:
+        relevance = "제조사 표기 후보"
+        score = 70
+        reasons = ["제조사 표기 일치", "모델 미확인"]
+    else:
+        relevance = "분류 후보"
+        score = 30
+        reasons = ["검색 세부품명 범주", "모델·제조사 미확인"]
+
+    if classification_exact:
+        score += 10
+        reasons.append("세부품명 정확 일치")
 
     return G2BDiscoveryCandidate(
         title=title,
-        classification_name=str(record.get("dtilPrdctClsfcNoNm") or ""),
+        classification_name=classification_name,
         classification_code=str(record.get("dtilPrdctClsfcNo") or ""),
         price=parsed.price,
         transaction_date=parsed.transaction_date,
         source_record_id=parsed.source_record_id or "",
+        search_term=search_term,
+        relevance=relevance,
+        score=score,
+        match_reason=" · ".join(reasons),
     )
+
+
+def _year_bounded_windows(start: date, end: date) -> tuple[tuple[date, date], ...]:
+    windows: list[tuple[date, date]] = []
+    cursor_end = end
+    while cursor_end >= start:
+        cursor_start = max(start, cursor_end - timedelta(days=364))
+        windows.append((cursor_start, cursor_end))
+        cursor_end = cursor_start - timedelta(days=1)
+    return tuple(windows)
 
 
 def discover_unmapped_g2b_candidates(
@@ -118,74 +211,131 @@ def discover_unmapped_g2b_candidates(
     max_retries: int = 3,
     pages_per_term_window: int = 2,
     num_of_rows: int = 100,
+    request_budget: int = 80,
     today: date | None = None,
+    curated_terms: tuple[str, ...] | None = None,
 ) -> G2BUnmappedDiscoveryResult:
-    """Search unverified classifications without promoting candidates to direct-price evidence."""
+    """Search broadly for research candidates without promoting them to direct-price evidence.
+
+    Query terms may be broad or curated. Every returned row remains a G2BDiscoveryCandidate and is
+    kept outside CollectedPrice. Model/manufacturer matches only affect research ranking.
+    Individual term/window failures are isolated so one weak research query does not erase useful
+    candidates from other terms. A partial result is explicitly labelled and never enters pricing.
+    """
 
     if lookback_days < 1:
         raise ValueError("lookback_days must be positive")
     if pages_per_term_window < 1 or num_of_rows < 1:
         raise ValueError("page bounds must be positive")
+    if request_budget < 1:
+        raise ValueError("request_budget must be positive")
 
-    terms = build_g2b_discovery_terms(query.product_name)
+    terms = build_g2b_research_terms(query, curated_terms=curated_terms)
     if not terms:
-        return G2BUnmappedDiscoveryResult("success_0", (), 0, 0, ())
+        return G2BUnmappedDiscoveryResult(
+            "success_0", (), 0, 0, (), request_budget=request_budget
+        )
 
-    client = PublicDataPortalClient(service_key, timeout_seconds=timeout_seconds, max_retries=max_retries)
+    client = PublicDataPortalClient(
+        service_key,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+    )
     collector = G2BShoppingCollector(service_key, base_url=base_url, client=client)
 
     end = today or date.today()
     start = end - timedelta(days=lookback_days - 1)
-    windows: list[tuple[date, date]] = []
-    cursor_end = end
-    while cursor_end >= start:
-        cursor_start = max(start, cursor_end - timedelta(days=364))
-        windows.append((cursor_start, cursor_end))
-        cursor_end = cursor_start - timedelta(days=1)
+    windows = _year_bounded_windows(start, end)
 
     request_count = 0
     records_seen = 0
-    candidates: list[G2BDiscoveryCandidate] = []
-    seen: set[tuple[str, str, str]] = set()
+    successful_fetches = 0
+    failed_query_count = 0
+    error_types: set[str] = set()
+    budget_exhausted = False
+    candidates_by_key: dict[tuple[str, str, str], G2BDiscoveryCandidate] = {}
 
-    try:
-        for window_begin, window_end in windows:
-            for term in terms:
-                fetched_for_query = 0
-                for page_no in range(1, pages_per_term_window + 1):
+    for window_begin, window_end in windows:
+        if budget_exhausted:
+            break
+        for term in terms:
+            if budget_exhausted:
+                break
+            fetched_for_query = 0
+            query_failed = False
+            for page_no in range(1, pages_per_term_window + 1):
+                if request_count >= request_budget:
+                    budget_exhausted = True
+                    break
+                request_count += 1
+                try:
                     page, _ = collector.fetch_specific_item_page(
-                        detail_product_name=term, begin_date=window_begin, end_date=window_end,
-                        page_no=page_no, num_of_rows=num_of_rows,
+                        detail_product_name=term,
+                        begin_date=window_begin,
+                        end_date=window_end,
+                        page_no=page_no,
+                        num_of_rows=num_of_rows,
                     )
-                    request_count += 1
-                    records_seen += len(page.items)
-                    fetched_for_query += len(page.items)
-                    for raw in page.items:
-                        candidate = _candidate_from_record(raw, query)
-                        if candidate is None:
-                            continue
-                        key = (candidate.source_record_id, candidate.title,
-                               candidate.transaction_date.isoformat() if candidate.transaction_date else "")
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        candidates.append(candidate)
-                    if not page.items:
-                        break
-                    if page.total_count is not None and fetched_for_query >= page.total_count:
-                        break
-                    if len(page.items) < num_of_rows:
-                        break
-    except (PublicDataClientError, ValueError) as exc:
-        return G2BUnmappedDiscoveryResult(
-            "failure", terms, request_count, records_seen, tuple(candidates), type(exc).__name__
-        )
+                except (PublicDataClientError, ValueError) as exc:
+                    failed_query_count += 1
+                    error_types.add(type(exc).__name__)
+                    query_failed = True
+                    break
 
-    candidates.sort(
-        key=lambda item: (item.transaction_date or date.min, item.title, item.source_record_id),
+                successful_fetches += 1
+                records_seen += len(page.items)
+                fetched_for_query += len(page.items)
+                for raw in page.items:
+                    candidate = _candidate_from_record(raw, query, search_term=term)
+                    if candidate is None:
+                        continue
+                    key = (
+                        candidate.source_record_id,
+                        candidate.title,
+                        candidate.transaction_date.isoformat()
+                        if candidate.transaction_date
+                        else "",
+                    )
+                    previous = candidates_by_key.get(key)
+                    if previous is None or candidate.score > previous.score:
+                        candidates_by_key[key] = candidate
+                if not page.items:
+                    break
+                if page.total_count is not None and fetched_for_query >= page.total_count:
+                    break
+                if len(page.items) < num_of_rows:
+                    break
+            if query_failed:
+                continue
+
+    candidates = sorted(
+        candidates_by_key.values(),
+        key=lambda item: (
+            item.score,
+            item.transaction_date or date.min,
+            item.title,
+            item.source_record_id,
+        ),
         reverse=True,
     )
+
+    incomplete = budget_exhausted or failed_query_count > 0
+    if successful_fetches == 0 and failed_query_count > 0:
+        status = "failure"
+    elif incomplete:
+        status = "partial"
+    else:
+        status = "success" if candidates else "success_0"
+
+    ordered_errors = tuple(sorted(error_types))
     return G2BUnmappedDiscoveryResult(
-        "success" if candidates else "success_0", terms, request_count, records_seen,
-        tuple(candidates[:50]),
+        status,
+        terms,
+        request_count,
+        records_seen,
+        tuple(candidates[:100]),
+        error_type=ordered_errors[0] if ordered_errors else "",
+        request_budget=request_budget,
+        failed_query_count=failed_query_count,
+        error_types=ordered_errors,
     )
