@@ -1,0 +1,111 @@
+name: Production Streamlit Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/production-streamlit-smoke.yml"
+      - "tests/test_production_smoke_workflow_contract.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-streamlit-smoke
+  cancel-in-progress: true
+
+jobs:
+  deployment-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      PRODUCTION_URL: https://bp-price-research.streamlit.app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Probe deployed Streamlit app with bounded retry
+        shell: bash
+        run: |
+          set -u
+          mkdir -p artifacts/production-streamlit-smoke
+
+          max_attempts=20
+          sleep_seconds=15
+          health_code="000"
+          root_code="000"
+          marker_ok=false
+          success=false
+          attempt=0
+
+          for attempt in $(seq 1 "$max_attempts"); do
+            echo "Production smoke attempt ${attempt}/${max_attempts}"
+
+            health_code=$(curl \
+              --location \
+              --silent \
+              --show-error \
+              --connect-timeout 10 \
+              --max-time 20 \
+              --user-agent "price-check-assistant-production-smoke/1.0" \
+              --output /tmp/streamlit-health.txt \
+              --write-out '%{http_code}' \
+              "${PRODUCTION_URL}/_stcore/health" || printf '000')
+
+            root_code=$(curl \
+              --location \
+              --silent \
+              --show-error \
+              --connect-timeout 10 \
+              --max-time 20 \
+              --user-agent "price-check-assistant-production-smoke/1.0" \
+              --output /tmp/streamlit-root.html \
+              --write-out '%{http_code}' \
+              "${PRODUCTION_URL}/" || printf '000')
+
+            marker_ok=false
+            if [ -s /tmp/streamlit-root.html ] && grep -Eqi 'streamlit|_stcore|static/js' /tmp/streamlit-root.html; then
+              marker_ok=true
+            fi
+
+            echo "health_http=${health_code} root_http=${root_code} bootstrap_marker=${marker_ok}"
+            if [ "$health_code" = "200" ] && [ "$root_code" = "200" ] && [ "$marker_ok" = "true" ]; then
+              success=true
+              break
+            fi
+
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              sleep "$sleep_seconds"
+            fi
+          done
+
+          checked_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          cat > artifacts/production-streamlit-smoke/report.json <<JSON
+          {
+            "production_url": "${PRODUCTION_URL}",
+            "checked_at_utc": "${checked_at}",
+            "attempts": ${attempt},
+            "health_http_status": "${health_code}",
+            "root_http_status": "${root_code}",
+            "streamlit_bootstrap_marker": ${marker_ok},
+            "deployment_smoke_success": ${success},
+            "scope": "deployment availability only; does not validate live market-search results"
+          }
+          JSON
+
+          if [ "$success" != "true" ]; then
+            echo "Production Streamlit deployment smoke failed after ${attempt} attempts."
+            exit 1
+          fi
+
+      - name: Upload Production smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-streamlit-smoke
+          path: artifacts/production-streamlit-smoke/report.json
+          if-no-files-found: error
+          retention-days: 14
