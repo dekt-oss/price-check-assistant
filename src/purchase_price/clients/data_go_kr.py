@@ -189,7 +189,11 @@ def _http_error_message(response: httpx.Response, secret: str) -> str:
 
 
 class PublicDataPortalClient:
-    """Common data.go.kr client with single key encoding and fail-closed errors."""
+    """Common data.go.kr client with single key encoding and fail-closed errors.
+
+    One HTTP client is reused for the lifetime of this object so multi-page/adaptive searches do
+    not perform a new TCP/TLS handshake for every API request.
+    """
 
     def __init__(
         self,
@@ -201,6 +205,27 @@ class PublicDataPortalClient:
         self.service_key = normalize_service_key(service_key)
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self._client: httpx.Client | None = None
+
+    def _get_client(self) -> httpx.Client:
+        if self._client is None:
+            self._client = httpx.Client(timeout=self.timeout_seconds)
+        return self._client
+
+    def close(self) -> None:
+        client = self._client
+        self._client = None
+        if client is not None:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+
+    def __enter__(self) -> PublicDataPortalClient:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self.close()
+        return False
 
     def _request(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
         merged = {"serviceKey": self.service_key, "type": "json", **params}
@@ -212,14 +237,13 @@ class PublicDataPortalClient:
             reraise=True,
         )
         def do_request() -> dict[str, Any]:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
-                response = client.get(url, params=merged)
-                if response.is_error:
-                    raise PublicDataClientError(_http_error_message(response, self.service_key))
-                try:
-                    payload = response.json()
-                except ValueError as exc:
-                    raise PublicDataClientError("API response is not valid JSON") from exc
+            response = self._get_client().get(url, params=merged)
+            if response.is_error:
+                raise PublicDataClientError(_http_error_message(response, self.service_key))
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                raise PublicDataClientError("API response is not valid JSON") from exc
 
             if not isinstance(payload, dict):
                 raise PublicDataClientError("API response root must be a JSON object")

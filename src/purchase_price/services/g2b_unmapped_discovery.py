@@ -43,6 +43,7 @@ class G2BUnmappedDiscoveryResult:
     failed_query_count: int = 0
     truncated_query_count: int = 0
     error_types: tuple[str, ...] = ()
+    error_messages: tuple[str, ...] = ()
 
     @property
     def status_label(self) -> str:
@@ -203,6 +204,11 @@ def _year_bounded_windows(start: date, end: date) -> tuple[tuple[date, date], ..
     return tuple(windows)
 
 
+def _safe_error_message(exc: Exception) -> str:
+    message = str(exc).strip().replace("\n", " ")
+    return message[:500] if message else type(exc).__name__
+
+
 def discover_unmapped_g2b_candidates(
     query: ProductQuery,
     *,
@@ -255,6 +261,7 @@ def discover_unmapped_g2b_candidates(
     failed_query_count = 0
     truncated_query_count = 0
     error_types: set[str] = set()
+    error_messages: set[str] = set()
     budget_exhausted = False
     candidates_by_key: dict[tuple[str, str, str], G2BDiscoveryCandidate] = {}
 
@@ -284,6 +291,7 @@ def discover_unmapped_g2b_candidates(
                 except (PublicDataClientError, ValueError) as exc:
                     failed_query_count += 1
                     error_types.add(type(exc).__name__)
+                    error_messages.add(_safe_error_message(exc))
                     query_failed = True
                     break
 
@@ -341,6 +349,7 @@ def discover_unmapped_g2b_candidates(
         status = "success" if candidates else "success_0"
 
     ordered_errors = tuple(sorted(error_types))
+    ordered_messages = tuple(sorted(error_messages))[:5]
     return G2BUnmappedDiscoveryResult(
         status,
         terms,
@@ -352,4 +361,5 @@ def discover_unmapped_g2b_candidates(
         failed_query_count=failed_query_count,
         truncated_query_count=truncated_query_count,
         error_types=ordered_errors,
+        error_messages=ordered_messages,
     )

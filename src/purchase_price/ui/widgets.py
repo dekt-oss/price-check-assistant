@@ -140,6 +140,13 @@ def discovery_candidate_rows(discovery: G2BUnmappedDiscoveryResult) -> list[dict
     ]
 
 
+def _render_discovery_error_messages(discovery: G2BUnmappedDiscoveryResult) -> None:
+    if not discovery.error_messages:
+        return
+    for message in discovery.error_messages[:3]:
+        st.caption(f"API 진단: {message}")
+
+
 def render_discovery_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
     budget_text = f"/{discovery.request_budget}" if discovery.request_budget else ""
     st.write(
@@ -148,9 +155,10 @@ def render_discovery_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
     )
     if discovery.status == "failure":
         st.warning(
-            "나라장터 후보 탐색 실패: "
-            + (", ".join(discovery.error_types) or discovery.error_type or "unknown error")
+            "나라장터 후보 탐색 실패입니다. 이는 '검색 결과 0건'과 다릅니다. "
+            "API 연결·응답 오류가 해결되기 전에는 시장자료가 없다고 판단할 수 없습니다."
         )
+        _render_discovery_error_messages(discovery)
         return
     if discovery.status == "partial":
         details: list[str] = []
@@ -163,6 +171,7 @@ def render_discovery_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
             "후보 탐색이 일부만 완료됐습니다. 현재 표는 부분 조사결과이며 누락 가능성이 있습니다"
             f"{detail_text}."
         )
+        _render_discovery_error_messages(discovery)
     rows = discovery_candidate_rows(discovery)
     if not rows:
         st.info("선택 기간과 연구용 탐색어에서 나라장터 후보를 찾지 못했습니다.")

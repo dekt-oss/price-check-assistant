@@ -1,0 +1,91 @@
+name: G2B Research Coverage Live Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Verify G2B secret
+        shell: bash
+        run: |
+          if [ -z "$G2B_SERVICE_KEY" ]; then
+            echo "G2B service key secret is required for live research validation"
+            exit 2
+          fi
+
+      - name: Control probe - known broad G2B term
+        id: control
+        continue-on-error: true
+        shell: bash
+        run: |
+          BEGIN_DATE=$(date -u -d '30 days ago' +%Y%m%d)
+          END_DATE=$(date -u +%Y%m%d)
+          python -m purchase_price.scripts.g2b_shopping_probe \
+            getSpcifyPrdlstPrcureInfoList \
+            --param pageNo=1 \
+            --param numOfRows=1 \
+            --param inqryDiv=1 \
+            --param "inqryBgnDate=$BEGIN_DATE" \
+            --param "inqryEndDate=$END_DATE" \
+            --param inqryPrdctDiv=2 \
+            --param fnlCntrctDlvrReqChgOrdYn=Y \
+            --param dtilPrdctClsfcNoNm=제습기
+
+      - name: Run bounded hospital-product research coverage
+        if: steps.control.outcome == 'success'
+        run: |
+          python -m purchase_price.scripts.validate_g2b_research_live \
+            --lookback-days 365 \
+            --pages-per-term-window 1 \
+            --request-budget-per-case 5 \
+            --timeout-seconds 12 \
+            --max-retries 1 \
+            --workers 2 \
+            --output artifacts/g2b-research-live/report.json
+
+      - name: Record invalid live environment
+        if: steps.control.outcome != 'success'
+        shell: bash
+        run: |
+          mkdir -p artifacts/g2b-research-live
+          cat > artifacts/g2b-research-live/report.json <<'JSON'
+          {
+            "validation_status": "environment_failure",
+            "control_probe": "failure",
+            "research_hit_rate": null,
+            "model_candidate_hit_rate": null,
+            "failure_reason": "The known broad G2B control probe could not establish a live API connection. Product coverage was not measured.",
+            "safety_note": "Do not interpret this run as zero G2B market coverage."
+          }
+          JSON
+
+      - name: Upload live research report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2b-research-live
+          path: artifacts/g2b-research-live/report.json
+          if-no-files-found: warn
+          retention-days: 14
