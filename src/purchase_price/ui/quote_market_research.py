@@ -184,7 +184,7 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
 
 def render_quote_market_research(state: QuoteReviewState) -> None:
     st.info(
-        "견적서를 올리면 품목을 추출한 뒤 **제품 식별 확인을 기다리지 않고 바로 시장가격 조사를 시작**합니다. "
+        "견적서를 업로드하면 품목을 추출한 뒤 **제품 식별 확인을 기다리지 않고 바로 시장가격 조사를 시작**합니다. "
         "세부조건은 검색 제한이 아니라 결과 해석을 위한 보조정보입니다."
     )
 
