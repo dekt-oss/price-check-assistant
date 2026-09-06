@@ -2,6 +2,7 @@ from datetime import date
 from types import SimpleNamespace
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
+from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL
 from purchase_price.config import Settings
 from purchase_price.services.live_smoke import (
     LIVE_FAILURE,
@@ -18,6 +19,7 @@ class FakePortalClient:
         self.payload, self.error, self.calls = payload or {}, error, []
 
     def get_json(self, base_url, operation, **params):
+        assert isinstance(base_url, str) and base_url.strip()
         self.calls.append((base_url, operation, params))
         if self.error:
             raise self.error
@@ -68,10 +70,27 @@ def test_g2b_live_smoke_bounded_and_success():
     )
     assert result.status == LIVE_SUCCESS
     assert len(client.calls) == 1
+    assert client.calls[0][0] == G2B_SHOPPING_BASE_URL
     assert result.logical_requests == 1
     assert result.max_http_attempts == 3
     params = client.calls[0][2]
     assert params["pageNo"] == 1 and params["numOfRows"] == 1
+
+
+def test_g2b_live_smoke_respects_configured_base_url():
+    client = FakePortalClient(payload([], 0))
+    custom_base_url = "https://example.invalid/g2b"
+    result = run_g2b_live_smoke(
+        "제습기",
+        settings=settings(
+            g2b_service_key="key",
+            g2b_shopping_base_url=custom_base_url,
+        ),
+        portal_client=client,
+        today=date(2026, 9, 5),
+    )
+    assert result.status == LIVE_SUCCESS_0
+    assert client.calls[0][0] == custom_base_url
 
 
 def test_g2b_zero_and_failure_are_distinct_and_secret_free():
