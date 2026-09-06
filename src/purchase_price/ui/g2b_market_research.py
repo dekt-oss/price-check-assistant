@@ -13,6 +13,7 @@ from purchase_price.services.g2b_market_models import (
 
 _SOURCE_LABELS = {
     G2BResearchSource.BID_NOTICE: "입찰공고",
+    G2BResearchSource.BID_ITEM: "공고 품목상세",
     G2BResearchSource.AWARD: "낙찰",
     G2BResearchSource.PRESPEC: "사전규격",
     G2BResearchSource.CONTRACT: "계약",
@@ -21,7 +22,7 @@ _SOURCE_LABELS = {
 
 _AMOUNT_LABELS = {
     ResearchAmountType.UNIT_PRICE: "단가",
-    ResearchAmountType.ESTIMATED_UNIT_PRICE: "추정단가",
+    ResearchAmountType.ESTIMATED_UNIT_PRICE: "예정/추정단가",
     ResearchAmountType.ESTIMATED_PRICE: "추정가격",
     ResearchAmountType.BASIC_AMOUNT: "기초금액",
     ResearchAmountType.BUDGET_AMOUNT: "예산",
@@ -37,10 +38,18 @@ def _format_amount(record: G2BResearchRecord) -> str:
     return f"{record.amount:,.0f}원 ({_AMOUNT_LABELS[record.amount_type]})"
 
 
+def _format_quantity(record: G2BResearchRecord) -> str:
+    if record.quantity is None:
+        return ""
+    value = f"{record.quantity:,.4f}".rstrip("0").rstrip(".")
+    return f"{value} {record.unit or ''}".strip()
+
+
 def _row(record: G2BResearchRecord) -> dict[str, object]:
     return {
         "자료구분": _SOURCE_LABELS[record.source_type],
-        "공고/자료명": record.title or "",
+        "공고/자료명": record.title or record.product_name or "",
+        "수량·단위": _format_quantity(record),
         "기관": record.institution or "",
         "일자": record.published_date.isoformat() if record.published_date else "",
         "금액": _format_amount(record),
@@ -56,8 +65,9 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
 
     st.subheader("나라장터 전체 Research")
     st.caption(
-        "종합쇼핑몰뿐 아니라 입찰공고·낙찰·사전규격을 함께 조회합니다. "
-        "아래 추정가격·예산·낙찰총액은 제품 단가가 아니며 동일모델 검증 전에는 가격판정에 사용하지 않습니다."
+        "종합쇼핑몰뿐 아니라 입찰공고·공고 품목상세·낙찰·사전규격을 함께 조회합니다. "
+        "추정가격·예산·낙찰총액·예정단가는 동일제품 거래단가가 아니며, "
+        "제품 식별과 거래조건 검증 전에는 가격판정에 사용하지 않습니다."
     )
     if bundle.query_terms:
         st.caption("검색어: " + " · ".join(bundle.query_terms))
@@ -109,6 +119,6 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
     attachment_count = sum(len(record.attachments) for record in records)
     if attachment_count:
         st.caption(
-            f"규격/설명 첨부 링크 {attachment_count}개를 확인했습니다. 다음 단계에서 상위 관련 공고의 "
-            "첨부문서에서 제조사·모델을 찾아 동일제품 여부를 검증합니다."
+            f"규격/설명 첨부 링크 {attachment_count}개를 확인했습니다. 첨부문서의 제조사·모델 식별은 "
+            "동일제품 여부 검증에 사용하되, 첨부 키워드만으로 직접가격을 자동 승격하지 않습니다."
         )
