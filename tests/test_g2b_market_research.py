@@ -168,11 +168,12 @@ def test_market_research_runs_for_plain_product_keyword_without_model_or_mapping
         prespec_client=prespec,  # type: ignore[arg-type]
     )
 
-    assert result.query_terms == ("마취",)
-    assert bid.terms == ["마취"]
-    assert award.terms == ["마취"]
-    assert prespec.terms == ["마취"]
-    assert len(result.records) == 3
+    expected_terms = ("마취", "마취기", "가스마취기", "전신가스마취기", "마취기시스템")
+    assert result.query_terms == expected_terms
+    assert bid.terms == list(expected_terms)
+    assert award.terms == list(expected_terms)
+    assert prespec.terms == list(expected_terms)
+    assert len(result.records) == 15
     assert all(not isinstance(record, CollectedPrice) for record in result.records)
 
 
