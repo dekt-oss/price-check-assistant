@@ -1,0 +1,131 @@
+<!doctype html>
+<html>
+<head>
+  <title>S4-근거수집</title>
+  <meta charset="utf-8">
+</head>
+<body>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f6f5f2; color: #1c1b19; font-size: 14px; line-height: 1.45; }
+    a { color: #1f6f8b; } a:hover { color: #174f63; }
+    .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .ok { background: #e4f2ea; color: #1f5e42; } .warn { background: #f7ecd6; color: #7a5410; } .err { background: #f8e1e1; color: #8a2a2a; } .muted { background: #eeece7; color: #5a5750; } .info { background: #e3eef3; color: #1f6f8b; }
+    .nav a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 8px; color: #3b3935; text-decoration: none; font-weight: 500; }
+    .nav a.on { background: #e3eef3; color: #1f6f8b; font-weight: 600; }
+    .card { background: #fff; border: 1px solid #e2dfd8; border-radius: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 18px; border-radius: 8px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+    .primary { background: #1f6f8b; color: #fff; } .ghost { border: 1px solid #cfcbc2; background: #fff; color: #1c1b19; } .disabled { opacity: 0.45; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-size: 12px; color: #6b6862; font-weight: 500; padding: 8px 10px; border-bottom: 1px solid #e2dfd8; }
+    td { padding: 9px 10px; border-bottom: 1px solid #efece6; font-size: 13px; vertical-align: middle; }
+    .step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #8a877f; }
+    .step .n { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #cfcbc2; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+    .step.done .n { background: #2e7d5b; border-color: #2e7d5b; color: #fff; }
+    .step.now { color: #1c1b19; font-weight: 600; } .step.now .n { border-color: #1f6f8b; color: #1f6f8b; }
+    .item { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-bottom: 1px solid #efece6; }
+    .item.on { background: #e3eef3; border-left: 3px solid #1f6f8b; }
+    .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #efece6; gap: 12px; }
+    .kv span:last-child { font-weight: 600; text-align: right; }
+    .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 12px; color: #6b6862; }
+    .field div { height: 40px; border: 1px solid #cfcbc2; border-radius: 8px; background: #fff; padding: 0 12px; display: flex; align-items: center; font-size: 13px; }
+    .field.edited div { border-color: #1f6f8b; background: #f3f8fa; }
+    .src { font-size: 12px; color: #6b6862; background: #fbfaf8; border: 1px dashed #cfcbc2; border-radius: 6px; padding: 8px 10px; }
+    .todo { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+  </style>
+
+<div style="width: 1440px; min-height: 1040px; display: flex; box-sizing: border-box;">
+  <div class="nav" style="width: 220px; background: #fff; border-right: 1px solid #e2dfd8; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+    <div style="padding: 6px 14px 18px; font-weight: 700; font-size: 15px;">시장가격조사기</div>
+    <a href="#">대시보드</a>
+    <a class="on" href="#">견적 검토</a>
+    <a href="#">빠른 검색</a>
+    <a href="#">의료기기 조회</a>
+    <div style="flex-grow: 1;"></div>
+    <a href="#" style="color: #8a877f;">관리</a>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; box-sizing: border-box;">
+    <div style="background: #fff; border-bottom: 1px solid #e2dfd8; padding: 18px 32px; display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <a href="#" style="font-size: 13px; color: #6b6862; text-decoration: none;">← 대시보드</a>
+          <div style="font-size: 20px; font-weight: 700;">전산비품 견적 2026-09</div>
+          <span class="chip muted">xlsx · 1시트</span>
+          <span class="chip ok">4단계 · 수집 완료</span>
+        </div>
+        <div style="display: flex; gap: 8px;"><a class="btn ghost" href="#">원문 보기</a><a class="btn ghost" href="#">검토 보고서</a></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 28px;">
+        <div class="step done"><span class="n">✓</span>업로드·추출</div>
+        <div class="step done"><span class="n">✓</span>품목 확인</div>
+        <div class="step done"><span class="n">✓</span>제품 식별</div>
+        <div class="step now"><span class="n">4</span>근거 수집</div>
+        <div class="step"><span class="n">5</span>조건 대조</div>
+        <div class="step"><span class="n">6</span>승인·판정</div>
+      </div>
+    </div>
+    <div style="display: grid; grid-template-columns: 300px 1fr 340px; gap: 0; flex-grow: 1; min-height: 0;">
+      <div style="background: #fff; border-right: 1px solid #e2dfd8; display: flex; flex-direction: column;">
+        <div style="padding: 14px 14px 8px; display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">품목 1건</span><a href="#" style="font-size: 12px;">품목 추가</a></div>
+        <div class="item on">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">컬러 레이저프린터</span><span class="chip muted">1대</span></div>
+          <div style="font-size: 12px; color: #6b6862;">FUJIFILM Business Innovation · ApeosPrint C5570 GK · 3,500,000원</div>
+          <div style="display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap;"><span class="chip ok">식별 ✓</span><span class="chip ok">근거 68</span><span class="chip muted">판정 보류</span></div>
+        </div>
+        <div style="padding: 14px; font-size: 12px; color: #6b6862; border-top: 1px solid #efece6; margin-top: auto;">
+          <div style="font-weight: 600; color: #3b3935; margin-bottom: 6px;">수집 메모</div>
+          <div>1년 · 4구간 · 88/120 요청 · 3분 28초</div>
+        </div>
+      </div>
+      <div style="padding: 22px 26px; display: flex; flex-direction: column; gap: 18px; overflow: hidden;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="font-size: 17px; font-weight: 700;">4. 근거 수집</div>
+          <div style="display: flex; gap: 8px;"><span class="chip info">최근 1년</span><a href="#" style="font-size: 13px;">기간 변경</a></div>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 600;">출처별 상태</div><span class="chip ok">완료 · 2/2 출처</span></div>
+          <table>
+            <thead><tr><th style="width: 34%;">출처</th><th>상태</th><th>건수</th><th>요청</th><th>메모</th></tr></thead>
+            <tbody>
+              <tr><td>제조사 공개가격</td><td><span class="chip ok">완료</span></td><td>1</td><td class="mono">—</td><td style="color: #6b6862;">FUJIFILM 공식몰 · 2026-09-04 확인</td></tr>
+              <tr><td>나라장터 직접검색 · 레이저프린터 (4321210501)</td><td><span class="chip ok">완료</span></td><td>67</td><td class="mono">88 / 120</td><td style="color: #6b6862;">4구간 분할 · 3분 28초</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-weight: 600;">직접 비교 근거 <span style="color: #6b6862; font-weight: 400;">A·B · KRW · 직접가격</span></div>
+            <div style="display: flex; gap: 8px;"><span class="chip ok">A 68</span><a href="#" style="font-size: 13px;">CSV</a></div>
+          </div>
+          <table>
+            <thead><tr><th>거래일</th><th>출처</th><th>등급</th><th>단가</th><th>수량</th><th>VAT</th><th>배송·설치</th><th>근거</th></tr></thead>
+            <tbody>
+              <tr><td>2026-08-27</td><td>나라장터</td><td><span class="chip ok">A</span></td><td class="mono">2,981,000</td><td>1대</td><td><span class="chip muted">미확인</span></td><td>현장설치도</td><td><a href="#">R26TB02263211</a></td></tr>
+              <tr><td>2026-08-14</td><td>나라장터</td><td><span class="chip ok">A</span></td><td class="mono">2,981,000</td><td>1대</td><td><span class="chip muted">미확인</span></td><td>현장설치도</td><td><a href="#">R26TB02225745</a></td></tr>
+              <tr><td>2026-09-04</td><td>FUJIFILM 공식몰</td><td><span class="chip ok">A</span></td><td class="mono">5,500,000</td><td>1대</td><td><span class="chip ok">포함</span></td><td>—</td><td><a href="#">공식몰</a></td></tr>
+              <tr><td colspan="8" style="text-align: center; color: #6b6862;">… 65건 더 보기</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card" style="padding: 12px 16px; background: #fbfaf8; border-style: dashed; display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #5a5750; font-weight: 600;">나라장터 미검증 후보</span><span class="chip muted">이 품목은 직접검색이 실행되어 후보 탐색을 하지 않았습니다</span>
+        </div>
+      </div>
+      <div style="background: #fff; border-left: 1px solid #e2dfd8; padding: 22px 20px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="font-weight: 700; font-size: 15px;">관측 가격</div>
+        <div style="font-size: 12px; color: #6b6862;">조건이 다른 근거는 합치지 않습니다</div>
+        <div style="padding: 12px 14px; border-radius: 8px; background: #e3eef3;"><div style="display: flex; justify-content: space-between; font-size: 12px; color: #1f6f8b;"><span>나라장터 · 67건</span><span class="chip muted">VAT 미확인</span></div><div style="font-size: 18px; font-weight: 700;">2,981,000원</div></div>
+        <div style="padding: 12px 14px; border-radius: 8px; background: #e3eef3;"><div style="display: flex; justify-content: space-between; font-size: 12px; color: #1f6f8b;"><span>FUJIFILM 공식몰 · 1건</span><span class="chip ok">VAT 포함</span></div><div style="font-size: 18px; font-weight: 700;">5,500,000원</div></div>
+        <div class="kv"><span>견적 단가</span><span>3,500,000원</span></div>
+        <div class="kv"><span>판정</span><span style="color: #8a877f;">보류 · 조건 미대조</span></div>
+        <div style="flex-grow: 1;"></div>
+        <a class="btn primary" href="#">5. 조건 대조로</a>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

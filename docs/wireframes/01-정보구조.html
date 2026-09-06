@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+  <title>01-정보구조</title>
+  <meta charset="utf-8">
+</head>
+<body>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f6f5f2; color: #1c1b19; font-size: 14px; line-height: 1.45; }
+    a { color: #1f6f8b; } a:hover { color: #174f63; }
+    .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+    .ok { background: #e4f2ea; color: #1f5e42; } .warn { background: #f7ecd6; color: #7a5410; } .err { background: #f8e1e1; color: #8a2a2a; } .muted { background: #eeece7; color: #5a5750; } .new { background: #e3eef3; color: #1f6f8b; }
+    .old { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 1px dashed #b9b5ac; border-radius: 6px; background: #fbfaf8; font-size: 13px; color: #3b3935; }
+    .area { background: #fff; border: 1px solid #e2dfd8; border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+    .area h3 { margin: 0; font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .area p { margin: 0; font-size: 13px; color: #6b6862; }
+    .from { display: flex; flex-wrap: wrap; gap: 6px; }
+    .from span { font-size: 12px; background: #eeece7; color: #5a5750; padding: 3px 8px; border-radius: 4px; }
+    .num { width: 26px; height: 26px; border-radius: 50%; background: #1f6f8b; color: #fff; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  </style>
+
+<div style="width: 1440px; min-height: 1000px; padding: 40px 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px;">
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+    <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #1f6f8b;">화면 구성 초안 · 01</div>
+    <div style="font-size: 26px; font-weight: 700;">정보구조 — 15개 메뉴 나열에서 5개 영역으로</div>
+    <div style="font-size: 14px; color: #6b6862; max-width: 880px;">기능 단위가 아니라 담당자의 일 단위로 묶습니다. 견적 하나를 검토하는 흐름은 한 화면에서 끝나고, 개발·운영 도구는 담당자 눈앞에서 치웁니다.</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 340px 60px 1fr; gap: 0; align-items: start;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-size: 12px; font-weight: 600; color: #6b6862; margin-bottom: 4px;">현재 — 사이드바에 15개가 순서 없이</div>
+      <div class="old">Home</div>
+      <div class="old">통합검색</div>
+      <div class="old">견적서 분석</div>
+      <div class="old">Phase0 검증 <span class="chip muted">개발용</span></div>
+      <div class="old">의료기기 시장조사</div>
+      <div class="old">의료기기 안전 공급사</div>
+      <div class="old">의료기기 UDI</div>
+      <div class="old">나라장터 계약근거</div>
+      <div class="old">공개가격 수집상태 <span class="chip muted">개발용</span></div>
+      <div class="old">견적조건 확인 <span class="chip warn">흐름 1/4</span></div>
+      <div class="old">견적 외부조건 대조 <span class="chip warn">흐름 2/4</span></div>
+      <div class="old">견적 비교가능성 게이트 <span class="chip warn">흐름 3/4</span></div>
+      <div class="old">가격근거 최신성 <span class="chip warn">흐름 4/4</span></div>
+      <div class="old">견적추출 UAT <span class="chip muted">개발용</span></div>
+      <div class="old">운영환경 진단 <span class="chip muted">운영용</span></div>
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: center; height: 100%; padding-top: 260px;">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#b9b5ac" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M13 6l6 6-6 6"></path></svg>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;">
+      <div class="area" style="grid-column: span 2; border-color: #1f6f8b; border-width: 2px;">
+        <h3><span class="num">2</span>견적 검토 <span class="chip new">핵심 워크플로 · 한 화면</span></h3>
+        <p>업로드 → 품목 확인 → 제품 식별 → 근거 수집 → 조건 대조 → 승인·판정. 한 견적이 한 레코드로 남고, 단계 이동에 세션 상태를 쓰지 않습니다.</p>
+        <div class="from"><span>견적서 분석</span><span>견적조건 확인</span><span>견적 외부조건 대조</span><span>견적 비교가능성 게이트</span><span>가격근거 최신성</span></div>
+      </div>
+      <div class="area">
+        <h3><span class="num">1</span>대시보드 <span class="chip new">신규</span></h3>
+        <p>내가 검토 중인 견적, 판정 대기, 시스템 상태 한 줄. 여기서 "새 견적 검토"로 시작합니다.</p>
+        <div class="from"><span>Home</span></div>
+      </div>
+      <div class="area">
+        <h3><span class="num">3</span>빠른 검색</h3>
+        <p>견적 없이 제품명·모델로 근거만 볼 때. 결과 화면 구성은 견적 검토의 4단계와 동일합니다.</p>
+        <div class="from"><span>통합검색</span><span>나라장터 계약근거 → 근거표의 출처 하나로</span></div>
+      </div>
+      <div class="area">
+        <h3><span class="num">4</span>의료기기 조회</h3>
+        <p>식약처 identity 확인이 먼저, 그 다음 공급사·경쟁장비·안전 이력·UDI를 탭으로.</p>
+        <div class="from"><span>의료기기 시장조사</span><span>의료기기 안전 공급사</span><span>의료기기 UDI</span></div>
+      </div>
+      <div class="area" style="background: #fbfaf8;">
+        <h3><span class="num" style="background: #5a5750;">5</span>관리 <span class="chip muted">관리자만 표시</span></h3>
+        <p>근거 레지스트리(mapping·제조사 가격), 운영환경 진단, 추출 UAT, 벤치마크. 담당자 메뉴에서는 숨깁니다.</p>
+        <div class="from"><span>운영환경 진단</span><span>견적추출 UAT</span><span>Phase0 검증</span><span>공개가격 수집상태</span><span>근거 레지스트리 (신규)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 8px;">
+    <div style="background: #fff; border: 1px solid #e2dfd8; border-radius: 8px; padding: 14px;"><div style="font-weight: 700; margin-bottom: 4px;">한 견적 = 한 화면</div><div style="font-size: 12px; color: #6b6862;">단계는 화면 안의 진행표시. 페이지 이동 없음.</div></div>
+    <div style="background: #fff; border: 1px solid #e2dfd8; border-radius: 8px; padding: 14px;"><div style="font-weight: 700; margin-bottom: 4px;">상태가 숫자보다 먼저</div><div style="font-size: 12px; color: #6b6862;">검색 완전/불완전/실패를 관측범위 위에 둡니다.</div></div>
+    <div style="background: #fff; border: 1px solid #e2dfd8; border-radius: 8px; padding: 14px;"><div style="font-weight: 700; margin-bottom: 4px;">근거와 후보를 분리</div><div style="font-size: 12px; color: #6b6862;">미검증 후보는 다른 색, 접힘, 금액 서식 없음.</div></div>
+    <div style="background: #fff; border: 1px solid #e2dfd8; border-radius: 8px; padding: 14px;"><div style="font-weight: 700; margin-bottom: 4px;">긴 검색은 기다리게 하지 않기</div><div style="font-size: 12px; color: #6b6862;">진행률·요청수 표시, 화면을 떠나도 결과 유지.</div></div>
+    <div style="background: #fff; border: 1px solid #e2dfd8; border-radius: 8px; padding: 14px;"><div style="font-weight: 700; margin-bottom: 4px;">판정은 사람이 누른다</div><div style="font-size: 12px; color: #6b6862;">승인 버튼 전까지 "보류"가 기본값이고 이유가 항상 보입니다.</div></div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!doctype html>
+<html>
+<head>
+  <title>S6-승인판정</title>
+  <meta charset="utf-8">
+</head>
+<body>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f6f5f2; color: #1c1b19; font-size: 14px; line-height: 1.45; }
+    a { color: #1f6f8b; } a:hover { color: #174f63; }
+    .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .ok { background: #e4f2ea; color: #1f5e42; } .warn { background: #f7ecd6; color: #7a5410; } .err { background: #f8e1e1; color: #8a2a2a; } .muted { background: #eeece7; color: #5a5750; } .info { background: #e3eef3; color: #1f6f8b; }
+    .nav a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 8px; color: #3b3935; text-decoration: none; font-weight: 500; }
+    .nav a.on { background: #e3eef3; color: #1f6f8b; font-weight: 600; }
+    .card { background: #fff; border: 1px solid #e2dfd8; border-radius: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 18px; border-radius: 8px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+    .primary { background: #1f6f8b; color: #fff; } .ghost { border: 1px solid #cfcbc2; background: #fff; color: #1c1b19; } .disabled { opacity: 0.45; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-size: 12px; color: #6b6862; font-weight: 500; padding: 8px 10px; border-bottom: 1px solid #e2dfd8; }
+    td { padding: 9px 10px; border-bottom: 1px solid #efece6; font-size: 13px; vertical-align: middle; }
+    .step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #8a877f; }
+    .step .n { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #cfcbc2; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+    .step.done .n { background: #2e7d5b; border-color: #2e7d5b; color: #fff; }
+    .step.now { color: #1c1b19; font-weight: 600; } .step.now .n { border-color: #1f6f8b; color: #1f6f8b; }
+    .item { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-bottom: 1px solid #efece6; }
+    .item.on { background: #e3eef3; border-left: 3px solid #1f6f8b; }
+    .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #efece6; gap: 12px; }
+    .kv span:last-child { font-weight: 600; text-align: right; }
+    .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 12px; color: #6b6862; }
+    .field div { height: 40px; border: 1px solid #cfcbc2; border-radius: 8px; background: #fff; padding: 0 12px; display: flex; align-items: center; font-size: 13px; }
+    .field.edited div { border-color: #1f6f8b; background: #f3f8fa; }
+    .src { font-size: 12px; color: #6b6862; background: #fbfaf8; border: 1px dashed #cfcbc2; border-radius: 6px; padding: 8px 10px; }
+    .todo { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+  </style>
+
+<div style="width: 1440px; min-height: 1020px; display: flex; box-sizing: border-box;">
+  <div class="nav" style="width: 220px; background: #fff; border-right: 1px solid #e2dfd8; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+    <div style="padding: 6px 14px 18px; font-weight: 700; font-size: 15px;">시장가격조사기</div>
+    <a href="#">대시보드</a>
+    <a class="on" href="#">견적 검토</a>
+    <a href="#">빠른 검색</a>
+    <a href="#">의료기기 조회</a>
+    <div style="flex-grow: 1;"></div>
+    <a href="#" style="color: #8a877f;">관리</a>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; box-sizing: border-box;">
+    <div style="background: #fff; border-bottom: 1px solid #e2dfd8; padding: 18px 32px; display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <a href="#" style="font-size: 13px; color: #6b6862; text-decoration: none;">← 대시보드</a>
+          <div style="font-size: 20px; font-weight: 700;">전산비품 견적 2026-09</div>
+          <span class="chip muted">xlsx · 1시트</span>
+          <span class="chip ok">6단계 · 승인 1</span>
+        </div>
+        <div style="display: flex; gap: 8px;"><a class="btn ghost" href="#">원문 보기</a><a class="btn ghost" href="#">검토 보고서</a></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 28px;">
+        <div class="step done"><span class="n">✓</span>업로드·추출</div>
+        <div class="step done"><span class="n">✓</span>품목 확인</div>
+        <div class="step done"><span class="n">✓</span>제품 식별</div>
+        <div class="step done"><span class="n">✓</span>근거 수집</div>
+        <div class="step done"><span class="n">✓</span>조건 대조</div>
+        <div class="step now"><span class="n">6</span>승인·판정</div>
+      </div>
+    </div>
+    <div style="display: grid; grid-template-columns: 300px 1fr 340px; gap: 0; flex-grow: 1; min-height: 0;">
+      <div style="background: #fff; border-right: 1px solid #e2dfd8; display: flex; flex-direction: column;">
+        <div style="padding: 14px 14px 8px; display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">품목 1건</span><a href="#" style="font-size: 12px;">품목 추가</a></div>
+        <div class="item on">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">컬러 레이저프린터</span><span class="chip muted">1대</span></div>
+          <div style="font-size: 12px; color: #6b6862;">FUJIFILM Business Innovation · ApeosPrint C5570 GK · 3,500,000원</div>
+          <div style="display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap;"><span class="chip ok">후보 1</span><span class="chip ok">승인 1</span><span class="chip ok">판정</span></div>
+        </div>
+        <div style="padding: 14px; font-size: 12px; color: #6b6862; border-top: 1px solid #efece6; margin-top: auto;">
+          <div style="font-weight: 600; color: #3b3935; margin-bottom: 6px;">승인 메모</div>
+          <div>공식몰 보증 3년 확인(링크) · 설치 포함 확인 · 승인 pair 3f9a1c</div>
+        </div>
+      </div>
+      <div style="padding: 22px 26px; display: flex; flex-direction: column; gap: 18px; overflow: hidden;">
+        <div style="font-size: 17px; font-weight: 700;">6. 승인·판정</div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 600;">비교가능 후보 → 담당자 승인</div><span class="chip ok">후보 1건</span></div>
+          <table>
+            <thead><tr><th>출처</th><th>단가</th><th>조건 대조</th><th>기준일</th><th>승인</th></tr></thead>
+            <tbody>
+              <tr><td>FUJIFILM 공식몰 · 공식 판매가 <div style="font-size: 12px; color: #6b6862;">보증 1년 → 공식 보증 페이지에서 3년 확인 후 수정 (메모 있음)</div></td><td class="mono">5,500,000</td><td><span class="chip ok">일치 8 · 충돌 0 · 미확인 0</span></td><td>2026-09-04</td><td><input type="checkbox" checked style="width: 18px; height: 18px;"></td></tr>
+            </tbody>
+          </table>
+          <div class="field"><label>승인 메모 (필수)</label><div>공식몰 보증 조건 페이지 확인함 (링크 첨부). 설치 포함은 공식몰 배송·설치 안내에서 확인.</div></div>
+          <div style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: #6b6862;"><span class="chip muted">승인 기록</span>김OO · 2026-09-06 14:12 · pair 3f9a1c… · 견적값이 바뀌면 승인은 자동으로 무효</div>
+        </div>
+        <div class="card" style="padding: 18px; border-color: #2e7d5b; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 700; font-size: 16px;">판정</div><span class="chip ok">승인 근거 1건 기준</span></div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+            <div style="padding: 12px; border-radius: 8px; background: #f6f5f2;"><div style="font-size: 12px; color: #6b6862;">견적 단가</div><div style="font-size: 20px; font-weight: 700;">3,500,000원</div></div>
+            <div style="padding: 12px; border-radius: 8px; background: #f6f5f2;"><div style="font-size: 12px; color: #6b6862;">승인 근거 범위</div><div style="font-size: 20px; font-weight: 700;">5,500,000원</div><div style="font-size: 12px; color: #6b6862;">1건 · 공식 판매가</div></div>
+            <div style="padding: 12px; border-radius: 8px; background: #e4f2ea;"><div style="font-size: 12px; color: #1f5e42;">견적 위치</div><div style="font-size: 20px; font-weight: 700; color: #1f5e42;">하단 미만 · −36.4%</div></div>
+          </div>
+          <div style="font-size: 13px; color: #3b3935;">현재 견적은 조건이 대조·승인된 공식 판매가보다 36.4% 낮습니다. <b>근거 1건·출처 1개</b>이므로 "적정"이 아니라 "공식 정가 대비 위치"로만 읽으세요. 나라장터 67건은 조건 미확인으로 판정에서 제외됐고 참고 범위(2,981,000원)로만 보고서에 실립니다.</div>
+        </div>
+        <div style="display: flex; gap: 8px;"><a class="btn primary" href="#">검토 보고서 생성 (PDF)</a><a class="btn ghost" href="#">검토 기록 저장</a><a class="btn ghost" href="#">승인 취소</a></div>
+      </div>
+      <div style="background: #fff; border-left: 1px solid #e2dfd8; padding: 22px 20px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="font-weight: 700; font-size: 15px;">검토 기록</div>
+        <div class="kv"><span>1 추출</span><span>xlsx · 1건</span></div>
+        <div class="kv"><span>2 확인</span><span>단가 수정 1 · VAT 확정</span></div>
+        <div class="kv"><span>3 식별</span><span>mapping 검증됨</span></div>
+        <div class="kv"><span>4 수집</span><span>2출처 · 68건 · 88요청</span></div>
+        <div class="kv"><span>5 대조</span><span>후보 1 · 보완 1</span></div>
+        <div class="kv"><span>6 승인</span><span>1건 · 김OO</span></div>
+        <div style="padding: 12px; border-radius: 8px; background: #f7ecd6; font-size: 12px; color: #7a5410;">이 기록은 지금 구조에선 세션이 끝나면 사라집니다. 보고서 PDF와 기록 JSON을 반드시 저장하세요. (백엔드 분리 전까지의 한계)</div>
+        <div style="flex-grow: 1;"></div>
+        <a class="btn ghost" href="#">대시보드로</a>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

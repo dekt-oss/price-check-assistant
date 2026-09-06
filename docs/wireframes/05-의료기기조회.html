@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+  <title>05-의료기기조회</title>
+  <meta charset="utf-8">
+</head>
+<body>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f6f5f2; color: #1c1b19; font-size: 14px; line-height: 1.45; }
+    a { color: #1f6f8b; } a:hover { color: #174f63; }
+    .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .ok { background: #e4f2ea; color: #1f5e42; } .warn { background: #f7ecd6; color: #7a5410; } .err { background: #f8e1e1; color: #8a2a2a; } .muted { background: #eeece7; color: #5a5750; } .info { background: #e3eef3; color: #1f6f8b; }
+    .nav a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 8px; color: #3b3935; text-decoration: none; font-weight: 500; }
+    .nav a.on { background: #e3eef3; color: #1f6f8b; font-weight: 600; }
+    .card { background: #fff; border: 1px solid #e2dfd8; border-radius: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 18px; border-radius: 8px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+    .primary { background: #1f6f8b; color: #fff; } .ghost { border: 1px solid #cfcbc2; background: #fff; color: #1c1b19; }
+    .tab { padding: 10px 4px; font-weight: 500; color: #6b6862; border-bottom: 2px solid transparent; }
+    .tab.on { color: #1f6f8b; border-bottom-color: #1f6f8b; font-weight: 600; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 12px; color: #6b6862; }
+    .field div { height: 44px; border: 1px solid #cfcbc2; border-radius: 8px; background: #fff; padding: 0 12px; display: flex; align-items: center; font-size: 14px; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-size: 12px; color: #6b6862; font-weight: 500; padding: 8px 10px; border-bottom: 1px solid #e2dfd8; }
+    td { padding: 9px 10px; border-bottom: 1px solid #efece6; font-size: 13px; vertical-align: middle; }
+  </style>
+
+<div style="width: 1440px; min-height: 900px; display: flex; box-sizing: border-box;">
+  <div class="nav" style="width: 220px; background: #fff; border-right: 1px solid #e2dfd8; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+    <div style="padding: 6px 14px 18px; font-weight: 700; font-size: 15px;">시장가격조사기</div>
+    <a href="#">대시보드</a>
+    <a href="#">견적 검토</a>
+    <a href="#">빠른 검색</a>
+    <a class="on" href="#">의료기기 조회</a>
+    <div style="flex-grow: 1;"></div>
+    <a href="#" style="color: #8a877f;">관리</a>
+  </div>
+
+  <div style="flex-grow: 1; padding: 28px 32px; display: flex; flex-direction: column; gap: 18px; box-sizing: border-box;">
+    <div>
+      <div style="font-size: 24px; font-weight: 700;">의료기기 조회</div>
+      <div style="color: #6b6862;">식약처 공식 identity를 먼저 확정하고, 그 identity로만 공급사·경쟁장비·안전 이력을 엽니다.</div>
+    </div>
+
+    <div class="card" style="padding: 16px 18px; display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end;">
+      <div class="field"><label>식약처 품목명</label><div>인공호흡기</div></div>
+      <div class="field"><label>제조사 (선택)</label><div>Stephan</div></div>
+      <div class="field"><label>모델 / 형명 (선택)</label><div>Sophie</div></div>
+      <a class="btn primary" href="#">identity 확인</a>
+    </div>
+
+    <div class="card" style="padding: 16px 18px; display: flex; align-items: center; gap: 18px; border-color: #2e7d5b;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2e7d5b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>
+      <div style="flex-grow: 1;">
+        <div style="font-weight: 600;">확정 identity · 인공호흡기 / Fritz Stephan GmbH / Sophie</div>
+        <div style="font-size: 12px; color: #6b6862;">품목허가 유효 · 국내 정상 · 단일 후보 · 형명 3종 등록</div>
+      </div>
+      <div style="display: flex; gap: 8px;"><span class="chip ok">국내 정상</span><span class="chip info">단일 후보</span><a href="#" style="font-size: 13px;">다른 후보 보기</a></div>
+    </div>
+
+    <div style="display: flex; gap: 24px; border-bottom: 1px solid #e2dfd8;">
+      <div class="tab on">공급사 후보</div>
+      <div class="tab">동일 품목 경쟁장비</div>
+      <div class="tab">안전 · 허가 이력</div>
+      <div class="tab">UDI 조회</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 18px;">
+      <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 600;">① 나라장터 실제 납품업체</div><span class="chip ok">최근 1년 · 9건</span></div>
+        <table>
+          <thead><tr><th>업체</th><th>납품</th><th>최근</th><th>근거</th></tr></thead>
+          <tbody>
+            <tr><td>[업체 A]</td><td>6건</td><td>2026-07</td><td><a href="#">R26TB…</a></td></tr>
+            <tr><td>[업체 B]</td><td>3건</td><td>2026-04</td><td><a href="#">R26TA…</a></td></tr>
+          </tbody>
+        </table>
+        <div style="font-size: 12px; color: #6b6862;">identity가 확정된 모델에 대해서만 조회합니다. 없다는 뜻이 아니라 현재 연결된 공개근거에서 미확인이라는 뜻입니다.</div>
+      </div>
+      <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 600;">② 식약처 업허가 업체</div><span class="chip muted">수입업 1 · 판매업 2</span></div>
+        <table>
+          <thead><tr><th>업체</th><th>허가</th><th>상태</th><th></th></tr></thead>
+          <tbody>
+            <tr><td>[수입업체]</td><td>수입업</td><td><span class="chip ok">정상</span></td><td><a href="#">허가 원문</a></td></tr>
+            <tr><td>[판매업체 1]</td><td>판매업</td><td><span class="chip ok">정상</span></td><td><a href="#">허가 원문</a></td></tr>
+          </tbody>
+        </table>
+        <div style="font-size: 12px; color: #6b6862;">허가 상태는 공식 총판 여부를 뜻하지 않습니다. 견적 요청 전 업체에 직접 확인하세요.</div>
+      </div>
+    </div>
+
+    <div class="card" style="padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; background: #fbfaf8;">
+      <div>
+        <div style="font-weight: 600;">이 identity로 가격 근거 보기</div>
+        <div style="font-size: 12px; color: #6b6862;">빠른 검색에 제조사·모델을 그대로 넘깁니다. 견적서가 있으면 견적 검토에서 시작하세요.</div>
+      </div>
+      <div style="display: flex; gap: 8px;"><a class="btn ghost" href="#">빠른 검색으로</a><a class="btn primary" href="#">견적 검토 시작</a></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+  <title>03-견적검토-막힌경우</title>
+  <meta charset="utf-8">
+</head>
+<body>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; background: #f6f5f2; color: #1c1b19; font-size: 14px; line-height: 1.45; }
+    a { color: #1f6f8b; } a:hover { color: #174f63; }
+    .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .ok { background: #e4f2ea; color: #1f5e42; } .warn { background: #f7ecd6; color: #7a5410; } .err { background: #f8e1e1; color: #8a2a2a; } .muted { background: #eeece7; color: #5a5750; } .info { background: #e3eef3; color: #1f6f8b; }
+    .nav a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 8px; color: #3b3935; text-decoration: none; font-weight: 500; }
+    .nav a.on { background: #e3eef3; color: #1f6f8b; font-weight: 600; }
+    .card { background: #fff; border: 1px solid #e2dfd8; border-radius: 10px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 18px; border-radius: 8px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+    .primary { background: #1f6f8b; color: #fff; } .ghost { border: 1px solid #cfcbc2; background: #fff; color: #1c1b19; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-size: 12px; color: #6b6862; font-weight: 500; padding: 8px 10px; border-bottom: 1px solid #e2dfd8; }
+    td { padding: 9px 10px; border-bottom: 1px solid #efece6; font-size: 13px; vertical-align: middle; }
+    .step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #8a877f; }
+    .step .n { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #cfcbc2; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+    .step.done .n { background: #2e7d5b; border-color: #2e7d5b; color: #fff; }
+    .step.now { color: #1c1b19; font-weight: 600; } .step.now .n { border-color: #1f6f8b; color: #1f6f8b; }
+    .item { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-bottom: 1px solid #efece6; }
+    .item.on { background: #e3eef3; border-left: 3px solid #1f6f8b; }
+    .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #efece6; }
+    .kv span:last-child { font-weight: 600; }
+    .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
+  </style>
+
+<div style="width: 1440px; min-height: 1040px; display: flex; box-sizing: border-box;">
+  <div class="nav" style="width: 220px; background: #fff; border-right: 1px solid #e2dfd8; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+    <div style="padding: 6px 14px 18px; font-weight: 700; font-size: 15px;">시장가격조사기</div>
+    <a href="#">대시보드</a>
+    <a class="on" href="#">견적 검토</a>
+    <a href="#">빠른 검색</a>
+    <a href="#">의료기기 조회</a>
+    <div style="flex-grow: 1;"></div>
+    <a href="#" style="color: #8a877f;">관리</a>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; flex-direction: column; box-sizing: border-box;">
+    <div style="background: #fff; border-bottom: 1px solid #e2dfd8; padding: 18px 32px; display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <a href="#" style="font-size: 13px; color: #6b6862; text-decoration: none;">← 대시보드</a>
+          <div style="font-size: 20px; font-weight: 700;">2025-206 마취기</div>
+          <span class="chip muted">PDF · 3페이지 · 텍스트 레이어</span>
+          <span class="chip warn">4단계 · 관리자 조치 대기</span>
+        </div>
+        <div style="display: flex; gap: 8px;"><a class="btn ghost" href="#">원문 보기</a><a class="btn ghost" href="#">검토 보고서</a></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 28px;">
+        <div class="step done"><span class="n">✓</span>업로드·추출</div>
+        <div class="step done"><span class="n">✓</span>품목 확인</div>
+        <div class="step done"><span class="n">✓</span>제품 식별</div>
+        <div class="step now"><span class="n">4</span>근거 수집</div>
+        <div class="step"><span class="n">5</span>조건 대조</div>
+        <div class="step"><span class="n">6</span>승인·판정</div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 300px 1fr 340px; gap: 0; flex-grow: 1; min-height: 0;">
+      <div style="background: #fff; border-right: 1px solid #e2dfd8; display: flex; flex-direction: column;">
+        <div style="padding: 14px 14px 8px; display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">품목 1건</span><a href="#" style="font-size: 12px;">품목 추가</a></div>
+        <div class="item on">
+          <div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 600;">가스 마취기</span><span class="chip muted">1 set</span></div>
+          <div style="font-size: 12px; color: #6b6862;">Maquet · Flow-C · 66,000,000원 · VAT 포함</div>
+          <div style="display: flex; gap: 6px; margin-top: 4px;"><span class="chip ok">식별 ✓</span><span class="chip warn">근거 0 · 후보 3</span><span class="chip muted">판정 보류</span></div>
+        </div>
+        <div style="padding: 14px; font-size: 12px; color: #6b6862; border-top: 1px solid #efece6; margin-top: auto;">
+          <div style="font-weight: 600; color: #3b3935; margin-bottom: 6px;">추출 확인 메모</div>
+          <div>세액 (포함) → VAT 포함으로 확정 · 공급가액/세액 행은 품목에서 제외됨 · 보증 3년 · 설치 포함</div>
+        </div>
+      </div>
+
+      <div style="padding: 22px 26px; display: flex; flex-direction: column; gap: 18px; overflow: hidden;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="font-size: 17px; font-weight: 700;">4. 근거 수집 — 가스 마취기 · Flow-C</div>
+          <div style="display: flex; gap: 8px;"><span class="chip info">기간 최근 1년</span><a href="#" style="font-size: 13px;">기간 변경</a></div>
+        </div>
+
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-weight: 600;">출처별 상태</div>
+            <span class="chip warn">불완전 — 직접 검색 미실행 1</span>
+          </div>
+          <table>
+            <thead><tr><th style="width: 34%;">출처</th><th>상태</th><th>건수</th><th>요청</th><th>이유</th></tr></thead>
+            <tbody>
+              <tr><td>제조사 공개가격</td><td><span class="chip ok">완료 · 0건</span></td><td>0</td><td class="mono">—</td><td style="color: #6b6862;">등록된 공개가격 없음</td></tr>
+              <tr><td>나라장터 직접검색</td><td><span class="chip muted">미실행</span></td><td>—</td><td class="mono">0</td><td style="color: #6b6862;">Flow-C의 검증된 세부품명 mapping 없음 → <a href="#">조사 요청</a></td></tr>
+              <tr><td>나라장터 후보 탐색</td><td><span class="chip ok">완료</span></td><td>3 후보</td><td class="mono">4 / 120</td><td style="color: #6b6862;">검색어 "가스 마취기", "마취기"</td></tr>
+              <tr><td>식약처 identity</td><td><span class="chip ok">확인</span></td><td>1</td><td class="mono">1</td><td style="color: #6b6862;">품목허가 확인 · 국내 정상</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-weight: 600;">직접 비교 근거 <span style="color: #6b6862; font-weight: 400;">A·B 등급 · KRW · 직접가격</span></div>
+            <span class="chip muted">0건</span>
+          </div>
+          <div style="padding: 22px; border: 1px dashed #cfcbc2; border-radius: 8px; text-align: center; color: #6b6862; font-size: 13px;">이 품목과 동일하다고 확인된 공개 가격이 아직 없습니다. 아래 후보는 참고용이며 판정에 쓰이지 않습니다.</div>
+        </div>
+
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: #fbfaf8; border-style: dashed;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-weight: 600; color: #5a5750;">나라장터 미검증 후보 <span style="font-weight: 400;">· 모델 토큰이 포함된 표기만</span></div>
+            <a href="#" style="font-size: 13px;">접기</a>
+          </div>
+          <table>
+            <thead><tr><th>거래일</th><th style="width: 40%;">나라장터 표기</th><th>세부품명 (코드)</th><th>표기 금액 (미검증)</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>2026-06-12</td><td>마취기, Maquet, Flow-C, Base Unit</td><td>마취기 (42182001)</td><td class="mono" style="color: #6b6862;">66,000,000</td><td><a href="#">근거 R26TB…</a></td></tr>
+              <tr><td>2026-03-02</td><td>마취기, Maquet, Flow-C, Base Unit</td><td>마취기 (42182001)</td><td class="mono" style="color: #6b6862;">64,500,000</td><td><a href="#">근거 R26TB…</a></td></tr>
+              <tr><td>2025-11-20</td><td>마취기, Maquet, Flow-C, Base Unit + Monitor</td><td>마취기 (42182001)</td><td class="mono" style="color: #6b6862;">78,000,000</td><td><a href="#">근거 R25TB…</a></td></tr>
+            </tbody>
+          </table>
+          <div style="font-size: 12px; color: #7a5410; background: #f7ecd6; padding: 8px 10px; border-radius: 6px;">이 후보를 직접 근거로 쓰려면 관리자가 "마취기 (42182001)" mapping을 검증해 레지스트리에 등록해야 합니다. <a href="#">조사 요청 보내기</a></div>
+        </div>
+      </div>
+
+      <div style="background: #fff; border-left: 1px solid #e2dfd8; padding: 22px 20px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="font-weight: 700; font-size: 15px;">판정</div>
+        <div style="padding: 14px; border-radius: 8px; background: #eeece7; display: flex; flex-direction: column; gap: 4px;">
+          <div style="font-size: 12px; color: #5a5750;">현재 상태</div>
+          <div style="font-size: 18px; font-weight: 700;">보류</div>
+          <div style="font-size: 13px; color: #3b3935;">직접 비교 근거가 없어 견적의 높고 낮음을 판정하지 않습니다.</div>
+        </div>
+        <div>
+          <div class="kv"><span>견적 단가</span><span>66,000,000원</span></div>
+          <div class="kv"><span>관측 범위</span><span style="color: #8a877f;">산정 불가</span></div>
+          <div class="kv"><span>독립 출처</span><span>0</span></div>
+          <div class="kv"><span>후보 (참고)</span><span style="color: #8a877f;">3건</span></div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 12px; font-weight: 600; color: #6b6862;">판정으로 가려면</div>
+          <div style="display: flex; gap: 8px; align-items: flex-start; font-size: 13px;"><span class="chip err">1</span>세부품명 mapping 검증 (관리자)</div>
+          <div style="display: flex; gap: 8px; align-items: flex-start; font-size: 13px;"><span class="chip muted">2</span>근거 재수집 후 A/B 1건 이상</div>
+          <div style="display: flex; gap: 8px; align-items: flex-start; font-size: 13px;"><span class="chip muted">3</span>VAT·설치·보증 조건 대조</div>
+          <div style="display: flex; gap: 8px; align-items: flex-start; font-size: 13px;"><span class="chip muted">4</span>담당자 승인</div>
+        </div>
+        <div style="flex-grow: 1;"></div>
+        <a class="btn ghost" href="#">이 상태로 보고서 저장</a>
+        <a class="btn primary" href="#" style="opacity: 0.45;">5. 조건 대조로 이동</a>
+        <div style="font-size: 12px; color: #6b6862; text-align: center;">직접 근거가 생기면 활성화됩니다</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
