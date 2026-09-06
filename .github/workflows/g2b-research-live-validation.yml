@@ -1,0 +1,54 @@
+name: G2B Research Coverage Live Validation
+
+on:
+  push:
+    branches:
+      - feat/r7-live-coverage
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Verify G2B secret
+        shell: bash
+        run: |
+          if [ -z "$G2B_SERVICE_KEY" ]; then
+            echo "G2B service key secret is required for live research validation"
+            exit 2
+          fi
+
+      - name: Run bounded hospital-product research coverage
+        run: |
+          python -m purchase_price.scripts.validate_g2b_research_live \
+            --lookback-days 365 \
+            --pages-per-term-window 1 \
+            --request-budget-per-case 12 \
+            --output artifacts/g2b-research-live/report.json
+
+      - name: Upload live research report
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2b-research-live
+          path: artifacts/g2b-research-live/report.json
+          retention-days: 14
