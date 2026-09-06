@@ -8,6 +8,7 @@ from enum import StrEnum
 
 class G2BResearchSource(StrEnum):
     BID_NOTICE = "bid_notice"
+    BID_ITEM = "bid_item"
     AWARD = "award"
     PRESPEC = "prespec"
     CONTRACT = "contract"
