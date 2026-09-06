@@ -4,13 +4,28 @@ on:
   push:
     branches: [ui/quote-review-s1-s3]
 
+permissions:
+  contents: write
+
 jobs:
-  preview:
+  apply:
+    if: github.event.head_commit.message != 'chore: apply Ruff import fix'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ui/quote-review-s1-s3
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install ruff==0.16.6
-      - run: ruff check src/purchase_price/ui/quote_review_steps.py --select I --fix --diff
+      - name: Apply Ruff import fix
+        run: |
+          ruff check src/purchase_price/ui/quote_review_steps.py --select I --fix
+          git config user.name dekt-oss
+          git config user.email dekt-oss@users.noreply.github.com
+          if ! git diff --quiet; then
+            git add src/purchase_price/ui/quote_review_steps.py
+            git commit -m "chore: apply Ruff import fix"
+            git push origin HEAD:ui/quote-review-s1-s3
+          fi
