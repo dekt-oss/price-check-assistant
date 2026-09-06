@@ -47,6 +47,20 @@ def test_ocr_stages_report_missing_binary_without_hiding_python_modules(monkeypa
     assert by_key["ocr_python_modules"].ready is True
     assert by_key["ocr_tesseract_binary"].ready is False
     assert by_key["ocr_languages"].ready is False
+    assert by_key["ocr_execution"].ready is False
+    assert "실행하지 않음" in by_key["ocr_execution"].detail
+
+
+def _ready_tesseract(monkeypatch) -> None:
+    _installed_packages(monkeypatch)
+    monkeypatch.setattr(runtime_readiness.shutil, "which", lambda _: "/usr/bin/tesseract")
+
+    def fake_run(command, **_: object):
+        if command[-1] == "--version":
+            return SimpleNamespace(stdout="tesseract 5.3.4\n leptonica-1.82")
+        return SimpleNamespace(stdout="List of available languages in /usr/share/tessdata (3):\neng\nkor\nosd\n")
+
+    monkeypatch.setattr(runtime_readiness.subprocess, "run", fake_run)
 
 
 def test_ocr_readiness_requires_korean_and_english_language_packs(monkeypatch) -> None:
@@ -64,29 +78,35 @@ def test_ocr_readiness_requires_korean_and_english_language_packs(monkeypatch) -
     assert "kor" in check.detail
 
 
-def test_ocr_readiness_reports_ready_for_real_required_language_set(monkeypatch) -> None:
-    _installed_packages(monkeypatch)
-    monkeypatch.setattr(runtime_readiness.shutil, "which", lambda _: "/usr/bin/tesseract")
+def test_ocr_readiness_requires_real_execution_after_dependencies(monkeypatch) -> None:
+    _ready_tesseract(monkeypatch)
+    monkeypatch.setattr(
+        runtime_readiness,
+        "_run_synthetic_ocr_execution",
+        lambda: (False, "execution failed: RuntimeError"),
+    )
+    checks = runtime_readiness.ocr_runtime_readiness_checks()
+    by_key = {check.key: check for check in checks}
+    assert by_key["ocr_languages"].ready is True
+    assert by_key["ocr_execution"].ready is False
+    assert runtime_readiness.ocr_runtime_readiness().ready is False
 
-    def fake_run(command, **_: object):
-        if command[-1] == "--version":
-            return SimpleNamespace(stdout="tesseract 5.3.4\n leptonica-1.82")
-        return SimpleNamespace(
-            stdout="List of available languages in /usr/share/tessdata (3):\neng\nkor\nosd\n"
-        )
 
-    monkeypatch.setattr(runtime_readiness.subprocess, "run", fake_run)
+def test_ocr_readiness_reports_ready_only_after_synthetic_execution(monkeypatch) -> None:
+    _ready_tesseract(monkeypatch)
+    monkeypatch.setattr(
+        runtime_readiness,
+        "_run_synthetic_ocr_execution",
+        lambda: (True, "synthetic PDF rasterize -> Tesseract OCR succeeded"),
+    )
     check = runtime_readiness.ocr_runtime_readiness()
     assert check.ready is True
     assert check.status == runtime_readiness.READY
-    assert "kor+eng" in check.detail
+    assert "synthetic execution verified" in check.detail
 
 
 def test_runtime_readiness_exposes_build_identity_and_all_ocr_stages(monkeypatch) -> None:
-    settings = Settings(
-        data_go_kr_service_key=None,
-        data_go_kr_market_service_key="shared-secret",
-    )
+    settings = Settings(data_go_kr_service_key=None, data_go_kr_market_service_key="shared-secret")
     _installed_packages(monkeypatch)
     monkeypatch.setattr(runtime_readiness.shutil, "which", lambda _: None)
     monkeypatch.setenv("COMMIT_SHA", "1234567890abcdef")
@@ -100,6 +120,7 @@ def test_runtime_readiness_exposes_build_identity_and_all_ocr_stages(monkeypatch
         "ocr_tesseract_binary",
         "ocr_tesseract_command",
         "ocr_languages",
+        "ocr_execution",
     ]
     assert "1234567890ab" in checks[0].detail
     assert "shared-secret" not in repr([check.to_public_dict() for check in checks])
