@@ -41,6 +41,7 @@ class G2BUnmappedDiscoveryResult:
     error_type: str = ""
     request_budget: int = 0
     failed_query_count: int = 0
+    truncated_query_count: int = 0
     error_types: tuple[str, ...] = ()
 
     @property
@@ -252,6 +253,7 @@ def discover_unmapped_g2b_candidates(
     records_seen = 0
     successful_fetches = 0
     failed_query_count = 0
+    truncated_query_count = 0
     error_types: set[str] = set()
     budget_exhausted = False
     candidates_by_key: dict[tuple[str, str, str], G2BDiscoveryCandidate] = {}
@@ -264,6 +266,8 @@ def discover_unmapped_g2b_candidates(
                 break
             fetched_for_query = 0
             query_failed = False
+            query_complete = False
+            last_total_count: int | None = None
             for page_no in range(1, pages_per_term_window + 1):
                 if request_count >= request_budget:
                     budget_exhausted = True
@@ -286,6 +290,7 @@ def discover_unmapped_g2b_candidates(
                 successful_fetches += 1
                 records_seen += len(page.items)
                 fetched_for_query += len(page.items)
+                last_total_count = page.total_count
                 for raw in page.items:
                     candidate = _candidate_from_record(raw, query, search_term=term)
                     if candidate is None:
@@ -301,13 +306,20 @@ def discover_unmapped_g2b_candidates(
                     if previous is None or candidate.score > previous.score:
                         candidates_by_key[key] = candidate
                 if not page.items:
+                    query_complete = True
                     break
                 if page.total_count is not None and fetched_for_query >= page.total_count:
+                    query_complete = True
                     break
                 if len(page.items) < num_of_rows:
+                    query_complete = True
                     break
-            if query_failed:
+            if query_failed or budget_exhausted:
                 continue
+            if not query_complete and (
+                last_total_count is None or fetched_for_query < last_total_count
+            ):
+                truncated_query_count += 1
 
     candidates = sorted(
         candidates_by_key.values(),
@@ -320,7 +332,7 @@ def discover_unmapped_g2b_candidates(
         reverse=True,
     )
 
-    incomplete = budget_exhausted or failed_query_count > 0
+    incomplete = budget_exhausted or failed_query_count > 0 or truncated_query_count > 0
     if successful_fetches == 0 and failed_query_count > 0:
         status = "failure"
     elif incomplete:
@@ -338,5 +350,6 @@ def discover_unmapped_g2b_candidates(
         error_type=ordered_errors[0] if ordered_errors else "",
         request_budget=request_budget,
         failed_query_count=failed_query_count,
+        truncated_query_count=truncated_query_count,
         error_types=ordered_errors,
     )
