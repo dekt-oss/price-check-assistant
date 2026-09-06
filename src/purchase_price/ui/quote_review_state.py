@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from purchase_price.services.quote_comparability import evaluate_quote_comparability_candidate
@@ -56,7 +56,7 @@ class QuoteReviewState:
     approvals: dict[str, QuoteComparableApproval] = field(default_factory=dict)
     reviewer: str = ""
     step: int = 1
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def reset_downstream(self, after_step: int) -> None:
         """Drop only derived UI state after an upstream edit."""
@@ -101,7 +101,11 @@ def can_enter(step: int, state: QuoteReviewState) -> tuple[bool, tuple[str, ...]
     if step == 2:
         return True, ()
 
-    unconfirmed = [index for index in range(len(state.items)) if not state.item_confirmed.get(index, False)]
+    unconfirmed = [
+        index
+        for index in range(len(state.items))
+        if not state.item_confirmed.get(index, False)
+    ]
     if unconfirmed:
         reasons.append(f"품목 {_item_numbers(unconfirmed)}의 추출값을 원문과 대조해 확인하세요.")
         return False, tuple(reasons)
@@ -125,7 +129,9 @@ def can_enter(step: int, state: QuoteReviewState) -> tuple[bool, tuple[str, ...]
     if step == 5:
         return True, ()
 
-    missing_context = [index for index in state.search_runs if index not in state.comparability_context]
+    missing_context = [
+        index for index in state.search_runs if index not in state.comparability_context
+    ]
     if missing_context:
         reasons.append(f"품목 {_item_numbers(missing_context)}의 견적 비교조건을 확인하세요.")
         return False, tuple(reasons)
