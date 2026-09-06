@@ -55,17 +55,42 @@ def load_g2b_research_terms(
     return tuple(rows)
 
 
+def _product_family_rows(
+    product_key: str,
+    registry: tuple[G2BResearchTerm, ...],
+) -> list[G2BResearchTerm]:
+    """Return the most-specific research-only product-family rows.
+
+    This intentionally affects discovery recall only. A short curated family key such as `마취`
+    may expand a quote label like `마취기(Anesthesia Machine)`, but that relationship can never be
+    used as product identity evidence.
+    """
+
+    candidates: list[tuple[int, G2BResearchTerm]] = []
+    for row in registry:
+        if row.model_name.strip():
+            continue
+        row_key = normalize_text(row.product_name)
+        if not row_key:
+            continue
+        if row_key == product_key or row_key in product_key or product_key in row_key:
+            candidates.append((len(row_key), row))
+    if not candidates:
+        return []
+    longest = max(length for length, _ in candidates)
+    return [row for length, row in candidates if length == longest]
+
+
 def research_terms_for_query(
     query: ProductQuery,
     rows: Iterable[G2BResearchTerm] | None = None,
 ) -> tuple[str, ...]:
-    """Return curated candidate-search terms for an exact model/product identity.
+    """Return curated research-only terms for a model or product family.
 
-    Model identity has precedence. If no model-specific rows exist, exact normalized product-name
-    rows may be used. The result is research-only and deliberately does not call the verified
-    mapping resolver. Whitespace variants are kept when they differ as server request strings,
-    because the public API can match those strings differently even though local identity
-    normalization treats them as equivalent.
+    Exact model identity has precedence. If no model-specific rows exist, product-family rows may
+    be selected by exact/containment match, preferring the longest family key. This only expands
+    Research Layer recall; it never calls or modifies the verified G2B mapping resolver and never
+    upgrades MatchGrade.
     """
 
     registry = tuple(rows) if rows is not None else load_g2b_research_terms()
@@ -76,11 +101,7 @@ def research_terms_for_query(
     if model_key:
         selected = [row for row in registry if normalize_text(row.model_name) == model_key]
     if not selected and product_key:
-        selected = [
-            row
-            for row in registry
-            if normalize_text(row.product_name) == product_key and not row.model_name.strip()
-        ]
+        selected = _product_family_rows(product_key, registry)
 
     output: list[str] = []
     seen: set[str] = set()
