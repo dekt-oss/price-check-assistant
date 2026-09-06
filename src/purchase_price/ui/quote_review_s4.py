@@ -39,6 +39,7 @@ def render_s4(state: QuoteReviewState, index: int) -> None:
             format_func=g2b_lookback_label,
             disabled=not g2b_enabled,
             key=f"quote_g2b_lookback_{index}",
+            help="1~5년 모두 API 허용범위 안의 기간창으로 나눠 조사합니다.",
         )
     )
 
@@ -49,17 +50,26 @@ def render_s4(state: QuoteReviewState, index: int) -> None:
             status_box.write("검증된 직접가격 source를 검색합니다.")
             run = search_all(query, build_collectors(g2b_lookback_days=state.lookback_days))
             state.search_runs[index] = run
-            skipped_g2b = next(
+            g2b_status = next(
                 (
                     source_status
                     for source_status in run.source_statuses
-                    if source_status.source_name == SOURCE_NAME and source_status.skipped
+                    if source_status.source_name == SOURCE_NAME
                 ),
                 None,
             )
+            research_needed = bool(
+                g2b_status is not None
+                and (
+                    g2b_status.skipped
+                    or (g2b_status.succeeded and g2b_status.result_count == 0)
+                )
+            )
             discovery = None
-            if skipped_g2b is not None and g2b_enabled and query.product_name.strip():
-                status_box.write("verified mapping이 없어 G2B 미검증 후보를 별도 탐색합니다.")
+            if research_needed and g2b_enabled and query.product_name.strip():
+                status_box.write(
+                    "직접가격이 없거나 mapping이 없어 Research Layer에서 관련 후보를 확장 탐색합니다."
+                )
                 discovery = discover_unmapped_g2b_candidates(
                     query,
                     service_key=(settings.resolved_g2b_service_key or "").strip(),
@@ -67,7 +77,7 @@ def render_s4(state: QuoteReviewState, index: int) -> None:
                     base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
                     timeout_seconds=settings.g2b_request_timeout_seconds,
                     max_retries=settings.g2b_max_retries,
-                    pages_per_term_window=1,
+                    pages_per_term_window=2,
                 )
             state.discoveries[index] = discovery
             status_box.update(
@@ -103,7 +113,7 @@ def render_s4(state: QuoteReviewState, index: int) -> None:
 
     discovery = state.discoveries.get(index)
     if discovery is not None:
-        st.markdown("**나라장터 미검증 후보**")
+        st.markdown("**나라장터 Research 후보 — 판정 미포함**")
         render_discovery_candidates(discovery)
 
     allowed, reasons = can_enter(5, state)
