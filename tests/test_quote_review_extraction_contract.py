@@ -1,3 +1,4 @@
+from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -20,9 +21,13 @@ def test_extraction_reports_summary_rows_it_actually_excluded(tmp_path: Path) ->
 
     assert len(result.items) == 1
     assert len(result.excluded_rows) == 3
-    assert any("공급가액" in row for row in result.excluded_rows)
-    assert any("세액" in row for row in result.excluded_rows)
-    assert any("합계" in row for row in result.excluded_rows)
+    by_label = {row.label: row for row in result.excluded_rows}
+    assert set(by_label) == {"공급가액", "세액", "합계"}
+    assert by_label["공급가액"].source_sheet == "Sheet"
+    assert by_label["공급가액"].source_row == 3
+    assert by_label["공급가액"].amount == Decimal("3500000")
+    assert by_label["세액"].amount == Decimal("350000")
+    assert by_label["합계"].amount == Decimal("3850000")
 
 
 def test_pdf_context_conflict_fails_closed_and_sets_warning_flag() -> None:
