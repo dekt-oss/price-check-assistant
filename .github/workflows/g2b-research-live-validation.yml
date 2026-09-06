@@ -43,10 +43,10 @@ jobs:
           python -m purchase_price.scripts.validate_g2b_research_live \
             --lookback-days 365 \
             --pages-per-term-window 1 \
-            --request-budget-per-case 8 \
-            --timeout-seconds 6 \
+            --request-budget-per-case 5 \
+            --timeout-seconds 12 \
             --max-retries 1 \
-            --workers 6 \
+            --workers 2 \
             --output artifacts/g2b-research-live/report.json
 
       - name: Upload live research report
