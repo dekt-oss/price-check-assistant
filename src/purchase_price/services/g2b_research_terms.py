@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,7 +63,9 @@ def research_terms_for_query(
 
     Model identity has precedence. If no model-specific rows exist, exact normalized product-name
     rows may be used. The result is research-only and deliberately does not call the verified
-    mapping resolver.
+    mapping resolver. Whitespace variants are kept when they differ as server request strings,
+    because the public API can match those strings differently even though local identity
+    normalization treats them as equivalent.
     """
 
     registry = tuple(rows) if rows is not None else load_g2b_research_terms()
@@ -82,9 +85,10 @@ def research_terms_for_query(
     output: list[str] = []
     seen: set[str] = set()
     for row in selected:
-        key = normalize_text(row.term)
+        request_term = re.sub(r"\s+", " ", row.term).strip()
+        key = request_term.casefold()
         if not key or key in seen:
             continue
         seen.add(key)
-        output.append(row.term)
+        output.append(request_term)
     return tuple(output)
