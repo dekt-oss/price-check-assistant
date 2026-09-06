@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from purchase_price.services.quote_comparability import evaluate_quote_comparability_candidate
 
 if TYPE_CHECKING:
+    from purchase_price.services.g2b_market_models import MarketResearchBundle
     from purchase_price.services.g2b_unmapped_discovery import G2BUnmappedDiscoveryResult
     from purchase_price.services.quote_comparability import QuoteComparabilityContext
     from purchase_price.services.quote_comparable_approval import QuoteComparableApproval
@@ -52,6 +53,7 @@ class QuoteReviewState:
     identity: dict[int, IdentityResult] = field(default_factory=dict)
     search_runs: dict[int, SearchRun] = field(default_factory=dict)
     discoveries: dict[int, G2BUnmappedDiscoveryResult | None] = field(default_factory=dict)
+    market_bundles: dict[int, MarketResearchBundle | None] = field(default_factory=dict)
     lookback_days: int = 365
     comparability_context: dict[int, QuoteComparabilityContext] = field(default_factory=dict)
     approvals: dict[str, QuoteComparableApproval] = field(default_factory=dict)
@@ -66,6 +68,7 @@ class QuoteReviewState:
         if after_step < 4:
             self.search_runs.clear()
             self.discoveries.clear()
+            self.market_bundles.clear()
         if after_step < 5:
             self.comparability_context.clear()
         if after_step < 6:
