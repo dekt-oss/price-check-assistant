@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from pathlib import Path
 
 from purchase_price.services import quote_extraction_core as _core
@@ -28,7 +29,19 @@ _SUMMARY_LABELS = frozenset(
     }
 )
 _SUMMARY_PREFIXES = ("합계", "총계", "소계", "공급가액", "부가세", "부가가치세", "세액", "견적금액")
-_EXCLUDED_ROWS: ContextVar[tuple[str, ...]] = ContextVar("quote_excluded_rows", default=())
+
+
+@dataclass(frozen=True)
+class ExcludedRow:
+    """Summary row intentionally excluded from quote items, with reviewable provenance."""
+
+    label: str
+    source_sheet: str
+    source_row: int
+    amount: Decimal | None = None
+
+
+_EXCLUDED_ROWS: ContextVar[tuple[ExcludedRow, ...]] = ContextVar("quote_excluded_rows", default=())
 _VAT_CONFLICT: ContextVar[bool] = ContextVar("quote_vat_conflict", default=False)
 _VAT_CONFLICT_WARNING = (
     '문서에 "VAT 포함"과 "VAT 별도/미포함" 표현이 함께 있어 VAT를 확정하지 않았습니다. '
@@ -37,8 +50,12 @@ _VAT_CONFLICT_WARNING = (
 
 
 def _record_excluded_row(item: QuoteItem) -> None:  # noqa: F405
-    label = item.product_name or item.model_name or item.specification or "요약행"
-    row = f"{item.source_sheet} {item.source_row}행: {label}"
+    row = ExcludedRow(
+        label=item.product_name or item.model_name or item.specification or "요약행",
+        source_sheet=item.source_sheet,
+        source_row=item.source_row,
+        amount=item.total_amount if item.total_amount is not None else item.unit_price,
+    )
     current = _EXCLUDED_ROWS.get()
     if row not in current:
         _EXCLUDED_ROWS.set((*current, row))
@@ -87,7 +104,7 @@ def _extract_pdf_context(texts):
 
 @dataclass(frozen=True)
 class QuoteExtractionResult(_core.QuoteExtractionResult):
-    excluded_rows: tuple[str, ...] = ()
+    excluded_rows: tuple[ExcludedRow, ...] = ()
 
 
 def _adapt_result(result: _core.QuoteExtractionResult) -> QuoteExtractionResult:
