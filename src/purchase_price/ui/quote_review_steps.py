@@ -26,6 +26,7 @@ from purchase_price.services.quote_extraction_diagnostics import (
     diagnose_quote_extraction_error,
 )
 from purchase_price.services.runtime_readiness import ocr_runtime_readiness
+from purchase_price.ui.mapping_requests import register_mapping_request
 from purchase_price.ui.quote_review_state import (
     QUOTE_REVIEW_STEPS,
     IdentityResult,
@@ -284,6 +285,7 @@ def render_s3(state: QuoteReviewState, index: int) -> None:
     item = state.items[index]
     query = quote_item_query(item)
     mapping = resolve_verified_g2b_mapping(query)
+    previous = state.identity.get(index)
 
     with st.container(border=True):
         st.markdown("**나라장터 verified mapping**")
@@ -295,8 +297,41 @@ def render_s3(state: QuoteReviewState, index: int) -> None:
         else:
             st.warning(
                 "현재 입력 품목에 verified G2B mapping이 없습니다. "
-                "미검증 후보는 다음 단계에서 별도 탐색합니다."
+                "조사요청을 등록하면 다음 단계에서는 직접가격으로 승격하지 않고 "
+                "미검증 후보만 별도로 탐색합니다."
             )
+
+    research_required = bool(previous and previous.research_required)
+    if mapping is None:
+        if st.button("나라장터 mapping 조사요청 등록", key=f"mapping_request_{index}"):
+            try:
+                created = register_mapping_request(
+                    product_name=item.product_name,
+                    manufacturer=item.manufacturer,
+                    model_name=item.model_name,
+                )
+            except (OSError, ValueError) as exc:
+                st.error(f"조사요청 등록 실패: {type(exc).__name__}")
+            else:
+                research_required = True
+                state.identity[index] = IdentityResult(
+                    ready=False,
+                    status="mapping 조사요청 등록",
+                    detail="G2B verified mapping 조사요청 등록됨",
+                    source="G2B",
+                    mapping_verified=False,
+                    research_required=True,
+                )
+                if created:
+                    st.success("mapping 조사요청을 등록했습니다.")
+                else:
+                    st.info("동일 제품 식별정보의 조사요청이 이미 등록되어 있습니다.")
+        if research_required:
+            st.caption(
+                "조사요청에는 제품명·제조사·모델명만 기록하며 견적가격·수량·조건·원문은 저장하지 않습니다."
+            )
+    else:
+        research_required = False
 
     is_medical = st.checkbox(
         "이 품목은 의료기기이며 MFDS exact 모델 확인이 필요함",
@@ -314,32 +349,21 @@ def render_s3(state: QuoteReviewState, index: int) -> None:
             source="MFDS",
             mapping_verified=mapping is not None,
             mfds_confirmed=mfds_confirmed,
+            research_required=research_required,
         )
         if mfds_confirmed:
             st.success(mfds_detail)
         else:
             st.error(mfds_detail)
 
-    research_required = st.checkbox(
-        "verified mapping이 없어 추가 식별조사 경로로 진행",
-        value=bool(previous and previous.research_required),
-        key=f"quote_research_required_{index}",
-    )
-    research_note = st.text_input(
-        "추가 식별조사 사유",
-        value=previous.detail if previous and previous.research_required else "",
-        key=f"quote_research_note_{index}",
-        disabled=not research_required,
-    )
-
-    base_ready = mapping is not None or (research_required and bool(research_note.strip()))
+    base_ready = mapping is not None or research_required
     ready = base_ready and (not is_medical or mfds_confirmed)
     if st.button("제품 식별 상태 저장", type="primary", key=f"save_identity_{index}"):
         state.reset_downstream(after_step=3)
         state.identity[index] = IdentityResult(
             ready=ready,
             status="식별 완료" if ready else "식별 확인 필요",
-            detail=mfds_detail or research_note.strip(),
+            detail=mfds_detail or ("G2B verified mapping 조사요청 등록됨" if research_required else ""),
             source="MFDS+G2B" if is_medical else "G2B",
             mapping_verified=mapping is not None,
             mfds_confirmed=mfds_confirmed,
