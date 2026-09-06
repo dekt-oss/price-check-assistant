@@ -2,9 +2,11 @@ import pandas as pd
 import streamlit as st
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
+from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL, SOURCE_NAME
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_unmapped_discovery import discover_unmapped_g2b_candidates
 from purchase_price.services.market_research_support import (
     alternative_research_gate,
     build_alternative_web_search_links,
@@ -28,7 +30,11 @@ from purchase_price.services.safety_support import (
     build_manual_safety_check_state,
 )
 from purchase_price.services.search import search_all
-from purchase_price.ui.widgets import render_evidence_table, render_source_status
+from purchase_price.ui.widgets import (
+    render_discovery_candidates,
+    render_evidence_table,
+    render_source_status,
+)
 
 st.set_page_config(page_title="의료기기 조회", page_icon="🏥", layout="wide")
 st.title("의료기기 조회")
@@ -164,6 +170,38 @@ with market_tab:
                             )
                     else:
                         st.info("exact identity 이후에도 검증된 공개 납품·가격근거가 0건입니다.")
+
+                    g2b_status = next(
+                        (
+                            source_status
+                            for source_status in run.source_statuses
+                            if source_status.source_name == SOURCE_NAME
+                        ),
+                        None,
+                    )
+                    research_needed = bool(
+                        g2b_status is not None
+                        and (
+                            g2b_status.skipped
+                            or (g2b_status.succeeded and g2b_status.result_count == 0)
+                        )
+                    )
+                    if research_needed:
+                        st.markdown("#### 나라장터 Research 후보")
+                        discovery = discover_unmapped_g2b_candidates(
+                            query,
+                            service_key=g2b_key,
+                            lookback_days=365,
+                            base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
+                            timeout_seconds=settings.g2b_request_timeout_seconds,
+                            max_retries=settings.g2b_max_retries,
+                            pages_per_term_window=2,
+                        )
+                        render_discovery_candidates(discovery)
+                        st.caption(
+                            "MFDS exact identity는 입력 모델의 신원확인일 뿐, 위 Research 후보가 동일제품이라는 "
+                            "뜻은 아닙니다. 후보는 mapping 검증 전 가격판정에서 제외됩니다."
+                        )
                 elif model_name.strip() and not exact_ready:
                     st.info("MFDS exact identity가 확인되지 않아 나라장터와 자동 교차조회하지 않습니다.")
 
