@@ -77,21 +77,21 @@ def test_direct_and_quote_style_inputs_share_the_same_contract() -> None:
     assert direct == quote_row
 
 
-def test_existing_direct_search_page_loads_with_shared_contract() -> None:
+def test_quick_search_page_loads_with_shared_contract() -> None:
     root = Path(__file__).resolve().parents[1]
-    app = AppTest.from_file(root / "pages" / "1_통합검색.py")
+    app = AppTest.from_file(root / "pages" / "3_빠른_검색.py")
 
     app.run(timeout=10)
 
     assert not app.exception
-    assert app.title[0].value == "통합검색"
+    assert app.title[0].value == "빠른 검색"
 
 
-def test_existing_quote_page_loads_with_shared_contract() -> None:
+def test_quote_review_page_loads_with_shared_contract() -> None:
     root = Path(__file__).resolve().parents[1]
-    app = AppTest.from_file(root / "pages" / "2_견적서_분석.py")
+    app = AppTest.from_file(root / "pages" / "2_견적_검토.py")
 
     app.run(timeout=10)
 
     assert not app.exception
-    assert app.title[0].value == "견적서 분석"
+    assert app.title[0].value == "견적 검토"

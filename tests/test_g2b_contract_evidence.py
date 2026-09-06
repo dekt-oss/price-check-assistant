@@ -155,11 +155,11 @@ def test_search_paginates_and_deduplicates_contracts() -> None:
     assert [call[2]["pageNo"] for call in fake.calls] == [1, 2]
 
 
-def test_contract_evidence_page_loads() -> None:
+def test_contract_evidence_is_absorbed_into_quick_search_page() -> None:
     root = Path(__file__).resolve().parents[1]
-    app = AppTest.from_file(root / "pages" / "7_나라장터_계약근거.py")
+    app = AppTest.from_file(root / "pages" / "3_빠른_검색.py")
 
     app.run(timeout=10)
 
     assert not app.exception
-    assert app.title[0].value == "나라장터 물품 계약근거"
+    assert app.title[0].value == "빠른 검색"
