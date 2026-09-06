@@ -69,6 +69,7 @@ def summarize_case(case: LiveResearchCase, discovery) -> LiveResearchCaseResult:
         category_candidates=relevance["분류 후보"],
         failed_query_count=discovery.failed_query_count,
         truncated_query_count=discovery.truncated_query_count,
+        error=" | ".join(discovery.error_messages),
     )
 
 
