@@ -12,7 +12,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     env:
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
       DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
@@ -37,6 +37,28 @@ jobs:
             echo "G2B service key secret is required for live research validation"
             exit 2
           fi
+
+      - name: Control probe - known broad G2B term
+        id: control
+        continue-on-error: true
+        shell: bash
+        run: |
+          BEGIN_DATE=$(date -u -d '30 days ago' +%Y%m%d)
+          END_DATE=$(date -u +%Y%m%d)
+          python -m purchase_price.scripts.g2b_shopping_probe \
+            getSpcifyPrdlstPrcureInfoList \
+            --param pageNo=1 \
+            --param numOfRows=1 \
+            --param inqryDiv=1 \
+            --param "inqryBgnDate=$BEGIN_DATE" \
+            --param "inqryEndDate=$END_DATE" \
+            --param inqryPrdctDiv=2 \
+            --param fnlCntrctDlvrReqChgOrdYn=Y \
+            --param dtilPrdctClsfcNoNm=제습기
+
+      - name: Report control probe outcome
+        if: always()
+        run: echo "control_probe_outcome=${{ steps.control.outcome }}"
 
       - name: Run bounded hospital-product research coverage
         run: |
