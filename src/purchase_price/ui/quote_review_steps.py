@@ -33,7 +33,6 @@ from purchase_price.ui.quote_review_state import (
     can_enter,
 )
 
-
 _STEP_CSS = """
 <style>
 .quote-stepper{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 18px 0}
