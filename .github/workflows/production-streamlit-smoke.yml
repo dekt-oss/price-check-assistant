@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 8
     env:
       PRODUCTION_URL: https://bp-price-research.streamlit.app
+      BROWSER_UA: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
 
     steps:
       - name: Checkout
@@ -33,46 +34,56 @@ jobs:
           set -u
           mkdir -p artifacts/production-streamlit-smoke
 
-          max_attempts=20
+          max_attempts=8
           sleep_seconds=15
           health_code="000"
           root_code="000"
           marker_ok=false
           success=false
           attempt=0
+          : > /tmp/streamlit-cookies.txt
 
           for attempt in $(seq 1 "$max_attempts"); do
             echo "Production smoke attempt ${attempt}/${max_attempts}"
 
-            health_code=$(curl \
-              --location \
-              --silent \
-              --show-error \
-              --connect-timeout 10 \
-              --max-time 20 \
-              --user-agent "price-check-assistant-production-smoke/1.0" \
-              --output /tmp/streamlit-health.txt \
-              --write-out '%{http_code}' \
-              "${PRODUCTION_URL}/_stcore/health" || printf '000')
-
+            # Streamlit Community Cloud distinguishes browser and non-browser clients. Open the
+            # root first and preserve cookies, matching the order a real browser uses before the
+            # frontend requests /_stcore/health.
             root_code=$(curl \
               --location \
+              --max-redirs 10 \
               --silent \
               --show-error \
-              --connect-timeout 10 \
+              --connect-timeout 8 \
               --max-time 20 \
-              --user-agent "price-check-assistant-production-smoke/1.0" \
+              --user-agent "$BROWSER_UA" \
+              --cookie /tmp/streamlit-cookies.txt \
+              --cookie-jar /tmp/streamlit-cookies.txt \
               --output /tmp/streamlit-root.html \
               --write-out '%{http_code}' \
               "${PRODUCTION_URL}/" || printf '000')
+
+            health_code=$(curl \
+              --location \
+              --max-redirs 10 \
+              --silent \
+              --show-error \
+              --connect-timeout 8 \
+              --max-time 20 \
+              --user-agent "$BROWSER_UA" \
+              --cookie /tmp/streamlit-cookies.txt \
+              --cookie-jar /tmp/streamlit-cookies.txt \
+              --output /tmp/streamlit-health.txt \
+              --write-out '%{http_code}' \
+              "${PRODUCTION_URL}/_stcore/health" || printf '000')
 
             marker_ok=false
             if [ -s /tmp/streamlit-root.html ] && grep -Eqi 'streamlit|_stcore|static/js' /tmp/streamlit-root.html; then
               marker_ok=true
             fi
 
-            echo "health_http=${health_code} root_http=${root_code} bootstrap_marker=${marker_ok}"
-            if [ "$health_code" = "200" ] && [ "$root_code" = "200" ] && [ "$marker_ok" = "true" ]; then
+            echo "root_http=${root_code} health_http=${health_code} bootstrap_marker=${marker_ok}"
+            if [ "$root_code" = "200" ] && [ "$health_code" = "200" ] && [ "$marker_ok" = "true" ]; then
               success=true
               break
             fi
