@@ -23,6 +23,9 @@ UAT_FIELDS = TEXT_FIELDS + DECIMAL_FIELDS
 _STRONG_IDENTITY_FIELDS = ("product_name", "model_name", "specification")
 _GAP_COST = 1.0
 _NO_ANCHOR_PENALTY = 1.2
+REQUIRED_UAT_STRATEGIES = frozenset(
+    {"xlsx", "xls", "pdf_text", "pdf_ocr", "pdf_commercial"}
+)
 
 
 @dataclass(frozen=True)
@@ -193,14 +196,7 @@ def _align_rows(
     expected_rows: Sequence[Mapping[str, object]],
     actual_items: Sequence[QuoteItem],
 ) -> tuple[tuple[int, int, _PairComparison], ...]:
-    """Align expected and actual rows without cascading errors after one missing/extra item.
-
-    Quote tables are ordered, so a sequence alignment is preferable to arbitrary permutation.
-    A row with an exact product/model/specification anchor (or exact price anchor) is cheap to
-    pair even when another field is wrong. Completely unrelated rows are more expensive than
-    one expected gap plus one actual gap, so they become explicit FN/FP items instead of a large
-    block of misleading field errors.
-    """
+    """Align expected and actual rows without cascading errors after one missing/extra item."""
 
     expected_count = len(expected_rows)
     actual_count = len(actual_items)
@@ -246,7 +242,7 @@ def _align_rows(
             i -= 1
         elif op == "extra":
             j -= 1
-        else:  # pragma: no cover - defensive guard for an impossible DP state
+        else:  # pragma: no cover
             raise RuntimeError("quote UAT row alignment entered an invalid state")
 
     aligned.reverse()
@@ -267,11 +263,7 @@ def compare_review_rows(
     scored_fields = sum(comparison.scored_fields for _, _, comparison in aligned)
     field_errors = sum(comparison.field_errors for _, _, comparison in aligned)
     error_fields = sorted(
-        {
-            field
-            for _, _, comparison in aligned
-            for field in comparison.error_fields
-        }
+        {field for _, _, comparison in aligned for field in comparison.error_fields}
     )
     matched_item_count = len(aligned)
     false_negative_item_count = max(0, len(expected_rows) - matched_item_count)
@@ -333,6 +325,38 @@ def _strategy_summary(metrics: Sequence[QuoteUatCaseMetric]) -> dict[str, dict[s
     return summary
 
 
+def evaluate_uat_release_gate(
+    metrics: Sequence[QuoteUatCaseMetric],
+    *,
+    minimum_cases: int = 5,
+    required_strategies: frozenset[str] = REQUIRED_UAT_STRATEGIES,
+) -> dict[str, object]:
+    strategies = {metric.strategy for metric in metrics}
+    missing_strategies = sorted(required_strategies - strategies)
+    blockers: list[str] = []
+
+    if len(metrics) < minimum_cases:
+        blockers.append(f"confirmed cases {len(metrics)}/{minimum_cases}")
+    if missing_strategies:
+        blockers.append("missing strategies: " + ", ".join(missing_strategies))
+    if any(metric.extraction_failed for metric in metrics):
+        blockers.append("extraction failure present")
+    if any(metric.false_positive_item_count for metric in metrics):
+        blockers.append("false-positive item present")
+    if any(metric.false_negative_item_count for metric in metrics):
+        blockers.append("false-negative item present")
+    if any(metric.field_errors for metric in metrics):
+        blockers.append("confirmed field error present")
+
+    return {
+        "release_ready": not blockers,
+        "blockers": blockers,
+        "required_strategies": sorted(required_strategies),
+        "covered_strategies": sorted(strategies),
+        "missing_strategies": missing_strategies,
+    }
+
+
 def build_redacted_uat_summary(
     metrics: Sequence[QuoteUatCaseMetric],
     *,
@@ -354,6 +378,7 @@ def build_redacted_uat_summary(
         "total_confirmed_cases": total_cases,
         "minimum_case_target": minimum_cases,
         "minimum_case_target_met": total_cases >= minimum_cases,
+        "release_gate": evaluate_uat_release_gate(metrics, minimum_cases=minimum_cases),
         "extraction_failures": extraction_failures,
         "extraction_failure_rate": _rate(extraction_failures, total_cases),
         "exact_item_count_cases": exact_item_count_cases,
