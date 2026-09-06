@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from purchase_price.clients.data_go_kr import PublicDataPortalClient
@@ -14,14 +15,19 @@ from .base import CollectorSkipped, PriceCollector
 from .g2b_shopping import G2B_SHOPPING_BASE_URL, SOURCE_NAME, G2BShoppingCollector
 
 
-class VerifiedG2BShoppingSearchCollector(PriceCollector):
-    """User-facing G2B adapter restricted to explicitly verified exact-model mappings.
+@dataclass(frozen=True)
+class G2BSearchTelemetry:
+    request_count: int
+    request_budget: int
+    window_count: int
+    pages_fetched: int
+    records_seen: int
+    begin_date: date
+    end_date: date
 
-    The underlying specific-item API is classification-based. To avoid silently broadening a
-    user query, this adapter only runs when an exact model name is present and that model has an
-    explicitly verified G2B detail-product mapping. Busy classifications are collected through
-    adaptive date partitioning rather than by raising the pagination cap indefinitely.
-    """
+
+class VerifiedG2BShoppingSearchCollector(PriceCollector):
+    """User-facing G2B adapter restricted to explicitly verified exact-model mappings."""
 
     name = SOURCE_NAME
 
@@ -39,6 +45,7 @@ class VerifiedG2BShoppingSearchCollector(PriceCollector):
         num_of_rows: int = 100,
         max_pages: int = 20,
         max_split_depth: int = 12,
+        request_budget: int = 120,
     ) -> None:
         if lookback_days < 1:
             raise ValueError("lookback_days must be positive")
@@ -46,6 +53,8 @@ class VerifiedG2BShoppingSearchCollector(PriceCollector):
             raise ValueError("num_of_rows must be positive")
         if max_pages < 1:
             raise ValueError("max_pages must be positive")
+        if request_budget < 1:
+            raise ValueError("request_budget must be positive")
 
         if collector is None:
             if not service_key or not service_key.strip():
@@ -64,8 +73,11 @@ class VerifiedG2BShoppingSearchCollector(PriceCollector):
         self.num_of_rows = num_of_rows
         self.max_pages = max_pages
         self.max_split_depth = max_split_depth
+        self.request_budget = request_budget
+        self.last_telemetry: G2BSearchTelemetry | None = None
 
     def search(self, query: ProductQuery) -> list[CollectedPrice]:
+        self.last_telemetry = None
         model_name = query.model_name.strip()
         if not model_name:
             raise CollectorSkipped(
@@ -89,5 +101,15 @@ class VerifiedG2BShoppingSearchCollector(PriceCollector):
             num_of_rows=self.num_of_rows,
             max_pages=self.max_pages,
             max_split_depth=self.max_split_depth,
+            request_budget=self.request_budget,
+        )
+        self.last_telemetry = G2BSearchTelemetry(
+            request_count=result.request_count,
+            request_budget=result.request_budget,
+            window_count=len(result.windows),
+            pages_fetched=result.pages_fetched,
+            records_seen=result.records_seen,
+            begin_date=begin_date,
+            end_date=end_date,
         )
         return list(result.candidate_prices)
