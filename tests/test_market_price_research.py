@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_research_terms import research_terms_for_query
 from purchase_price.services.g2b_unmapped_discovery import (
     G2BDiscoveryCandidate,
     G2BUnmappedDiscoveryResult,
@@ -31,6 +32,7 @@ def test_product_keyword_alone_runs_broad_research() -> None:
 
     assert should_run_broad_research(query, g2b_enabled=True) is True
     assert should_run_broad_research(query, g2b_enabled=False) is False
+    assert research_terms_for_query(query) == ("가스마취기", "마취기", "전신마취기")
 
 
 def test_market_reference_summary_keeps_broad_candidates_separate_from_verdict() -> None:
