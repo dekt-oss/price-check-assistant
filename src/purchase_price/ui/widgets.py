@@ -125,10 +125,14 @@ def render_condition_table(items: Iterable[CollectedPrice]) -> None:
 def discovery_candidate_rows(discovery: G2BUnmappedDiscoveryResult) -> list[dict[str, object]]:
     return [
         {
+            "관련성": candidate.relevance,
+            "점수": candidate.score,
             "거래일": candidate.transaction_date.isoformat() if candidate.transaction_date else "",
             "나라장터 표기": candidate.title,
             "세부품명": candidate.classification_name,
             "세부품명코드": candidate.classification_code,
+            "탐색어": candidate.search_term,
+            "관련 근거": candidate.match_reason,
             "표기 금액 (미검증)": float(candidate.price),
             "근거ID": candidate.source_record_id,
         }
@@ -137,25 +141,46 @@ def discovery_candidate_rows(discovery: G2BUnmappedDiscoveryResult) -> list[dict
 
 
 def render_discovery_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
+    budget_text = f"/{discovery.request_budget}" if discovery.request_budget else ""
     st.write(
         f"상태: **{discovery.status_label}** · 검색어: {', '.join(discovery.terms) or '-'} · "
-        f"API 요청 {discovery.request_count}회 · 원자료 확인 {discovery.records_seen}건"
+        f"API 요청 {discovery.request_count}{budget_text}회 · 원자료 확인 {discovery.records_seen}건"
     )
     if discovery.status == "failure":
-        st.warning(f"나라장터 후보 탐색 실패: {discovery.error_type or 'unknown error'}")
+        st.warning(
+            "나라장터 후보 탐색 실패: "
+            + (", ".join(discovery.error_types) or discovery.error_type or "unknown error")
+        )
         return
+    if discovery.status == "partial":
+        details: list[str] = []
+        if discovery.failed_query_count:
+            details.append(f"실패 검색구간 {discovery.failed_query_count}개")
+        if discovery.truncated_query_count:
+            details.append(f"페이지 상한으로 일부수집 {discovery.truncated_query_count}개")
+        detail_text = " · " + " · ".join(details) if details else ""
+        st.warning(
+            "후보 탐색이 일부만 완료됐습니다. 현재 표는 부분 조사결과이며 누락 가능성이 있습니다"
+            f"{detail_text}."
+        )
     rows = discovery_candidate_rows(discovery)
     if not rows:
-        st.info("선택 기간과 탐색어에서 입력 모델 토큰이 포함된 나라장터 후보를 찾지 못했습니다.")
+        st.info("선택 기간과 연구용 탐색어에서 나라장터 후보를 찾지 못했습니다.")
         return
-    with st.expander("미검증 후보 보기", expanded=False):
+    with st.expander("미검증 Research 후보 보기", expanded=True):
         st.dataframe(
             pd.DataFrame(rows),
             use_container_width=True,
             hide_index=True,
-            column_config={"표기 금액 (미검증)": st.column_config.NumberColumn(format="%d")},
+            column_config={
+                "점수": st.column_config.NumberColumn(format="%d"),
+                "표기 금액 (미검증)": st.column_config.NumberColumn(format="%d"),
+            },
         )
-        st.warning("위 표기 금액은 미검증 후보이며 관측가격 범위와 견적 판정에 포함하지 않습니다.")
+        st.warning(
+            "Research 후보의 관련성 점수는 조사 우선순위일 뿐 MatchGrade가 아닙니다. "
+            "위 금액은 관측가격 범위와 견적 판정에 포함하지 않습니다."
+        )
 
 
 def build_observation_groups(items: Iterable[CollectedPrice]) -> list[ObservationGroup]:

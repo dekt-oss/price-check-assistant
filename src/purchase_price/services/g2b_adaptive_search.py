@@ -51,6 +51,30 @@ def _midpoint(begin_date: date, end_date: date) -> date:
     return begin_date + timedelta(days=span_days // 2)
 
 
+def _bounded_root_windows(
+    begin_date: date,
+    end_date: date,
+    *,
+    max_window_days: int,
+) -> tuple[tuple[date, date], ...]:
+    """Partition a long search before the first API call.
+
+    The live specific-item operation rejects oversized date ranges before pagination logic can
+    inspect the response. Root partitioning therefore happens before adaptive density splitting.
+    A 365-day inclusive window has a date delta of at most 364 days.
+    """
+
+    if max_window_days < 1:
+        raise ValueError("max_window_days must be positive")
+    windows: list[tuple[date, date]] = []
+    cursor = begin_date
+    while cursor <= end_date:
+        window_end = min(end_date, cursor + timedelta(days=max_window_days - 1))
+        windows.append((cursor, window_end))
+        cursor = window_end + timedelta(days=1)
+    return tuple(windows)
+
+
 def _dedupe_candidate_prices(prices: list[CollectedPrice]) -> tuple[CollectedPrice, ...]:
     """Deduplicate only records carrying a stable external id; never guess identity without one."""
 
@@ -84,13 +108,14 @@ def search_mapped_g2b_candidates_adaptive(
     max_pages: int = 20,
     max_split_depth: int = 12,
     request_budget: int = 120,
+    max_initial_window_days: int = 365,
 ) -> G2BAdaptiveSearchResult:
-    """Collect a verified G2B classification under page and search-wide request budgets.
+    """Collect a verified G2B classification under date, page and request budgets.
 
-    Dense windows are bisected when they cannot fit the page cap. Every physical collector page
-    fetch is counted across all split windows. Before a fetch that would exceed `request_budget`,
-    the search raises `G2BRequestBudgetExceeded`; no partial result is returned for downstream
-    price assessment.
+    Long periods are first partitioned into API-safe root windows. Dense root windows are then
+    bisected when they cannot fit the page cap. Every physical collector page fetch is counted
+    across all windows. Before a fetch that would exceed `request_budget`, the search raises
+    `G2BRequestBudgetExceeded`; no partial result is returned for downstream price assessment.
     """
 
     if begin_date > end_date:
@@ -99,6 +124,8 @@ def search_mapped_g2b_candidates_adaptive(
         raise ValueError("max_split_depth must not be negative")
     if request_budget < 1:
         raise ValueError("request_budget must be positive")
+    if max_initial_window_days < 1:
+        raise ValueError("max_initial_window_days must be positive")
 
     mapping = resolve_verified_g2b_mapping(query, mappings)
     if mapping is None or not mapping.detail_product_name:
@@ -162,7 +189,13 @@ def search_mapped_g2b_candidates_adaptive(
         )
         prices.extend(result.candidate_prices)
 
-    collect_window(begin_date, end_date, 0)
+    for root_begin, root_end in _bounded_root_windows(
+        begin_date,
+        end_date,
+        max_window_days=max_initial_window_days,
+    ):
+        collect_window(root_begin, root_end, 0)
+
     windows.sort(key=lambda window: (window.begin_date, window.end_date))
 
     return G2BAdaptiveSearchResult(

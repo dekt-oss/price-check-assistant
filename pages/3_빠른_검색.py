@@ -43,8 +43,9 @@ price_tab, contract_tab = st.tabs(["가격 근거 검색", "나라장터 계약�
 with price_tab:
     if g2b_enabled:
         st.caption(
-            "공식 제조사 공개가격과 나라장터 구매실적을 함께 검색합니다. verified mapping이 있는 exact "
-            "모델만 직접가격 검색을 수행하고, mapping이 없는 모델은 후보 탐색만 수행합니다."
+            "verified exact mapping은 직접가격 Evidence를 수집하고, mapping이 없거나 직접가격이 0건이면 "
+            "Research Layer가 관련 세부품명·모델·제조사 후보를 넓게 탐색합니다. Research 후보는 자동 "
+            "가격판정에 들어가지 않습니다."
         )
     else:
         st.caption(
@@ -66,7 +67,10 @@ with price_tab:
             index=G2B_LOOKBACK_OPTIONS.index(G2B_DEFAULT_LOOKBACK_DAYS),
             format_func=g2b_lookback_label,
             disabled=not g2b_enabled,
-            help="기본 최근 1년. 직접가격 검색은 bounded request budget 안에서 완전수집을 시도합니다.",
+            help=(
+                "1~5년 모두 API 허용범위 이내의 기간창으로 나눠 검색합니다. 직접가격은 전체 수집이 "
+                "완료돼야 사용하며 Research 후보는 부분결과도 명시적으로 구분합니다."
+            ),
         )
         submitted = st.form_submit_button("가격자료 검색", type="primary")
 
@@ -121,16 +125,12 @@ with price_tab:
                 f"원자료 {telemetry.get('records_seen', '-')}건"
             )
 
-        skipped_g2b = next(
-            (
-                status
-                for status in run.source_statuses
-                if status.source_name == SOURCE_NAME and status.skipped
-            ),
-            None,
+        research_needed = bool(
+            g2b_status is not None
+            and (g2b_status.skipped or (g2b_status.succeeded and g2b_status.result_count == 0))
         )
-        if skipped_g2b is not None and g2b_enabled and query.product_name.strip():
-            with st.status("나라장터 미검증 후보 탐색 중", expanded=True) as status:
+        if research_needed and g2b_enabled and query.product_name.strip():
+            with st.status("나라장터 Research 후보 확장 탐색 중", expanded=True) as status:
                 discovery = discover_unmapped_g2b_candidates(
                     query,
                     service_key=g2b_key,
@@ -138,14 +138,24 @@ with price_tab:
                     base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
                     timeout_seconds=settings.g2b_request_timeout_seconds,
                     max_retries=settings.g2b_max_retries,
-                    pages_per_term_window=1,
+                    pages_per_term_window=2,
                 )
-                status.update(label="나라장터 후보 탐색 완료", state="complete")
-            st.subheader("나라장터 미검증 후보 탐색")
+                status.update(
+                    label=f"나라장터 Research 완료 · {discovery.status_label}",
+                    state="complete",
+                )
+            st.subheader("나라장터 Research 후보")
+            st.caption(
+                "직접가격 검색이 불가능하거나 0건일 때 관련 시장거래를 넓게 찾는 조사층입니다. "
+                "관련성 점수는 검토 순서이며 MatchGrade A/B와 무관합니다."
+            )
             render_discovery_candidates(discovery)
 
         if not run.results:
-            st.error("검증된 직접 비교가격은 확보하지 못했습니다. 출처별 상태를 확인하세요.")
+            st.error(
+                "검증된 직접 비교가격은 확보하지 못했습니다. 아래 Research 후보가 있더라도 담당자 "
+                "검증 전에는 직접가격으로 사용하지 않습니다."
+            )
         else:
             assessment = assess_prices(run.results, review_input.quote_unit_price)
             profiles = [build_price_condition_profile(item) for item in run.results]
