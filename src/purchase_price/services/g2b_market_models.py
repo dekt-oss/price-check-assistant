@@ -12,6 +12,7 @@ class G2BResearchSource(StrEnum):
     AWARD = "award"
     PRESPEC = "prespec"
     CONTRACT = "contract"
+    LIFECYCLE = "lifecycle"
     SHOPPING = "shopping"
 
 
