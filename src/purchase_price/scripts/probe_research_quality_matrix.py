@@ -4,7 +4,6 @@ import argparse
 import csv
 import json
 from datetime import date
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +20,7 @@ from purchase_price.services.g2b_unmapped_discovery import (
     discover_unmapped_g2b_candidates,
 )
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.research_basis import resolve_research_basis
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CASES_PATH = PROJECT_ROOT / "data" / "research_quality_uat_cases.csv"
@@ -103,6 +103,7 @@ def _run_case(
         specification=(row.get("specification") or "").strip(),
     )
     mapping = mapping_by_model.get(normalize_text(query.model_name))
+    basis = resolve_research_basis(query)
     curated = _curated_terms(query, mapping)
 
     discovery = discover_unmapped_g2b_candidates(
@@ -124,11 +125,11 @@ def _run_case(
     ]
 
     verified_classification_candidates: list[G2BDiscoveryCandidate] = []
-    if mapping and mapping.verified and mapping.detail_product_code:
+    if basis.is_verified_official and basis.code:
         verified_classification_candidates = [
             candidate
             for candidate in price_candidates
-            if candidate.classification_code == mapping.detail_product_code
+            if candidate.classification_code == basis.code
             and candidate.relevance != "모델 표기 후보"
         ]
 
@@ -149,17 +150,6 @@ def _run_case(
         usefulness = "research_only_no_qualified_price"
         useful = False
 
-    if mapping and mapping.verified:
-        basis_status = "verified_official_classification"
-        basis_name = mapping.detail_product_name
-        basis_code = mapping.detail_product_code
-    else:
-        basis_status = "research_candidate_only"
-        basis_name = discovery.terms[1] if len(discovery.terms) > 1 else (
-            discovery.terms[0] if discovery.terms else None
-        )
-        basis_code = None
-
     return {
         "case_id": (row.get("case_id") or "").strip(),
         "case_role": (row.get("case_role") or "").strip(),
@@ -168,9 +158,10 @@ def _run_case(
         "model_name": query.model_name,
         "specification": query.specification,
         "mapping_status": mapping.mapping_status if mapping else "not_registered",
-        "basis_status": basis_status,
-        "basis_name": basis_name,
-        "basis_code": basis_code,
+        "basis_status": basis.status.value,
+        "basis_name": basis.name,
+        "basis_code": basis.code,
+        "basis_rationale": basis.rationale,
         "query_terms": list(discovery.terms),
         "discovery_status": discovery.status,
         "request_count": discovery.request_count,
