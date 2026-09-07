@@ -85,9 +85,10 @@ def build_g2b_research_terms(
     """Build recall-oriented detail-product search terms without asserting a mapping.
 
     Shopping procurement history is classification-oriented. We therefore search the quote label,
-    research-only filename/category hints, known official G2B detail names and curated synonyms in
-    parallel. Model/manufacturer strings remain local ranking signals unless an official mapping or
-    category hint supplies a classification-oriented request term.
+    research-only filename/category hints, known official G2B detail names, registry aliases and
+    any additional terms discovered from procurement item detail in parallel. Model/manufacturer
+    strings remain local ranking signals unless another source supplies a classification-oriented
+    request term.
     """
 
     output: list[str] = list(build_g2b_discovery_terms(query.product_name))
@@ -106,7 +107,9 @@ def build_g2b_research_terms(
 
     output.extend(query.research_hints)
     output.extend(research_g2b_mapping_terms(query))
-    output.extend(curated_terms if curated_terms is not None else research_terms_for_query(query))
+    output.extend(research_terms_for_query(query))
+    if curated_terms:
+        output.extend(curated_terms)
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -248,11 +251,11 @@ def discover_unmapped_g2b_candidates(
 ) -> G2BUnmappedDiscoveryResult:
     """Search broadly for exact, category and same-class alternative candidates.
 
-    Every returned row remains a Research candidate outside CollectedPrice. When a query produces
-    an official detail-product classification that is strongly related to the searched category or
-    to a model/manufacturer hit, that official classification is queued for one more bounded search
-    pass. This is how a specific quote can widen into same-class competing products without mixing
-    those alternatives into the exact-product price verdict.
+    Every returned row remains a Research candidate outside CollectedPrice. Additional terms may
+    come from quote context, curated aliases or official procurement item detail. When a query
+    produces a related official detail-product classification, that classification is queued for
+    one more bounded search pass. A specific quote can therefore widen into same-class competing
+    products without mixing those alternatives into the exact-product price verdict.
     """
 
     if lookback_days < 1:
