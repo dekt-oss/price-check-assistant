@@ -16,11 +16,18 @@ from purchase_price.services.g2b_market_sources import (
     G2BBidResearchClient,
     G2BPrespecResearchClient,
 )
+from purchase_price.services.g2b_product_mapping import research_g2b_mapping_terms
 from purchase_price.services.g2b_research_terms import research_terms_for_query
 
 
-def build_market_research_terms(query: ProductQuery, *, max_terms: int = 6) -> tuple[str, ...]:
-    """Build recall-oriented query terms without consulting verified G2B mappings."""
+def build_market_research_terms(query: ProductQuery, *, max_terms: int = 10) -> tuple[str, ...]:
+    """Build layered recall terms without treating any expansion as product identity.
+
+    Search order is intentionally broad for Research:
+    exact model -> manufacturer+model -> quote product label -> research-only filename/category
+    hints -> known official G2B detail-product names -> curated synonyms. The resulting records
+    remain Research and cannot enter direct-price verdicts without the normal identity gates.
+    """
 
     if max_terms < 1:
         raise ValueError("max_terms must be positive")
@@ -36,6 +43,9 @@ def build_market_research_terms(query: ProductQuery, *, max_terms: int = 6) -> t
             raw.append(f"{manufacturer} {model}")
     if product:
         raw.append(product)
+
+    raw.extend(query.research_hints)
+    raw.extend(research_g2b_mapping_terms(query))
     raw.extend(research_terms_for_query(query))
 
     output: list[str] = []
@@ -118,7 +128,7 @@ def research_g2b_market(
     today: date | None = None,
     timeout_seconds: float = 20.0,
     max_retries: int = 2,
-    max_terms: int = 6,
+    max_terms: int = 10,
     max_pages_per_window: int = 1,
     bid_base_url: str | None = None,
     award_base_url: str | None = None,
