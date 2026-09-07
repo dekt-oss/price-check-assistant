@@ -37,8 +37,8 @@ def run_market_research(
     """Run direct-price, shopping discovery and procurement Research independently.
 
     Shopping direct-price/discovery can use a credential approved only for ShoppingMall API while
-    bid/award/pre-spec/item/contract Research can use a separate service subscription. Research
-    records remain outside `search_all` and `assess_prices` regardless of which key is configured.
+    bid/award/pre-spec/item/contract Research can use a separate service subscription.
+    None of those records are passed to `search_all` or `assess_prices`.
     """
 
     settings = get_settings()
