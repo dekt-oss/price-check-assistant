@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 8
     strategy:
       fail-fast: false
+      # Keep public-data traffic sequential. Retries below apply only to transport errors;
+      # HTTP/API authorization and parameter errors remain fail-closed and are not retried.
       max-parallel: 1
       matrix:
         case:
@@ -52,8 +54,8 @@ jobs:
           python -m purchase_price.scripts.probe_g2b_market_sources \
             --keyword "${{ matrix.case.keyword }}" \
             --lookback-days 90 \
-            --timeout-seconds 15 \
-            --max-retries 1 \
+            --timeout-seconds 20 \
+            --max-retries 3 \
             --output "artifacts/exoatlet-uat/${{ matrix.case.id }}.json"
 
       - name: Enforce transport/auth health and print counts
