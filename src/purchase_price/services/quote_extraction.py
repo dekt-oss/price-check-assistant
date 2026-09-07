@@ -9,6 +9,9 @@ from pathlib import Path
 
 from purchase_price.services import quote_extraction_core as _core
 from purchase_price.services.quote_extraction_core import *  # noqa: F403
+from purchase_price.services.quote_single_item_ocr_fallback import (
+    recover_single_item_scanned_quote,
+)
 
 
 _SUMMARY_LABELS = frozenset(
@@ -46,6 +49,10 @@ _VAT_CONFLICT: ContextVar[bool] = ContextVar("quote_vat_conflict", default=False
 _VAT_CONFLICT_WARNING = (
     '문서에 "VAT 포함"과 "VAT 별도/미포함" 표현이 함께 있어 VAT를 확정하지 않았습니다. '
     "원문을 대조해 직접 확인하세요."
+)
+_SINGLE_ITEM_FOOTER_WARNING = (
+    "일반 표 추출은 실패했지만 단일품목 견적의 품명과 하단 TOTAL PRICE/개별단가를 "
+    "별도 OCR로 연결해 1건을 복원했습니다. 제품명·가격·VAT·보증·설치조건을 원문과 대조하세요."
 )
 
 
@@ -137,7 +144,24 @@ def _sync_core_test_seams() -> None:
 
 def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     _sync_core_test_seams()
-    return _run_with_tracking(_original_extract_pdf_quote, path)
+    result = _run_with_tracking(_original_extract_pdf_quote, path)
+    if result.items:
+        return result
+
+    recovered = recover_single_item_scanned_quote(path)
+    if recovered is None:
+        return result
+
+    warnings = tuple(
+        warning
+        for warning in result.warnings
+        if "의미 있는 품목/가격 행을 식별하지 못했습니다" not in warning
+    )
+    return QuoteExtractionResult(
+        items=(recovered,),
+        warnings=(*warnings, _SINGLE_ITEM_FOOTER_WARNING),
+        excluded_rows=result.excluded_rows,
+    )
 
 
 def extract_excel_quote(path: Path) -> QuoteExtractionResult:
