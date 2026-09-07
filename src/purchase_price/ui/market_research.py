@@ -10,7 +10,7 @@ from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_bid_item_enrichment import enrich_market_bundle_with_bid_items
 from purchase_price.services.g2b_contract_enrichment import enrich_market_bundle_with_contracts
-from purchase_price.services.g2b_market_models import MarketResearchBundle
+from purchase_price.services.g2b_market_models import G2BResearchSource, MarketResearchBundle
 from purchase_price.services.g2b_unmapped_discovery import (
     G2BUnmappedDiscoveryResult,
     discover_unmapped_g2b_candidates,
@@ -23,8 +23,57 @@ from purchase_price.services.market_price_research import (
 )
 from purchase_price.services.market_research import research_g2b_market
 from purchase_price.services.market_research_support import build_web_supplier_search_links
+from purchase_price.services.matching import normalize_text
 from purchase_price.services.search import SearchRun, search_all
 from purchase_price.ui.g2b_market_research import render_g2b_market_research
+
+
+def _procurement_item_research_terms(
+    bundle: MarketResearchBundle | None,
+    query: ProductQuery,
+    *,
+    max_terms: int = 4,
+) -> tuple[str, ...]:
+    """Lift official purchase-object names into a second Research pass, never identity.
+
+    If an exact/model/generic bid search finds a notice, the official purchase-object rows can name
+    the category more usefully than the quote itself. Feeding those names into shopping Research is
+    what allows an exact product to fan out to same-class competitors (e.g. a model-labelled phone
+    bid -> an official smartphone item name -> other smartphone procurements). The terms stay
+    Research-only and never establish MatchGrade.
+    """
+
+    if bundle is None or max_terms < 1:
+        return ()
+
+    existing = {
+        normalize_text(value)
+        for value in (
+            query.product_name,
+            query.model_name,
+            query.manufacturer,
+            *query.research_hints,
+            *bundle.query_terms,
+        )
+        if value and normalize_text(value)
+    }
+    output: list[str] = []
+    seen: set[str] = set()
+    for record in bundle.records:
+        if record.source_type != G2BResearchSource.BID_ITEM:
+            continue
+        term = (record.product_name or record.title or "").strip()
+        key = normalize_text(term)
+        if not key or key in existing or key in seen:
+            continue
+        # Avoid tiny/noisy item fragments while allowing ordinary category names such as 스마트폰.
+        if len(key) < 3:
+            continue
+        seen.add(key)
+        output.append(term)
+        if len(output) >= max_terms:
+            break
+    return tuple(output)
 
 
 def run_market_research(
@@ -77,6 +126,7 @@ def run_market_research(
         )
 
     if should_run_broad_research(query, g2b_enabled=bool(shopping_key)):
+        discovered_terms = _procurement_item_research_terms(market_bundle, query)
         discovery = discover_unmapped_g2b_candidates(
             query,
             service_key=shopping_key,
@@ -86,6 +136,7 @@ def run_market_research(
             max_retries=settings.g2b_max_retries,
             pages_per_term_window=research_pages_per_term,
             request_budget=research_request_budget,
+            curated_terms=discovered_terms,
         )
     return run, discovery, market_bundle
 
