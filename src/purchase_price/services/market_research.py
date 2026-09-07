@@ -57,6 +57,13 @@ def _safe_error(exc: Exception) -> str:
     return text[:500] if text else type(exc).__name__
 
 
+def is_g2b_research_authorization_error(exc: Exception) -> bool:
+    """Recognize the authorization failures observed from the public-data gateway."""
+
+    message = str(exc).strip().casefold()
+    return "http 403" in message or "code=30" in message
+
+
 def _run_source(
     *,
     source: G2BResearchSource,
@@ -74,6 +81,16 @@ def _run_source(
         try:
             found, requests = search(term, begin, end)
         except Exception as exc:  # source isolation is intentional; callers still see failure.
+            request_count += 1
+            if is_g2b_research_authorization_error(exc):
+                return ResearchSourceResult(
+                    source=source,
+                    status=ResearchSourceStatus.NOT_AUTHORIZED,
+                    records=tuple(records),
+                    request_count=request_count,
+                    error_type=type(exc).__name__,
+                    error_message=_safe_error(exc),
+                )
             errors.append(exc)
             continue
         request_count += requests
