@@ -39,21 +39,33 @@ class RuntimeReadinessCheck:
         }
 
 
-def _credential_check(*, key: str, label: str, configured: bool) -> RuntimeReadinessCheck:
+def _credential_check(
+    *, key: str, label: str, configured: bool, source_name: str = ""
+) -> RuntimeReadinessCheck:
     if configured:
-        return RuntimeReadinessCheck(key, label, READY, "설정됨 (secret 값은 표시하지 않음)")
+        detail = "설정됨 (secret 값은 표시하지 않음)"
+        if source_name:
+            detail += f"; 선택 변수={source_name}"
+        return RuntimeReadinessCheck(key, label, READY, detail)
     return RuntimeReadinessCheck(key, label, UNAVAILABLE, "미설정 — live API 호출 불가")
 
 
 def public_data_credential_readiness(
     settings: Settings | None = None,
-) -> tuple[RuntimeReadinessCheck, RuntimeReadinessCheck]:
+) -> tuple[RuntimeReadinessCheck, ...]:
     settings = settings or get_settings()
     return (
         _credential_check(
             key="g2b_credential",
-            label="G2B 인증",
-            configured=bool((settings.resolved_g2b_service_key or "").strip()),
+            label="G2B Shopping 인증",
+            configured=bool((settings.resolved_g2b_shopping_service_key or "").strip()),
+            source_name=settings.g2b_shopping_key_source,
+        ),
+        _credential_check(
+            key="g2b_research_credential",
+            label="G2B Research 인증",
+            configured=bool((settings.resolved_g2b_research_service_key or "").strip()),
+            source_name=settings.g2b_research_key_source,
         ),
         _credential_check(
             key="mfds_credential",
