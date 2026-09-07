@@ -7,7 +7,10 @@ from purchase_price.config import get_settings
 
 def _clear_public_data_keys(monkeypatch) -> None:
     monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "")
+    monkeypatch.setenv("DATA_GO_KR_MARKET_SERVICE_KEY", "")
     monkeypatch.setenv("G2B_SERVICE_KEY", "")
+    monkeypatch.setenv("G2B_SHOPPING_SERVICE_KEY", "")
+    monkeypatch.setenv("G2B_RESEARCH_SERVICE_KEY", "")
     monkeypatch.setenv("MFDS_SERVICE_KEY", "")
 
 
@@ -41,6 +44,28 @@ def test_configured_registry_enables_verified_g2b_without_mock(monkeypatch) -> N
         get_settings.cache_clear()
 
 
+def test_dedicated_research_key_alone_does_not_enable_shopping_collector(monkeypatch) -> None:
+    _clear_public_data_keys(monkeypatch)
+    monkeypatch.setenv("G2B_RESEARCH_SERVICE_KEY", "research-only-key")
+    get_settings.cache_clear()
+    try:
+        collectors = build_collectors()
+        assert not any(isinstance(collector, VerifiedG2BShoppingSearchCollector) for collector in collectors)
+    finally:
+        get_settings.cache_clear()
+
+
+def test_dedicated_shopping_key_enables_shopping_collector(monkeypatch) -> None:
+    _clear_public_data_keys(monkeypatch)
+    monkeypatch.setenv("G2B_SHOPPING_SERVICE_KEY", "shopping-only-key")
+    get_settings.cache_clear()
+    try:
+        collectors = build_collectors()
+        assert any(isinstance(collector, VerifiedG2BShoppingSearchCollector) for collector in collectors)
+    finally:
+        get_settings.cache_clear()
+
+
 def test_legacy_common_key_still_enables_g2b(monkeypatch) -> None:
     _clear_public_data_keys(monkeypatch)
     monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "legacy-test-service-key")
@@ -60,7 +85,7 @@ def test_source_specific_keys_take_precedence_over_legacy_common_key(monkeypatch
     get_settings.cache_clear()
     try:
         settings = get_settings()
-        assert settings.resolved_g2b_service_key == "new-g2b-key"
+        assert settings.resolved_g2b_shopping_service_key == "new-g2b-key"
         assert settings.resolved_mfds_service_key == "new-mfds-key"
     finally:
         get_settings.cache_clear()
