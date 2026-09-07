@@ -90,39 +90,88 @@ def run_market_research(
     return run, discovery, market_bundle
 
 
+def _render_research_basis(discovery: G2BUnmappedDiscoveryResult) -> None:
+    if not discovery.terms:
+        return
+    st.markdown("**조사 기준 품목 후보**")
+    st.write(" · ".join(f"`{term}`" for term in discovery.terms[:8]))
+    st.caption(
+        "검색 확장에 사용한 Research 후보명입니다. 공식 조달 분류 또는 동일제품으로 확정된 명칭은 "
+        "아니며, 물품목록·규격·모델 근거가 확인되면 별도로 승격합니다."
+    )
+
+
+def _render_related_price_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
+    related = [
+        candidate
+        for candidate in discovery.candidates
+        if candidate.relevance != "모델 표기 후보" and candidate.price > 0
+    ]
+    if not related:
+        return
+
+    st.markdown("**대체품·관련품목 가격 후보 · 개별 참고**")
+    rows = []
+    for candidate in related[:10]:
+        rows.append(
+            {
+                "후보": candidate.title,
+                "분류": candidate.classification_name or "-",
+                "분류번호": candidate.classification_code or "-",
+                "가격": f"{candidate.price:,.0f}원",
+                "관계": candidate.relevance,
+                "근거": candidate.match_reason or "Research 후보",
+            }
+        )
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.caption(
+        "공식 분류·규격·모델 일치가 검증되지 않은 후보는 개별 참고만 합니다. 이 가격들은 동일모델 "
+        "가격 범위와 견적 대비 증감률 계산에 포함하지 않습니다."
+    )
+
+
 def render_market_reference_summary(
     discovery: G2BUnmappedDiscoveryResult | None,
     *,
     quote_unit_price: Decimal | None = None,
 ) -> None:
-    summary = summarize_g2b_research(discovery)
     if discovery is None:
         return
     if discovery.status == "failure":
         st.warning("나라장터 쇼핑몰 Research API 조회가 실패했습니다. 이는 시장자료 0건과 다릅니다.")
         return
-    if not summary.has_prices:
-        st.info("쇼핑몰 Research는 정상 실행됐지만 현재 검색어·기간에서 가격 후보가 0건입니다.")
-        return
 
-    st.markdown("**나라장터 쇼핑몰 시장참고 범위**")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("관련 가격후보", f"{summary.candidate_count}건")
-    c2.metric("하단", f"{summary.low:,.0f}원" if summary.low is not None else "-")
-    c3.metric("중앙값", f"{summary.median:,.0f}원" if summary.median is not None else "-")
-    c4.metric("상단", f"{summary.high:,.0f}원" if summary.high is not None else "-")
-    st.caption(
-        "이 범위는 검증 전 관련 세부품명·제조사·분류 후보를 포함할 수 있는 시장조사 참고값입니다. "
-        "동일제품 직접가격 범위와는 분리됩니다."
-    )
+    _render_research_basis(discovery)
+    summary = summarize_g2b_research(discovery)
 
-    delta = quote_delta_from_market_median(quote_unit_price, summary)
-    if delta is not None:
-        direction = "높음" if delta > 0 else "낮음" if delta < 0 else "동일"
-        st.info(
-            f"현재 견적은 Research 중앙값 대비 **{abs(delta):.1f}% {direction}**입니다. "
-            "이는 시장참고 비교이며 최종 적정성 판정은 아닙니다."
+    if summary.has_prices:
+        st.markdown("**동일모델 표기 가격 후보 범위 · 미검증**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("동일모델 가격후보", f"{summary.model_candidate_count}건")
+        c2.metric("하단", f"{summary.low:,.0f}원" if summary.low is not None else "-")
+        c3.metric("중앙값", f"{summary.median:,.0f}원" if summary.median is not None else "-")
+        c4.metric("상단", f"{summary.high:,.0f}원" if summary.high is not None else "-")
+        st.caption(
+            "모델 문자열이 표기된 Research 후보만 집계합니다. 최종 동일제품 직접가격 범위는 엄격한 "
+            "제품 식별·비교조건 검증을 통과한 Evidence로 별도 산정합니다."
         )
+
+        delta = quote_delta_from_market_median(quote_unit_price, summary)
+        if delta is not None:
+            direction = "높음" if delta > 0 else "낮음" if delta < 0 else "동일"
+            st.info(
+                f"현재 견적은 동일모델 표기 Research 중앙값 대비 **{abs(delta):.1f}% {direction}**입니다. "
+                "이는 미검증 Research 비교이며 최종 적정성 판정은 아닙니다."
+            )
+    elif discovery.candidates:
+        st.info(
+            "동일모델로 집계할 수 있는 가격 후보는 0건입니다. 아래 대체품·관련품목 후보는 개별 "
+            "참고로만 표시합니다."
+        )
+    else:
+        st.info("쇼핑몰 Research는 정상 실행됐지만 현재 검색어·기간에서 유의미한 가격 후보가 0건입니다.")
+
+    _render_related_price_candidates(discovery)
 
 
 def render_procurement_research(bundle: MarketResearchBundle | None) -> None:
