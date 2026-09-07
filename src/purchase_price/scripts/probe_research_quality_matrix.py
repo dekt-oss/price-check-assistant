@@ -54,6 +54,14 @@ def _candidate_row(candidate: G2BDiscoveryCandidate) -> dict[str, Any]:
     }
 
 
+def _candidate_examples(
+    candidates: list[G2BDiscoveryCandidate],
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    return [_candidate_row(candidate) for candidate in candidates[:limit]]
+
+
 def _mapping_index() -> dict[str, G2BProductMapping]:
     return {
         normalize_text(mapping.model_name): mapping
@@ -170,10 +178,15 @@ def _run_case(
         "failed_query_count": discovery.failed_query_count,
         "truncated_query_count": discovery.truncated_query_count,
         "same_model_prices": _price_range(model_candidates),
+        "same_model_examples": _candidate_examples(model_candidates),
         "verified_category_alternative_prices": _price_range(
             verified_classification_candidates
         ),
+        "verified_category_alternative_examples": _candidate_examples(
+            verified_classification_candidates
+        ),
         "unverified_related_price_candidates": _price_range(unverified_related),
+        "unverified_related_examples": _candidate_examples(unverified_related),
         "provisional_decision_useful_price": useful,
         "usefulness_reason": usefulness,
         "top_candidates": [_candidate_row(candidate) for candidate in price_candidates[:10]],
