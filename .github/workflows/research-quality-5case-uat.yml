@@ -64,6 +64,11 @@ jobs:
               report.get("case_count"),
           )
           print("target_met=", report.get("target_met"))
+          example_buckets = (
+              ("same_model", "same_model_examples"),
+              ("verified_alt", "verified_category_alternative_examples"),
+              ("unverified_related", "unverified_related_examples"),
+          )
           for case in report.get("cases", []):
               print(
                   "case=",
@@ -83,6 +88,20 @@ jobs:
                   "useful=",
                   case.get("provisional_decision_useful_price"),
               )
+              for bucket_label, bucket_key in example_buckets:
+                  for candidate in case.get(bucket_key, [])[:3]:
+                      print(
+                          "  ",
+                          bucket_label,
+                          "title=",
+                          candidate.get("title"),
+                          "price=",
+                          candidate.get("price"),
+                          "classification=",
+                          candidate.get("classification_name"),
+                          "code=",
+                          candidate.get("classification_code"),
+                      )
           if report.get("validation_status") == "not_configured":
               raise SystemExit("Shopping API credential is not configured")
           PY
