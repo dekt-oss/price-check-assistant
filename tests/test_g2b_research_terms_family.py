@@ -21,3 +21,18 @@ def test_anesthesia_family_terms_expand_descriptive_quote_label_without_identity
     terms = build_market_research_terms(query)
     assert terms[0] == "FLOW-C"
     assert "가스마취기" in terms
+
+
+def test_exoatlet_quote_label_expands_to_rehabilitation_research_basis() -> None:
+    query = ProductQuery(product_name="엑소아틀레트 - II")
+
+    assert research_terms_for_query(query) == (
+        "로봇보조 정형용 운동장치",
+        "보행재활로봇",
+        "재활로봇",
+    )
+    terms = build_market_research_terms(query)
+    assert terms[0] == "엑소아틀레트 - II"
+    assert "로봇보조 정형용 운동장치" in terms
+    assert "보행재활로봇" in terms
+    assert "재활로봇" in terms

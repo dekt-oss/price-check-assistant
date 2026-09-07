@@ -61,16 +61,18 @@ def _row(record: G2BResearchRecord) -> dict[str, object]:
 
 
 def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 100) -> None:
-    """Render broad procurement research without implying direct-price comparability."""
+    """Render broad external procurement research without implying hospital procurement flow."""
 
-    st.subheader("나라장터 전체 Research")
+    st.subheader("타 기관 나라장터 구매사례 Research")
     st.caption(
-        "종합쇼핑몰뿐 아니라 입찰공고·공고 품목상세·낙찰·사전규격을 함께 조회합니다. "
-        "추정가격·예산·낙찰총액·예정단가는 동일제품 거래단가가 아니며, "
-        "제품 식별과 거래조건 검증 전에는 가격판정에 사용하지 않습니다."
+        "우리 병원의 입찰 절차가 아니라 타 기관의 공개 조달자료를 시장가격 조사 참고자료로 조회합니다. "
+        "입찰공고·공고 품목상세·낙찰·사전규격·계약을 함께 보되, 추정가격·예산·낙찰총액은 "
+        "동일제품 거래단가가 아니며 제품 식별과 거래조건 검증 전에는 가격판정에 사용하지 않습니다."
     )
     if bundle.query_terms:
-        st.caption("검색어: " + " · ".join(bundle.query_terms))
+        st.markdown("**조사 기준 품목 후보**")
+        st.write(" · ".join(f"`{term}`" for term in bundle.query_terms))
+        st.caption("위 명칭은 검색 확장용 후보이며 공식 분류 또는 동일제품 확정 결과가 아닙니다.")
 
     columns = st.columns(len(bundle.sources))
     for column, source in zip(columns, bundle.sources, strict=True):
@@ -117,7 +119,7 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
     )
     if not records:
         if not failures:
-            st.info("API는 정상 응답했지만 현재 검색어·기간에서 Research 결과가 0건입니다.")
+            st.info("API는 정상 응답했지만 현재 조사 기준·기간에서 유의미한 Research 결과가 0건입니다.")
         return
 
     shown = records[:max_rows]

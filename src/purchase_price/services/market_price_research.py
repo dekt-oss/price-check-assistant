@@ -19,7 +19,13 @@ class MarketReferenceSummary:
 
     @property
     def has_prices(self) -> bool:
-        return self.candidate_count > 0 and self.median is not None
+        """Whether a same-model research price range exists.
+
+        Manufacturer/category/spec-similar candidates remain useful individual research evidence,
+        but they must not silently become the quote comparison band.
+        """
+
+        return self.model_candidate_count > 0 and self.median is not None
 
 
 def should_run_broad_research(query: ProductQuery, *, g2b_enabled: bool) -> bool:
@@ -39,12 +45,17 @@ def _median(values: list[Decimal]) -> Decimal | None:
 
 
 def summarize_g2b_research(discovery: G2BUnmappedDiscoveryResult | None) -> MarketReferenceSummary:
+    """Summarize broad candidates while aggregating only same-model-labelled prices."""
+
     if discovery is None:
         return MarketReferenceSummary(0, 0, 0, 0, None, None, None)
 
     candidates = tuple(discovery.candidates)
-    prices = [candidate.price for candidate in candidates if candidate.price > 0]
-    model_count = sum(candidate.relevance == "모델 표기 후보" for candidate in candidates)
+    model_candidates = tuple(
+        candidate for candidate in candidates if candidate.relevance == "모델 표기 후보"
+    )
+    model_prices = [candidate.price for candidate in model_candidates if candidate.price > 0]
+    model_count = len(model_candidates)
     manufacturer_count = sum(candidate.relevance == "제조사 표기 후보" for candidate in candidates)
     classification_count = len(candidates) - model_count - manufacturer_count
 
@@ -53,9 +64,9 @@ def summarize_g2b_research(discovery: G2BUnmappedDiscoveryResult | None) -> Mark
         model_candidate_count=model_count,
         manufacturer_candidate_count=manufacturer_count,
         classification_candidate_count=classification_count,
-        low=min(prices) if prices else None,
-        median=_median(prices),
-        high=max(prices) if prices else None,
+        low=min(model_prices) if model_prices else None,
+        median=_median(model_prices),
+        high=max(model_prices) if model_prices else None,
     )
 
 
@@ -63,8 +74,8 @@ def quote_delta_from_market_median(
     quote_unit_price: Decimal | None,
     summary: MarketReferenceSummary,
 ) -> Decimal | None:
-    """Return a descriptive percentage delta, never an approval/verdict."""
+    """Return a descriptive same-model percentage delta, never an approval/verdict."""
 
-    if quote_unit_price is None or summary.median is None or summary.median <= 0:
+    if quote_unit_price is None or not summary.has_prices or summary.median is None or summary.median <= 0:
         return None
     return ((quote_unit_price - summary.median) / summary.median) * Decimal("100")

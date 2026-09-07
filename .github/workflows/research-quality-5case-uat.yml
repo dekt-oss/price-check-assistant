@@ -1,0 +1,129 @@
+name: Research Quality 5-Case UAT
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/research-quality-5case-uat.yml"
+      - "data/research_quality_uat_cases.csv"
+      - "data/g2b_research_terms.csv"
+      - "data/g2b_product_mappings.csv"
+      - "src/purchase_price/scripts/probe_research_quality_matrix.py"
+      - "src/purchase_price/services/g2b_unmapped_discovery.py"
+      - "src/purchase_price/services/g2b_research_terms.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Run five-case research quality probe
+        run: |
+          python -m purchase_price.scripts.probe_research_quality_matrix \
+            --lookback-days 90 \
+            --request-budget 12 \
+            --timeout-seconds 15 \
+            --max-retries 1 \
+            --output artifacts/research-quality-uat/report.json
+
+      - name: Print decision-useful evidence summary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(
+              Path("artifacts/research-quality-uat/report.json").read_text(encoding="utf-8")
+          )
+          print("validation_status=", report.get("validation_status"))
+          print("key_source=", report.get("key_source"))
+          print(
+              "provisional_useful_price_count=",
+              report.get("provisional_useful_price_count"),
+              "/",
+              report.get("case_count"),
+          )
+          print("target_met=", report.get("target_met"))
+          print("failure_count=", report.get("failure_count"))
+          example_buckets = (
+              ("same_model", "same_model_examples"),
+              ("verified_alt", "verified_category_alternative_examples"),
+              ("unverified_related", "unverified_related_examples"),
+          )
+          for case in report.get("cases", []):
+              print(
+                  "case=",
+                  case.get("case_id"),
+                  "model=",
+                  case.get("model_name"),
+                  "basis=",
+                  case.get("basis_name"),
+                  "basis_status=",
+                  case.get("basis_status"),
+                  "discovery_status=",
+                  case.get("discovery_status"),
+                  "same_model=",
+                  case.get("same_model_prices", {}).get("count"),
+                  "verified_alt=",
+                  case.get("verified_category_alternative_prices", {}).get("count"),
+                  "related=",
+                  case.get("unverified_related_price_candidates", {}).get("count"),
+                  "useful=",
+                  case.get("provisional_decision_useful_price"),
+              )
+              for error_type, error_message in zip(
+                  case.get("error_types", []),
+                  case.get("error_messages", []),
+                  strict=False,
+              ):
+                  print("  api_failure type=", error_type, "message=", error_message)
+              for bucket_label, bucket_key in example_buckets:
+                  for candidate in case.get(bucket_key, [])[:3]:
+                      print(
+                          "  ",
+                          bucket_label,
+                          "title=",
+                          candidate.get("title"),
+                          "price=",
+                          candidate.get("price"),
+                          "classification=",
+                          candidate.get("classification_name"),
+                          "code=",
+                          candidate.get("classification_code"),
+                      )
+          if report.get("validation_status") == "not_configured":
+              raise SystemExit("Shopping API credential is not configured")
+          if report.get("failure_count", 0) > 0:
+              raise SystemExit(
+                  "Shopping Research API transport/auth failures occurred; do not treat them as zero-result UAT"
+              )
+          PY
+
+      - name: Upload UAT evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-quality-5case-uat
+          path: artifacts/research-quality-uat/report.json
+          if-no-files-found: error
+          retention-days: 14

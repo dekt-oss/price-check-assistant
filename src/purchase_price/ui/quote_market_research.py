@@ -14,7 +14,9 @@ from purchase_price.services.pricing import assess_prices
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
 from purchase_price.ui.market_research import (
     render_external_research_links,
+    render_market_alternative_candidates,
     render_market_reference_summary,
+    render_model_price_research_summary,
     render_procurement_research,
     run_market_research,
 )
@@ -23,7 +25,6 @@ from purchase_price.ui.quote_review_state import QuoteReviewState
 from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.widgets import (
     render_condition_table,
-    render_discovery_candidates,
     render_evidence_table,
     render_observation_cards,
     render_source_status,
@@ -234,9 +235,16 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
         c2.metric("수량", str(item.quantity) if item.quantity is not None else "미확인")
         c3.metric("단위", item.unit or "미확인")
 
-        render_procurement_research(market_bundle)
-        render_market_reference_summary(discovery, quote_unit_price=item.unit_price)
+        # 1-3. Quote identity -> canonical/research basis -> basis verification status.
+        render_market_reference_summary(
+            discovery,
+            query=query,
+            quote_unit_price=item.unit_price,
+            include_model_price_summary=False,
+            include_related_candidates=False,
+        )
 
+        # 4. Verified same-product actual evidence is always kept ahead of alternatives.
         if run is not None and run.results:
             assessment = assess_prices(run.results, item.unit_price)
             st.markdown("**검증된 동일제품 직접가격 근거**")
@@ -246,14 +254,19 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             d3.metric("신뢰도", assessment.confidence)
             render_observation_cards(run.results)
         else:
-            st.caption(
-                "검증된 동일제품 직접가격이 없어도 입찰·품목상세·낙찰·사전규격·계약 Research는 "
-                "시장조사 참고자료로 계속 제공합니다."
-            )
+            st.caption("검증된 동일제품 직접가격 근거는 현재 조사 범위에서 확인되지 않았습니다.")
 
-        if discovery is not None and discovery.candidates:
-            with st.expander("나라장터 쇼핑몰 관련 단가 후보", expanded=False):
-                render_discovery_candidates(discovery)
+        # Model-labelled Shopping rows stay explicitly unverified and separate from direct evidence.
+        render_model_price_research_summary(
+            discovery,
+            quote_unit_price=item.unit_price,
+        )
+
+        # 5-6. Same official classification first, then unverified related/spec-similar candidates.
+        render_market_alternative_candidates(discovery, query=query)
+
+        # 7. Other institutions' public procurement lifecycle evidence is last in the core sequence.
+        render_procurement_research(market_bundle)
 
         render_external_research_links(query)
 

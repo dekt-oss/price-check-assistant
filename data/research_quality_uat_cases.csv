@@ -1,0 +1,6 @@
+case_id,manufacturer,product_name,model_name,specification,case_role
+exoatlet,,엑소아틀레트 - II,,,hard_missing_exact
+sophie,Stephan,인공호흡기,Sophie,Sophie,medical_verified_control
+veriti,Thermo Fisher Scientific,핵산증폭기,Veriti Pro Dx,Veriti Pro Dx,medical_verified_category_alternative
+gmsr,GMS,약품냉장고,GMSR-182,182L,medical_ambiguous_category
+apeos,FUJIFILM Business Innovation,컬러 레이저프린터,ApeosPrint C5570 GK,"A3,55PPM",exact_price_control

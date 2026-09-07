@@ -38,14 +38,15 @@ def test_product_keyword_alone_runs_broad_research() -> None:
     assert len(terms) >= 3
 
 
-def test_market_reference_summary_keeps_broad_candidates_separate_from_verdict() -> None:
+def test_market_reference_summary_aggregates_same_model_only() -> None:
     discovery = G2BUnmappedDiscoveryResult(
         status="success",
         terms=("마취",),
         request_count=1,
-        records_seen=3,
+        records_seen=4,
         candidates=(
             _candidate(price="100", relevance="모델 표기 후보"),
+            _candidate(price="140", relevance="모델 표기 후보"),
             _candidate(price="200", relevance="제조사 표기 후보"),
             _candidate(price="300", relevance="분류 후보"),
         ),
@@ -53,11 +54,34 @@ def test_market_reference_summary_keeps_broad_candidates_separate_from_verdict()
 
     summary = summarize_g2b_research(discovery)
 
-    assert summary.candidate_count == 3
-    assert summary.model_candidate_count == 1
+    assert summary.candidate_count == 4
+    assert summary.model_candidate_count == 2
     assert summary.manufacturer_candidate_count == 1
     assert summary.classification_candidate_count == 1
     assert summary.low == Decimal("100")
-    assert summary.median == Decimal("200")
-    assert summary.high == Decimal("300")
-    assert quote_delta_from_market_median(Decimal("250"), summary) == Decimal("25")
+    assert summary.median == Decimal("120")
+    assert summary.high == Decimal("140")
+    assert quote_delta_from_market_median(Decimal("150"), summary) == Decimal("25")
+
+
+def test_alternative_candidates_do_not_create_quote_price_band() -> None:
+    discovery = G2BUnmappedDiscoveryResult(
+        status="success",
+        terms=("재활로봇",),
+        request_count=1,
+        records_seen=2,
+        candidates=(
+            _candidate(price="46000000", relevance="제조사 표기 후보"),
+            _candidate(price="90000000", relevance="분류 후보"),
+        ),
+    )
+
+    summary = summarize_g2b_research(discovery)
+
+    assert summary.candidate_count == 2
+    assert summary.model_candidate_count == 0
+    assert summary.has_prices is False
+    assert summary.low is None
+    assert summary.median is None
+    assert summary.high is None
+    assert quote_delta_from_market_median(Decimal("140000000"), summary) is None
