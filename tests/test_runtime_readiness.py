@@ -6,31 +6,60 @@ from purchase_price.config import Settings
 from purchase_price.services import runtime_readiness
 
 
-def test_shared_market_key_marks_both_public_data_sources_ready_without_exposing_value() -> None:
+def test_shared_market_key_marks_all_public_data_sources_ready_without_exposing_value() -> None:
     secret = "SHARED-SUPER-SECRET"
     settings = Settings(
         data_go_kr_service_key=None,
         data_go_kr_market_service_key=secret,
         g2b_service_key=None,
+        g2b_shopping_service_key=None,
+        g2b_research_service_key=None,
         mfds_service_key=None,
     )
     checks = runtime_readiness.public_data_credential_readiness(settings)
     public_payload = repr([check.to_public_dict() for check in checks])
     assert all(check.ready for check in checks)
-    assert {check.key for check in checks} == {"g2b_credential", "mfds_credential"}
+    assert {check.key for check in checks} == {
+        "g2b_credential",
+        "g2b_research_credential",
+        "mfds_credential",
+    }
     assert secret not in public_payload
+    assert "DATA_GO_KR_MARKET_SERVICE_KEY" in public_payload
 
 
-def test_source_specific_key_can_make_only_one_source_ready() -> None:
+def test_historical_g2b_key_can_make_both_g2b_families_ready_without_mfds() -> None:
     settings = Settings(
         data_go_kr_service_key=None,
         data_go_kr_market_service_key=None,
         g2b_service_key="g2b-only-secret",
+        g2b_shopping_service_key=None,
+        g2b_research_service_key=None,
         mfds_service_key=None,
     )
-    g2b, mfds = runtime_readiness.public_data_credential_readiness(settings)
-    assert g2b.ready is True and mfds.ready is False
-    assert "g2b-only-secret" not in repr(g2b.to_public_dict())
+    shopping, research, mfds = runtime_readiness.public_data_credential_readiness(settings)
+    assert shopping.ready is True
+    assert research.ready is True
+    assert mfds.ready is False
+    assert "g2b-only-secret" not in repr([shopping.to_public_dict(), research.to_public_dict()])
+    assert "G2B_SERVICE_KEY" in shopping.detail
+    assert "G2B_SERVICE_KEY" in research.detail
+
+
+def test_dedicated_research_key_is_reported_independently() -> None:
+    settings = Settings(
+        data_go_kr_service_key=None,
+        data_go_kr_market_service_key=None,
+        g2b_service_key=None,
+        g2b_shopping_service_key=None,
+        g2b_research_service_key="research-secret",
+        mfds_service_key=None,
+    )
+    shopping, research, _mfds = runtime_readiness.public_data_credential_readiness(settings)
+    assert shopping.ready is False
+    assert research.ready is True
+    assert "G2B_RESEARCH_SERVICE_KEY" in research.detail
+    assert "research-secret" not in research.detail
 
 
 def _installed_packages(monkeypatch) -> None:
