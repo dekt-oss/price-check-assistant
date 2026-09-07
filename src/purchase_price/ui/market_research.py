@@ -10,6 +10,8 @@ from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_bid_item_enrichment import enrich_market_bundle_with_bid_items
 from purchase_price.services.g2b_contract_enrichment import enrich_market_bundle_with_contracts
+from purchase_price.services.g2b_lifecycle import G2B_LIFECYCLE_BASE_URL
+from purchase_price.services.g2b_lifecycle_enrichment import enrich_market_bundle_with_lifecycle
 from purchase_price.services.g2b_market_models import MarketResearchBundle
 from purchase_price.services.g2b_unmapped_discovery import (
     G2BDiscoveryCandidate,
@@ -43,13 +45,14 @@ def run_market_research(
     """Run direct-price, shopping discovery and procurement Research independently.
 
     Shopping direct-price/discovery can use a credential approved only for ShoppingMall API while
-    bid/award/pre-spec/item/contract Research can use a separate service subscription.
-    None of those records are passed to `search_all` or `assess_prices`.
+    bid/award/pre-spec/item/contract/lifecycle Research can use separate service subscriptions.
+    None of those Research records are passed to `search_all` or `assess_prices`.
     """
 
     settings = get_settings()
     shopping_key = (settings.resolved_g2b_shopping_service_key or "").strip()
     research_key = (settings.resolved_g2b_research_service_key or "").strip()
+    lifecycle_key = (settings.resolved_g2b_lifecycle_service_key or "").strip()
 
     run = search_all(query, build_collectors(g2b_lookback_days=lookback_days))
 
@@ -79,6 +82,16 @@ def run_market_research(
             max_pages_per_bid=1,
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=min(settings.g2b_max_retries, 2),
+        )
+        # Integrated lifecycle is identifier-based enrichment, not another keyword search. Keep it
+        # tightly bounded because every call follows one already observed bid notice.
+        market_bundle = enrich_market_bundle_with_lifecycle(
+            market_bundle,
+            service_key=lifecycle_key,
+            max_bid_notices=min(procurement_detail_limit, 2),
+            timeout_seconds=settings.g2b_request_timeout_seconds,
+            max_retries=min(settings.g2b_max_retries, 2),
+            base_url=settings.g2b_lifecycle_base_url or G2B_LIFECYCLE_BASE_URL,
         )
 
     discovery = None
