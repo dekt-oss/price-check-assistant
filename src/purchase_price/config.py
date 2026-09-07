@@ -24,9 +24,15 @@ class Settings(BaseSettings):
     g2b_service_key: str | None = None
     g2b_shopping_service_key: str | None = None
     g2b_research_service_key: str | None = None
+    # Newly approved PPS services are kept separate because data.go.kr authorization is
+    # subscription-specific even when the encoded key text happens to be identical.
+    g2b_catalog_service_key: str | None = None
+    g2b_lifecycle_service_key: str | None = None
 
     g2b_shopping_base_url: str | None = None
     g2b_contract_base_url: str | None = None
+    g2b_catalog_base_url: str | None = None
+    g2b_lifecycle_base_url: str | None = None
     g2b_request_timeout_seconds: float = 20.0
     g2b_max_retries: int = 3
     g2b_search_request_budget: int = 120
@@ -78,6 +84,30 @@ class Settings(BaseSettings):
         )
 
     @property
+    def resolved_g2b_catalog_service_key(self) -> str | None:
+        """Resolve the key for PPS Thing List / official catalog attributes."""
+
+        return (
+            self.g2b_catalog_service_key
+            or self.data_go_kr_market_service_key
+            or self.g2b_research_service_key
+            or self.g2b_service_key
+            or self.data_go_kr_service_key
+        )
+
+    @property
+    def resolved_g2b_lifecycle_service_key(self) -> str | None:
+        """Resolve the key for the integrated procurement lifecycle service."""
+
+        return (
+            self.g2b_lifecycle_service_key
+            or self.data_go_kr_market_service_key
+            or self.g2b_research_service_key
+            or self.g2b_service_key
+            or self.data_go_kr_service_key
+        )
+
+    @property
     def resolved_g2b_service_key(self) -> str | None:
         """Backward-compatible alias for callers that specifically use the shopping API."""
 
@@ -100,6 +130,30 @@ class Settings(BaseSettings):
             (
                 ("G2B_RESEARCH_SERVICE_KEY", self.g2b_research_service_key),
                 ("DATA_GO_KR_MARKET_SERVICE_KEY", self.data_go_kr_market_service_key),
+                ("G2B_SERVICE_KEY", self.g2b_service_key),
+                ("DATA_GO_KR_SERVICE_KEY", self.data_go_kr_service_key),
+            )
+        )
+
+    @property
+    def g2b_catalog_key_source(self) -> str:
+        return self._key_source(
+            (
+                ("G2B_CATALOG_SERVICE_KEY", self.g2b_catalog_service_key),
+                ("DATA_GO_KR_MARKET_SERVICE_KEY", self.data_go_kr_market_service_key),
+                ("G2B_RESEARCH_SERVICE_KEY", self.g2b_research_service_key),
+                ("G2B_SERVICE_KEY", self.g2b_service_key),
+                ("DATA_GO_KR_SERVICE_KEY", self.data_go_kr_service_key),
+            )
+        )
+
+    @property
+    def g2b_lifecycle_key_source(self) -> str:
+        return self._key_source(
+            (
+                ("G2B_LIFECYCLE_SERVICE_KEY", self.g2b_lifecycle_service_key),
+                ("DATA_GO_KR_MARKET_SERVICE_KEY", self.data_go_kr_market_service_key),
+                ("G2B_RESEARCH_SERVICE_KEY", self.g2b_research_service_key),
                 ("G2B_SERVICE_KEY", self.g2b_service_key),
                 ("DATA_GO_KR_SERVICE_KEY", self.data_go_kr_service_key),
             )
