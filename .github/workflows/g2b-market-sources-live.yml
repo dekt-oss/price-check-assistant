@@ -3,9 +3,13 @@ name: G2B Market Sources Live Acceptance
 on:
   pull_request:
     paths:
+      - "src/purchase_price/config.py"
       - "src/purchase_price/services/g2b_market_*.py"
       - "src/purchase_price/services/market_research.py"
+      - "src/purchase_price/services/live_smoke.py"
+      - "src/purchase_price/services/runtime_readiness.py"
       - "src/purchase_price/scripts/probe_g2b_market_sources.py"
+      - "pages/14_운영환경_진단.py"
       - "data/g2b_research_terms.csv"
       - ".github/workflows/g2b-market-sources-live.yml"
   workflow_dispatch:
@@ -18,9 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
       DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
-      DATA_GO_KR_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
 
     steps:
       - name: Checkout
@@ -35,7 +40,7 @@ jobs:
         run: pip install -e .
 
       - name: Run bounded live anesthesia research
-        if: env.G2B_SERVICE_KEY != ''
+        if: env.G2B_RESEARCH_SERVICE_KEY != '' || env.DATA_GO_KR_MARKET_SERVICE_KEY != '' || env.G2B_SERVICE_KEY != '' || env.DATA_GO_KR_SERVICE_KEY != ''
         run: |
           python -m purchase_price.scripts.probe_g2b_market_sources \
             --keyword "마취" \
@@ -45,15 +50,15 @@ jobs:
             --output artifacts/g2b-market-sources-live/report.json
 
       - name: Record missing secret
-        if: env.G2B_SERVICE_KEY == ''
+        if: env.G2B_RESEARCH_SERVICE_KEY == '' && env.DATA_GO_KR_MARKET_SERVICE_KEY == '' && env.G2B_SERVICE_KEY == '' && env.DATA_GO_KR_SERVICE_KEY == ''
         run: |
           mkdir -p artifacts/g2b-market-sources-live
           cat > artifacts/g2b-market-sources-live/report.json <<'JSON'
           {
             "validation_status": "not_configured",
             "keyword": "마취",
-            "bid_notice_hit": null,
-            "message": "G2B service key secret is not configured; live acceptance was not measured."
+            "key_source": "미설정",
+            "message": "G2B research service key secret is not configured; live acceptance was not measured."
           }
           JSON
 
@@ -67,7 +72,7 @@ jobs:
           report = json.loads(Path("artifacts/g2b-market-sources-live/report.json").read_text(encoding="utf-8"))
           print("validation_status=", report.get("validation_status"))
           print("keyword=", report.get("keyword"))
-          print("bid_notice_hit=", report.get("bid_notice_hit"))
+          print("key_source=", report.get("key_source"))
           for source in report.get("sources", []):
               print(
                   f"source={source.get('source')} status={source.get('status')} "
@@ -75,6 +80,30 @@ jobs:
               )
           PY
           fi
+
+      - name: Enforce live Research authorization gate
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("artifacts/g2b-market-sources-live/report.json")
+          if not path.exists():
+              raise SystemExit("live acceptance report missing")
+          report = json.loads(path.read_text(encoding="utf-8"))
+          status = report.get("validation_status")
+          if status != "pass":
+              raise SystemExit(f"G2B Research live acceptance failed: {status}")
+          sources = report.get("sources", [])
+          expected = {"bid_notice", "award", "prespec"}
+          normal = {"success", "success_0"}
+          observed = {row.get("source") for row in sources if row.get("status") in normal}
+          if observed != expected:
+              raise SystemExit(
+                  f"G2B Research live acceptance incomplete: expected={sorted(expected)} observed={sorted(observed)}"
+              )
+          print("G2B Research live acceptance PASS: bid/award/prespec all returned normal responses")
+          PY
 
       - name: Upload live acceptance report
         if: always()
