@@ -17,6 +17,7 @@ _SOURCE_LABELS = {
     G2BResearchSource.AWARD: "낙찰",
     G2BResearchSource.PRESPEC: "사전규격",
     G2BResearchSource.CONTRACT: "계약",
+    G2BResearchSource.LIFECYCLE: "과정통합",
     G2BResearchSource.SHOPPING: "쇼핑몰·납품",
 }
 
@@ -66,7 +67,7 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
     st.subheader("타 기관 나라장터 구매사례 Research")
     st.caption(
         "우리 병원의 입찰 절차가 아니라 타 기관의 공개 조달자료를 시장가격 조사 참고자료로 조회합니다. "
-        "입찰공고·공고 품목상세·낙찰·사전규격·계약을 함께 보되, 추정가격·예산·낙찰총액은 "
+        "입찰공고·공고 품목상세·낙찰·사전규격·계약·과정통합 자료를 함께 보되, 추정가격·예산·낙찰총액·계약총액은 "
         "동일제품 거래단가가 아니며 제품 식별과 거래조건 검증 전에는 가격판정에 사용하지 않습니다."
     )
     if bundle.query_terms:
