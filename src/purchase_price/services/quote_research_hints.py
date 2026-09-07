@@ -3,8 +3,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from purchase_price.services.matching import normalize_text
-
 _DOCUMENT_WORDS = {
     "견적",
     "견적서",
@@ -53,6 +51,9 @@ def build_quote_filename_research_hints(file_name: str, *, max_terms: int = 6) -
     `재활의학과 로봇보조 정형용 운동장치 견적2.pdf`. The filename is not authoritative product
     identity, so these hints are used only to widen Research and can never promote MatchGrade or
     direct-price evidence.
+
+    Spaced and compact Korean variants are intentionally both preserved because upstream public
+    APIs do not always tokenize them consistently.
     """
 
     if max_terms < 1:
@@ -89,11 +90,12 @@ def build_quote_filename_research_hints(file_name: str, *, max_terms: int = 6) -
     output: list[str] = []
     seen: set[str] = set()
     for term in raw:
-        key = normalize_text(term)
+        normalized_request = re.sub(r"\s+", " ", term).strip()
+        key = normalized_request.casefold()
         if not key or key in seen:
             continue
         seen.add(key)
-        output.append(term)
+        output.append(normalized_request)
         if len(output) >= max_terms:
             break
     return tuple(output)
