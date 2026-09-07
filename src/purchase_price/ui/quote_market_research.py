@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import streamlit as st
 
+from purchase_price.config import get_settings
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
@@ -12,6 +13,7 @@ from purchase_price.services.g2b_search_policy import (
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
+from purchase_price.services.quote_research_hints import build_quote_filename_research_hints
 from purchase_price.ui.market_research import (
     render_external_research_links,
     render_market_reference_summary,
@@ -49,6 +51,16 @@ def _invalidate_item_review(state: QuoteReviewState, index: int) -> None:
     state.identity.pop(index, None)
     _clear_research(state)
     state.step = 2
+
+
+def _query_for_item(state: QuoteReviewState, index: int):
+    """Build a strict identity query plus research-only aliases from quote context."""
+
+    query = quote_item_query(state.items[index])
+    hints = build_quote_filename_research_hints(state.file_name or "")
+    if not hints:
+        return query
+    return replace(query, research_hints=hints)
 
 
 def _render_inline_manual_item_form(state: QuoteReviewState) -> None:
@@ -166,7 +178,7 @@ def _ensure_market_research(state: QuoteReviewState) -> None:
     total = len(missing)
     for done, index in enumerate(missing, start=1):
         item = state.items[index]
-        query = quote_item_query(item)
+        query = _query_for_item(state, index)
         progress.progress(
             (done - 1) / total,
             text=(
@@ -178,7 +190,7 @@ def _ensure_market_research(state: QuoteReviewState) -> None:
             query,
             lookback_days=state.lookback_days,
             research_pages_per_term=1,
-            research_request_budget=18,
+            research_request_budget=24,
             procurement_detail_limit=4,
         )
         state.search_runs[index] = run
@@ -215,7 +227,7 @@ def _render_overview(state: QuoteReviewState) -> None:
 
 def _render_item_result(state: QuoteReviewState, index: int) -> None:
     item = state.items[index]
-    query = quote_item_query(item)
+    query = _query_for_item(state, index)
     run = state.search_runs.get(index)
     discovery = state.discoveries.get(index)
     market_bundle = state.market_bundles.get(index)
@@ -229,6 +241,12 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             )
             or "추가 식별정보 없음"
         )
+        if query.research_hints:
+            st.caption(
+                "자동 확장 Research: "
+                + " · ".join(query.research_hints)
+                + " — 견적 파일명에서 얻은 조사 힌트이며 동일제품 identity 근거는 아닙니다."
+            )
         c1, c2, c3 = st.columns(3)
         c1.metric("견적 단가", _money(item.unit_price))
         c2.metric("수량", str(item.quantity) if item.quantity is not None else "미확인")
@@ -252,7 +270,7 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             )
 
         if discovery is not None and discovery.candidates:
-            with st.expander("나라장터 쇼핑몰 관련 단가 후보", expanded=False):
+            with st.expander("나라장터 쇼핑몰 동일·동급·대체 후보", expanded=False):
                 render_discovery_candidates(discovery)
 
         render_external_research_links(query)
@@ -286,8 +304,8 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
 
 def render_quote_market_research(state: QuoteReviewState) -> None:
     st.info(
-        "견적서를 업로드하면 품목을 추출하고 제품 식별 확인을 기다리지 않은 채 바로 시장조사를 시작합니다. "
-        "입찰·낙찰·계약 금액은 Research 참고자료이며 동일제품 직접단가 판정과 분리됩니다."
+        "견적서를 업로드하면 정확 모델명뿐 아니라 견적의 일반 품명·나라장터 세부품명 후보·동급 품목군까지 "
+        "Research를 넓혀 동시에 조사합니다. 대체품 가격은 동일제품 가격과 분리합니다."
     )
 
     uploaded = st.file_uploader(
@@ -312,6 +330,13 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
 
     if state.diagnostics is not None:
         st.caption(f"추출 경로: {state.diagnostics.strategy_label}")
+
+    settings = get_settings()
+    st.caption(
+        "나라장터 API 인증 라우팅: "
+        f"입찰·낙찰·사전규격={settings.g2b_research_key_source} · "
+        f"쇼핑몰·납품={settings.g2b_shopping_key_source}"
+    )
 
     if state.extraction.warnings:
         with st.expander(f"추출 경고 {len(state.extraction.warnings)}건", expanded=False):
