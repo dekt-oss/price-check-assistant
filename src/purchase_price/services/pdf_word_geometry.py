@@ -90,10 +90,12 @@ def _has_same_field_prefix(
     return False
 
 
-def _find_header_anchors(
+def _find_partial_header_anchors(
     line: list[_Word],
     resolve_header: Callable[[str], str | None],
 ) -> list[_HeaderAnchor]:
+    """Return recognized header anchors without requiring a complete header on one OCR line."""
+
     anchors: list[_HeaderAnchor] = []
     used_fields: set[str] = set()
     index = 0
@@ -117,21 +119,57 @@ def _find_header_anchors(
         anchors.append(_HeaderAnchor(field=field, x0=span[0].x0, x1=span[-1].x1))
         used_fields.add(field)
         index += width
-
-    fields = {anchor.field for anchor in anchors}
-    if not fields.intersection(_IDENTITY_FIELDS) or not fields.intersection(_PRICE_FIELDS):
-        return []
     return sorted(anchors, key=lambda anchor: anchor.center)
+
+
+def _header_anchors_are_usable(anchors: Sequence[_HeaderAnchor]) -> bool:
+    fields = {anchor.field for anchor in anchors}
+    return bool(fields.intersection(_IDENTITY_FIELDS) and fields.intersection(_PRICE_FIELDS))
+
+
+def _find_header_anchors(
+    line: list[_Word],
+    resolve_header: Callable[[str], str | None],
+) -> list[_HeaderAnchor]:
+    anchors = _find_partial_header_anchors(line, resolve_header)
+    return anchors if _header_anchors_are_usable(anchors) else []
+
+
+def _merge_header_anchor_groups(
+    groups: Sequence[Sequence[_HeaderAnchor]],
+) -> list[_HeaderAnchor]:
+    """Merge adjacent OCR header lines by semantic field while preserving X positions."""
+
+    by_field: dict[str, _HeaderAnchor] = {}
+    for group in groups:
+        for anchor in group:
+            by_field.setdefault(anchor.field, anchor)
+    return sorted(by_field.values(), key=lambda anchor: anchor.center)
 
 
 def _header_line(
     lines: list[list[_Word]],
     resolve_header: Callable[[str], str | None],
 ) -> tuple[int, list[_HeaderAnchor]] | None:
-    for index, line in enumerate(lines[:40]):
+    candidate_lines = lines[:40]
+    for index, line in enumerate(candidate_lines):
         anchors = _find_header_anchors(line, resolve_header)
         if anchors:
             return index, anchors
+
+        groups: list[list[_HeaderAnchor]] = []
+        for offset in range(3):
+            target = index + offset
+            if target >= len(candidate_lines):
+                break
+            partial = _find_partial_header_anchors(candidate_lines[target], resolve_header)
+            if partial:
+                groups.append(partial)
+            if offset == 0:
+                continue
+            merged = _merge_header_anchor_groups(groups)
+            if _header_anchors_are_usable(merged):
+                return target, merged
     return None
 
 
