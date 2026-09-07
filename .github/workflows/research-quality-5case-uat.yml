@@ -64,6 +64,7 @@ jobs:
               report.get("case_count"),
           )
           print("target_met=", report.get("target_met"))
+          print("failure_count=", report.get("failure_count"))
           example_buckets = (
               ("same_model", "same_model_examples"),
               ("verified_alt", "verified_category_alternative_examples"),
@@ -79,6 +80,8 @@ jobs:
                   case.get("basis_name"),
                   "basis_status=",
                   case.get("basis_status"),
+                  "discovery_status=",
+                  case.get("discovery_status"),
                   "same_model=",
                   case.get("same_model_prices", {}).get("count"),
                   "verified_alt=",
@@ -88,6 +91,12 @@ jobs:
                   "useful=",
                   case.get("provisional_decision_useful_price"),
               )
+              for error_type, error_message in zip(
+                  case.get("error_types", []),
+                  case.get("error_messages", []),
+                  strict=False,
+              ):
+                  print("  api_failure type=", error_type, "message=", error_message)
               for bucket_label, bucket_key in example_buckets:
                   for candidate in case.get(bucket_key, [])[:3]:
                       print(
@@ -104,6 +113,10 @@ jobs:
                       )
           if report.get("validation_status") == "not_configured":
               raise SystemExit("Shopping API credential is not configured")
+          if report.get("failure_count", 0) > 0:
+              raise SystemExit(
+                  "Shopping Research API transport/auth failures occurred; do not treat them as zero-result UAT"
+              )
           PY
 
       - name: Upload UAT evidence
