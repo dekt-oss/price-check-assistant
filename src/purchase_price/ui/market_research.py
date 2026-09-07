@@ -103,7 +103,10 @@ def _basis_status_label(basis: ResearchBasis) -> str:
     return "Research 기준명 후보 · 미검증"
 
 
-def _render_research_basis(query: ProductQuery, discovery: G2BUnmappedDiscoveryResult) -> None:
+def _render_research_basis(
+    query: ProductQuery,
+    discovery: G2BUnmappedDiscoveryResult | None,
+) -> None:
     basis = resolve_research_basis(query)
     st.markdown("**가격조사 기준**")
     c1, c2 = st.columns([2, 1])
@@ -114,7 +117,7 @@ def _render_research_basis(query: ProductQuery, discovery: G2BUnmappedDiscoveryR
     else:
         st.caption(basis.rationale)
 
-    if discovery.terms:
+    if discovery is not None and discovery.terms:
         with st.expander("실제 검색 확장어", expanded=False):
             st.write(" · ".join(f"`{term}`" for term in discovery.terms[:8]))
             st.caption(
@@ -135,6 +138,52 @@ def _candidate_rows(candidates: list[G2BDiscoveryCandidate]) -> list[dict[str, s
         }
         for candidate in candidates[:10]
     ]
+
+
+def _render_model_price_summary(
+    discovery: G2BUnmappedDiscoveryResult,
+    *,
+    quote_unit_price: Decimal | None = None,
+) -> None:
+    summary = summarize_g2b_research(discovery)
+    model_candidates = [
+        candidate
+        for candidate in discovery.candidates
+        if candidate.relevance == "모델 표기 후보" and candidate.price > 0
+    ]
+
+    if summary.has_prices:
+        st.markdown("**동일모델 표기 가격 후보 · 미검증 Research**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("동일모델 가격후보", f"{summary.model_candidate_count}건")
+        c2.metric("하단", f"{summary.low:,.0f}원" if summary.low is not None else "-")
+        c3.metric("중앙값", f"{summary.median:,.0f}원" if summary.median is not None else "-")
+        c4.metric("상단", f"{summary.high:,.0f}원" if summary.high is not None else "-")
+        if model_candidates:
+            st.dataframe(
+                _candidate_rows(model_candidates),
+                use_container_width=True,
+                hide_index=True,
+            )
+        st.caption(
+            "모델 문자열이 표기된 Research 후보만 집계합니다. 최종 동일제품 직접가격 범위는 엄격한 "
+            "제품 식별·비교조건 검증을 통과한 Evidence로 별도 산정합니다."
+        )
+
+        delta = quote_delta_from_market_median(quote_unit_price, summary)
+        if delta is not None:
+            direction = "높음" if delta > 0 else "낮음" if delta < 0 else "동일"
+            st.info(
+                f"현재 견적은 동일모델 표기 Research 중앙값 대비 **{abs(delta):.1f}% {direction}**입니다. "
+                "이는 미검증 Research 비교이며 최종 적정성 판정은 아닙니다."
+            )
+    elif discovery.candidates:
+        st.info(
+            "동일모델로 집계할 수 있는 가격 후보는 0건입니다. 대체품·관련품목 가격은 아래에서 개별 "
+            "참고로만 표시합니다."
+        )
+    else:
+        st.info("쇼핑몰 Research는 정상 실행됐지만 현재 조사 기준·기간에서 유의미한 가격 후보가 0건입니다.")
 
 
 def _render_related_price_candidates(
@@ -161,7 +210,7 @@ def _render_related_price_candidates(
     ]
 
     if same_official_class:
-        st.markdown("**동일 공식분류 대체후보 · 실제 납품가격 참고**")
+        st.markdown("**동일 공식분류의 다른 제품 · 실제 납품가격 참고**")
         st.dataframe(
             _candidate_rows(same_official_class),
             use_container_width=True,
@@ -174,7 +223,7 @@ def _render_related_price_candidates(
         )
 
     if unverified_related:
-        st.markdown("**규격·관련품목 대체후보 · 미검증 개별 참고**")
+        st.markdown("**공식분류 미확정 규격·관련품목 대체후보 · 개별 참고**")
         st.dataframe(
             _candidate_rows(unverified_related),
             use_container_width=True,
@@ -186,49 +235,56 @@ def _render_related_price_candidates(
         )
 
 
+def render_model_price_research_summary(
+    discovery: G2BUnmappedDiscoveryResult | None,
+    *,
+    quote_unit_price: Decimal | None = None,
+) -> None:
+    """Render unverified same-model-labeled shopping evidence separately from direct evidence."""
+
+    if discovery is None or discovery.status == "failure":
+        return
+    _render_model_price_summary(discovery, quote_unit_price=quote_unit_price)
+
+
+def render_market_alternative_candidates(
+    discovery: G2BUnmappedDiscoveryResult | None,
+    *,
+    query: ProductQuery,
+) -> None:
+    """Render official-class and unverified related candidates without price-band promotion."""
+
+    if discovery is None or discovery.status == "failure":
+        return
+    _render_related_price_candidates(query, discovery)
+
+
 def render_market_reference_summary(
     discovery: G2BUnmappedDiscoveryResult | None,
     *,
     query: ProductQuery,
     quote_unit_price: Decimal | None = None,
+    include_model_price_summary: bool = True,
+    include_related_candidates: bool = True,
 ) -> None:
+    """Render basis plus optional shopping price/candidate sections.
+
+    The basis is shown even when Shopping Research is unavailable so the user can always see which
+    canonical/research name drives the item review. Quote UIs can split the optional sections to
+    preserve the required evidence ordering around verified direct prices.
+    """
+
+    _render_research_basis(query, discovery)
     if discovery is None:
         return
     if discovery.status == "failure":
         st.warning("나라장터 쇼핑몰 Research API 조회가 실패했습니다. 이는 시장자료 0건과 다릅니다.")
         return
 
-    _render_research_basis(query, discovery)
-    summary = summarize_g2b_research(discovery)
-
-    if summary.has_prices:
-        st.markdown("**동일모델 표기 가격 후보 범위 · 미검증**")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("동일모델 가격후보", f"{summary.model_candidate_count}건")
-        c2.metric("하단", f"{summary.low:,.0f}원" if summary.low is not None else "-")
-        c3.metric("중앙값", f"{summary.median:,.0f}원" if summary.median is not None else "-")
-        c4.metric("상단", f"{summary.high:,.0f}원" if summary.high is not None else "-")
-        st.caption(
-            "모델 문자열이 표기된 Research 후보만 집계합니다. 최종 동일제품 직접가격 범위는 엄격한 "
-            "제품 식별·비교조건 검증을 통과한 Evidence로 별도 산정합니다."
-        )
-
-        delta = quote_delta_from_market_median(quote_unit_price, summary)
-        if delta is not None:
-            direction = "높음" if delta > 0 else "낮음" if delta < 0 else "동일"
-            st.info(
-                f"현재 견적은 동일모델 표기 Research 중앙값 대비 **{abs(delta):.1f}% {direction}**입니다. "
-                "이는 미검증 Research 비교이며 최종 적정성 판정은 아닙니다."
-            )
-    elif discovery.candidates:
-        st.info(
-            "동일모델로 집계할 수 있는 가격 후보는 0건입니다. 아래 대체품·관련품목 후보는 개별 "
-            "참고로만 표시합니다."
-        )
-    else:
-        st.info("쇼핑몰 Research는 정상 실행됐지만 현재 조사 기준·기간에서 유의미한 가격 후보가 0건입니다.")
-
-    _render_related_price_candidates(query, discovery)
+    if include_model_price_summary:
+        _render_model_price_summary(discovery, quote_unit_price=quote_unit_price)
+    if include_related_candidates:
+        _render_related_price_candidates(query, discovery)
 
 
 def render_procurement_research(bundle: MarketResearchBundle | None) -> None:
