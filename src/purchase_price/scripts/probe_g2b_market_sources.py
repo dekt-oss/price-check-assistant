@@ -38,14 +38,15 @@ def build_report(
     max_retries: int,
 ) -> dict[str, Any]:
     settings = get_settings()
-    key = (settings.resolved_g2b_service_key or "").strip()
+    key = (settings.resolved_g2b_research_service_key or "").strip()
     if not key:
         return {
             "validation_status": "not_configured",
             "keyword": keyword,
             "lookback_days": lookback_days,
+            "key_source": settings.g2b_research_key_source,
             "sources": [],
-            "message": "G2B service key is not configured.",
+            "message": "G2B research service key is not configured.",
         }
 
     bundle = research_g2b_market(
@@ -81,6 +82,7 @@ def build_report(
         "validation_status": validation_status,
         "keyword": keyword,
         "lookback_days": lookback_days,
+        "key_source": settings.g2b_research_key_source,
         "query_terms": list(bundle.query_terms),
         "research_record_count": len(bundle.records),
         "bid_notice_hit": bool(bid.records),
