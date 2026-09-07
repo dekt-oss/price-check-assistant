@@ -11,6 +11,9 @@ class ProductQuery:
     manufacturer: str = ""
     model_name: str = ""
     specification: str = ""
+    # Research-only aliases/category hints. These expand candidate discovery but are never product
+    # identity evidence and must not affect MatchGrade or direct-price promotion by themselves.
+    research_hints: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
