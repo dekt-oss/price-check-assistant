@@ -1,0 +1,87 @@
+name: ExoAtlet Procurement Research UAT
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g2b-exoatlet-uat.yml"
+      - "src/purchase_price/scripts/probe_g2b_market_sources.py"
+      - "src/purchase_price/services/market_research.py"
+      - "src/purchase_price/services/g2b_market_sources.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - id: exact
+            keyword: "엑소아틀레트 - II"
+          - id: official_phrase
+            keyword: "로봇보조 정형용 운동장치"
+          - id: gait_rehab
+            keyword: "보행재활로봇"
+          - id: rehab_robot
+            keyword: "재활로봇"
+    env:
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Run bounded discovery probe
+        run: |
+          python -m purchase_price.scripts.probe_g2b_market_sources \
+            --keyword "${{ matrix.case.keyword }}" \
+            --lookback-days 90 \
+            --timeout-seconds 15 \
+            --max-retries 1 \
+            --output "artifacts/exoatlet-uat/${{ matrix.case.id }}.json"
+
+      - name: Enforce transport/auth health and print counts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          case = "${{ matrix.case.id }}"
+          path = Path(f"artifacts/exoatlet-uat/{case}.json")
+          report = json.loads(path.read_text(encoding="utf-8"))
+          print("case=", case)
+          print("keyword=", report.get("keyword"))
+          print("validation_status=", report.get("validation_status"))
+          print("key_source=", report.get("key_source"))
+          for source in report.get("sources", []):
+              print(
+                  f"source={source.get('source')} status={source.get('status')} "
+                  f"records={source.get('record_count')} requests={source.get('request_count')}"
+              )
+          if report.get("validation_status") != "pass":
+              raise SystemExit("ExoAtlet discovery UAT transport/auth gate failed")
+          PY
+
+      - name: Upload UAT evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exoatlet-uat-${{ matrix.case.id }}
+          path: artifacts/exoatlet-uat/${{ matrix.case.id }}.json
+          if-no-files-found: error
+          retention-days: 14
