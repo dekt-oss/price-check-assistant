@@ -111,6 +111,54 @@ def resolve_verified_g2b_mapping(
     return None
 
 
+def research_g2b_mapping_terms(
+    query: ProductQuery,
+    mappings: Iterable[G2BProductMapping] | None = None,
+) -> tuple[str, ...]:
+    """Return known official/detail-product names for Research recall only.
+
+    Unlike `resolve_verified_g2b_mapping`, this may use an unverified registry row when it already
+    carries a detail-product name. The returned strings are search aliases only: they never supply
+    a classification code, never establish identity and never promote MatchGrade.
+    """
+
+    rows = tuple(mappings) if mappings is not None else load_g2b_product_mappings()
+    model_key = normalize_text(query.model_name)
+    product_key = normalize_text(query.product_name)
+
+    selected: list[G2BProductMapping] = []
+    if model_key:
+        selected = [
+            row
+            for row in rows
+            if row.detail_product_name and normalize_text(row.model_name) == model_key
+        ]
+    if not selected and product_key:
+        candidates: list[tuple[int, G2BProductMapping]] = []
+        for row in rows:
+            if not row.detail_product_name:
+                continue
+            row_key = normalize_text(row.product_name)
+            if not row_key:
+                continue
+            if row_key == product_key or row_key in product_key or product_key in row_key:
+                candidates.append((len(row_key), row))
+        if candidates:
+            longest = max(length for length, _ in candidates)
+            selected = [row for length, row in candidates if length == longest]
+
+    output: list[str] = []
+    seen: set[str] = set()
+    for row in selected:
+        term = (row.detail_product_name or "").strip()
+        key = normalize_text(term)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        output.append(term)
+    return tuple(output)
+
+
 _RECORD_TITLE_FIELDS = (
     "prdctIdntNoNm",
     "물품식별명",
