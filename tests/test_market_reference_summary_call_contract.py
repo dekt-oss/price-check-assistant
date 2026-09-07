@@ -7,6 +7,21 @@ TARGET = "render_market_reference_summary"
 QUOTE_UI = SRC / "purchase_price" / "ui" / "quote_market_research.py"
 
 
+def _streamlit_entrypoints() -> list[Path]:
+    """Return the Streamlit page modules pytest never imports.
+
+    `pages/` is executed by Streamlit at runtime, not collected by pytest. A keyword-only
+    parameter added to a `ui/` renderer therefore breaks Production while every unit test stays
+    green, which is exactly how the quick-search research-basis crash shipped.
+    """
+
+    return sorted(ROOT.glob("pages/*.py")) + [ROOT / "Home.py"]
+
+
+def _call_sites() -> list[Path]:
+    return sorted(SRC.rglob("*.py")) + _streamlit_entrypoints()
+
+
 def _target_calls(path: Path) -> list[ast.Call]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     calls: list[ast.Call] = []
@@ -33,10 +48,10 @@ def test_all_market_reference_summary_calls_pass_query_keyword() -> None:
     """Keep quote/product context wired into the research-basis renderer at every call site."""
 
     found: list[tuple[Path, ast.Call]] = []
-    for path in SRC.rglob("*.py"):
+    for path in _call_sites():
         found.extend((path, call) for call in _target_calls(path))
 
-    assert found, f"No {TARGET} call sites found under {SRC}"
+    assert found, f"No {TARGET} call sites found under {SRC} or the Streamlit entrypoints"
 
     missing = [
         f"{path.relative_to(ROOT)}:{getattr(call, 'lineno', '?')}"

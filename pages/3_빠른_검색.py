@@ -123,6 +123,7 @@ with price_tab:
         if discovery is not None:
             render_market_reference_summary(
                 discovery,
+                query=query,
                 quote_unit_price=review_input.quote_unit_price,
             )
             if discovery.candidates:
