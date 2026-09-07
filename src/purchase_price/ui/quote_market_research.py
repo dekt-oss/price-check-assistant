@@ -18,6 +18,7 @@ from purchase_price.ui.market_research import (
     render_procurement_research,
     run_market_research,
 )
+from purchase_price.ui.quote_review_contract import build_manual_quote_item
 from purchase_price.ui.quote_review_state import QuoteReviewState
 from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.widgets import (
@@ -39,6 +40,72 @@ def _clear_research(state: QuoteReviewState) -> None:
     state.market_bundles.clear()
     state.comparability_context.clear()
     state.approvals.clear()
+
+
+def _invalidate_item_review(state: QuoteReviewState, index: int) -> None:
+    state.item_confirmed[index] = False
+    state.item_notes.pop(index, None)
+    state.condition_notes.pop(index, None)
+    state.identity.pop(index, None)
+    _clear_research(state)
+    state.step = 2
+
+
+def _render_inline_manual_item_form(state: QuoteReviewState) -> None:
+    st.warning(
+        "자동 추출 결과가 없습니다. 다른 검토 모드로 이동할 필요 없이 이 화면에서 핵심 품목정보를 입력하면 "
+        "저장 직후 시장조사를 시작합니다."
+    )
+    with st.form("quote_auto_manual_item"):
+        c1, c2 = st.columns(2)
+        product_name = c1.text_input("품명", placeholder="예: 극초단파치료시스템")
+        manufacturer = c2.text_input("제조사", placeholder="선택")
+        model_name = c1.text_input("모델명", placeholder="선택")
+        specification = c2.text_input("규격", placeholder="선택")
+        quantity = c1.text_input("수량", placeholder="예: 1")
+        unit = c2.text_input("단위", placeholder="예: SET")
+        unit_price = c1.text_input("견적 단가", placeholder="예: 66000000")
+        total_amount = c2.text_input("총액", placeholder="선택")
+        vat = c1.text_input("VAT", placeholder="포함/별도/면세 등 선택")
+        installation = c2.text_input("설치", placeholder="선택")
+        options = c1.text_input("옵션/구성", placeholder="선택")
+        warranty = c2.text_input("보증", placeholder="선택")
+        submitted = st.form_submit_button("품목 저장 후 시장조사", type="primary")
+
+    if not submitted:
+        return
+
+    try:
+        item = build_manual_quote_item(
+            product_name=product_name,
+            manufacturer=manufacturer,
+            model_name=model_name,
+            specification=specification,
+            quantity=parse_quote_decimal(quantity),
+            unit=unit,
+            unit_price=parse_quote_decimal(unit_price),
+            total_amount=parse_quote_decimal(total_amount),
+            vat_status=vat,
+            delivery_condition="",
+            installation_condition=installation,
+            option_condition=options,
+            warranty_condition=warranty,
+            maintenance_condition="",
+            other_conditions="",
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+
+    state.items = [item]
+    state.item_confirmed = {0: False}
+    state.item_notes = {0: "자동 추출 0건 — 통합 견적검토 화면에서 담당자 수동 입력"}
+    state.condition_notes = {0: {}}
+    state.identity.clear()
+    _clear_research(state)
+    state.step = 2
+    st.success("품목을 저장했습니다. 시장가격 조사를 시작합니다.")
+    st.rerun()
 
 
 def _render_compact_item_editor(state: QuoteReviewState) -> None:
@@ -83,8 +150,8 @@ def _render_compact_item_editor(state: QuoteReviewState) -> None:
                 unit_price=parse_quote_decimal(unit_price),
                 quantity=parse_quote_decimal(quantity),
             )
-            _clear_research(state)
-            st.success("품목을 수정했습니다. 시장가격을 다시 조사합니다.")
+            _invalidate_item_review(state, int(index))
+            st.success("품목을 수정했습니다. 기존 식별·비교상태를 초기화하고 시장가격을 다시 조사합니다.")
             st.rerun()
 
 
@@ -118,6 +185,32 @@ def _ensure_market_research(state: QuoteReviewState) -> None:
         state.discoveries[index] = discovery
         state.market_bundles[index] = market_bundle
     progress.progress(1.0, text="시장가격 자동 조사를 완료했습니다.")
+
+
+def _render_overview(state: QuoteReviewState) -> None:
+    direct_evidence_count = sum(len(run.results) for run in state.search_runs.values())
+    procurement_record_count = sum(
+        len(bundle.records) for bundle in state.market_bundles.values() if bundle is not None
+    )
+    discovery_candidate_count = sum(
+        len(discovery.candidates)
+        for discovery in state.discoveries.values()
+        if discovery is not None
+    )
+    unconfirmed_count = sum(
+        not state.item_confirmed.get(index, False) for index in range(len(state.items))
+    )
+
+    st.subheader("검토 요약")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("견적 품목", f"{len(state.items)}건")
+    c2.metric("검증 직접근거", f"{direct_evidence_count}건")
+    c3.metric("조달 Research", f"{procurement_record_count + discovery_candidate_count}건")
+    c4.metric("원문 확인 필요", f"{unconfirmed_count}건")
+    st.caption(
+        "Research는 동일제품 자료가 부족해도 넓게 계속 수행합니다. 조달 Research·쇼핑몰 후보는 "
+        "검증된 동일제품 직접가격과 분리되며 최종 판정에는 자동 투입되지 않습니다."
+    )
 
 
 def _render_item_result(state: QuoteReviewState, index: int) -> None:
@@ -193,7 +286,7 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
 
 def render_quote_market_research(state: QuoteReviewState) -> None:
     st.info(
-        "견적서를 업로드하면 품목을 추출한 뒤 제품 식별 확인을 기다리지 않고 바로 시장조사를 시작합니다. "
+        "견적서를 업로드하면 품목을 추출하고 제품 식별 확인을 기다리지 않은 채 바로 시장조사를 시작합니다. "
         "입찰·낙찰·계약 금액은 Research 참고자료이며 동일제품 직접단가 판정과 분리됩니다."
     )
 
@@ -207,15 +300,18 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
         state.lookback_days = G2B_DEFAULT_LOOKBACK_DAYS
 
     if state.extraction is None:
-        st.caption("PDF · xlsx · xls 견적서를 업로드하면 자동 시장조사가 시작됩니다.")
+        st.caption("PDF · xlsx · xls 견적서를 업로드하면 품목 추출과 시장조사가 한 번에 시작됩니다.")
         return
 
-    top1, top2, top3 = st.columns([1.3, 1, 1])
+    top1, top2, top3 = st.columns([1.3, 2.2, 1])
     top1.metric("추출 품목", f"{len(state.items)}건")
     top2.metric("파일", state.file_name or "-")
     if top3.button("새 견적서로 초기화"):
         st.session_state.pop("quote_review_state", None)
         st.rerun()
+
+    if state.diagnostics is not None:
+        st.caption(f"추출 경로: {state.diagnostics.strategy_label}")
 
     if state.extraction.warnings:
         with st.expander(f"추출 경고 {len(state.extraction.warnings)}건", expanded=False):
@@ -223,9 +319,10 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
                 st.warning(warning)
 
     if not state.items:
-        st.warning("자동 추출 품목이 없습니다. 정밀 비교검토에서 수동 품목을 입력할 수 있습니다.")
+        _render_inline_manual_item_form(state)
         return
 
+    st.markdown("**인식된 견적 품목**")
     rows = [
         {
             "품목": index + 1,
@@ -263,6 +360,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
             st.rerun()
 
     _ensure_market_research(state)
+    _render_overview(state)
 
     st.subheader("품목별 시장조사")
     for index in range(len(state.items)):
