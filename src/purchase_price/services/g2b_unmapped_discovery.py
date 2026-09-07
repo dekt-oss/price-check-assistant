@@ -92,6 +92,8 @@ def build_g2b_research_terms(
 
     `curated_terms=None` means use the registry defaults. Passing an explicit tuple, including an
     empty tuple, overrides the registry. This keeps deterministic bounded probes/tests possible.
+    Spaced and compact Korean request variants are intentionally kept separate because data.go.kr
+    endpoints do not consistently tokenize them the same way.
     """
 
     output: list[str] = list(build_g2b_discovery_terms(query.product_name))
@@ -110,15 +112,13 @@ def build_g2b_research_terms(
 
     output.extend(query.research_hints)
     output.extend(research_g2b_mapping_terms(query))
-    output.extend(
-        research_terms_for_query(query) if curated_terms is None else curated_terms
-    )
+    output.extend(research_terms_for_query(query) if curated_terms is None else curated_terms)
 
     deduped: list[str] = []
     seen: set[str] = set()
     for term in output:
         request_term = re.sub(r"\s+", " ", term).strip()
-        key = normalize_text(request_term)
+        key = request_term.casefold()
         if not key or key in seen:
             continue
         seen.add(key)
