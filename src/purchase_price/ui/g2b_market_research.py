@@ -81,20 +81,34 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             column.metric(label, f"{len(source.records)}건 · 부분")
         elif source.status == ResearchSourceStatus.NOT_CONFIGURED:
             column.metric(label, "미설정")
+        elif source.status == ResearchSourceStatus.NOT_AUTHORIZED:
+            column.metric(label, "인증 미승인")
         else:
             column.metric(label, "조회 실패")
 
     failures = [
         source
         for source in bundle.sources
-        if source.status in {ResearchSourceStatus.FAILURE, ResearchSourceStatus.PARTIAL}
+        if source.status
+        in {
+            ResearchSourceStatus.FAILURE,
+            ResearchSourceStatus.PARTIAL,
+            ResearchSourceStatus.NOT_AUTHORIZED,
+        }
     ]
     for source in failures:
         label = _SOURCE_LABELS[source.source]
-        st.warning(
-            f"{label}: API 조회 실패/부분완료입니다. 이것은 검색 결과 0건이 아닙니다. "
-            f"{source.error_type}: {source.error_message}"
-        )
+        if source.status == ResearchSourceStatus.NOT_AUTHORIZED:
+            st.error(
+                f"{label}: 현재 선택된 Research API 인증/활용신청으로 호출할 수 없습니다. "
+                "검색 결과 0건이 아니라 서비스 권한 문제입니다. "
+                f"{source.error_type}: {source.error_message}"
+            )
+        else:
+            st.warning(
+                f"{label}: API 조회 실패/부분완료입니다. 이것은 검색 결과 0건이 아닙니다. "
+                f"{source.error_type}: {source.error_message}"
+            )
 
     records = sorted(
         bundle.records,

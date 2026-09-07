@@ -8,7 +8,10 @@ from typing import Any
 
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
-from purchase_price.services.g2b_market_models import G2BResearchRecord
+from purchase_price.services.g2b_market_models import (
+    G2BResearchRecord,
+    ResearchSourceStatus,
+)
 from purchase_price.services.market_research import research_g2b_market
 
 
@@ -38,14 +41,16 @@ def build_report(
     max_retries: int,
 ) -> dict[str, Any]:
     settings = get_settings()
-    key = (settings.resolved_g2b_service_key or "").strip()
+    key = (settings.resolved_g2b_research_service_key or "").strip()
+    key_source = settings.g2b_research_key_source
     if not key:
         return {
             "validation_status": "not_configured",
             "keyword": keyword,
             "lookback_days": lookback_days,
+            "key_source": key_source,
             "sources": [],
-            "message": "G2B service key is not configured.",
+            "message": "G2B research service key is not configured.",
         }
 
     bundle = research_g2b_market(
@@ -72,18 +77,22 @@ def build_report(
             }
         )
 
-    bid = next(source for source in bundle.sources if source.source.value == "bid_notice")
-    validation_status = "pass" if bid.records else "incomplete"
-    if bid.status.value == "failure":
+    statuses = {source.status for source in bundle.sources}
+    normal_statuses = {ResearchSourceStatus.SUCCESS, ResearchSourceStatus.SUCCESS_0}
+    if statuses and statuses.issubset(normal_statuses):
+        validation_status = "pass"
+    elif ResearchSourceStatus.NOT_AUTHORIZED in statuses:
+        validation_status = "not_authorized"
+    else:
         validation_status = "environment_or_access_failure"
 
     return {
         "validation_status": validation_status,
         "keyword": keyword,
         "lookback_days": lookback_days,
+        "key_source": key_source,
         "query_terms": list(bundle.query_terms),
         "research_record_count": len(bundle.records),
-        "bid_notice_hit": bool(bid.records),
         "sources": source_rows,
         "safety_contract": {
             "research_only": True,

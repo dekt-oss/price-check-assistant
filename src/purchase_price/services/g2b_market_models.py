@@ -38,6 +38,7 @@ class ResearchSourceStatus(StrEnum):
     PARTIAL = "partial"
     FAILURE = "failure"
     NOT_CONFIGURED = "not_configured"
+    NOT_AUTHORIZED = "not_authorized"
 
 
 @dataclass(frozen=True)
@@ -99,4 +100,8 @@ class MarketResearchBundle:
 
     @property
     def failures(self) -> tuple[ResearchSourceResult, ...]:
-        return tuple(source for source in self.sources if source.status == ResearchSourceStatus.FAILURE)
+        return tuple(
+            source
+            for source in self.sources
+            if source.status in {ResearchSourceStatus.FAILURE, ResearchSourceStatus.NOT_AUTHORIZED}
+        )
