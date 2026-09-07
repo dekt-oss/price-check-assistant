@@ -154,6 +154,33 @@ class FakeResearchClient:
         )
 
 
+class NoisyPrespecClient:
+    def search(self, *, keyword: str, begin: date, end: date, max_pages_per_window: int = 1):
+        del begin, end, max_pages_per_window
+        return (
+            (
+                G2BResearchRecord(
+                    source_type=G2BResearchSource.PRESPEC,
+                    source_record_id=f"relevant:{keyword}",
+                    title=(
+                        "로봇보조정형용운동장치 구매"
+                        if "로봇보조" in keyword
+                        else f"{keyword} 구매"
+                    ),
+                    search_term=keyword,
+                ),
+                G2BResearchRecord(
+                    source_type=G2BResearchSource.PRESPEC,
+                    source_record_id=f"noise:{keyword}",
+                    title="아스팔트 콘크리트 구매",
+                    product_name="도로포장재",
+                    search_term=keyword,
+                ),
+            ),
+            1,
+        )
+
+
 def test_market_research_runs_for_plain_product_keyword_without_model_or_mapping() -> None:
     bid = FakeResearchClient(G2BResearchSource.BID_NOTICE)
     award = FakeResearchClient(G2BResearchSource.AWARD)
@@ -175,6 +202,49 @@ def test_market_research_runs_for_plain_product_keyword_without_model_or_mapping
     assert prespec.terms == list(expected_terms)
     assert len(result.records) == 15
     assert all(not isinstance(record, CollectedPrice) for record in result.records)
+
+
+def test_prespec_relevance_filter_drops_unrelated_bulk_rows() -> None:
+    bid = FakeResearchClient(G2BResearchSource.BID_NOTICE)
+    award = FakeResearchClient(G2BResearchSource.AWARD)
+    prespec = NoisyPrespecClient()
+
+    result = research_g2b_market(
+        ProductQuery(product_name="재활로봇"),
+        service_key=None,
+        today=date(2026, 9, 6),
+        bid_client=bid,  # type: ignore[arg-type]
+        award_client=award,  # type: ignore[arg-type]
+        prespec_client=prespec,  # type: ignore[arg-type]
+    )
+
+    prespec_result = next(
+        source for source in result.sources if source.source == G2BResearchSource.PRESPEC
+    )
+    assert prespec_result.status == ResearchSourceStatus.SUCCESS
+    assert prespec_result.records
+    assert all(record.title != "아스팔트 콘크리트 구매" for record in prespec_result.records)
+
+
+def test_prespec_relevance_filter_ignores_spacing_for_long_category_term() -> None:
+    bid = FakeResearchClient(G2BResearchSource.BID_NOTICE)
+    award = FakeResearchClient(G2BResearchSource.AWARD)
+    prespec = NoisyPrespecClient()
+
+    result = research_g2b_market(
+        ProductQuery(product_name="로봇보조 정형용 운동장치"),
+        service_key=None,
+        today=date(2026, 9, 6),
+        max_terms=1,
+        bid_client=bid,  # type: ignore[arg-type]
+        award_client=award,  # type: ignore[arg-type]
+        prespec_client=prespec,  # type: ignore[arg-type]
+    )
+
+    prespec_result = next(
+        source for source in result.sources if source.source == G2BResearchSource.PRESPEC
+    )
+    assert [record.title for record in prespec_result.records] == ["로봇보조정형용운동장치 구매"]
 
 
 def test_source_failure_is_not_reported_as_zero_results() -> None:
