@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 8
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         case:
           - id: exact
