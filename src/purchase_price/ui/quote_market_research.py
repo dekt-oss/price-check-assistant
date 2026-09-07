@@ -235,7 +235,11 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
         c3.metric("단위", item.unit or "미확인")
 
         render_procurement_research(market_bundle)
-        render_market_reference_summary(discovery, quote_unit_price=item.unit_price)
+        render_market_reference_summary(
+            discovery,
+            query=query,
+            quote_unit_price=item.unit_price,
+        )
 
         if run is not None and run.results:
             assessment = assess_prices(run.results, item.unit_price)
