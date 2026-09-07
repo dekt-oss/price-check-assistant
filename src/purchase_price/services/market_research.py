@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from datetime import date, timedelta
 
@@ -17,6 +18,7 @@ from purchase_price.services.g2b_market_sources import (
     G2BPrespecResearchClient,
 )
 from purchase_price.services.g2b_research_terms import research_terms_for_query
+from purchase_price.services.matching import normalize_text
 
 
 def build_market_research_terms(query: ProductQuery, *, max_terms: int = 6) -> tuple[str, ...]:
@@ -64,6 +66,44 @@ def is_g2b_research_authorization_error(exc: Exception) -> bool:
     return "http 403" in message or "code=30" in message
 
 
+def _meaningful_term_tokens(term: str) -> tuple[str, ...]:
+    """Return tokens useful for a conservative local relevance check.
+
+    PPS pre-specification PPSSrch has been observed returning unfiltered bulk rows even when a
+    keyword parameter is supplied. These tokens are therefore used only to reject obvious noise
+    after retrieval; they never establish product identity or comparability.
+    """
+
+    return tuple(
+        token.casefold()
+        for token in re.findall(r"[0-9A-Za-z가-힣]+", term)
+        if len(normalize_text(token)) >= 2
+    )
+
+
+def _prespec_record_matches_term(record: G2BResearchRecord, term: str) -> bool:
+    """Fail closed on unrelated pre-spec rows when the upstream keyword filter is ineffective."""
+
+    term_key = normalize_text(term)
+    if not term_key:
+        return False
+
+    searchable = " ".join(
+        value for value in (record.title, record.product_name, record.model_name) if value
+    )
+    searchable_key = normalize_text(searchable)
+    if not searchable_key:
+        return False
+
+    if term_key in searchable_key:
+        return True
+
+    tokens = _meaningful_term_tokens(term)
+    if len(tokens) < 2:
+        return False
+    return all(normalize_text(token) in searchable_key for token in tokens)
+
+
 def _run_source(
     *,
     source: G2BResearchSource,
@@ -95,6 +135,8 @@ def _run_source(
             continue
         request_count += requests
         for record in found:
+            if source == G2BResearchSource.PRESPEC and not _prespec_record_matches_term(record, term):
+                continue
             if record.source_record_id in seen:
                 continue
             seen.add(record.source_record_id)
