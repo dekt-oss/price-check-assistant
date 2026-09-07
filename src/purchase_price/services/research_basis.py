@@ -56,3 +56,22 @@ def resolve_research_basis(query: ProductQuery) -> ResearchBasis:
         status=ResearchBasisStatus.QUOTE_LABEL_FALLBACK,
         rationale="별도 분류 근거가 없어 견적 표기를 그대로 사용",
     )
+
+
+def research_terms_with_basis(query: ProductQuery) -> tuple[str, ...]:
+    """Return Research-only aliases plus a verified official basis when one exists."""
+
+    terms = list(research_terms_for_query(query))
+    basis = resolve_research_basis(query)
+    if basis.is_verified_official and basis.name:
+        terms.append(basis.name)
+
+    output: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        normalized = " ".join(term.split()).strip()
+        key = normalized.casefold()
+        if normalized and key not in seen:
+            seen.add(key)
+            output.append(normalized)
+    return tuple(output)
