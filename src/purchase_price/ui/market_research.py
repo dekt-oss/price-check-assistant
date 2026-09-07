@@ -11,6 +11,7 @@ from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_bid_item_enrichment import enrich_market_bundle_with_bid_items
 from purchase_price.services.g2b_contract_enrichment import enrich_market_bundle_with_contracts
 from purchase_price.services.g2b_market_models import G2BResearchSource, MarketResearchBundle
+from purchase_price.services.g2b_research_terms import research_terms_for_query
 from purchase_price.services.g2b_unmapped_discovery import (
     G2BUnmappedDiscoveryResult,
     discover_unmapped_g2b_candidates,
@@ -76,6 +77,24 @@ def _procurement_item_research_terms(
     return tuple(output)
 
 
+def _shopping_expansion_terms(
+    bundle: MarketResearchBundle | None,
+    query: ProductQuery,
+) -> tuple[str, ...]:
+    """Combine curated aliases with official procurement item names, preserving order."""
+
+    raw = (*research_terms_for_query(query), *_procurement_item_research_terms(bundle, query))
+    output: list[str] = []
+    seen: set[str] = set()
+    for term in raw:
+        key = normalize_text(term)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        output.append(term)
+    return tuple(output)
+
+
 def run_market_research(
     query: ProductQuery,
     *,
@@ -89,6 +108,7 @@ def run_market_research(
     G2B shopping/direct-price calls and bid/award/pre-spec research calls may use different
     data.go.kr subscription keys. Procurement Research and alternatives remain outside `search_all`
     and `assess_prices` until the existing strict identity/comparability gates approve evidence.
+    None of those records are passed to `search_all` or `assess_prices`.
     """
 
     settings = get_settings()
@@ -126,7 +146,6 @@ def run_market_research(
         )
 
     if should_run_broad_research(query, g2b_enabled=bool(shopping_key)):
-        discovered_terms = _procurement_item_research_terms(market_bundle, query)
         discovery = discover_unmapped_g2b_candidates(
             query,
             service_key=shopping_key,
@@ -136,7 +155,7 @@ def run_market_research(
             max_retries=settings.g2b_max_retries,
             pages_per_term_window=research_pages_per_term,
             request_budget=research_request_budget,
-            curated_terms=discovered_terms,
+            curated_terms=_shopping_expansion_terms(market_bundle, query),
         )
     return run, discovery, market_bundle
 
