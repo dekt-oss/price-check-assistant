@@ -9,7 +9,11 @@ from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_bid_item_enrichment import enrich_market_bundle_with_bid_items
+from purchase_price.services.g2b_catalog import G2B_CATALOG_BASE_URL
+from purchase_price.services.g2b_catalog_enrichment import enrich_discovery_with_catalog
 from purchase_price.services.g2b_contract_enrichment import enrich_market_bundle_with_contracts
+from purchase_price.services.g2b_lifecycle import G2B_LIFECYCLE_BASE_URL
+from purchase_price.services.g2b_lifecycle_enrichment import enrich_market_bundle_with_lifecycle
 from purchase_price.services.g2b_market_models import MarketResearchBundle
 from purchase_price.services.g2b_unmapped_discovery import (
     G2BDiscoveryCandidate,
@@ -43,13 +47,15 @@ def run_market_research(
     """Run direct-price, shopping discovery and procurement Research independently.
 
     Shopping direct-price/discovery can use a credential approved only for ShoppingMall API while
-    bid/award/pre-spec/item/contract Research can use a separate service subscription.
+    bid/award/pre-spec/item/contract/lifecycle Research can use separate service subscriptions.
     None of those records are passed to `search_all` or `assess_prices`.
     """
 
     settings = get_settings()
     shopping_key = (settings.resolved_g2b_shopping_service_key or "").strip()
     research_key = (settings.resolved_g2b_research_service_key or "").strip()
+    catalog_key = (settings.resolved_g2b_catalog_service_key or "").strip()
+    lifecycle_key = (settings.resolved_g2b_lifecycle_service_key or "").strip()
 
     run = search_all(query, build_collectors(g2b_lookback_days=lookback_days))
 
@@ -80,6 +86,16 @@ def run_market_research(
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=min(settings.g2b_max_retries, 2),
         )
+        # Integrated lifecycle is identifier-based enrichment, not another keyword search. Keep it
+        # tightly bounded because every call follows one already observed bid notice.
+        market_bundle = enrich_market_bundle_with_lifecycle(
+            market_bundle,
+            service_key=lifecycle_key,
+            max_bid_notices=min(procurement_detail_limit, 2),
+            timeout_seconds=settings.g2b_request_timeout_seconds,
+            max_retries=min(settings.g2b_max_retries, 2),
+            base_url=settings.g2b_lifecycle_base_url or G2B_LIFECYCLE_BASE_URL,
+        )
 
     discovery = None
     if should_run_broad_research(query, g2b_enabled=bool(shopping_key)):
@@ -94,6 +110,17 @@ def run_market_research(
             request_budget=research_request_budget,
             curated_terms=research_terms_with_basis(query),
         )
+        if catalog_key and discovery.candidates:
+            # Catalog lookup is supplementary exact-ID evidence. Keep the user-facing latency
+            # bounded; a catalog timeout annotates the candidate but never erases shopping prices.
+            discovery = enrich_discovery_with_catalog(
+                discovery,
+                service_key=catalog_key,
+                max_candidates=3,
+                timeout_seconds=min(settings.g2b_request_timeout_seconds, 10.0),
+                max_retries=1,
+                base_url=settings.g2b_catalog_base_url or G2B_CATALOG_BASE_URL,
+            )
     return run, discovery, market_bundle
 
 
@@ -130,10 +157,12 @@ def _candidate_rows(candidates: list[G2BDiscoveryCandidate]) -> list[dict[str, s
     return [
         {
             "후보": candidate.title,
+            "품목식별번호": candidate.product_id or "-",
             "분류": candidate.classification_name or "-",
             "분류번호": candidate.classification_code or "-",
             "가격": f"{candidate.price:,.0f}원",
             "관계": candidate.relevance,
+            "공식 품목속성": candidate.catalog_summary or "-",
             "근거": candidate.match_reason or "Research 후보",
         }
         for candidate in candidates[:10]
@@ -166,8 +195,9 @@ def _render_model_price_summary(
                 hide_index=True,
             )
         st.caption(
-            "모델 문자열이 표기된 Research 후보만 집계합니다. 최종 동일제품 직접가격 범위는 엄격한 "
-            "제품 식별·비교조건 검증을 통과한 Evidence로 별도 산정합니다."
+            "모델 문자열이 표기된 Research 후보만 집계합니다. 공식 품목속성은 해당 나라장터 "
+            "품목식별번호의 규격 검증 보조근거이며, 견적 제품과 동일제품임을 자동 확정하지 않습니다. "
+            "최종 동일제품 직접가격 범위는 엄격한 제품 식별·비교조건 검증을 통과한 Evidence로 별도 산정합니다."
         )
 
         delta = quote_delta_from_market_median(quote_unit_price, summary)
@@ -218,6 +248,7 @@ def _render_related_price_candidates(
         )
         st.caption(
             "견적 품목과 동일한 검증 세부품명번호에 속한 타 제품의 실제 납품가격 후보입니다. "
+            "나라장터 품목식별번호의 공식 속성이 조회된 후보는 규격 비교 보조근거를 함께 표시합니다. "
             "동일 분류가 곧 규격·성능 동등을 의미하지 않으므로 개별 대체품 후보로만 확인하며, "
             "동일모델 가격 범위에는 합산하지 않습니다."
         )

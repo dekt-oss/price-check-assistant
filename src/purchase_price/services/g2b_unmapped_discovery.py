@@ -29,6 +29,9 @@ class G2BDiscoveryCandidate:
     relevance: str = "분류 후보"
     score: int = 0
     match_reason: str = ""
+    product_id: str = ""
+    catalog_status: str = ""
+    catalog_summary: str = ""
 
 
 @dataclass(frozen=True)
@@ -191,6 +194,7 @@ def _candidate_from_record(
         relevance=relevance,
         score=score,
         match_reason=" · ".join(reasons),
+        product_id=str(record.get("prdctIdntNo") or "").strip(),
     )
 
 
