@@ -34,22 +34,24 @@ def run_market_research(
     research_request_budget: int = 18,
     procurement_detail_limit: int = 4,
 ) -> tuple[SearchRun, G2BUnmappedDiscoveryResult | None, MarketResearchBundle | None]:
-    """Run strict direct-price collection and broad procurement research independently.
+    """Run direct-price, shopping discovery and procurement Research independently.
 
-    Broad G2B research is mapping-independent and may include bid/award/pre-spec/item/contract
-    records. None of those records are passed to `search_all` or `assess_prices`.
+    Shopping direct-price/discovery can use a credential approved only for ShoppingMall API while
+    bid/award/pre-spec/item/contract Research can use a separate service subscription. Research
+    records remain outside `search_all` and `assess_prices` regardless of which key is configured.
     """
 
     settings = get_settings()
-    g2b_key = (settings.resolved_g2b_service_key or "").strip()
+    shopping_key = (settings.resolved_g2b_shopping_service_key or "").strip()
+    research_key = (settings.resolved_g2b_research_service_key or "").strip()
+
     run = search_all(query, build_collectors(g2b_lookback_days=lookback_days))
 
-    discovery = None
     market_bundle = None
-    if should_run_broad_research(query, g2b_enabled=bool(g2b_key)):
+    if should_run_broad_research(query, g2b_enabled=bool(research_key)):
         market_bundle = research_g2b_market(
             query,
-            service_key=g2b_key,
+            service_key=research_key,
             lookback_days=min(lookback_days, 90),
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=min(settings.g2b_max_retries, 2),
@@ -58,7 +60,7 @@ def run_market_research(
         )
         market_bundle = enrich_market_bundle_with_bid_items(
             market_bundle,
-            service_key=g2b_key,
+            service_key=research_key,
             max_bid_notices=procurement_detail_limit,
             max_pages_per_bid=1,
             timeout_seconds=settings.g2b_request_timeout_seconds,
@@ -66,15 +68,18 @@ def run_market_research(
         )
         market_bundle = enrich_market_bundle_with_contracts(
             market_bundle,
-            service_key=g2b_key,
+            service_key=research_key,
             max_bid_notices=procurement_detail_limit,
             max_pages_per_bid=1,
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=min(settings.g2b_max_retries, 2),
         )
+
+    discovery = None
+    if should_run_broad_research(query, g2b_enabled=bool(shopping_key)):
         discovery = discover_unmapped_g2b_candidates(
             query,
-            service_key=g2b_key,
+            service_key=shopping_key,
             lookback_days=lookback_days,
             base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
             timeout_seconds=settings.g2b_request_timeout_seconds,
