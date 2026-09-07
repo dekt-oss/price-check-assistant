@@ -13,6 +13,7 @@ from purchase_price.collectors.g2b_shopping import (
     parse_official_report_record,
 )
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_product_mapping import research_g2b_mapping_terms
 from purchase_price.services.g2b_research_terms import research_terms_for_query
 from purchase_price.services.matching import normalize_text
 
@@ -83,10 +84,10 @@ def build_g2b_research_terms(
 ) -> tuple[str, ...]:
     """Build recall-oriented detail-product search terms without asserting a mapping.
 
-    The server-side operation accepts a detail-product-name substring, not a model-name search.
-    Therefore model/manufacturer strings are used for local ranking, while request terms stay
-    product/classification-oriented. Curated terms are research-only aliases and never become a
-    verified mapping through this function.
+    Shopping procurement history is classification-oriented. We therefore search the quote label,
+    research-only filename/category hints, known official G2B detail names and curated synonyms in
+    parallel. Model/manufacturer strings remain local ranking signals unless an official mapping or
+    category hint supplies a classification-oriented request term.
     """
 
     output: list[str] = list(build_g2b_discovery_terms(query.product_name))
@@ -103,18 +104,20 @@ def build_g2b_research_terms(
         if parenthetical and re.search(r"[가-힣]", parenthetical):
             output.append(parenthetical)
 
+    output.extend(query.research_hints)
+    output.extend(research_g2b_mapping_terms(query))
     output.extend(curated_terms if curated_terms is not None else research_terms_for_query(query))
 
     deduped: list[str] = []
     seen: set[str] = set()
     for term in output:
         request_term = re.sub(r"\s+", " ", term).strip()
-        key = request_term.casefold()
+        key = normalize_text(request_term)
         if not key or key in seen:
             continue
         seen.add(key)
         deduped.append(request_term)
-    return tuple(deduped[:8])
+    return tuple(deduped[:12])
 
 
 def _normalized_identity_tokens(value: str) -> tuple[str, ...]:
@@ -134,6 +137,18 @@ def _model_matches_title(model_name: str, title: str) -> bool:
     if len(model_key) <= 3:
         return model_key in _normalized_identity_tokens(title)
     return model_key in normalize_text(title)
+
+
+def _terms_semantically_overlap(left: str, right: str) -> bool:
+    left_key = normalize_text(left)
+    right_key = normalize_text(right)
+    if not left_key or not right_key:
+        return False
+    if left_key in right_key or right_key in left_key:
+        return True
+    left_tokens = {normalize_text(token) for token in re.findall(r"[가-힣]{2,}", left)}
+    right_tokens = {normalize_text(token) for token in re.findall(r"[가-힣]{2,}", right)}
+    return bool(left_tokens and right_tokens and left_tokens.intersection(right_tokens))
 
 
 def _candidate_from_record(
@@ -159,6 +174,9 @@ def _candidate_from_record(
     classification_exact = bool(classification_name) and (
         normalize_text(classification_name) == normalize_text(search_term)
     )
+    classification_related = bool(classification_name) and _terms_semantically_overlap(
+        classification_name, search_term
+    )
 
     if model_hit:
         relevance = "모델 표기 후보"
@@ -171,6 +189,10 @@ def _candidate_from_record(
         relevance = "제조사 표기 후보"
         score = 70
         reasons = ["제조사 표기 일치", "모델 미확인"]
+    elif classification_exact or classification_related:
+        relevance = "동일분류·대체 후보"
+        score = 45 if classification_exact else 40
+        reasons = ["공식 세부품명/분류 관련 후보", "모델·제조사 미확인"]
     else:
         relevance = "분류 후보"
         score = 30
@@ -222,13 +244,15 @@ def discover_unmapped_g2b_candidates(
     request_budget: int = 80,
     today: date | None = None,
     curated_terms: tuple[str, ...] | None = None,
+    max_dynamic_classification_terms: int = 4,
 ) -> G2BUnmappedDiscoveryResult:
-    """Search broadly for research candidates without promoting them to direct-price evidence.
+    """Search broadly for exact, category and same-class alternative candidates.
 
-    Query terms may be broad or curated. Every returned row remains a G2BDiscoveryCandidate and is
-    kept outside CollectedPrice. Model/manufacturer matches only affect research ranking.
-    Individual term/window failures are isolated so one weak research query does not erase useful
-    candidates from other terms. A partial result is explicitly labelled and never enters pricing.
+    Every returned row remains a Research candidate outside CollectedPrice. When a query produces
+    an official detail-product classification that is strongly related to the searched category or
+    to a model/manufacturer hit, that official classification is queued for one more bounded search
+    pass. This is how a specific quote can widen into same-class competing products without mixing
+    those alternatives into the exact-product price verdict.
     """
 
     if lookback_days < 1:
@@ -237,9 +261,11 @@ def discover_unmapped_g2b_candidates(
         raise ValueError("page bounds must be positive")
     if request_budget < 1:
         raise ValueError("request_budget must be positive")
+    if max_dynamic_classification_terms < 0:
+        raise ValueError("max_dynamic_classification_terms must not be negative")
 
-    terms = build_g2b_research_terms(query, curated_terms=curated_terms)
-    if not terms:
+    base_terms = build_g2b_research_terms(query, curated_terms=curated_terms)
+    if not base_terms:
         return G2BUnmappedDiscoveryResult(
             "success_0", (), 0, 0, (), request_budget=request_budget
         )
@@ -255,6 +281,12 @@ def discover_unmapped_g2b_candidates(
     start = end - timedelta(days=lookback_days - 1)
     windows = _year_bounded_windows(start, end)
 
+    term_queue = list(base_terms)
+    queued_term_keys = {normalize_text(term) for term in term_queue}
+    dynamic_term_count = 0
+    attempted_terms: list[str] = []
+    attempted_term_keys: set[str] = set()
+
     request_count = 0
     records_seen = 0
     successful_fetches = 0
@@ -268,9 +300,17 @@ def discover_unmapped_g2b_candidates(
     for window_begin, window_end in windows:
         if budget_exhausted:
             break
-        for term in terms:
+        term_index = 0
+        while term_index < len(term_queue):
             if budget_exhausted:
                 break
+            term = term_queue[term_index]
+            term_index += 1
+            term_key = normalize_text(term)
+            if term_key not in attempted_term_keys:
+                attempted_term_keys.add(term_key)
+                attempted_terms.append(term)
+
             fetched_for_query = 0
             query_failed = False
             query_complete = False
@@ -313,6 +353,24 @@ def discover_unmapped_g2b_candidates(
                     previous = candidates_by_key.get(key)
                     if previous is None or candidate.score > previous.score:
                         candidates_by_key[key] = candidate
+
+                    classification = candidate.classification_name.strip()
+                    classification_key = normalize_text(classification)
+                    can_expand = candidate.relevance in {
+                        "모델 표기 후보",
+                        "제조사 표기 후보",
+                        "동일분류·대체 후보",
+                    }
+                    if (
+                        classification
+                        and can_expand
+                        and dynamic_term_count < max_dynamic_classification_terms
+                        and classification_key not in queued_term_keys
+                    ):
+                        term_queue.append(classification)
+                        queued_term_keys.add(classification_key)
+                        dynamic_term_count += 1
+
                 if not page.items:
                     query_complete = True
                     break
@@ -352,7 +410,7 @@ def discover_unmapped_g2b_candidates(
     ordered_messages = tuple(sorted(error_messages))[:5]
     return G2BUnmappedDiscoveryResult(
         status,
-        terms,
+        tuple(attempted_terms),
         request_count,
         records_seen,
         tuple(candidates[:100]),
