@@ -19,6 +19,7 @@ from purchase_price.services.market_price_research import (
     quote_delta_from_market_median,
     should_run_broad_research,
     summarize_g2b_research,
+    summarize_g2b_research_bands,
 )
 from purchase_price.services.market_research import research_g2b_market
 from purchase_price.services.market_research_support import build_web_supplier_search_links
@@ -36,29 +37,31 @@ def run_market_research(
 ) -> tuple[SearchRun, G2BUnmappedDiscoveryResult | None, MarketResearchBundle | None]:
     """Run strict direct-price collection and broad procurement research independently.
 
-    Broad G2B research is mapping-independent and may include bid/award/pre-spec/item/contract
-    records. None of those records are passed to `search_all` or `assess_prices`.
+    G2B shopping/direct-price calls and bid/award/pre-spec research calls may use different
+    data.go.kr subscription keys. Procurement Research and alternatives remain outside `search_all`
+    and `assess_prices` until the existing strict identity/comparability gates approve evidence.
     """
 
     settings = get_settings()
-    g2b_key = (settings.resolved_g2b_service_key or "").strip()
+    shopping_key = (settings.resolved_g2b_shopping_service_key or "").strip()
+    research_key = (settings.resolved_g2b_research_service_key or "").strip()
     run = search_all(query, build_collectors(g2b_lookback_days=lookback_days))
 
     discovery = None
     market_bundle = None
-    if should_run_broad_research(query, g2b_enabled=bool(g2b_key)):
+    if should_run_broad_research(query, g2b_enabled=bool(research_key)):
         market_bundle = research_g2b_market(
             query,
-            service_key=g2b_key,
+            service_key=research_key,
             lookback_days=min(lookback_days, 90),
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=min(settings.g2b_max_retries, 2),
-            max_terms=6,
+            max_terms=10,
             max_pages_per_window=research_pages_per_term,
         )
         market_bundle = enrich_market_bundle_with_bid_items(
             market_bundle,
-            service_key=g2b_key,
+            service_key=research_key,
             max_bid_notices=procurement_detail_limit,
             max_pages_per_bid=1,
             timeout_seconds=settings.g2b_request_timeout_seconds,
@@ -66,15 +69,17 @@ def run_market_research(
         )
         market_bundle = enrich_market_bundle_with_contracts(
             market_bundle,
-            service_key=g2b_key,
+            service_key=research_key,
             max_bid_notices=procurement_detail_limit,
             max_pages_per_bid=1,
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=min(settings.g2b_max_retries, 2),
         )
+
+    if should_run_broad_research(query, g2b_enabled=bool(shopping_key)):
         discovery = discover_unmapped_g2b_candidates(
             query,
-            service_key=g2b_key,
+            service_key=shopping_key,
             lookback_days=lookback_days,
             base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
             timeout_seconds=settings.g2b_request_timeout_seconds,
@@ -83,6 +88,15 @@ def run_market_research(
             request_budget=research_request_budget,
         )
     return run, discovery, market_bundle
+
+
+def _render_band_metrics(label: str, band) -> None:
+    st.markdown(f"**{label}**")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("후보", f"{band.candidate_count}건")
+    c2.metric("하단", f"{band.low:,.0f}원" if band.low is not None else "-")
+    c3.metric("중앙값", f"{band.median:,.0f}원" if band.median is not None else "-")
+    c4.metric("상단", f"{band.high:,.0f}원" if band.high is not None else "-")
 
 
 def render_market_reference_summary(
@@ -100,23 +114,31 @@ def render_market_reference_summary(
         st.info("쇼핑몰 Research는 정상 실행됐지만 현재 검색어·기간에서 가격 후보가 0건입니다.")
         return
 
-    st.markdown("**나라장터 쇼핑몰 시장참고 범위**")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("관련 가격후보", f"{summary.candidate_count}건")
-    c2.metric("하단", f"{summary.low:,.0f}원" if summary.low is not None else "-")
-    c3.metric("중앙값", f"{summary.median:,.0f}원" if summary.median is not None else "-")
-    c4.metric("상단", f"{summary.high:,.0f}원" if summary.high is not None else "-")
+    model_band, manufacturer_band, alternative_band = summarize_g2b_research_bands(discovery)
+    st.markdown("**나라장터 쇼핑몰 Research 가격 후보**")
     st.caption(
-        "이 범위는 검증 전 관련 세부품명·제조사·분류 후보를 포함할 수 있는 시장조사 참고값입니다. "
-        "동일제품 직접가격 범위와는 분리됩니다."
+        "동일모델 표기 후보, 동일 제조사·모델 미확인 후보, 동일분류·대체제품 후보를 분리합니다. "
+        "특히 대체제품 가격은 동일제품 시장가격 범위나 최종 적정성 판정에 섞지 않습니다."
     )
 
-    delta = quote_delta_from_market_median(quote_unit_price, summary)
-    if delta is not None:
-        direction = "높음" if delta > 0 else "낮음" if delta < 0 else "동일"
-        st.info(
-            f"현재 견적은 Research 중앙값 대비 **{abs(delta):.1f}% {direction}**입니다. "
-            "이는 시장참고 비교이며 최종 적정성 판정은 아닙니다."
+    if model_band.has_prices:
+        _render_band_metrics("동일모델 표기 후보 · 미검증", model_band)
+        delta = quote_delta_from_market_median(quote_unit_price, model_band)
+        if delta is not None:
+            direction = "높음" if delta > 0 else "낮음" if delta < 0 else "동일"
+            st.info(
+                f"현재 견적은 동일모델 **표기 후보** 중앙값 대비 {abs(delta):.1f}% {direction}입니다. "
+                "모델 표기가 같아도 옵션·VAT·설치·보증 확인 전에는 최종 판정이 아닙니다."
+            )
+
+    if manufacturer_band.has_prices:
+        _render_band_metrics("동일 제조사 · 모델 미확인 후보", manufacturer_band)
+
+    if alternative_band.has_prices:
+        _render_band_metrics("동일분류·대체제품 후보", alternative_band)
+        st.warning(
+            "이 가격대는 같은 세부품명/품목군의 경쟁제품을 포함할 수 있는 대체품 Research입니다. "
+            "동일제품 가격으로 사용하지 않으며 성능·옵션·임상적 대체 가능성을 별도로 확인해야 합니다."
         )
 
 
