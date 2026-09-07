@@ -177,6 +177,9 @@ def _run_case(
         "records_seen": discovery.records_seen,
         "failed_query_count": discovery.failed_query_count,
         "truncated_query_count": discovery.truncated_query_count,
+        "error_type": discovery.error_type,
+        "error_types": list(discovery.error_types),
+        "error_messages": list(discovery.error_messages),
         "same_model_prices": _price_range(model_candidates),
         "same_model_examples": _candidate_examples(model_candidates),
         "verified_category_alternative_prices": _price_range(
