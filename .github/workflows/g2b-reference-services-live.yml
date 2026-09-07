@@ -1,0 +1,76 @@
+name: G2B Catalog and Lifecycle Live Validation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g2b-reference-services-live.yml"
+      - "src/purchase_price/config.py"
+      - "src/purchase_price/services/g2b_catalog.py"
+      - "src/purchase_price/services/g2b_lifecycle.py"
+      - "src/purchase_price/scripts/probe_g2b_reference_services.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference-services:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
+      G2B_LIFECYCLE_SERVICE_KEY: ${{ secrets.G2B_LIFECYCLE_SERVICE_KEY }}
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Probe official catalog and lifecycle services
+        run: |
+          python -m purchase_price.scripts.probe_g2b_reference_services \
+            --product-id 24888744 \
+            --bid-notice-no 20160234982 \
+            --output artifacts/g2b-reference-services/report.json
+
+      - name: Print safe summary
+        if: always()
+        run: |
+          if [ -f artifacts/g2b-reference-services/report.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/g2b-reference-services/report.json").read_text())
+          print("validation_status=", report.get("validation_status"))
+          for name in ("catalog", "lifecycle"):
+              row = report.get(name, {})
+              print(
+                  name,
+                  "status=", row.get("status"),
+                  "key_source=", row.get("key_source"),
+                  "error_type=", row.get("error_type", ""),
+                  "error_message=", row.get("error_message", ""),
+              )
+          PY
+          fi
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2b-reference-services-live
+          path: artifacts/g2b-reference-services/report.json
+          if-no-files-found: warn
+          retention-days: 14
