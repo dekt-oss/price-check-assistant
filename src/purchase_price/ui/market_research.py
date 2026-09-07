@@ -12,6 +12,7 @@ from purchase_price.services.g2b_bid_item_enrichment import enrich_market_bundle
 from purchase_price.services.g2b_contract_enrichment import enrich_market_bundle_with_contracts
 from purchase_price.services.g2b_market_models import MarketResearchBundle
 from purchase_price.services.g2b_unmapped_discovery import (
+    G2BDiscoveryCandidate,
     G2BUnmappedDiscoveryResult,
     discover_unmapped_g2b_candidates,
 )
@@ -22,6 +23,11 @@ from purchase_price.services.market_price_research import (
 )
 from purchase_price.services.market_research import research_g2b_market
 from purchase_price.services.market_research_support import build_web_supplier_search_links
+from purchase_price.services.research_basis import (
+    ResearchBasis,
+    research_terms_with_basis,
+    resolve_research_basis,
+)
 from purchase_price.services.search import SearchRun, search_all
 from purchase_price.ui.g2b_market_research import render_g2b_market_research
 
@@ -86,22 +92,56 @@ def run_market_research(
             max_retries=settings.g2b_max_retries,
             pages_per_term_window=research_pages_per_term,
             request_budget=research_request_budget,
+            curated_terms=research_terms_with_basis(query),
         )
     return run, discovery, market_bundle
 
 
-def _render_research_basis(discovery: G2BUnmappedDiscoveryResult) -> None:
-    if not discovery.terms:
-        return
-    st.markdown("**조사 기준 품목 후보**")
-    st.write(" · ".join(f"`{term}`" for term in discovery.terms[:8]))
-    st.caption(
-        "검색 확장에 사용한 Research 후보명입니다. 공식 조달 분류 또는 동일제품으로 확정된 명칭은 "
-        "아니며, 물품목록·규격·모델 근거가 확인되면 별도로 승격합니다."
-    )
+def _basis_status_label(basis: ResearchBasis) -> str:
+    if basis.is_verified_official:
+        return "공식 조달분류 확인"
+    return "Research 기준명 후보 · 미검증"
 
 
-def _render_related_price_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
+def _render_research_basis(query: ProductQuery, discovery: G2BUnmappedDiscoveryResult) -> None:
+    basis = resolve_research_basis(query)
+    st.markdown("**가격조사 기준**")
+    c1, c2 = st.columns([2, 1])
+    c1.metric("기준 품목명", basis.name or "미확인")
+    c2.metric("분류 상태", _basis_status_label(basis))
+    if basis.code:
+        st.caption(f"공식 세부품명번호: `{basis.code}` · {basis.rationale}")
+    else:
+        st.caption(basis.rationale)
+
+    if discovery.terms:
+        with st.expander("실제 검색 확장어", expanded=False):
+            st.write(" · ".join(f"`{term}`" for term in discovery.terms[:8]))
+            st.caption(
+                "검색 확장어는 넓은 Research용입니다. 검색어 자체로 동일제품·공식분류·대체가능성을 "
+                "확정하지 않습니다."
+            )
+
+
+def _candidate_rows(candidates: list[G2BDiscoveryCandidate]) -> list[dict[str, str]]:
+    return [
+        {
+            "후보": candidate.title,
+            "분류": candidate.classification_name or "-",
+            "분류번호": candidate.classification_code or "-",
+            "가격": f"{candidate.price:,.0f}원",
+            "관계": candidate.relevance,
+            "근거": candidate.match_reason or "Research 후보",
+        }
+        for candidate in candidates[:10]
+    ]
+
+
+def _render_related_price_candidates(
+    query: ProductQuery,
+    discovery: G2BUnmappedDiscoveryResult,
+) -> None:
+    basis = resolve_research_basis(query)
     related = [
         candidate
         for candidate in discovery.candidates
@@ -110,29 +150,46 @@ def _render_related_price_candidates(discovery: G2BUnmappedDiscoveryResult) -> N
     if not related:
         return
 
-    st.markdown("**대체품·관련품목 가격 후보 · 개별 참고**")
-    rows = []
-    for candidate in related[:10]:
-        rows.append(
-            {
-                "후보": candidate.title,
-                "분류": candidate.classification_name or "-",
-                "분류번호": candidate.classification_code or "-",
-                "가격": f"{candidate.price:,.0f}원",
-                "관계": candidate.relevance,
-                "근거": candidate.match_reason or "Research 후보",
-            }
+    same_official_class: list[G2BDiscoveryCandidate] = []
+    if basis.is_verified_official and basis.code:
+        same_official_class = [
+            candidate for candidate in related if candidate.classification_code == basis.code
+        ]
+    same_official_ids = {id(candidate) for candidate in same_official_class}
+    unverified_related = [
+        candidate for candidate in related if id(candidate) not in same_official_ids
+    ]
+
+    if same_official_class:
+        st.markdown("**동일 공식분류 대체후보 · 실제 납품가격 참고**")
+        st.dataframe(
+            _candidate_rows(same_official_class),
+            use_container_width=True,
+            hide_index=True,
         )
-    st.dataframe(rows, use_container_width=True, hide_index=True)
-    st.caption(
-        "공식 분류·규격·모델 일치가 검증되지 않은 후보는 개별 참고만 합니다. 이 가격들은 동일모델 "
-        "가격 범위와 견적 대비 증감률 계산에 포함하지 않습니다."
-    )
+        st.caption(
+            "견적 품목과 동일한 검증 세부품명번호에 속한 타 제품의 실제 납품가격 후보입니다. "
+            "동일 분류가 곧 규격·성능 동등을 의미하지 않으므로 개별 대체품 후보로만 확인하며, "
+            "동일모델 가격 범위에는 합산하지 않습니다."
+        )
+
+    if unverified_related:
+        st.markdown("**규격·관련품목 대체후보 · 미검증 개별 참고**")
+        st.dataframe(
+            _candidate_rows(unverified_related),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "공식 분류 또는 규격 동등성이 확인되지 않은 후보입니다. 후보 자체와 개별 가격은 조사 "
+            "참고로 보여주되 가격 band와 견적 대비 증감률 계산에는 포함하지 않습니다."
+        )
 
 
 def render_market_reference_summary(
     discovery: G2BUnmappedDiscoveryResult | None,
     *,
+    query: ProductQuery,
     quote_unit_price: Decimal | None = None,
 ) -> None:
     if discovery is None:
@@ -141,7 +198,7 @@ def render_market_reference_summary(
         st.warning("나라장터 쇼핑몰 Research API 조회가 실패했습니다. 이는 시장자료 0건과 다릅니다.")
         return
 
-    _render_research_basis(discovery)
+    _render_research_basis(query, discovery)
     summary = summarize_g2b_research(discovery)
 
     if summary.has_prices:
@@ -169,9 +226,9 @@ def render_market_reference_summary(
             "참고로만 표시합니다."
         )
     else:
-        st.info("쇼핑몰 Research는 정상 실행됐지만 현재 검색어·기간에서 유의미한 가격 후보가 0건입니다.")
+        st.info("쇼핑몰 Research는 정상 실행됐지만 현재 조사 기준·기간에서 유의미한 가격 후보가 0건입니다.")
 
-    _render_related_price_candidates(discovery)
+    _render_related_price_candidates(query, discovery)
 
 
 def render_procurement_research(bundle: MarketResearchBundle | None) -> None:
