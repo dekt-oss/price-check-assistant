@@ -89,6 +89,9 @@ def build_g2b_research_terms(
     any additional terms discovered from procurement item detail in parallel. Model/manufacturer
     strings remain local ranking signals unless another source supplies a classification-oriented
     request term.
+
+    `curated_terms=None` means use the registry defaults. Passing an explicit tuple, including an
+    empty tuple, overrides the registry. This keeps deterministic bounded probes/tests possible.
     """
 
     output: list[str] = list(build_g2b_discovery_terms(query.product_name))
@@ -107,9 +110,9 @@ def build_g2b_research_terms(
 
     output.extend(query.research_hints)
     output.extend(research_g2b_mapping_terms(query))
-    output.extend(research_terms_for_query(query))
-    if curated_terms:
-        output.extend(curated_terms)
+    output.extend(
+        research_terms_for_query(query) if curated_terms is None else curated_terms
+    )
 
     deduped: list[str] = []
     seen: set[str] = set()
