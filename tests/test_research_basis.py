@@ -1,4 +1,5 @@
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_unmapped_discovery import build_g2b_research_terms
 from purchase_price.services.research_basis import (
     ResearchBasisStatus,
     research_terms_with_basis,
@@ -27,7 +28,12 @@ def test_verified_mapping_adds_official_term_when_quote_label_differs() -> None:
         manufacturer="Thermo Fisher Scientific",
     )
 
-    assert research_terms_with_basis(query) == ("유전자증폭기",)
+    curated_terms = research_terms_with_basis(query)
+    assert curated_terms == ("유전자증폭기",)
+    assert build_g2b_research_terms(query, curated_terms=curated_terms) == (
+        "핵산증폭기",
+        "유전자증폭기",
+    )
 
 
 def test_exoatlet_uses_curated_category_as_unverified_research_basis() -> None:
