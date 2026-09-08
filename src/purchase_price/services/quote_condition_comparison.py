@@ -145,9 +145,12 @@ def _compare_value(label: str, quote_value: str, evidence_value: str) -> Conditi
         quote_months = _duration_months(quote_value)
         evidence_months = _duration_months(evidence_value)
         if quote_months is not None and evidence_months is not None:
-            if quote_months != evidence_months:
-                return ConditionComparisonStatus.CONFLICT
-        elif quote_months is not None or evidence_months is not None:
+            return (
+                ConditionComparisonStatus.MATCH
+                if quote_months == evidence_months
+                else ConditionComparisonStatus.CONFLICT
+            )
+        if quote_months is not None or evidence_months is not None:
             # One side states a duration and the other does not. Missing detail is unknown, not match.
             return ConditionComparisonStatus.UNKNOWN
 
