@@ -10,7 +10,9 @@ def test_market_research_wires_independent_contract_terms_and_requested_lookback
         encoding="utf-8"
     )
 
+    assert "contract_key = (settings.resolved_g2b_contract_service_key" in text
     assert "enrich_market_bundle_with_contracts(" in text
+    assert "service_key=contract_key" in text
     assert "independent_terms=research_terms_with_basis(query)" in text
     assert "requested_lookback_days=lookback_days" in text
     assert "max_independent_terms=1" in text
