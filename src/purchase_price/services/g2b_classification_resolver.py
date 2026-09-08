@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-import re
 from typing import Any
 
 from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
