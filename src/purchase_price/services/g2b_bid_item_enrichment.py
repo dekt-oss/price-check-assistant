@@ -75,7 +75,8 @@ def enrich_market_bundle_with_bid_items(
     if not notices:
         item_source = ResearchSourceResult(
             source=G2BResearchSource.BID_ITEM,
-            status=ResearchSourceStatus.SUCCESS_0,
+            status=ResearchSourceStatus.NOT_RUN,
+            request_count=0,
         )
         return replace(bundle, sources=(*base_sources, item_source), records=base_records)
 
