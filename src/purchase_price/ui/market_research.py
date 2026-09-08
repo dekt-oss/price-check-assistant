@@ -157,6 +157,13 @@ def _render_research_basis(
             )
 
 
+def _quantity_unit(candidate: G2BDiscoveryCandidate) -> str:
+    if candidate.quantity is None:
+        return candidate.unit or "-"
+    quantity = f"{candidate.quantity:,.4f}".rstrip("0").rstrip(".")
+    return f"{quantity} {candidate.unit}".strip()
+
+
 def _candidate_rows(candidates: list[G2BDiscoveryCandidate]) -> list[dict[str, str]]:
     return [
         {
@@ -164,6 +171,13 @@ def _candidate_rows(candidates: list[G2BDiscoveryCandidate]) -> list[dict[str, s
             "품목식별번호": candidate.product_id or "-",
             "분류": candidate.classification_name or "-",
             "분류번호": candidate.classification_code or "-",
+            "기관": candidate.institution or "-",
+            "공급업체": candidate.supplier or "-",
+            "수량·단위": _quantity_unit(candidate),
+            "라인": candidate.item_sequence or "-",
+            "납품조건": candidate.delivery_condition or "-",
+            "변경차수": candidate.record_change_order or "-",
+            "원문규격": candidate.original_specification or "-",
             "가격": f"{candidate.price:,.0f}원",
             "관계": candidate.relevance,
             "공식 품목속성": candidate.catalog_summary or "-",
@@ -201,6 +215,7 @@ def _render_model_price_summary(
         st.caption(
             "모델 문자열이 표기된 Research 후보만 집계합니다. 공식 품목속성은 해당 나라장터 "
             "품목식별번호의 규격 검증 보조근거이며, 견적 제품과 동일제품임을 자동 확정하지 않습니다. "
+            "기관·공급업체·라인·규격·납품조건·변경차수는 원자료 추적용 provenance이며 가격 승격 근거가 아닙니다. "
             "최종 동일제품 직접가격 범위는 엄격한 제품 식별·비교조건 검증을 통과한 Evidence로 별도 산정합니다."
         )
 
