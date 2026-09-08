@@ -34,6 +34,16 @@ def _diagnostic_snapshot(page: Any, *, label: str) -> dict[str, object]:
     except Exception as exc:
         snapshot["body_error"] = f"{type(exc).__name__}: {exc}"[:500]
     try:
+        snapshot["html_prefix"] = page.content()[:12000]
+    except Exception as exc:
+        snapshot["html_error"] = f"{type(exc).__name__}: {exc}"[:500]
+    try:
+        snapshot["streamlit_root_count"] = page.locator("#root").count()
+        snapshot["streamlit_app_count"] = page.locator('[data-testid="stApp"]').count()
+        snapshot["iframe_count"] = page.locator("iframe").count()
+    except Exception as exc:
+        snapshot["dom_probe_error"] = f"{type(exc).__name__}: {exc}"[:500]
+    try:
         screenshot_path = ARTIFACT_DIR / f"{label}.png"
         page.screenshot(path=str(screenshot_path), full_page=True)
         snapshot["screenshot"] = str(screenshot_path)
@@ -42,14 +52,85 @@ def _diagnostic_snapshot(page: Any, *, label: str) -> dict[str, object]:
     return snapshot
 
 
+def _install_browser_diagnostics(page: Any, report: dict[str, object]) -> None:
+    console_messages: list[dict[str, str]] = []
+    page_errors: list[str] = []
+    failed_requests: list[dict[str, str]] = []
+    stcore_responses: list[dict[str, object]] = []
+    websockets: list[dict[str, object]] = []
+
+    report["console_messages"] = console_messages
+    report["page_errors"] = page_errors
+    report["failed_requests"] = failed_requests
+    report["stcore_responses"] = stcore_responses
+    report["websockets"] = websockets
+
+    def on_console(message: Any) -> None:
+        console_messages.append(
+            {
+                "type": str(message.type),
+                "text": str(message.text)[:2000],
+            }
+        )
+
+    def on_page_error(error: Any) -> None:
+        page_errors.append(str(error)[:4000])
+
+    def on_request_failed(request: Any) -> None:
+        failure = request.failure or "unknown"
+        failed_requests.append(
+            {
+                "method": request.method,
+                "url": request.url[:2000],
+                "failure": str(failure)[:2000],
+            }
+        )
+
+    def on_response(response: Any) -> None:
+        if "_stcore" not in response.url:
+            return
+        stcore_responses.append(
+            {
+                "url": response.url[:2000],
+                "status": response.status,
+                "status_text": response.status_text,
+            }
+        )
+
+    def on_websocket(socket: Any) -> None:
+        record: dict[str, object] = {
+            "url": socket.url[:2000],
+            "events": ["open"],
+        }
+        websockets.append(record)
+
+        def append_event(name: str, detail: object = "") -> None:
+            events = record.setdefault("events", [])
+            if isinstance(events, list) and len(events) < 30:
+                events.append(f"{name}: {str(detail)[:500]}" if detail else name)
+
+        socket.on("framesent", lambda payload: append_event("frame_sent", type(payload).__name__))
+        socket.on(
+            "framereceived", lambda payload: append_event("frame_received", type(payload).__name__)
+        )
+        socket.on("socketerror", lambda error: append_event("socket_error", error))
+        socket.on("close", lambda: append_event("close"))
+
+    page.on("console", on_console)
+    page.on("pageerror", on_page_error)
+    page.on("requestfailed", on_request_failed)
+    page.on("response", on_response)
+    page.on("websocket", on_websocket)
+
+
 def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
     attempts: list[dict[str, object]] = []
     report["dashboard_attempts"] = attempts
     expected = "구매가격 검색·검토 보조시스템"
 
     for attempt in range(1, 4):
-        page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
-        page.wait_for_timeout(2_000)
+        response = page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
+        page.wait_for_timeout(3_000)
         body = page.locator("body").inner_text(timeout=5_000)
         platform_error = next((text for text in KNOWN_PLATFORM_ERRORS if text in body), "")
         if platform_error:
@@ -59,6 +140,7 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
                     "attempt": attempt,
                     "status": "platform_error",
                     "platform_error": platform_error,
+                    "root_http_status": response.status if response is not None else None,
                 }
             )
             attempts.append(snapshot)
@@ -69,7 +151,14 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
 
         try:
             _wait_heading(page, expected, timeout=30_000)
-            attempts.append({"attempt": attempt, "status": "pass", "url": page.url})
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "pass",
+                    "url": page.url,
+                    "root_http_status": response.status if response is not None else None,
+                }
+            )
             return
         except Exception as exc:
             snapshot = _diagnostic_snapshot(page, label=f"dashboard-attempt-{attempt}")
@@ -77,6 +166,7 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
                 {
                     "attempt": attempt,
                     "status": "timeout",
+                    "root_http_status": response.status if response is not None else None,
                     "error_type": type(exc).__name__,
                     "error_message": str(exc)[:1000],
                 }
@@ -103,6 +193,7 @@ def main() -> None:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 1200})
+            _install_browser_diagnostics(page, report)
             try:
                 _wake_and_wait_dashboard(page, report)
                 report["checks"].append("dashboard_rendered")
