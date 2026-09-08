@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date, timedelta
 
+from purchase_price.clients.data_go_kr import PublicDataTransportError
 from purchase_price.services.g2b_contract_research import G2BContractResearchClient
 from purchase_price.services.g2b_market_models import (
     G2BResearchRecord,
@@ -160,6 +161,8 @@ def enrich_market_bundle_with_contracts(
             )
         except Exception as exc:
             errors.append(exc)
+            if isinstance(exc, PublicDataTransportError):
+                break
             continue
         request_count += max(0, requests - 1)
         for record in found:
@@ -184,6 +187,7 @@ def enrich_market_bundle_with_contracts(
             independent_ran = True
             coverage_start = interval_begin
             coverage_end = end
+            transport_failed = False
             for term in terms:
                 request_count += 1
                 try:
@@ -195,6 +199,9 @@ def enrich_market_bundle_with_contracts(
                     )
                 except Exception as exc:
                     errors.append(exc)
+                    if isinstance(exc, PublicDataTransportError):
+                        transport_failed = True
+                        break
                     continue
                 request_count += max(0, requests - 1)
                 for record in found:
@@ -203,7 +210,7 @@ def enrich_market_bundle_with_contracts(
                     seen.add(record.source_record_id)
                     contract_records.append(record)
             previous_days = stage_days
-            if errors or len(contract_records) >= minimum_records_before_stop:
+            if transport_failed or errors or len(contract_records) >= minimum_records_before_stop:
                 break
 
     if errors and not contract_records:
