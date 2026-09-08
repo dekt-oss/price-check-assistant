@@ -51,11 +51,13 @@ class ResearchAttachment:
 
 @dataclass(frozen=True)
 class G2BResearchRecord:
-    """Research-only G2B observation.
+    """Research-only G2B observation with loss-minimizing procurement provenance.
 
     This type intentionally does not inherit from or convert itself to CollectedPrice. Broad bid,
-    award and pre-specification discovery can contain related products, totals or estimates; those
-    records must pass a separate identity/amount evidence gate before pricing code can see them.
+    award, pre-specification and contract discovery can contain related products, totals or
+    estimates; those records must pass a separate identity/amount evidence gate before pricing code
+    can see them. Raw identity/specification fields are preserved for later fingerprinting without
+    changing that promotion rule.
     """
 
     source_type: G2BResearchSource
@@ -70,11 +72,18 @@ class G2BResearchRecord:
     product_name: str | None = None
     manufacturer: str | None = None
     model_name: str | None = None
+    product_id: str | None = None
+    detail_product_code: str | None = None
+    item_sequence: str | None = None
+    original_specification: str | None = None
     quantity: Decimal | None = None
     unit: str | None = None
     amount: Decimal | None = None
     amount_type: ResearchAmountType = ResearchAmountType.UNKNOWN
+    original_amount_text: str | None = None
     supplier: str | None = None
+    delivery_condition: str | None = None
+    record_change_order: str | None = None
     source_url: str | None = None
     attachments: tuple[ResearchAttachment, ...] = ()
     search_term: str | None = None
