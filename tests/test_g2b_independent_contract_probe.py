@@ -13,8 +13,9 @@ from purchase_price.services.g2b_market_models import (
 
 
 class FakeContractClient:
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, service_key: str, *args, **kwargs) -> None:
         del args, kwargs
+        assert service_key == "contract-key"
 
     def search_by_product_name(self, **kwargs):
         assert kwargs["product_name"] == "레이저프린터"
@@ -39,10 +40,10 @@ class FakeContractClient:
         )
 
 
-def _settings(key: str | None = "key") -> SimpleNamespace:
+def _settings(key: str | None = "contract-key") -> SimpleNamespace:
     return SimpleNamespace(
-        resolved_g2b_research_service_key=key,
-        g2b_research_key_source=("G2B_RESEARCH_SERVICE_KEY" if key else "미설정"),
+        resolved_g2b_contract_service_key=key,
+        g2b_contract_key_source=("G2B_CONTRACT_SERVICE_KEY" if key else "미설정"),
         g2b_contract_base_url=None,
     )
 
@@ -61,6 +62,7 @@ def test_probe_reports_contract_total_as_research_only(monkeypatch) -> None:
 
     assert report["validation_status"] == "pass"
     assert report["source_status"] == "success"
+    assert report["key_source"] == "G2B_CONTRACT_SERVICE_KEY"
     assert report["coverage_start"] == "2025-09-09"
     assert report["coverage_end"] == "2026-09-08"
     assert report["record_count"] == 1
