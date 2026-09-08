@@ -12,12 +12,7 @@ from purchase_price.clients.data_go_kr import (
     PublicDataClientError,
     PublicDataPortalClient,
 )
-from purchase_price.domain import (
-    ComparisonScope,
-    EvidenceType,
-    MatchGrade,
-    SourceType,
-)
+from purchase_price.domain import ComparisonScope, EvidenceType, MatchGrade, SourceType
 from purchase_price.schemas import CollectedPrice, ProductQuery
 
 G2B_SHOPPING_BASE_URL = "https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService"
@@ -59,24 +54,17 @@ def _raise_for_result_header(container: Mapping[str, Any]) -> None:
 
 
 def unwrap_g2b_page(payload: Mapping[str, Any]) -> G2BShoppingPage:
-    # A failed request answers with a `*ResponseError` envelope instead of `response`. Without
-    # this check the fallback to `payload` finds no `header`, no `body`, and returns an empty
-    # page, so a broken call is indistinguishable from "this product had no transactions".
     for key, value in payload.items():
         if key.endswith("ResponseError") and isinstance(value, Mapping):
             _raise_for_result_header(value)
             raise PublicDataClientError(f"G2B API returned an error envelope: {key}")
-
     response = payload.get("response", payload)
     if not isinstance(response, Mapping):
         raise PublicDataClientError("G2B response must be an object")
-
     _raise_for_result_header(response)
-
     body = response.get("body", {})
     if not isinstance(body, Mapping):
         raise PublicDataClientError("G2B response body must be an object")
-
     raw_items = body.get("items", [])
     if isinstance(raw_items, Mapping) and "item" in raw_items:
         raw_items = raw_items["item"]
@@ -86,7 +74,6 @@ def unwrap_g2b_page(payload: Mapping[str, Any]) -> G2BShoppingPage:
         raw_items = [raw_items]
     if not isinstance(raw_items, list):
         raise PublicDataClientError("G2B response items must be a list or item object")
-
     items = tuple(dict(item) for item in raw_items if isinstance(item, Mapping))
     return G2BShoppingPage(
         items=items,
@@ -96,23 +83,11 @@ def unwrap_g2b_page(payload: Mapping[str, Any]) -> G2BShoppingPage:
     )
 
 
-# Korean aliases come from official public file reports. camelCase aliases below were
-# verified against a live getSpcifyPrdlstPrcureInfoList response on 2026-09-03.
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "product_id": ("물품식별", "물품식별번호", "prdctIdntNo"),
-    "product_name": (
-        "물품식별명",
-        "품명",
-        "세부품명(명칭)",
-        "세부품명",
-        "prdctIdntNoNm",
-    ),
+    "product_name": ("물품식별명", "품명", "세부품명(명칭)", "세부품명", "prdctIdntNoNm"),
     "contract_number": ("계약번호", "단가계약번호", "uprcCntrctNo"),
-    "delivery_request_number": (
-        "납품요구번호",
-        "계약(납품요구)번호",
-        "cntrctDlvrReqNo",
-    ),
+    "delivery_request_number": ("납품요구번호", "계약(납품요구)번호", "cntrctDlvrReqNo"),
     "delivery_request_change_order": ("cntrctDlvrReqChgOrd",),
     "product_sequence": ("prdctSno",),
     "contract_unit_price": ("계약단가",),
@@ -161,19 +136,11 @@ def _date_or_none(value: Any) -> date | None:
 
 
 def build_g2b_source_record_id(record: Mapping[str, Any]) -> str | None:
-    """Build an item-level external key without pretending a delivery request is one item.
-
-    `cntrctDlvrReqNo` identifies the delivery-request container and can repeat across multiple
-    products. Where available, change-order, product-identification and line sequence are appended
-    so downstream Ground Truth and observations can distinguish individual items.
-    """
-
     delivery_request = _first_value(record, "delivery_request_number")
     contract_number = _first_value(record, "contract_number")
     product_id = _first_value(record, "product_id")
     change_order = _first_value(record, "delivery_request_change_order")
     product_sequence = _first_value(record, "product_sequence")
-
     parts: list[str] = []
     if delivery_request not in (None, ""):
         parts.append(f"delivery:{delivery_request}")
@@ -181,82 +148,48 @@ def build_g2b_source_record_id(record: Mapping[str, Any]) -> str | None:
             parts.append(f"change:{change_order}")
     elif contract_number not in (None, ""):
         parts.append(f"contract:{contract_number}")
-
     if product_id not in (None, ""):
         parts.append(f"product:{product_id}")
     if product_sequence not in (None, ""):
         parts.append(f"line:{product_sequence}")
-
     return "|".join(parts) or None
 
 
-def _evidence_amount(
-    record: Mapping[str, Any], operation: G2BShoppingOperation
-) -> tuple[Decimal, EvidenceType] | None:
+def _evidence_amount(record: Mapping[str, Any], operation: G2BShoppingOperation) -> tuple[Decimal, EvidenceType] | None:
     delivery_unit_price = _decimal_or_none(_first_value(record, "delivery_unit_price"))
     contract_unit_price = _decimal_or_none(_first_value(record, "contract_unit_price"))
-
     if operation == G2BShoppingOperation.DELIVERY_REQUEST_DETAILS and delivery_unit_price is not None:
         return delivery_unit_price, EvidenceType.DELIVERY_ORDER_UNIT_PRICE
-
-    if operation in {
-        G2BShoppingOperation.MAS_CONTRACT_PRODUCTS,
-        G2BShoppingOperation.SHOPPING_MALL_PRODUCTS,
-    } and contract_unit_price is not None:
+    if operation in {G2BShoppingOperation.MAS_CONTRACT_PRODUCTS, G2BShoppingOperation.SHOPPING_MALL_PRODUCTS} and contract_unit_price is not None:
         return contract_unit_price, EvidenceType.SHOPPING_CONTRACT_UNIT_PRICE
-
     if operation == G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS:
         delivery_or_contract = str(_first_value(record, "contract_delivery_type") or "")
-        generic_unit_price = (
-            _decimal_or_none(_first_value(record, "generic_unit_price"))
-            or delivery_unit_price
-            or contract_unit_price
-        )
+        generic_unit_price = _decimal_or_none(_first_value(record, "generic_unit_price")) or delivery_unit_price or contract_unit_price
         if generic_unit_price is not None:
             if "납품" in delivery_or_contract:
                 return generic_unit_price, EvidenceType.DELIVERY_ORDER_UNIT_PRICE
             if "계약" in delivery_or_contract:
                 return generic_unit_price, EvidenceType.CONTRACT_UNIT_PRICE
-
     return None
 
 
-def parse_official_report_record(
-    record: Mapping[str, Any],
-    *,
-    operation: G2BShoppingOperation,
-) -> CollectedPrice | None:
-    """Convert only records whose unit-price meaning is verified.
-
-    Product identity matching is deliberately deferred to F3, so every F1 result remains
-    MatchGrade.X and cannot enter the direct reference-price range yet.
-    """
-
+def parse_official_report_record(record: Mapping[str, Any], *, operation: G2BShoppingOperation) -> CollectedPrice | None:
     evidence = _evidence_amount(record, operation)
     if evidence is None:
         return None
     price, evidence_type = evidence
-
     product_name = _first_value(record, "product_name")
     if product_name in (None, ""):
         return None
-
     quantity = _decimal_or_none(_first_value(record, "delivery_quantity"))
     total_amount = _decimal_or_none(_first_value(record, "delivery_amount"))
     unit = _first_value(record, "unit")
     transaction_date = _date_or_none(_first_value(record, "transaction_date"))
-
     conditions_parts: list[str] = []
-    for label, logical_name in (
-        ("공급업체", "supplier"),
-        ("수요기관", "demand_institution"),
-        ("계약구분", "contract_type"),
-        ("납품조건", "delivery_condition"),
-    ):
+    for label, logical_name in (("공급업체", "supplier"), ("수요기관", "demand_institution"), ("계약구분", "contract_type"), ("납품조건", "delivery_condition")):
         value = _first_value(record, logical_name)
         if value not in (None, ""):
             conditions_parts.append(f"{label}={value}")
-
     return CollectedPrice(
         manufacturer=None,
         product_name=str(product_name),
@@ -278,38 +211,26 @@ def parse_official_report_record(
         match_grade=MatchGrade.X,
         match_note="F1 raw procurement evidence; product identity matching deferred to F3",
         comparison_scope=ComparisonScope.OBSERVED_ONLY,
-        comparison_note=(
-            "VAT·단위 의미·배송·설치·옵션·보증 조건이 완전히 구조화되지 않아 "
-            "관측가격 범위에만 사용"
-        ),
+        comparison_note="VAT·단위 의미·배송·설치·옵션·보증 조건이 완전히 구조화되지 않아 관측가격 범위에만 사용",
     )
 
 
 class G2BShoppingCollector:
     name = SOURCE_NAME
 
-    def __init__(
-        self,
-        service_key: str,
-        *,
-        base_url: str = G2B_SHOPPING_BASE_URL,
-        client: PublicDataPortalClient | None = None,
-    ) -> None:
+    def __init__(self, service_key: str, *, base_url: str = G2B_SHOPPING_BASE_URL, client: PublicDataPortalClient | None = None) -> None:
         self.base_url = base_url
         self.client = client or PublicDataPortalClient(service_key)
 
-    def fetch_page(
-        self,
-        operation: G2BShoppingOperation,
-        **params: Any,
-    ) -> tuple[G2BShoppingPage, dict[str, Any]]:
+    def fetch_page(self, operation: G2BShoppingOperation, **params: Any) -> tuple[G2BShoppingPage, dict[str, Any]]:
         payload = self.client.get_json(self.base_url, operation.value, **params)
         return unwrap_g2b_page(payload), payload
 
     def fetch_specific_item_page(
         self,
         *,
-        detail_product_name: str,
+        detail_product_name: str | None = None,
+        detail_product_code: str | None = None,
         begin_date: date,
         end_date: date,
         page_no: int = 1,
@@ -318,20 +239,17 @@ class G2BShoppingCollector:
         product_div: str = "2",
         final_change_order_only: str = "Y",
     ) -> tuple[G2BShoppingPage, dict[str, Any]]:
-        """Call the live-verified specific-item procurement query contract.
-
-        The parameter names/default values are known to produce a valid response. Their
-        business-code semantics remain intentionally neutral until the reference document is
-        incorporated; callers may override them explicitly.
-        """
-
-        if not detail_product_name.strip():
-            raise ValueError("detail_product_name is required")
+        name = (detail_product_name or "").strip()
+        code = (detail_product_code or "").strip()
+        if bool(name) == bool(code):
+            raise ValueError("provide exactly one of detail_product_name or detail_product_code")
+        if code and (not code.isdigit() or len(code) != 10):
+            raise ValueError("detail_product_code must be a 10-digit PPS detail-product code")
         if begin_date > end_date:
             raise ValueError("begin_date must not be after end_date")
         if page_no < 1 or num_of_rows < 1:
             raise ValueError("page_no and num_of_rows must be positive")
-
+        selector = {"dtilPrdctClsfcNo": code} if code else {"dtilPrdctClsfcNoNm": name}
         return self.fetch_page(
             G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS,
             pageNo=page_no,
@@ -341,15 +259,10 @@ class G2BShoppingCollector:
             inqryEndDate=end_date.strftime("%Y%m%d"),
             inqryPrdctDiv=product_div,
             fnlCntrctDlvrReqChgOrdYn=final_change_order_only,
-            dtilPrdctClsfcNoNm=detail_product_name.strip(),
+            **selector,
         )
 
-    def parse_payload(
-        self,
-        payload: Mapping[str, Any],
-        *,
-        operation: G2BShoppingOperation,
-    ) -> list[CollectedPrice]:
+    def parse_payload(self, payload: Mapping[str, Any], *, operation: G2BShoppingOperation) -> list[CollectedPrice]:
         page = unwrap_g2b_page(payload)
         parsed: list[CollectedPrice] = []
         for item in page.items:
@@ -360,7 +273,5 @@ class G2BShoppingCollector:
 
     def search(self, query: ProductQuery) -> list[CollectedPrice]:
         raise RuntimeError(
-            "A verified model/product-name query parameter is not available yet. "
-            "Use fetch_specific_item_page for classification-based procurement history; "
-            "general ProductQuery search will be wired only after its live contract is verified."
+            "A verified model/product-name query parameter is not available yet. Use fetch_specific_item_page for classification-based procurement history; general ProductQuery search will be wired only after its live contract is verified."
         )
