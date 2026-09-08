@@ -4,24 +4,79 @@ import json
 import os
 import time
 from pathlib import Path
-
-import playwright.sync_api as pw
+from typing import Any
 
 
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 
 
-def _wait_heading(page: pw.Page, name: str) -> None:
-    page.get_by_role("heading", name=name, exact=True).wait_for(state="visible", timeout=30_000)
+def _wait_heading(page: Any, name: str, *, timeout: int = 30_000) -> None:
+    page.get_by_role("heading", name=name, exact=True).wait_for(state="visible", timeout=timeout)
 
 
-def _navigate(page: pw.Page, name: str) -> None:
+def _navigate(page: Any, name: str) -> None:
     page.get_by_role("link", name=name, exact=True).click()
     _wait_heading(page, name)
 
 
+def _diagnostic_snapshot(page: Any, *, label: str) -> dict[str, object]:
+    snapshot: dict[str, object] = {"label": label, "url": page.url}
+    try:
+        snapshot["title"] = page.title()
+    except Exception as exc:
+        snapshot["title_error"] = f"{type(exc).__name__}: {exc}"[:500]
+    try:
+        snapshot["body_text_prefix"] = page.locator("body").inner_text(timeout=5_000)[:3000]
+    except Exception as exc:
+        snapshot["body_error"] = f"{type(exc).__name__}: {exc}"[:500]
+    try:
+        screenshot_path = ARTIFACT_DIR / f"{label}.png"
+        page.screenshot(path=str(screenshot_path), full_page=True)
+        snapshot["screenshot"] = str(screenshot_path)
+    except Exception as exc:
+        snapshot["screenshot_error"] = f"{type(exc).__name__}: {exc}"[:500]
+    return snapshot
+
+
+def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
+    attempts: list[dict[str, object]] = []
+    report["dashboard_attempts"] = attempts
+    expected = "구매가격 검색·검토 보조시스템"
+
+    for attempt in range(1, 4):
+        page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
+        try:
+            _wait_heading(page, expected, timeout=30_000)
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "pass",
+                    "url": page.url,
+                    "elapsed_since_start_seconds": round(time.monotonic(), 2),
+                }
+            )
+            return
+        except Exception as exc:
+            snapshot = _diagnostic_snapshot(page, label=f"dashboard-attempt-{attempt}")
+            snapshot.update(
+                {
+                    "attempt": attempt,
+                    "status": "timeout",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:1000],
+                }
+            )
+            attempts.append(snapshot)
+            if attempt < 3:
+                page.wait_for_timeout(5_000)
+
+    raise RuntimeError("Production dashboard did not render after 3 bounded attempts")
+
+
 def main() -> None:
+    from playwright.sync_api import sync_playwright
+
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     report: dict[str, object] = {
@@ -29,13 +84,13 @@ def main() -> None:
         "status": "failure",
         "checks": [],
     }
+    page: Any | None = None
 
     try:
-        with pw.sync_playwright() as playwright:
+        with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 1200})
-            page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
-            _wait_heading(page, "구매가격 검색·검토 보조시스템")
+            _wake_and_wait_dashboard(page, report)
             report["checks"].append("dashboard_rendered")
 
             _navigate(page, "빠른 검색")
@@ -59,13 +114,15 @@ def main() -> None:
             page.get_by_role("tab", name="UDI-DI", exact=True).wait_for(state="visible")
             report["checks"].append("medical_device_tabs_rendered")
 
-            page.screenshot(path=str(ARTIFACT_DIR / "medical-device-page.png"), full_page=True)
+            report["final_snapshot"] = _diagnostic_snapshot(page, label="medical-device-page")
             report["final_url"] = page.url
             report["status"] = "pass"
             browser.close()
     except Exception as exc:
         report["error_type"] = type(exc).__name__
         report["error_message"] = str(exc)[:2000]
+        if page is not None:
+            report["failure_snapshot"] = _diagnostic_snapshot(page, label="failure-final")
         raise
     finally:
         report["elapsed_seconds"] = round(time.monotonic() - started, 2)
