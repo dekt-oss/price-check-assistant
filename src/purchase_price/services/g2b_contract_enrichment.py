@@ -73,7 +73,8 @@ def enrich_market_bundle_with_contracts(
     if not notices:
         source = ResearchSourceResult(
             source=G2BResearchSource.CONTRACT,
-            status=ResearchSourceStatus.SUCCESS_0,
+            status=ResearchSourceStatus.NOT_RUN,
+            request_count=0,
         )
         return replace(bundle, sources=(*base_sources, source), records=base_records)
 
