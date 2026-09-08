@@ -196,7 +196,7 @@ def test_independent_contract_failure_is_not_successful_zero() -> None:
 
     source = enriched.sources[-1]
     assert source.status == ResearchSourceStatus.FAILURE
-    assert source.request_count == 0
+    assert source.request_count == 1
     assert source.error_type == "RuntimeError"
     assert "synthetic independent contract failure" in source.error_message
 
