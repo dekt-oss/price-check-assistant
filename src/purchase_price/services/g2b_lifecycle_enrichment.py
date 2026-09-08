@@ -100,7 +100,8 @@ def enrich_market_bundle_with_lifecycle(
     if not notices:
         source = ResearchSourceResult(
             source=G2BResearchSource.LIFECYCLE,
-            status=ResearchSourceStatus.SUCCESS_0,
+            status=ResearchSourceStatus.NOT_RUN,
+            request_count=0,
         )
         return replace(bundle, sources=(*base_sources, source), records=base_records)
 
