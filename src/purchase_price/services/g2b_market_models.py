@@ -40,6 +40,7 @@ class ResearchSourceStatus(StrEnum):
     FAILURE = "failure"
     NOT_CONFIGURED = "not_configured"
     NOT_AUTHORIZED = "not_authorized"
+    NOT_RUN = "not_run"
 
 
 @dataclass(frozen=True)
