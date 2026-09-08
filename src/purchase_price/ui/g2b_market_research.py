@@ -50,11 +50,18 @@ def _row(record: G2BResearchRecord) -> dict[str, object]:
     return {
         "자료구분": _SOURCE_LABELS[record.source_type],
         "공고/자료명": record.title or record.product_name or "",
+        "품목식별번호": record.product_id or "",
+        "세부품명번호": record.detail_product_code or "",
+        "라인": record.item_sequence or "",
+        "원문규격": record.original_specification or "",
         "수량·단위": _format_quantity(record),
         "기관": record.institution or "",
         "일자": record.published_date.isoformat() if record.published_date else "",
         "금액": _format_amount(record),
+        "원문금액": record.original_amount_text or "",
         "낙찰/공급업체": record.supplier or "",
+        "납품조건": record.delivery_condition or "",
+        "변경차수": record.record_change_order or "",
         "공고번호": record.bid_notice_no or "",
         "검색어": record.search_term or "",
         "원문": record.source_url or "",
@@ -171,6 +178,10 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
         use_container_width=True,
         hide_index=True,
         column_config={"원문": st.column_config.LinkColumn("원문")},
+    )
+    st.caption(
+        "품목식별번호·세부품명번호·라인·원문규격·납품조건·변경차수·원문금액은 원자료 추적과 "
+        "후속 제품 fingerprint 비교를 위한 provenance입니다. 해당 필드 존재만으로 동일제품이나 단가 Evidence로 승격하지 않습니다."
     )
     if len(records) > len(shown):
         st.caption(f"총 {len(records)}건 중 최신 {len(shown)}건을 표시합니다.")
