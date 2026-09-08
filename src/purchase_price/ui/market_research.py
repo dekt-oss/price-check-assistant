@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from dataclasses import replace
 from decimal import Decimal
 
 import streamlit as st
@@ -11,6 +13,7 @@ from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_bid_item_enrichment import enrich_market_bundle_with_bid_items
 from purchase_price.services.g2b_catalog import G2B_CATALOG_BASE_URL
 from purchase_price.services.g2b_catalog_enrichment import enrich_discovery_with_catalog
+from purchase_price.services.g2b_classification_research import resolve_classification_research
 from purchase_price.services.g2b_contract_enrichment import enrich_market_bundle_with_contracts
 from purchase_price.services.g2b_lifecycle import G2B_LIFECYCLE_BASE_URL
 from purchase_price.services.g2b_lifecycle_enrichment import enrich_market_bundle_with_lifecycle
@@ -48,7 +51,8 @@ def run_market_research(
 
     Shopping direct-price/discovery can use a credential approved only for ShoppingMall API while
     bid/award/pre-spec/item/contract/lifecycle Research can use separate service subscriptions.
-    None of those records are passed to `search_all` or `assess_prices`.
+    Official detail-class resolver candidates are used only as recall hints. None of those records
+    or candidates are passed to `search_all` or `assess_prices`.
     """
 
     settings = get_settings()
@@ -58,6 +62,24 @@ def run_market_research(
     lifecycle_key = (settings.resolved_g2b_lifecycle_service_key or "").strip()
 
     run = search_all(query, build_collectors(g2b_lookback_days=lookback_days))
+
+    basis = resolve_research_basis(query)
+    broad_research_requested = should_run_broad_research(
+        query,
+        g2b_enabled=bool(research_key or shopping_key),
+    )
+    classification_resolution = None
+    if broad_research_requested and not basis.is_verified_official:
+        classification_resolution = resolve_classification_research(
+            query,
+            service_key=catalog_key,
+            base_url=settings.g2b_catalog_base_url or G2B_CATALOG_BASE_URL,
+            timeout_seconds=min(settings.g2b_request_timeout_seconds, 10.0),
+            max_retries=1,
+        )
+    resolver_terms = (
+        classification_resolution.research_terms if classification_resolution is not None else ()
+    )
 
     market_bundle = None
     if should_run_broad_research(query, g2b_enabled=bool(research_key)):
@@ -69,6 +91,7 @@ def run_market_research(
             max_retries=min(settings.g2b_max_retries, 2),
             max_terms=6,
             max_pages_per_window=research_pages_per_term,
+            additional_terms=resolver_terms,
         )
         market_bundle = enrich_market_bundle_with_bid_items(
             market_bundle,
@@ -108,8 +131,20 @@ def run_market_research(
             max_retries=settings.g2b_max_retries,
             pages_per_term_window=research_pages_per_term,
             request_budget=research_request_budget,
-            curated_terms=research_terms_with_basis(query),
+            curated_terms=research_terms_with_basis(query) + resolver_terms,
         )
+        if classification_resolution is not None:
+            discovery = replace(
+                discovery,
+                classification_resolution_status=classification_resolution.status.value,
+                classification_lookup_terms=tuple(
+                    request.term for request in classification_resolution.lookup_requests
+                ),
+                classification_candidates=classification_resolution.candidates,
+                classification_specification_clues=classification_resolution.specification_clues,
+                classification_error_types=classification_resolution.error_types,
+                classification_error_messages=classification_resolution.error_messages,
+            )
         if catalog_key and discovery.candidates:
             # Catalog lookup is supplementary exact-ID evidence. Keep the user-facing latency
             # bounded; a catalog timeout annotates the candidate but never erases shopping prices.
@@ -130,6 +165,82 @@ def _basis_status_label(basis: ResearchBasis) -> str:
     return "Research 기준명 후보 · 미검증"
 
 
+def _classification_session_key(query: ProductQuery) -> str:
+    raw = "|".join((query.manufacturer, query.model_name, query.product_name)).casefold()
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+    return f"g2b_classification_candidate_{digest}"
+
+
+def _render_classification_candidates(
+    query: ProductQuery,
+    discovery: G2BUnmappedDiscoveryResult,
+) -> None:
+    status = discovery.classification_resolution_status
+    if not status:
+        return
+
+    if status == "failure":
+        details = " · ".join(discovery.classification_error_messages[:2])
+        st.warning(
+            "공식 세부품명 resolver 조회가 실패했습니다. 이는 공식분류 후보 0건과 다릅니다."
+            + (f" ({details})" if details else "")
+        )
+        return
+    if status == "not_configured":
+        st.caption("공식 세부품명 resolver는 API 키가 없어 이번 실행에서 조회하지 않았습니다.")
+        return
+    if status == "success_0":
+        st.info("공식 세부품명 resolver는 정상 실행됐지만 현재 품명으로 확인된 후보가 0건입니다.")
+        return
+    if status == "partial":
+        st.warning("공식 세부품명 resolver 일부 요청이 실패했습니다. 아래 후보는 부분 결과입니다.")
+
+    if not discovery.classification_candidates:
+        return
+
+    candidates = list(discovery.classification_candidates)
+    with st.expander("공식 세부품명 후보 · Research 미검증", expanded=True):
+        st.dataframe(
+            [
+                {
+                    "세부품명번호": candidate.detail_product_code,
+                    "한글명": candidate.korean_name,
+                    "영문명": candidate.english_name or "-",
+                    "사용상태": candidate.use_status or "-",
+                    "탐색근거": f"{candidate.search_field.value}={candidate.search_term}",
+                }
+                for candidate in candidates
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        if discovery.classification_specification_clues:
+            st.caption(
+                "견적에서 분리 보존한 규격 단서: "
+                + " · ".join(
+                    f"`{clue}`" for clue in discovery.classification_specification_clues
+                )
+            )
+
+        labels = {
+            candidate.detail_product_code: (
+                f"{candidate.korean_name} · {candidate.detail_product_code}"
+            )
+            for candidate in candidates
+        }
+        st.selectbox(
+            "이번 세션에서 우선 확인할 공식 세부품명 후보",
+            options=[""] + list(labels),
+            format_func=lambda code: "미확정" if not code else labels[code],
+            key=_classification_session_key(query),
+        )
+        st.caption(
+            "이 선택은 현재 세션의 Research 검토 편의를 위한 값이며 verified mapping 파일을 수정하지 "
+            "않습니다. 후보 선택만으로 견적 제품과 동일제품·규격동등으로 확정하거나 가격을 "
+            "`assess_prices()`에 승격하지 않습니다."
+        )
+
+
 def _render_research_basis(
     query: ProductQuery,
     discovery: G2BUnmappedDiscoveryResult | None,
@@ -143,6 +254,9 @@ def _render_research_basis(
         st.caption(f"공식 세부품명번호: `{basis.code}` · {basis.rationale}")
     else:
         st.caption(basis.rationale)
+
+    if discovery is not None:
+        _render_classification_candidates(query, discovery)
 
     if discovery is not None and discovery.terms:
         with st.expander("실제 검색 확장어", expanded=False):
