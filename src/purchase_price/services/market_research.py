@@ -233,11 +233,13 @@ def research_g2b_market(
     shared_portal: PublicDataPortalClient | None = None
     if service_key and (bid_client is None or award_client is None or prespec_client is None):
         # All three PPS market endpoints share apis.data.go.kr. Reusing one client avoids a fresh
-        # TCP/TLS handshake per source and keeps transport retry/backoff behavior consistent.
+        # TCP/TLS handshake per source. The request-scoped connect circuit prevents bid/award/
+        # prespec from each waiting through the same exhausted connection failure.
         shared_portal = PublicDataPortalClient(
             service_key,
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
+            connect_circuit_breaker=True,
         )
 
     try:
