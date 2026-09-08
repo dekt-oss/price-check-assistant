@@ -1,0 +1,83 @@
+name: P0 Golden APC FLOW UAT
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/purchase_price/**"
+      - "tests/test_p0_golden_uat_contract.py"
+      - ".github/workflows/p0-golden-apc-flow-uat.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  golden-uat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY }}
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
+      G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
+      G2B_LIFECYCLE_SERVICE_KEY: ${{ secrets.G2B_LIFECYCLE_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Run deterministic golden safety gates
+        run: pytest -q tests/test_p0_golden_uat_contract.py
+
+      - name: Run bounded live APC and FLOW probe
+        run: |
+          python -m purchase_price.scripts.probe_p0_golden_uat \
+            --lookback-days 1095 \
+            --request-budget 24 \
+            --timeout-seconds 15 \
+            --max-retries 1 \
+            --output artifacts/p0-golden-uat/report.json
+
+      - name: Print acceptance summary
+        if: always()
+        run: |
+          if [ -f artifacts/p0-golden-uat/report.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("artifacts/p0-golden-uat/report.json").read_text(encoding="utf-8"))
+          print("validation_status=", report.get("validation_status"))
+          print("safety_violation_count=", report.get("safety_violation_count"))
+          for case in report.get("cases", []):
+              print(
+                  "case=", case.get("case_id"),
+                  "classification=", case.get("classification_status"),
+                  "shopping=", case.get("shopping_status"),
+                  "same_model=", case.get("same_model_status"),
+              )
+              for source in case.get("procurement_sources", []):
+                  print(
+                      " source=", source.get("source"),
+                      "status=", source.get("status"),
+                      "records=", source.get("record_count"),
+                      "requests=", source.get("request_count"),
+                  )
+          PY
+          fi
+
+      - name: Upload golden UAT report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-golden-apc-flow-uat
+          path: artifacts/p0-golden-uat/
+          if-no-files-found: warn
+          retention-days: 14

@@ -359,15 +359,14 @@ class G2BPrespecResearchClient(_BaseMarketSourceClient):
         keyword = keyword.strip()
         if not keyword:
             raise ValueError("keyword is required")
-        # `bfSpecNm` is the pre-specification-name search term on the PPSSrch operation. This
-        # contract is kept behind this adapter so a live probe can change it without affecting
-        # callers if PPS revises the parameter surface.
+        # Official PPS PPSSrch uses `prdctClsfcNoNm` as the goods/product-name search field.
+        # Keep that wire contract isolated here; broad Research relevance is still checked locally.
         return self._page(
             G2B_PRESPEC_THING_SEARCH_OPERATION,
             inqryDiv="1",
             inqryBgnDt=f"{begin:%Y%m%d}0000",
             inqryEndDt=f"{end:%Y%m%d}2359",
-            bfSpecNm=keyword,
+            prdctClsfcNoNm=keyword,
             pageNo=page_no,
             numOfRows=num_of_rows,
         )

@@ -43,19 +43,22 @@ def _decimal(value: Any) -> Decimal | None:
         return None
 
 
-def _record_id(record: Mapping[str, Any]) -> str:
-    notice = _text(record.get("bidNtceNo")) or "unknown"
-    order = _text(record.get("bidNtceOrd")) or ""
-    sequence = _text(
+def _item_sequence(record: Mapping[str, Any]) -> str | None:
+    return _text(
         _first(
             record,
             "bidNtceDtlSeq",
             "purchsObjPrdctSeq",
             "prdctSeq",
             "seq",
-            "prdctClsfcNo",
         )
-    ) or ""
+    )
+
+
+def _record_id(record: Mapping[str, Any]) -> str:
+    notice = _text(record.get("bidNtceNo")) or "unknown"
+    order = _text(record.get("bidNtceOrd")) or ""
+    sequence = _item_sequence(record) or ""
     product = _text(
         _first(record, "prdctClsfcNo", "prdctClsfcNoNm", "prdctNm", "purchsObjPrdctNm")
     ) or ""
@@ -67,19 +70,19 @@ def parse_bid_purchase_item(record: Mapping[str, Any]) -> G2BResearchRecord:
 
     PPS purchase-object data describes what the bid plans to buy. Even when a response exposes a
     unit-price-looking field, it is an estimate/planning value rather than a transacted market unit
-    price. The parser therefore uses ESTIMATED_UNIT_PRICE and never UNIT_PRICE.
+    price. The parser therefore uses ESTIMATED_UNIT_PRICE and never UNIT_PRICE. Raw item identity,
+    specification and amount text are retained for later product/configuration fingerprinting.
     """
 
-    amount = _decimal(
-        _first(
-            record,
-            "presmptUnitPrce",
-            "estmUnitPrc",
-            "prdctUnitPrc",
-            "unitPrce",
-            "unitPrc",
-        )
+    raw_amount = _first(
+        record,
+        "presmptUnitPrce",
+        "estmUnitPrc",
+        "prdctUnitPrc",
+        "unitPrce",
+        "unitPrc",
     )
+    amount = _decimal(raw_amount)
     product_name = _text(
         _first(
             record,
@@ -103,6 +106,18 @@ def parse_bid_purchase_item(record: Mapping[str, Any]) -> G2BResearchRecord:
         product_name=product_name,
         manufacturer=manufacturer,
         model_name=model_name,
+        product_id=_text(record.get("prdctIdntNo")),
+        detail_product_code=_text(record.get("dtilPrdctClsfcNo")),
+        item_sequence=_item_sequence(record),
+        original_specification=_text(
+            _first(
+                record,
+                "prdctSpcfctn",
+                "purchsObjPrdctSpcfctn",
+                "spcfctn",
+                "prdctDtlList",
+            )
+        ),
         quantity=quantity,
         unit=unit,
         amount=amount,
@@ -111,6 +126,14 @@ def parse_bid_purchase_item(record: Mapping[str, Any]) -> G2BResearchRecord:
             if amount is not None
             else ResearchAmountType.UNKNOWN
         ),
+        original_amount_text=_text(raw_amount),
+        delivery_condition=_text(
+            _first(record, "dlvryCndtnNm", "dlvrCndtnNm", "dlvryCndtn", "dlvrCndtn")
+        ),
+        record_change_order=_text(
+            _first(record, "purchsObjPrdctChgOrd", "prdctChgOrd", "chgOrd")
+        ),
+        source_url=_text(_first(record, "bidNtceDtlUrl", "prdctDtlUrl")),
     )
 
 

@@ -80,12 +80,7 @@ def enrich_market_bundle_with_lifecycle(
     base_url: str | None = None,
     client: G2BLifecycleClient | None = None,
 ) -> MarketResearchBundle:
-    """Attach integrated PPS lifecycle links by exact bid notice number.
-
-    This adds navigation/context only. Award and contract list totals embedded in the lifecycle API
-    are intentionally not parsed into `amount`, so this source cannot become direct unit-price
-    evidence or enter `assess_prices()`.
-    """
+    """Attach integrated PPS lifecycle links by exact bid notice number."""
 
     if max_bid_notices < 1:
         raise ValueError("max_bid_notices must be positive")
@@ -100,7 +95,8 @@ def enrich_market_bundle_with_lifecycle(
     if not notices:
         source = ResearchSourceResult(
             source=G2BResearchSource.LIFECYCLE,
-            status=ResearchSourceStatus.SUCCESS_0,
+            status=ResearchSourceStatus.NOT_RUN,
+            request_count=0,
         )
         return replace(bundle, sources=(*base_sources, source), records=base_records)
 

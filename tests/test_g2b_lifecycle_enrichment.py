@@ -90,5 +90,6 @@ def test_lifecycle_enrichment_skips_network_when_no_bid_notice_exists() -> None:
     enriched = enrich_market_bundle_with_lifecycle(bundle, service_key=None)
 
     source = next(source for source in enriched.sources if source.source == G2BResearchSource.LIFECYCLE)
-    assert source.status == ResearchSourceStatus.SUCCESS_0
+    assert source.status == ResearchSourceStatus.NOT_RUN
+    assert source.request_count == 0
     assert source.records == ()

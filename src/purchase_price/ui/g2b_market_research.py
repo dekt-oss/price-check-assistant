@@ -50,15 +50,44 @@ def _row(record: G2BResearchRecord) -> dict[str, object]:
     return {
         "자료구분": _SOURCE_LABELS[record.source_type],
         "공고/자료명": record.title or record.product_name or "",
+        "품목식별번호": record.product_id or "",
+        "세부품명번호": record.detail_product_code or "",
+        "라인": record.item_sequence or "",
+        "원문규격": record.original_specification or "",
         "수량·단위": _format_quantity(record),
         "기관": record.institution or "",
         "일자": record.published_date.isoformat() if record.published_date else "",
         "금액": _format_amount(record),
+        "원문금액": record.original_amount_text or "",
         "낙찰/공급업체": record.supplier or "",
+        "납품조건": record.delivery_condition or "",
+        "변경차수": record.record_change_order or "",
         "공고번호": record.bid_notice_no or "",
         "검색어": record.search_term or "",
         "원문": record.source_url or "",
     }
+
+
+def _coverage_caption(bundle: MarketResearchBundle) -> str:
+    parts: list[str] = []
+    for source in bundle.sources:
+        if not source.coverage_start and not source.coverage_end and not source.search_strategy:
+            continue
+        label = _SOURCE_LABELS[source.source]
+        coverage = ""
+        if source.coverage_start and source.coverage_end:
+            coverage = f"{source.coverage_start.isoformat()} ~ {source.coverage_end.isoformat()}"
+        elif source.coverage_start:
+            coverage = f"{source.coverage_start.isoformat()} 이후"
+        elif source.coverage_end:
+            coverage = f"{source.coverage_end.isoformat()}까지"
+        strategy = source.search_strategy.replace("adaptive independent product-name", "단계적 독립 품명검색")
+        strategy = strategy.replace("bid-linked", "공고번호 연결")
+        detail = " · ".join(part for part in (coverage, strategy) if part)
+        if source.requested_lookback_days:
+            detail += f" · 요청 {source.requested_lookback_days}일"
+        parts.append(f"{label}: {detail}")
+    return " / ".join(parts)
 
 
 def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 100) -> None:
@@ -82,12 +111,18 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             column.metric(label, f"{len(source.records)}건")
         elif source.status == ResearchSourceStatus.PARTIAL:
             column.metric(label, f"{len(source.records)}건 · 부분")
+        elif source.status == ResearchSourceStatus.NOT_RUN:
+            column.metric(label, "미조회")
         elif source.status == ResearchSourceStatus.NOT_CONFIGURED:
             column.metric(label, "미설정")
         elif source.status == ResearchSourceStatus.NOT_AUTHORIZED:
             column.metric(label, "인증 미승인")
         else:
             column.metric(label, "조회 실패")
+
+    coverage = _coverage_caption(bundle)
+    if coverage:
+        st.caption(f"실제 조회범위/전략 · {coverage}")
 
     failures = [
         source
@@ -99,6 +134,8 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             ResearchSourceStatus.NOT_AUTHORIZED,
         }
     ]
+    not_run = [source for source in bundle.sources if source.status == ResearchSourceStatus.NOT_RUN]
+
     for source in failures:
         label = _SOURCE_LABELS[source.source]
         if source.status == ResearchSourceStatus.NOT_AUTHORIZED:
@@ -113,14 +150,26 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
                 f"{source.error_type}: {source.error_message}"
             )
 
+    for source in not_run:
+        label = _SOURCE_LABELS[source.source]
+        st.info(
+            f"{label}: 필요한 검색 seed/검색어가 없어 이 후속 조회는 실행하지 않았습니다. "
+            "따라서 0건 검색 결과가 아니라 **미조회** 상태입니다."
+        )
+
     records = sorted(
         bundle.records,
         key=lambda item: (item.published_date is not None, item.published_date),
         reverse=True,
     )
     if not records:
-        if not failures:
+        if not failures and not not_run:
             st.info("API는 정상 응답했지만 현재 조사 기준·기간에서 유의미한 Research 결과가 0건입니다.")
+        elif not_run and not failures:
+            st.info(
+                "실행된 1차 검색에서 연결 가능한 자료를 찾지 못해 일부 후속 조회가 미실행 상태입니다. "
+                "미조회 source를 정상 0건으로 해석하지 마세요."
+            )
         return
 
     shown = records[:max_rows]
@@ -129,6 +178,10 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
         use_container_width=True,
         hide_index=True,
         column_config={"원문": st.column_config.LinkColumn("원문")},
+    )
+    st.caption(
+        "품목식별번호·세부품명번호·라인·원문규격·납품조건·변경차수·원문금액은 원자료 추적과 "
+        "후속 제품 fingerprint 비교를 위한 provenance입니다. 해당 필드 존재만으로 동일제품이나 단가 Evidence로 승격하지 않습니다."
     )
     if len(records) > len(shown):
         st.caption(f"총 {len(records)}건 중 최신 {len(shown)}건을 표시합니다.")

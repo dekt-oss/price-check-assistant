@@ -96,7 +96,6 @@ def _explicit_binary_state(value: str) -> str | None:
     normalized = _normalize_text(value)
     if not normalized or normalized == _normalize_text(UNKNOWN):
         return None
-    # Negative expressions must be checked before the positive '포함' token.
     if any(token in normalized for token in ("미포함", "불포함", "해당없음", "없음")):
         return "none"
     if "별도" in normalized:
@@ -119,18 +118,27 @@ def _duration_months(value: str) -> int | None:
     return None
 
 
+def _option_detail(value: str) -> str:
+    """Keep option identity after removing only inclusion/payment state words."""
+
+    normalized = _normalize_text(value)
+    for token in (
+        "미포함",
+        "불포함",
+        "해당없음",
+        "없음",
+        "별도",
+        "무료",
+        "무상",
+        "포함",
+    ):
+        normalized = normalized.replace(token, "")
+    return normalized
+
+
 def _compare_value(label: str, quote_value: str, evidence_value: str) -> ConditionComparisonStatus:
     if UNKNOWN in quote_value or UNKNOWN in evidence_value:
         return ConditionComparisonStatus.UNKNOWN
-
-    quote_binary = _explicit_binary_state(quote_value)
-    evidence_binary = _explicit_binary_state(evidence_value)
-    if quote_binary is not None and evidence_binary is not None:
-        return (
-            ConditionComparisonStatus.MATCH
-            if quote_binary == evidence_binary
-            else ConditionComparisonStatus.CONFLICT
-        )
 
     if label == "보증":
         quote_months = _duration_months(quote_value)
@@ -141,6 +149,26 @@ def _compare_value(label: str, quote_value: str, evidence_value: str) -> Conditi
                 if quote_months == evidence_months
                 else ConditionComparisonStatus.CONFLICT
             )
+        if quote_months is not None or evidence_months is not None:
+            return ConditionComparisonStatus.UNKNOWN
+
+    quote_binary = _explicit_binary_state(quote_value)
+    evidence_binary = _explicit_binary_state(evidence_value)
+    if quote_binary is not None and evidence_binary is not None:
+        if quote_binary != evidence_binary:
+            return ConditionComparisonStatus.CONFLICT
+        if label == "옵션":
+            quote_detail = _option_detail(quote_value)
+            evidence_detail = _option_detail(evidence_value)
+            if quote_detail and evidence_detail:
+                return (
+                    ConditionComparisonStatus.MATCH
+                    if quote_detail == evidence_detail
+                    else ConditionComparisonStatus.CONFLICT
+                )
+            if quote_detail or evidence_detail:
+                return ConditionComparisonStatus.UNKNOWN
+        return ConditionComparisonStatus.MATCH
 
     quote_normalized = _normalize_text(quote_value)
     evidence_normalized = _normalize_text(evidence_value)

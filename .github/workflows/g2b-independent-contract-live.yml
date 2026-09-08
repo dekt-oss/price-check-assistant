@@ -1,0 +1,77 @@
+name: G2B Independent Contract Live Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_name:
+        description: "PPS goods-name search term"
+        required: false
+        default: "레이저프린터"
+      lookback_days:
+        description: "Bounded live probe lookback days"
+        required: false
+        default: "365"
+
+permissions:
+  contents: read
+
+jobs:
+  independent-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Probe independent contract search
+        run: |
+          python -m purchase_price.scripts.probe_g2b_independent_contract \
+            --product-name "${{ inputs.product_name }}" \
+            --lookback-days "${{ inputs.lookback_days }}" \
+            --timeout-seconds 15 \
+            --max-retries 1 \
+            --output artifacts/g2b-independent-contract/report.json
+
+      - name: Print safe summary
+        if: always()
+        run: |
+          if [ -f artifacts/g2b-independent-contract/report.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/g2b-independent-contract/report.json").read_text())
+          print("validation_status=", report.get("validation_status"))
+          print("source_status=", report.get("source_status"))
+          print("key_source=", report.get("key_source"))
+          print("product_name=", report.get("product_name"))
+          print("coverage=", report.get("coverage_start"), "~", report.get("coverage_end"))
+          print("request_count=", report.get("request_count"))
+          print("record_count=", report.get("record_count"))
+          print("error_type=", report.get("error_type", ""))
+          print("error_message=", report.get("error_message", ""))
+          PY
+          fi
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2b-independent-contract-live
+          path: artifacts/g2b-independent-contract/report.json
+          if-no-files-found: warn
+          retention-days: 14
