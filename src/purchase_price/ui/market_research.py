@@ -54,6 +54,7 @@ def run_market_research(
     settings = get_settings()
     shopping_key = (settings.resolved_g2b_shopping_service_key or "").strip()
     research_key = (settings.resolved_g2b_research_service_key or "").strip()
+    contract_key = (settings.resolved_g2b_contract_service_key or "").strip()
     catalog_key = (settings.resolved_g2b_catalog_service_key or "").strip()
     lifecycle_key = (settings.resolved_g2b_lifecycle_service_key or "").strip()
 
@@ -80,7 +81,7 @@ def run_market_research(
         )
         market_bundle = enrich_market_bundle_with_contracts(
             market_bundle,
-            service_key=research_key,
+            service_key=contract_key,
             max_bid_notices=procurement_detail_limit,
             max_pages_per_bid=1,
             timeout_seconds=settings.g2b_request_timeout_seconds,
