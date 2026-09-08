@@ -120,23 +120,40 @@ def build_g2b_research_terms(
     return tuple(deduped[:8])
 
 
-def _normalized_identity_tokens(value: str) -> tuple[str, ...]:
+def _identity_parts(value: str) -> tuple[str, ...]:
     return tuple(
         normalize_text(token)
         for token in re.findall(r"[0-9A-Za-z가-힣]+", value)
-        if token
+        if normalize_text(token)
     )
 
 
-def _model_matches_title(model_name: str, title: str) -> bool:
-    """Require a bounded model identity instead of accepting arbitrary short substrings."""
+_ACCESSORY_MARKERS = frozenset({"accessory", "accessories", "액세서리", "부속품", "부속", "부품"})
 
-    model_key = normalize_text(model_name)
-    if not model_key:
+
+def _model_matches_title(model_name: str, title: str) -> bool:
+    """Match a complete model identity, not a prefix or an accessory-labelled row.
+
+    PPS titles often remove punctuation from model codes (`C-5570` -> `C5570`), so matching remains
+    punctuation-tolerant. Alphanumeric boundaries are preserved, however, so `FLOW-C` does not
+    become the same model as `FLOW-C20`. Rows explicitly labelled as accessories/parts are kept out
+    of the same-model Research band until a later configuration step proves they are the base unit.
+    """
+
+    model_parts = _identity_parts(model_name)
+    title_parts = _identity_parts(title)
+    if not model_parts or not title_parts:
         return False
-    if len(model_key) <= 3:
-        return model_key in _normalized_identity_tokens(title)
-    return model_key in normalize_text(title)
+    if _ACCESSORY_MARKERS.intersection(title_parts):
+        return False
+
+    model_key = "".join(model_parts)
+    max_width = max(1, len(model_parts))
+    for width in range(1, max_width + 1):
+        for start in range(0, len(title_parts) - width + 1):
+            if "".join(title_parts[start : start + width]) == model_key:
+                return True
+    return False
 
 
 def _candidate_from_record(
