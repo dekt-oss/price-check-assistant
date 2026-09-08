@@ -24,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
+      G2B_CONTRACT_SERVICE_KEY: ${{ secrets.G2B_CONTRACT_SERVICE_KEY }}
       G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
       DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
@@ -52,7 +53,7 @@ jobs:
             --output artifacts/g2b-market-sources-live/report.json
 
       - name: Run known-positive contract notice lookup
-        if: env.G2B_RESEARCH_SERVICE_KEY != '' || env.DATA_GO_KR_MARKET_SERVICE_KEY != '' || env.G2B_SERVICE_KEY != '' || env.DATA_GO_KR_SERVICE_KEY != ''
+        if: env.G2B_CONTRACT_SERVICE_KEY != '' || env.DATA_GO_KR_MARKET_SERVICE_KEY != '' || env.G2B_RESEARCH_SERVICE_KEY != '' || env.G2B_SERVICE_KEY != '' || env.DATA_GO_KR_SERVICE_KEY != ''
         run: |
           python -m purchase_price.scripts.probe_g2b_contract_notice \
             --bid-notice-no "20160234982" \
@@ -60,7 +61,7 @@ jobs:
             --max-retries 1 \
             --output artifacts/g2b-market-sources-live/contract-report.json
 
-      - name: Record missing secret
+      - name: Record missing research secret
         if: env.G2B_RESEARCH_SERVICE_KEY == '' && env.DATA_GO_KR_MARKET_SERVICE_KEY == '' && env.G2B_SERVICE_KEY == '' && env.DATA_GO_KR_SERVICE_KEY == ''
         run: |
           mkdir -p artifacts/g2b-market-sources-live
@@ -72,11 +73,17 @@ jobs:
             "message": "G2B research service key secret is not configured; live acceptance was not measured."
           }
           JSON
+
+      - name: Record missing contract secret
+        if: env.G2B_CONTRACT_SERVICE_KEY == '' && env.DATA_GO_KR_MARKET_SERVICE_KEY == '' && env.G2B_RESEARCH_SERVICE_KEY == '' && env.G2B_SERVICE_KEY == '' && env.DATA_GO_KR_SERVICE_KEY == ''
+        run: |
+          mkdir -p artifacts/g2b-market-sources-live
           cat > artifacts/g2b-market-sources-live/contract-report.json <<'JSON'
           {
             "validation_status": "not_configured",
             "bid_notice_no": "20160234982",
-            "message": "G2B research service key secret is not configured; live contract acceptance was not measured."
+            "key_source": "미설정",
+            "message": "G2B contract service key secret is not configured; live contract acceptance was not measured."
           }
           JSON
 
@@ -100,6 +107,7 @@ jobs:
           if contract_path.exists():
               contract = json.loads(contract_path.read_text(encoding="utf-8"))
               print("contract_validation_status=", contract.get("validation_status"))
+              print("contract_key_source=", contract.get("key_source"))
               print("contract_bid_notice_no=", contract.get("bid_notice_no"))
               print("contract_record_count=", contract.get("record_count"))
               print("contract_matching_notice_count=", contract.get("matching_notice_count"))
@@ -143,6 +151,7 @@ jobs:
           if report.get("validation_status") != "pass":
               raise SystemExit(
                   f"G2B contract live acceptance failed: {report.get('validation_status')} "
+                  f"key_source={report.get('key_source')} "
                   f"error={report.get('error_type')} {report.get('error_message')}"
               )
           if int(report.get("matching_notice_count") or 0) < 1:
