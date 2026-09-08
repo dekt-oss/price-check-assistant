@@ -39,6 +39,35 @@ from purchase_price.services.search import SearchRun, search_all
 from purchase_price.ui.g2b_market_research import render_g2b_market_research
 
 
+def _classification_session_key(query: ProductQuery) -> str:
+    raw = "|".join((query.manufacturer, query.model_name, query.product_name)).casefold()
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+    return f"g2b_classification_candidate_{digest}"
+
+
+def _targeted_detail_codes(
+    query: ProductQuery,
+    *,
+    basis: ResearchBasis,
+    classification_resolution,
+) -> tuple[str, ...]:
+    """Choose a bounded Shopping Research code without silently promoting resolver candidates."""
+
+    code = (basis.code or "").strip()
+    if basis.is_verified_official and code.isdigit() and len(code) == 10:
+        return (code,)
+
+    if classification_resolution is None or not classification_resolution.candidates:
+        return ()
+    selected = str(st.session_state.get(_classification_session_key(query), "") or "").strip()
+    allowed = {
+        candidate.detail_product_code
+        for candidate in classification_resolution.candidates
+        if candidate.detail_product_code.isdigit() and len(candidate.detail_product_code) == 10
+    }
+    return (selected,) if selected in allowed else ()
+
+
 def run_market_research(
     query: ProductQuery,
     *,
@@ -51,8 +80,9 @@ def run_market_research(
 
     Shopping direct-price/discovery can use a credential approved only for ShoppingMall API while
     bid/award/pre-spec/item/contract/lifecycle Research can use separate service subscriptions.
-    Official detail-class resolver candidates are used only as recall hints. None of those records
-    or candidates are passed to `search_all` or `assess_prices`.
+    Official detail-class resolver candidates are used only as recall hints or, after an explicit
+    session selection, a targeted Research selector. None of those records or candidates are passed
+    to `search_all` or `assess_prices`.
     """
 
     settings = get_settings()
@@ -79,6 +109,11 @@ def run_market_research(
         )
     resolver_terms = (
         classification_resolution.research_terms if classification_resolution is not None else ()
+    )
+    targeted_codes = _targeted_detail_codes(
+        query,
+        basis=basis,
+        classification_resolution=classification_resolution,
     )
 
     market_bundle = None
@@ -109,8 +144,6 @@ def run_market_research(
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=min(settings.g2b_max_retries, 2),
         )
-        # Integrated lifecycle is identifier-based enrichment, not another keyword search. Keep it
-        # tightly bounded because every call follows one already observed bid notice.
         market_bundle = enrich_market_bundle_with_lifecycle(
             market_bundle,
             service_key=lifecycle_key,
@@ -132,6 +165,7 @@ def run_market_research(
             pages_per_term_window=research_pages_per_term,
             request_budget=research_request_budget,
             curated_terms=research_terms_with_basis(query) + resolver_terms,
+            target_detail_product_codes=targeted_codes,
         )
         if classification_resolution is not None:
             discovery = replace(
@@ -146,8 +180,6 @@ def run_market_research(
                 classification_error_messages=classification_resolution.error_messages,
             )
         if catalog_key and discovery.candidates:
-            # Catalog lookup is supplementary exact-ID evidence. Keep the user-facing latency
-            # bounded; a catalog timeout annotates the candidate but never erases shopping prices.
             discovery = enrich_discovery_with_catalog(
                 discovery,
                 service_key=catalog_key,
@@ -163,12 +195,6 @@ def _basis_status_label(basis: ResearchBasis) -> str:
     if basis.is_verified_official:
         return "공식 조달분류 확인"
     return "Research 기준명 후보 · 미검증"
-
-
-def _classification_session_key(query: ProductQuery) -> str:
-    raw = "|".join((query.manufacturer, query.model_name, query.product_name)).casefold()
-    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
-    return f"g2b_classification_candidate_{digest}"
 
 
 def _render_classification_candidates(
@@ -235,9 +261,9 @@ def _render_classification_candidates(
             key=_classification_session_key(query),
         )
         st.caption(
-            "이 선택은 현재 세션의 Research 검토 편의를 위한 값이며 verified mapping 파일을 수정하지 "
-            "않습니다. 후보 선택만으로 견적 제품과 동일제품·규격동등으로 확정하거나 가격을 "
-            "`assess_prices()`에 승격하지 않습니다."
+            "선택값은 현재 세션의 세부품명번호 표적 Research 조회에만 사용합니다. verified mapping "
+            "파일을 수정하지 않으며, 후보 선택만으로 견적 제품과 동일제품·규격동등으로 확정하거나 "
+            "가격을 `assess_prices()`에 승격하지 않습니다."
         )
 
 
@@ -257,6 +283,17 @@ def _render_research_basis(
 
     if discovery is not None:
         _render_classification_candidates(query, discovery)
+        if discovery.targeted_detail_codes:
+            target_source = (
+                "검증 공식분류"
+                if basis.is_verified_official
+                else "세션에서 명시적으로 선택한 Research 후보"
+            )
+            st.caption(
+                "세부품명번호 표적 Shopping Research 실행: "
+                + " · ".join(f"`{code}`" for code in discovery.targeted_detail_codes)
+                + f" · 근거: {target_source}. 표적조회 자체는 동일제품 판정이 아닙니다."
+            )
 
     if discovery is not None and discovery.terms:
         with st.expander("실제 검색 확장어", expanded=False):
@@ -412,12 +449,7 @@ def render_market_reference_summary(
     include_model_price_summary: bool = True,
     include_related_candidates: bool = True,
 ) -> None:
-    """Render basis plus optional shopping price/candidate sections.
-
-    The basis is shown even when Shopping Research is unavailable so the user can always see which
-    canonical/research name drives the item review. Quote UIs can split the optional sections to
-    preserve the required evidence ordering around verified direct prices.
-    """
+    """Render basis plus optional shopping price/candidate sections."""
 
     _render_research_basis(query, discovery)
     if discovery is None:
