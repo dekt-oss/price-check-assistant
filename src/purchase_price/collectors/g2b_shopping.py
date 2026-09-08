@@ -59,9 +59,6 @@ def _raise_for_result_header(container: Mapping[str, Any]) -> None:
 
 
 def unwrap_g2b_page(payload: Mapping[str, Any]) -> G2BShoppingPage:
-    # A failed request answers with a `*ResponseError` envelope instead of `response`. Without
-    # this check the fallback to `payload` finds no `header`, no `body`, and returns an empty
-    # page, so a broken call is indistinguishable from "this product had no transactions".
     for key, value in payload.items():
         if key.endswith("ResponseError") and isinstance(value, Mapping):
             _raise_for_result_header(value)
@@ -96,8 +93,6 @@ def unwrap_g2b_page(payload: Mapping[str, Any]) -> G2BShoppingPage:
     )
 
 
-# Korean aliases come from official public file reports. camelCase aliases below were
-# verified against a live getSpcifyPrdlstPrcureInfoList response on 2026-09-03.
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "product_id": ("물품식별", "물품식별번호", "prdctIdntNo"),
     "product_name": (
@@ -161,12 +156,7 @@ def _date_or_none(value: Any) -> date | None:
 
 
 def build_g2b_source_record_id(record: Mapping[str, Any]) -> str | None:
-    """Build an item-level external key without pretending a delivery request is one item.
-
-    `cntrctDlvrReqNo` identifies the delivery-request container and can repeat across multiple
-    products. Where available, change-order, product-identification and line sequence are appended
-    so downstream Ground Truth and observations can distinguish individual items.
-    """
+    """Build an item-level external key without pretending a delivery request is one item."""
 
     delivery_request = _first_value(record, "delivery_request_number")
     contract_number = _first_value(record, "contract_number")
@@ -309,7 +299,8 @@ class G2BShoppingCollector:
     def fetch_specific_item_page(
         self,
         *,
-        detail_product_name: str,
+        detail_product_name: str | None = None,
+        detail_product_code: str | None = None,
         begin_date: date,
         end_date: date,
         page_no: int = 1,
@@ -318,20 +309,26 @@ class G2BShoppingCollector:
         product_div: str = "2",
         final_change_order_only: str = "Y",
     ) -> tuple[G2BShoppingPage, dict[str, Any]]:
-        """Call the live-verified specific-item procurement query contract.
+        """Query specific-item procurement history by one official detail-class selector.
 
-        The parameter names/default values are known to produce a valid response. Their
-        business-code semantics remain intentionally neutral until the reference document is
-        incorporated; callers may override them explicitly.
+        Name search remains available for broad Research. A caller may use a verified detail code or
+        an explicitly user-selected Research candidate code for targeted Research retrieval. This
+        method only controls the server-side selector; it does not assert quote identity, spec
+        equivalence, or eligibility for direct-price assessment.
         """
 
-        if not detail_product_name.strip():
-            raise ValueError("detail_product_name is required")
+        name = (detail_product_name or "").strip()
+        code = (detail_product_code or "").strip()
+        if bool(name) == bool(code):
+            raise ValueError("provide exactly one of detail_product_name or detail_product_code")
+        if code and (not code.isdigit() or len(code) != 10):
+            raise ValueError("detail_product_code must be a 10-digit PPS detail-product code")
         if begin_date > end_date:
             raise ValueError("begin_date must not be after end_date")
         if page_no < 1 or num_of_rows < 1:
             raise ValueError("page_no and num_of_rows must be positive")
 
+        selector = {"dtilPrdctClsfcNo": code} if code else {"dtilPrdctClsfcNoNm": name}
         return self.fetch_page(
             G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS,
             pageNo=page_no,
@@ -341,7 +338,7 @@ class G2BShoppingCollector:
             inqryEndDate=end_date.strftime("%Y%m%d"),
             inqryPrdctDiv=product_div,
             fnlCntrctDlvrReqChgOrdYn=final_change_order_only,
-            dtilPrdctClsfcNoNm=detail_product_name.strip(),
+            **selector,
         )
 
     def parse_payload(
