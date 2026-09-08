@@ -7,11 +7,15 @@ from urllib.parse import quote, unquote
 from xml.etree import ElementTree
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 
 class PublicDataClientError(RuntimeError):
     pass
+
+
+class PublicDataTransportError(PublicDataClientError):
+    """Transport failure after the client's bounded retry policy is exhausted."""
 
 
 _SERVICE_KEY_QUERY_PATTERN = re.compile(r"(serviceKey=)[^&\s\"']+", re.IGNORECASE)
@@ -233,7 +237,7 @@ class PublicDataPortalClient:
         @retry(
             retry=retry_if_exception_type((httpx.TimeoutException, httpx.TransportError)),
             stop=stop_after_attempt(self.max_retries),
-            wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+            wait=wait_random_exponential(multiplier=0.5, max=4),
             reraise=True,
         )
         def do_request() -> dict[str, Any]:
@@ -262,7 +266,7 @@ class PublicDataPortalClient:
                 f"Public Data Portal transport failure after retries: {type(exc).__name__}: {exc}",
                 self.service_key,
             )
-            raise PublicDataClientError(message) from exc
+            raise PublicDataTransportError(message) from exc
 
     def get_json(self, base_url: str, endpoint: str, **params: Any) -> dict[str, Any]:
         if not base_url.strip():
