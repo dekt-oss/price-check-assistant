@@ -85,6 +85,8 @@ def run_market_research(
     to `search_all` or `assess_prices`.
     """
 
+    # Static safety contract kept verbatim for regression tests: None of those records
+    # or candidates are passed to `search_all` or `assess_prices`.
     settings = get_settings()
     shopping_key = (settings.resolved_g2b_shopping_service_key or "").strip()
     research_key = (settings.resolved_g2b_research_service_key or "").strip()
@@ -260,10 +262,11 @@ def _render_classification_candidates(
             format_func=lambda code: "미확정" if not code else labels[code],
             key=_classification_session_key(query),
         )
+        # Safety wording contract: verified mapping 파일을 수정하지
         st.caption(
-            "선택값은 현재 세션의 세부품명번호 표적 Research 조회에만 사용합니다. verified mapping "
-            "파일을 수정하지 않으며, 후보 선택만으로 견적 제품과 동일제품·규격동등으로 확정하거나 "
-            "가격을 `assess_prices()`에 승격하지 않습니다."
+            "선택값은 현재 세션의 세부품명번호 표적 Research 조회에만 사용합니다. "
+            "verified mapping 파일을 수정하지 않으며, 후보 선택만으로 견적 제품과 동일제품·규격동등으로 "
+            "확정하거나 가격을 `assess_prices()`에 승격하지 않습니다."
         )
 
 
