@@ -82,6 +82,8 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             column.metric(label, f"{len(source.records)}건")
         elif source.status == ResearchSourceStatus.PARTIAL:
             column.metric(label, f"{len(source.records)}건 · 부분")
+        elif source.status == ResearchSourceStatus.NOT_RUN:
+            column.metric(label, "미조회")
         elif source.status == ResearchSourceStatus.NOT_CONFIGURED:
             column.metric(label, "미설정")
         elif source.status == ResearchSourceStatus.NOT_AUTHORIZED:
@@ -99,6 +101,8 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             ResearchSourceStatus.NOT_AUTHORIZED,
         }
     ]
+    not_run = [source for source in bundle.sources if source.status == ResearchSourceStatus.NOT_RUN]
+
     for source in failures:
         label = _SOURCE_LABELS[source.source]
         if source.status == ResearchSourceStatus.NOT_AUTHORIZED:
@@ -113,14 +117,26 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
                 f"{source.error_type}: {source.error_message}"
             )
 
+    for source in not_run:
+        label = _SOURCE_LABELS[source.source]
+        st.info(
+            f"{label}: 연결할 입찰공고 식별자가 없어 이 후속 조회는 실행하지 않았습니다. "
+            "따라서 0건 검색 결과가 아니라 **미조회** 상태입니다."
+        )
+
     records = sorted(
         bundle.records,
         key=lambda item: (item.published_date is not None, item.published_date),
         reverse=True,
     )
     if not records:
-        if not failures:
+        if not failures and not not_run:
             st.info("API는 정상 응답했지만 현재 조사 기준·기간에서 유의미한 Research 결과가 0건입니다.")
+        elif not_run and not failures:
+            st.info(
+                "실행된 1차 검색에서 연결 가능한 자료를 찾지 못해 일부 후속 조회가 미실행 상태입니다. "
+                "미조회 source를 정상 0건으로 해석하지 마세요."
+            )
         return
 
     shown = records[:max_rows]
