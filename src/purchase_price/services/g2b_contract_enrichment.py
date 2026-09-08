@@ -185,6 +185,7 @@ def enrich_market_bundle_with_contracts(
             coverage_start = interval_begin
             coverage_end = end
             for term in terms:
+                request_count += 1
                 try:
                     found, requests = active_client.search_by_product_name(
                         product_name=term,
@@ -195,7 +196,7 @@ def enrich_market_bundle_with_contracts(
                 except Exception as exc:
                     errors.append(exc)
                     continue
-                request_count += requests
+                request_count += max(0, requests - 1)
                 for record in found:
                     if record.source_record_id in seen:
                         continue
