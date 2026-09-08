@@ -309,7 +309,8 @@ class G2BShoppingCollector:
     def fetch_specific_item_page(
         self,
         *,
-        detail_product_name: str,
+        detail_product_name: str | None = None,
+        detail_product_code: str | None = None,
         begin_date: date,
         end_date: date,
         page_no: int = 1,
@@ -318,20 +319,27 @@ class G2BShoppingCollector:
         product_div: str = "2",
         final_change_order_only: str = "Y",
     ) -> tuple[G2BShoppingPage, dict[str, Any]]:
-        """Call the live-verified specific-item procurement query contract.
+        """Query specific-item procurement history by one official detail-class selector.
 
-        The parameter names/default values are known to produce a valid response. Their
-        business-code semantics remain intentionally neutral until the reference document is
-        incorporated; callers may override them explicitly.
+        Name search remains available for broad Research. When a verified/confirmed 10-digit PPS
+        detail-product code is available, `detail_product_code` sends the server-side
+        `dtilPrdctClsfcNo` filter instead of downloading a broader name match and filtering locally.
+        This method does not decide whether a code belongs to the quote item; that confirmation must
+        happen before the caller chooses the code path.
         """
 
-        if not detail_product_name.strip():
-            raise ValueError("detail_product_name is required")
+        name = (detail_product_name or "").strip()
+        code = (detail_product_code or "").strip()
+        if bool(name) == bool(code):
+            raise ValueError("provide exactly one of detail_product_name or detail_product_code")
+        if code and (not code.isdigit() or len(code) != 10):
+            raise ValueError("detail_product_code must be a 10-digit PPS detail-product code")
         if begin_date > end_date:
             raise ValueError("begin_date must not be after end_date")
         if page_no < 1 or num_of_rows < 1:
             raise ValueError("page_no and num_of_rows must be positive")
 
+        selector = {"dtilPrdctClsfcNo": code} if code else {"dtilPrdctClsfcNoNm": name}
         return self.fetch_page(
             G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS,
             pageNo=page_no,
@@ -341,7 +349,7 @@ class G2BShoppingCollector:
             inqryEndDate=end_date.strftime("%Y%m%d"),
             inqryPrdctDiv=product_div,
             fnlCntrctDlvrReqChgOrdYn=final_change_order_only,
-            dtilPrdctClsfcNoNm=detail_product_name.strip(),
+            **selector,
         )
 
     def parse_payload(
