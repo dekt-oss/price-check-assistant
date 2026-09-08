@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     g2b_service_key: str | None = None
     g2b_shopping_service_key: str | None = None
     g2b_research_service_key: str | None = None
+    # Contract authorization is subscription-specific. A key that works for bid/award/pre-spec can
+    # still return SERVICE_KEY_IS_NOT_REGISTERED_ERROR for CntrctInfoService, so keep it independent.
+    g2b_contract_service_key: str | None = None
     # Newly approved PPS services are kept separate because data.go.kr authorization is
     # subscription-specific even when the encoded key text happens to be identical.
     g2b_catalog_service_key: str | None = None
@@ -70,15 +73,28 @@ class Settings(BaseSettings):
 
     @property
     def resolved_g2b_research_service_key(self) -> str | None:
-        """Resolve the key for bid/award/pre-spec/item/contract research APIs.
-
-        Prefer the dedicated research key and then the shared market key before falling back to the
-        historical G2B key. A valid shopping-service key may be unregistered for these APIs.
-        """
+        """Resolve the key for bid/award/pre-spec/item research APIs."""
 
         return (
             self.g2b_research_service_key
             or self.data_go_kr_market_service_key
+            or self.g2b_service_key
+            or self.data_go_kr_service_key
+        )
+
+    @property
+    def resolved_g2b_contract_service_key(self) -> str | None:
+        """Resolve the key for CntrctInfoService without assuming bid Research authorization.
+
+        Prefer a dedicated contract subscription. The shared market key is intentionally checked
+        before the general Research key because live validation has shown a Research key can be
+        authorized for bid/award/pre-spec yet unregistered for the contract service.
+        """
+
+        return (
+            self.g2b_contract_service_key
+            or self.data_go_kr_market_service_key
+            or self.g2b_research_service_key
             or self.g2b_service_key
             or self.data_go_kr_service_key
         )
@@ -130,6 +146,18 @@ class Settings(BaseSettings):
             (
                 ("G2B_RESEARCH_SERVICE_KEY", self.g2b_research_service_key),
                 ("DATA_GO_KR_MARKET_SERVICE_KEY", self.data_go_kr_market_service_key),
+                ("G2B_SERVICE_KEY", self.g2b_service_key),
+                ("DATA_GO_KR_SERVICE_KEY", self.data_go_kr_service_key),
+            )
+        )
+
+    @property
+    def g2b_contract_key_source(self) -> str:
+        return self._key_source(
+            (
+                ("G2B_CONTRACT_SERVICE_KEY", self.g2b_contract_service_key),
+                ("DATA_GO_KR_MARKET_SERVICE_KEY", self.data_go_kr_market_service_key),
+                ("G2B_RESEARCH_SERVICE_KEY", self.g2b_research_service_key),
                 ("G2B_SERVICE_KEY", self.g2b_service_key),
                 ("DATA_GO_KR_SERVICE_KEY", self.data_go_kr_service_key),
             )
