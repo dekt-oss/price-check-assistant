@@ -64,11 +64,16 @@ def _notice_no(record: Mapping[str, Any]) -> str | None:
     return _text(_first(record, "ntceNo", "bidNtceNo"))
 
 
+def _item_sequence(record: Mapping[str, Any]) -> str | None:
+    return _text(_first(record, "cntrctDtlSeq", "prdctSeq", "seq"))
+
+
 def _record_id(record: Mapping[str, Any]) -> str:
     contract_no = _text(record.get("dcsnCntrctNo")) or "unknown"
     notice = _notice_no(record) or ""
-    sequence = _text(_first(record, "cntrctDtlSeq", "prdctSeq", "seq")) or ""
-    return f"contract:{contract_no}:{notice}:{sequence}"
+    sequence = _item_sequence(record) or ""
+    product_id = _text(record.get("prdctIdntNo")) or ""
+    return f"contract:{contract_no}:{notice}:{sequence}:{product_id}"
 
 
 def parse_contract_research(
@@ -80,18 +85,18 @@ def parse_contract_research(
 
     Contract monetary fields are kept as CONTRACT_TOTAL. They are never divided by bid quantity or
     promoted to UNIT_PRICE here because contract composition, changes, options and line-level scope
-    can differ from the bid's purchase-object rows.
+    can differ from the bid's purchase-object rows. Raw identity/specification fields are retained
+    only as later fingerprinting material.
     """
 
-    amount = _decimal(
-        _first(
-            record,
-            "totCntrctAmt",
-            "cntrctAmt",
-            "dcsnCntrctAmt",
-            "thtmCntrctAmt",
-        )
+    raw_amount = _first(
+        record,
+        "totCntrctAmt",
+        "cntrctAmt",
+        "dcsnCntrctAmt",
+        "thtmCntrctAmt",
     )
+    amount = _decimal(raw_amount)
     return G2BResearchRecord(
         source_type=G2BResearchSource.CONTRACT,
         source_record_id=_record_id(record),
@@ -102,12 +107,27 @@ def parse_contract_research(
         bid_notice_order=_text(record.get("bidNtceOrd")),
         contract_no=_text(record.get("dcsnCntrctNo")),
         product_name=_text(_first(record, "prdctClsfcNoNm", "prdctNm")),
+        manufacturer=_text(_first(record, "mnfcturNm", "makrNm", "manufacturer")),
+        model_name=_text(_first(record, "modelNm", "mdlNm", "modelName")),
+        product_id=_text(record.get("prdctIdntNo")),
+        detail_product_code=_text(record.get("dtilPrdctClsfcNo")),
+        item_sequence=_item_sequence(record),
+        original_specification=_text(
+            _first(
+                record,
+                "prdctSpcfctn",
+                "spcfctn",
+                "krnPrdctNm",
+                "prdctDtlList",
+            )
+        ),
         quantity=_decimal(_first(record, "prdctQty", "cntrctQty", "qty")),
         unit=_text(_first(record, "prdctUnit", "unitNm", "unit")),
         amount=amount,
         amount_type=(
             ResearchAmountType.CONTRACT_TOTAL if amount is not None else ResearchAmountType.UNKNOWN
         ),
+        original_amount_text=_text(raw_amount),
         supplier=_text(
             _first(
                 record,
@@ -116,6 +136,12 @@ def parse_contract_research(
                 "corpNm",
                 "bidwinnrNm",
             )
+        ),
+        delivery_condition=_text(
+            _first(record, "dlvryCndtnNm", "dlvrCndtnNm", "dlvryCndtn", "dlvrCndtn")
+        ),
+        record_change_order=_text(
+            _first(record, "cntrctChgOrd", "cntrctDtlChgOrd", "prdctChgOrd")
         ),
         source_url=_text(_first(record, "cntrctDtlInfoUrl", "cntrctInfoUrl")),
         search_term=search_term,
