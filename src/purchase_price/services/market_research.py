@@ -21,8 +21,18 @@ from purchase_price.services.g2b_research_terms import research_terms_for_query
 from purchase_price.services.matching import normalize_text
 
 
-def build_market_research_terms(query: ProductQuery, *, max_terms: int = 6) -> tuple[str, ...]:
-    """Build recall-oriented query terms without consulting verified G2B mappings."""
+def build_market_research_terms(
+    query: ProductQuery,
+    *,
+    max_terms: int = 6,
+    additional_terms: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Build recall-oriented query terms without promoting any inferred mapping.
+
+    `additional_terms` may contain names returned by the official PPS detail-class resolver. They
+    are Research recall hints only: inclusion here does not make a class verified and cannot make
+    any bid/award/pre-spec record direct-price evidence.
+    """
 
     if max_terms < 1:
         raise ValueError("max_terms must be positive")
@@ -38,6 +48,7 @@ def build_market_research_terms(query: ProductQuery, *, max_terms: int = 6) -> t
             raw.append(f"{manufacturer} {model}")
     if product:
         raw.append(product)
+    raw.extend(additional_terms)
     raw.extend(research_terms_for_query(query))
 
     output: list[str] = []
@@ -179,6 +190,7 @@ def research_g2b_market(
     max_retries: int = 2,
     max_terms: int = 6,
     max_pages_per_window: int = 1,
+    additional_terms: tuple[str, ...] = (),
     bid_base_url: str | None = None,
     award_base_url: str | None = None,
     prespec_base_url: str | None = None,
@@ -194,7 +206,11 @@ def research_g2b_market(
 
     if lookback_days < 1:
         raise ValueError("lookback_days must be positive")
-    terms = build_market_research_terms(query, max_terms=max_terms)
+    terms = build_market_research_terms(
+        query,
+        max_terms=max_terms,
+        additional_terms=additional_terms,
+    )
     if not terms:
         empty = tuple(
             ResearchSourceResult(source=source, status=ResearchSourceStatus.SUCCESS_0)
