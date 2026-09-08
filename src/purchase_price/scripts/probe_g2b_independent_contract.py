@@ -30,11 +30,11 @@ def build_report(
         raise ValueError("lookback_days must be positive")
 
     settings = get_settings()
-    key = (settings.resolved_g2b_research_service_key or "").strip()
+    key = (settings.resolved_g2b_contract_service_key or "").strip()
     if not key:
         return {
             "validation_status": "not_configured",
-            "key_source": settings.g2b_research_key_source,
+            "key_source": settings.g2b_contract_key_source,
             "product_name": product_name,
             "lookback_days": lookback_days,
         }
@@ -56,7 +56,7 @@ def build_report(
     except Exception as exc:
         return {
             "validation_status": "environment_or_access_failure",
-            "key_source": settings.g2b_research_key_source,
+            "key_source": settings.g2b_contract_key_source,
             "product_name": product_name,
             "lookback_days": lookback_days,
             "coverage_start": begin.isoformat(),
@@ -72,7 +72,7 @@ def build_report(
     return {
         "validation_status": "pass",
         "source_status": "success" if records else "success_0",
-        "key_source": settings.g2b_research_key_source,
+        "key_source": settings.g2b_contract_key_source,
         "product_name": product_name,
         "lookback_days": lookback_days,
         "coverage_start": begin.isoformat(),
