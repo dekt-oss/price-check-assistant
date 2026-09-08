@@ -7,11 +7,15 @@ from urllib.parse import quote, unquote
 from xml.etree import ElementTree
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 
 class PublicDataClientError(RuntimeError):
     pass
+
+
+class PublicDataTransportError(PublicDataClientError):
+    """Transport failure after the client's bounded retry policy is exhausted."""
 
 
 _SERVICE_KEY_QUERY_PATTERN = re.compile(r"(serviceKey=)[^&\s\"']+", re.IGNORECASE)
@@ -192,7 +196,11 @@ class PublicDataPortalClient:
     """Common data.go.kr client with single key encoding and fail-closed errors.
 
     One HTTP client is reused for the lifetime of this object so multi-page/adaptive searches do
-    not perform a new TCP/TLS handshake for every API request.
+    not perform a new TCP/TLS handshake for every API request. A caller may additionally enable a
+    request-scoped connect circuit: after bounded TCP connection retries fail, later calls through
+    the same shared portal fail immediately instead of repeatedly waiting on the same unreachable
+    host. The circuit is deliberately limited to connection-establishment failures; read timeouts
+    and API responses do not open it.
     """
 
     def __init__(
@@ -201,11 +209,14 @@ class PublicDataPortalClient:
         *,
         timeout_seconds: float = 20.0,
         max_retries: int = 3,
+        connect_circuit_breaker: bool = False,
     ) -> None:
         self.service_key = normalize_service_key(service_key)
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self.connect_circuit_breaker = connect_circuit_breaker
         self._client: httpx.Client | None = None
+        self._connect_circuit_error: str | None = None
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
@@ -215,6 +226,7 @@ class PublicDataPortalClient:
     def close(self) -> None:
         client = self._client
         self._client = None
+        self._connect_circuit_error = None
         if client is not None:
             close = getattr(client, "close", None)
             if callable(close):
@@ -228,12 +240,18 @@ class PublicDataPortalClient:
         return False
 
     def _request(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
+        if self._connect_circuit_error is not None:
+            raise PublicDataTransportError(
+                "Public Data Portal connection circuit open after exhausted connect failure: "
+                f"{self._connect_circuit_error}"
+            )
+
         merged = {"serviceKey": self.service_key, "type": "json", **params}
 
         @retry(
             retry=retry_if_exception_type((httpx.TimeoutException, httpx.TransportError)),
             stop=stop_after_attempt(self.max_retries),
-            wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+            wait=wait_random_exponential(multiplier=0.5, max=4),
             reraise=True,
         )
         def do_request() -> dict[str, Any]:
@@ -262,7 +280,15 @@ class PublicDataPortalClient:
                 f"Public Data Portal transport failure after retries: {type(exc).__name__}: {exc}",
                 self.service_key,
             )
-            raise PublicDataClientError(message) from exc
+            if self.connect_circuit_breaker and isinstance(
+                exc,
+                (httpx.ConnectTimeout, httpx.ConnectError),
+            ):
+                self._connect_circuit_error = _redact_secret(
+                    f"{type(exc).__name__}: {exc}",
+                    self.service_key,
+                )
+            raise PublicDataTransportError(message) from exc
 
     def get_json(self, base_url: str, endpoint: str, **params: Any) -> dict[str, Any]:
         if not base_url.strip():

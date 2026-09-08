@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "src/purchase_price/config.py"
+      - "src/purchase_price/clients/data_go_kr.py"
       - "src/purchase_price/services/g2b_market_*.py"
       - "src/purchase_price/services/g2b_contract_research.py"
       - "src/purchase_price/services/market_research.py"
@@ -48,7 +49,7 @@ jobs:
             --keyword "마취" \
             --lookback-days 30 \
             --timeout-seconds 15 \
-            --max-retries 1 \
+            --max-retries 2 \
             --output artifacts/g2b-market-sources-live/report.json
 
       - name: Run known-positive contract notice lookup
@@ -57,7 +58,7 @@ jobs:
           python -m purchase_price.scripts.probe_g2b_contract_notice \
             --bid-notice-no "20160234982" \
             --timeout-seconds 15 \
-            --max-retries 1 \
+            --max-retries 2 \
             --output artifacts/g2b-market-sources-live/contract-report.json
 
       - name: Record missing secret

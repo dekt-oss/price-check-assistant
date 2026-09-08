@@ -4,6 +4,7 @@ import re
 from collections.abc import Callable
 from datetime import date, timedelta
 
+from purchase_price.clients.data_go_kr import PublicDataPortalClient, PublicDataTransportError
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_market_models import (
     G2BResearchRecord,
@@ -134,6 +135,11 @@ def _run_source(
                     error_message=_safe_error(exc),
                 )
             errors.append(exc)
+            # A PublicDataTransportError already means the bounded retry policy was exhausted.
+            # Continuing through every recall term would amplify an upstream outage without
+            # increasing evidence quality, so open a source-local circuit for this request.
+            if isinstance(exc, PublicDataTransportError):
+                break
             continue
         request_count += requests
         for record in found:
@@ -224,69 +230,86 @@ def research_g2b_market(
         )
         return MarketResearchBundle(query_terms=terms, sources=missing, records=())
 
-    if bid_client is None:
-        bid_client = G2BBidResearchClient(
-            service_key or "injected",
-            base_url=bid_base_url or "https://apis.data.go.kr/1230000/ad/BidPublicInfoService",
-            timeout_seconds=timeout_seconds,
-            max_retries=max_retries,
-        )
-    if award_client is None:
-        award_client = G2BAwardResearchClient(
-            service_key or "injected",
-            base_url=award_base_url or "https://apis.data.go.kr/1230000/as/ScsbidInfoService",
-            timeout_seconds=timeout_seconds,
-            max_retries=max_retries,
-        )
-    if prespec_client is None:
-        prespec_client = G2BPrespecResearchClient(
-            service_key or "injected",
-            base_url=prespec_base_url
-            or "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService",
+    shared_portal: PublicDataPortalClient | None = None
+    if service_key and (bid_client is None or award_client is None or prespec_client is None):
+        # All three PPS market endpoints share apis.data.go.kr. Reusing one client avoids a fresh
+        # TCP/TLS handshake per source and keeps transport retry/backoff behavior consistent.
+        shared_portal = PublicDataPortalClient(
+            service_key,
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
         )
 
-    end = today or date.today()
-    begin = end - timedelta(days=lookback_days - 1)
+    try:
+        if bid_client is None:
+            bid_client = G2BBidResearchClient(
+                service_key or "injected",
+                base_url=bid_base_url or "https://apis.data.go.kr/1230000/ad/BidPublicInfoService",
+                timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
+                client=shared_portal,
+            )
+        if award_client is None:
+            award_client = G2BAwardResearchClient(
+                service_key or "injected",
+                base_url=award_base_url or "https://apis.data.go.kr/1230000/as/ScsbidInfoService",
+                timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
+                client=shared_portal,
+            )
+        if prespec_client is None:
+            prespec_client = G2BPrespecResearchClient(
+                service_key or "injected",
+                base_url=prespec_base_url
+                or "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService",
+                timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
+                client=shared_portal,
+            )
 
-    sources = (
-        _run_source(
-            source=G2BResearchSource.BID_NOTICE,
-            terms=terms,
-            begin=begin,
-            end=end,
-            search=lambda term, start, finish: bid_client.search(
-                keyword=term,
-                begin=start,
-                end=finish,
-                max_pages_per_window=max_pages_per_window,
+        end = today or date.today()
+        begin = end - timedelta(days=lookback_days - 1)
+
+        sources = (
+            _run_source(
+                source=G2BResearchSource.BID_NOTICE,
+                terms=terms,
+                begin=begin,
+                end=end,
+                search=lambda term, start, finish: bid_client.search(
+                    keyword=term,
+                    begin=start,
+                    end=finish,
+                    max_pages_per_window=max_pages_per_window,
+                ),
             ),
-        ),
-        _run_source(
-            source=G2BResearchSource.AWARD,
-            terms=terms,
-            begin=begin,
-            end=end,
-            search=lambda term, start, finish: award_client.search(
-                keyword=term,
-                begin=start,
-                end=finish,
-                max_pages_per_window=max_pages_per_window,
+            _run_source(
+                source=G2BResearchSource.AWARD,
+                terms=terms,
+                begin=begin,
+                end=end,
+                search=lambda term, start, finish: award_client.search(
+                    keyword=term,
+                    begin=start,
+                    end=finish,
+                    max_pages_per_window=max_pages_per_window,
+                ),
             ),
-        ),
-        _run_source(
-            source=G2BResearchSource.PRESPEC,
-            terms=terms,
-            begin=begin,
-            end=end,
-            search=lambda term, start, finish: prespec_client.search(
-                keyword=term,
-                begin=start,
-                end=finish,
-                max_pages_per_window=max_pages_per_window,
+            _run_source(
+                source=G2BResearchSource.PRESPEC,
+                terms=terms,
+                begin=begin,
+                end=end,
+                search=lambda term, start, finish: prespec_client.search(
+                    keyword=term,
+                    begin=start,
+                    end=finish,
+                    max_pages_per_window=max_pages_per_window,
+                ),
             ),
-        ),
-    )
-    records = tuple(record for source in sources for record in source.records)
-    return MarketResearchBundle(query_terms=terms, sources=sources, records=records)
+        )
+        records = tuple(record for source in sources for record in source.records)
+        return MarketResearchBundle(query_terms=terms, sources=sources, records=records)
+    finally:
+        if shared_portal is not None:
+            shared_portal.close()
