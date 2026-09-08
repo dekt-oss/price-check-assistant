@@ -126,10 +126,20 @@ def _date_windows(
     begin: date,
     end: date,
     *,
-    max_window_days: int = 31,
+    max_window_days: int | None = None,
 ) -> tuple[tuple[date, date], ...]:
+    """Split only when the caller has an explicit source-specific window limit.
+
+    The current PPS contract PPSSrch documentation exposes begin/end dates but does not establish
+    the 31-day restriction used by some other procurement APIs. Defaulting to one interval avoids
+    multiplying requests for 1/3/5-year adaptive research. A bounded window can still be supplied
+    explicitly if live evidence later proves such a source constraint.
+    """
+
     if begin > end:
         raise ValueError("begin must not be after end")
+    if max_window_days is None:
+        return ((begin, end),)
     if max_window_days < 1:
         raise ValueError("max_window_days must be positive")
 
@@ -192,12 +202,7 @@ class G2BContractResearchClient:
         page_no: int = 1,
         num_of_rows: int = 100,
     ) -> G2BShoppingPage:
-        """Use the official PPS-search contract fields for an independent goods lookup.
-
-        `inqryDiv=1` is contract-conclusion-date search. `prdctClsfcNoNm` is the goods-name search
-        field. The date fields deliberately use `YYYYMMDD` (`inqryBgnDate`/`inqryEndDate`), which
-        differ from the basic contract-list operation's timestamp fields.
-        """
+        """Use the official PPS-search contract fields for an independent goods lookup."""
 
         keyword = " ".join(product_name.split()).strip()
         if not keyword:
@@ -263,7 +268,7 @@ class G2BContractResearchClient:
         end_date: date,
         max_pages_per_window: int = 1,
         num_of_rows: int = 100,
-        max_window_days: int = 31,
+        max_window_days: int | None = None,
     ) -> tuple[tuple[G2BResearchRecord, ...], int]:
         """Search contracts without requiring an upstream bid notice seed."""
 
