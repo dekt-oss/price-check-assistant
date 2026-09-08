@@ -48,14 +48,7 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
         page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
         try:
             _wait_heading(page, expected, timeout=30_000)
-            attempts.append(
-                {
-                    "attempt": attempt,
-                    "status": "pass",
-                    "url": page.url,
-                    "elapsed_since_start_seconds": round(time.monotonic(), 2),
-                }
-            )
+            attempts.append({"attempt": attempt, "status": "pass", "url": page.url})
             return
         except Exception as exc:
             snapshot = _diagnostic_snapshot(page, label=f"dashboard-attempt-{attempt}")
