@@ -65,7 +65,7 @@ def test_transport_outage_opens_source_local_circuit_after_first_term(source) ->
 
 
 class StubPortal:
-    instances: list["StubPortal"] = []
+    instances: list[StubPortal] = []
 
     def __init__(self, service_key: str, *, timeout_seconds: float, max_retries: int) -> None:
         self.service_key = service_key
