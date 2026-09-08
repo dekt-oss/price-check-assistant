@@ -1,0 +1,68 @@
+name: Streamlit Cloud Build
+
+on:
+  pull_request:
+    paths:
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "packages.txt"
+      - ".github/workflows/streamlit-cloud-build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "packages.txt"
+      - ".github/workflows/streamlit-cloud-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cloud-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    container:
+      image: python:3.12-bullseye
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Community Cloud apt dependencies
+        shell: bash
+        run: |
+          apt-get update
+          xargs -r apt-get install -y --no-install-recommends < packages.txt
+          tesseract --version | head -n 1
+          tesseract --list-langs | grep -Fx kor
+          tesseract --list-langs | grep -Fx eng
+
+      - name: Reproduce uv requirements install
+        shell: bash
+        run: |
+          python -m venv /tmp/cloud-uv
+          /tmp/cloud-uv/bin/python -m pip install --upgrade pip uv
+          /tmp/cloud-uv/bin/uv pip install --python /tmp/cloud-uv/bin/python -r requirements.txt
+          /tmp/cloud-uv/bin/python - <<'PY'
+          import pypdfium2
+          import pytesseract
+          import streamlit
+          import purchase_price
+          print("uv install ok", streamlit.__version__, purchase_price.__name__)
+          PY
+
+      - name: Reproduce pip fallback requirements install
+        shell: bash
+        run: |
+          python -m venv /tmp/cloud-pip
+          /tmp/cloud-pip/bin/python -m pip install --upgrade pip
+          /tmp/cloud-pip/bin/pip install -r requirements.txt
+          /tmp/cloud-pip/bin/python - <<'PY'
+          import pypdfium2
+          import pytesseract
+          import streamlit
+          import purchase_price
+          print("pip install ok", streamlit.__version__, purchase_price.__name__)
+          PY
