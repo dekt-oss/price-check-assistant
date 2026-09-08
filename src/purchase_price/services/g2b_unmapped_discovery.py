@@ -13,6 +13,7 @@ from purchase_price.collectors.g2b_shopping import (
     parse_official_report_record,
 )
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_classification_resolver import G2BDetailClassCandidate
 from purchase_price.services.g2b_research_terms import research_terms_for_query
 from purchase_price.services.matching import normalize_text
 
@@ -47,6 +48,12 @@ class G2BUnmappedDiscoveryResult:
     truncated_query_count: int = 0
     error_types: tuple[str, ...] = ()
     error_messages: tuple[str, ...] = ()
+    classification_resolution_status: str = ""
+    classification_lookup_terms: tuple[str, ...] = ()
+    classification_candidates: tuple[G2BDetailClassCandidate, ...] = ()
+    classification_specification_clues: tuple[str, ...] = ()
+    classification_error_types: tuple[str, ...] = ()
+    classification_error_messages: tuple[str, ...] = ()
 
     @property
     def status_label(self) -> str:
