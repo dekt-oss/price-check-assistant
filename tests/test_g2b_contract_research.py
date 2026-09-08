@@ -78,7 +78,7 @@ def test_contract_client_queries_official_ppssrch_by_notice_number() -> None:
                 [
                     {
                         "dcsnCntrctNo": "20260900123",
-                        "bidNtceNo": "R26BK01234567",
+                        "ntceNo": "R26BK01234567",
                         "cntrctNm": "전신가스마취기 구매 계약",
                     }
                 ]
@@ -94,10 +94,12 @@ def test_contract_client_queries_official_ppssrch_by_notice_number() -> None:
 
     assert request_count == 1
     assert len(records) == 1
+    assert records[0].bid_notice_no == "R26BK01234567"
     _, endpoint, params = portal.calls[0]
     assert endpoint == "getCntrctInfoListThngPPSSrch"
     assert params["inqryDiv"] == "4"
-    assert params["bidNtceNo"] == "R26BK01234567"
+    assert params["ntceNo"] == "R26BK01234567"
+    assert "bidNtceNo" not in params
     assert params["pageNo"] == 1
 
 
