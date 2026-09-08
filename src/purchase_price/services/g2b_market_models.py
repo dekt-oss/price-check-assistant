@@ -91,6 +91,10 @@ class ResearchSourceResult:
     request_count: int = 0
     error_type: str = ""
     error_message: str = ""
+    coverage_start: date | None = None
+    coverage_end: date | None = None
+    requested_lookback_days: int = 0
+    search_strategy: str = ""
 
 
 @dataclass(frozen=True)
