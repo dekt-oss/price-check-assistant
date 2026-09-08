@@ -13,8 +13,14 @@ from purchase_price.collectors.g2b_shopping import (
     parse_official_report_record,
 )
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_classification_resolver import G2BDetailClassCandidate
 from purchase_price.services.g2b_research_terms import research_terms_for_query
 from purchase_price.services.matching import normalize_text
+
+_SUBSCRIPT_DIGITS = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
+_ACCESSORY_MARKERS = frozenset(
+    {"accessory", "accessories", "액세서리", "부속품", "부속", "부품"}
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +61,13 @@ class G2BUnmappedDiscoveryResult:
     truncated_query_count: int = 0
     error_types: tuple[str, ...] = ()
     error_messages: tuple[str, ...] = ()
+    classification_resolution_status: str = ""
+    classification_lookup_terms: tuple[str, ...] = ()
+    classification_candidates: tuple[G2BDetailClassCandidate, ...] = ()
+    classification_specification_clues: tuple[str, ...] = ()
+    classification_error_types: tuple[str, ...] = ()
+    classification_error_messages: tuple[str, ...] = ()
+    targeted_detail_codes: tuple[str, ...] = ()
 
     @property
     def status_label(self) -> str:
@@ -72,9 +85,10 @@ class G2BUnmappedDiscoveryResult:
 
 
 def build_g2b_discovery_terms(product_name: str) -> tuple[str, ...]:
-    without_parenthetical = re.sub(r"\([^)]*\)", " ", product_name)
-    korean_and_space = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", without_parenthetical)
-    cleaned = re.sub(r"\s+", " ", korean_and_space).strip()
+    translated = product_name.translate(_SUBSCRIPT_DIGITS)
+    without_parenthetical = re.sub(r"\([^)]*\)", " ", translated)
+    safe_text = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", without_parenthetical)
+    cleaned = re.sub(r"\s+", " ", safe_text).strip()
     if not cleaned:
         return ()
 
@@ -92,27 +106,22 @@ def build_g2b_research_terms(
     *,
     curated_terms: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
-    """Build recall-oriented detail-product search terms without asserting a mapping.
-
-    The server-side operation accepts a detail-product-name substring, not a model-name search.
-    Therefore model/manufacturer strings are used for local ranking, while request terms stay
-    product/classification-oriented. Curated terms are research-only aliases and never become a
-    verified mapping through this function.
-    """
+    """Build recall-oriented terms without asserting a verified mapping."""
 
     output: list[str] = list(build_g2b_discovery_terms(query.product_name))
 
-    cleaned = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", re.sub(r"\([^)]*\)", " ", query.product_name))
+    translated = query.product_name.translate(_SUBSCRIPT_DIGITS)
+    cleaned = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", re.sub(r"\([^)]*\)", " ", translated))
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     compact = re.sub(r"\s+", "", cleaned)
     if compact and compact != cleaned and re.search(r"[가-힣]", compact):
         output.append(compact)
 
-    for parenthetical in re.findall(r"\(([^)]*)\)", query.product_name):
-        parenthetical = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", parenthetical)
-        parenthetical = re.sub(r"\s+", " ", parenthetical).strip()
-        if parenthetical and re.search(r"[가-힣]", parenthetical):
-            output.append(parenthetical)
+    for parenthetical in re.findall(r"\(([^)]*)\)", translated):
+        clue = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", parenthetical)
+        clue = re.sub(r"\s+", " ", clue).strip()
+        if clue and re.search(r"[가-힣]", clue):
+            output.append(clue)
 
     output.extend(curated_terms if curated_terms is not None else research_terms_for_query(query))
 
@@ -128,23 +137,46 @@ def build_g2b_research_terms(
     return tuple(deduped[:8])
 
 
-def _normalized_identity_tokens(value: str) -> tuple[str, ...]:
+def _normalize_target_codes(codes: tuple[str, ...]) -> tuple[str, ...]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for raw in codes:
+        code = raw.strip()
+        if not code:
+            continue
+        if not code.isdigit() or len(code) != 10:
+            raise ValueError("target detail-product codes must be 10-digit PPS codes")
+        if code not in seen:
+            seen.add(code)
+            output.append(code)
+    return tuple(output[:3])
+
+
+def _identity_parts(value: str) -> tuple[str, ...]:
     return tuple(
         normalize_text(token)
         for token in re.findall(r"[0-9A-Za-z가-힣]+", value)
-        if token
+        if normalize_text(token)
     )
 
 
 def _model_matches_title(model_name: str, title: str) -> bool:
-    """Require a bounded model identity instead of accepting arbitrary short substrings."""
+    """Match a complete model identity, not a prefix or accessory-labelled row."""
 
-    model_key = normalize_text(model_name)
-    if not model_key:
+    model_parts = _identity_parts(model_name)
+    title_parts = _identity_parts(title)
+    if not model_parts or not title_parts:
         return False
-    if len(model_key) <= 3:
-        return model_key in _normalized_identity_tokens(title)
-    return model_key in normalize_text(title)
+    if _ACCESSORY_MARKERS.intersection(title_parts):
+        return False
+
+    model_key = "".join(model_parts)
+    max_width = max(1, len(model_parts))
+    for width in range(1, max_width + 1):
+        for start in range(0, len(title_parts) - width + 1):
+            if "".join(title_parts[start : start + width]) == model_key:
+                return True
+    return False
 
 
 def _raw_text(record: dict, *names: str) -> str:
@@ -170,6 +202,7 @@ def _candidate_from_record(
     query: ProductQuery,
     *,
     search_term: str,
+    target_detail_code: str = "",
 ) -> G2BDiscoveryCandidate | None:
     parsed = parse_official_report_record(
         record,
@@ -185,9 +218,11 @@ def _candidate_from_record(
     manufacturer_hit = bool(manufacturer_key) and manufacturer_key in title_key
 
     classification_name = str(record.get("dtilPrdctClsfcNoNm") or "")
+    classification_code = str(record.get("dtilPrdctClsfcNo") or "").strip()
     classification_exact = bool(classification_name) and (
         normalize_text(classification_name) == normalize_text(search_term)
     )
+    targeted_code_match = bool(target_detail_code) and classification_code == target_detail_code
 
     if model_hit:
         relevance = "모델 표기 후보"
@@ -205,18 +240,21 @@ def _candidate_from_record(
         score = 30
         reasons = ["검색 세부품명 범주", "모델·제조사 미확인"]
 
-    if classification_exact:
+    if targeted_code_match:
+        score += 15
+        reasons.append("세부품명번호 서버필터 일치")
+    elif classification_exact:
         score += 10
         reasons.append("세부품명 정확 일치")
 
     return G2BDiscoveryCandidate(
         title=title,
         classification_name=classification_name,
-        classification_code=str(record.get("dtilPrdctClsfcNo") or ""),
+        classification_code=classification_code,
         price=parsed.price,
         transaction_date=parsed.transaction_date,
         source_record_id=parsed.source_record_id or "",
-        search_term=search_term,
+        search_term=(f"code:{target_detail_code}" if target_detail_code else search_term),
         relevance=relevance,
         score=score,
         match_reason=" · ".join(reasons),
@@ -266,15 +304,9 @@ def discover_unmapped_g2b_candidates(
     request_budget: int = 80,
     today: date | None = None,
     curated_terms: tuple[str, ...] | None = None,
+    target_detail_product_codes: tuple[str, ...] = (),
 ) -> G2BUnmappedDiscoveryResult:
-    """Search broadly for research candidates without promoting them to direct-price evidence.
-
-    Query terms may be broad or curated. Every returned row remains a G2BDiscoveryCandidate and is
-    kept outside CollectedPrice. Model/manufacturer matches only affect research ranking. Raw
-    procurement identity and line provenance are retained for later fingerprinting, not promotion.
-    Individual term/window failures are isolated so one weak research query does not erase useful
-    candidates from other terms. A partial result is explicitly labelled and never enters pricing.
-    """
+    """Search broad names plus targeted detail codes while remaining Research-only."""
 
     if lookback_days < 1:
         raise ValueError("lookback_days must be positive")
@@ -284,9 +316,15 @@ def discover_unmapped_g2b_candidates(
         raise ValueError("request_budget must be positive")
 
     terms = build_g2b_research_terms(query, curated_terms=curated_terms)
-    if not terms:
+    target_codes = _normalize_target_codes(target_detail_product_codes)
+    if not terms and not target_codes:
         return G2BUnmappedDiscoveryResult(
-            "success_0", (), 0, 0, (), request_budget=request_budget
+            "success_0",
+            (),
+            0,
+            0,
+            (),
+            request_budget=request_budget,
         )
 
     client = PublicDataPortalClient(
@@ -310,10 +348,13 @@ def discover_unmapped_g2b_candidates(
     budget_exhausted = False
     candidates_by_key: dict[tuple[str, str, str], G2BDiscoveryCandidate] = {}
 
+    selectors = tuple(("code", code) for code in target_codes) + tuple(
+        ("name", term) for term in terms
+    )
     for window_begin, window_end in windows:
         if budget_exhausted:
             break
-        for term in terms:
+        for selector_type, selector_value in selectors:
             if budget_exhausted:
                 break
             fetched_for_query = 0
@@ -326,13 +367,22 @@ def discover_unmapped_g2b_candidates(
                     break
                 request_count += 1
                 try:
-                    page, _ = collector.fetch_specific_item_page(
-                        detail_product_name=term,
-                        begin_date=window_begin,
-                        end_date=window_end,
-                        page_no=page_no,
-                        num_of_rows=num_of_rows,
-                    )
+                    kwargs = {
+                        "begin_date": window_begin,
+                        "end_date": window_end,
+                        "page_no": page_no,
+                        "num_of_rows": num_of_rows,
+                    }
+                    if selector_type == "code":
+                        page, _ = collector.fetch_specific_item_page(
+                            detail_product_code=selector_value,
+                            **kwargs,
+                        )
+                    else:
+                        page, _ = collector.fetch_specific_item_page(
+                            detail_product_name=selector_value,
+                            **kwargs,
+                        )
                 except (PublicDataClientError, ValueError) as exc:
                     failed_query_count += 1
                     error_types.add(type(exc).__name__)
@@ -345,7 +395,12 @@ def discover_unmapped_g2b_candidates(
                 fetched_for_query += len(page.items)
                 last_total_count = page.total_count
                 for raw in page.items:
-                    candidate = _candidate_from_record(raw, query, search_term=term)
+                    candidate = _candidate_from_record(
+                        raw,
+                        query,
+                        search_term=selector_value,
+                        target_detail_code=(selector_value if selector_type == "code" else ""),
+                    )
                     if candidate is None:
                         continue
                     key = (
@@ -407,4 +462,5 @@ def discover_unmapped_g2b_candidates(
         truncated_query_count=truncated_query_count,
         error_types=ordered_errors,
         error_messages=ordered_messages,
+        targeted_detail_codes=target_codes,
     )
