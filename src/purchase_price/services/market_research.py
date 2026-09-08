@@ -21,8 +21,18 @@ from purchase_price.services.g2b_research_terms import research_terms_for_query
 from purchase_price.services.matching import normalize_text
 
 
-def build_market_research_terms(query: ProductQuery, *, max_terms: int = 6) -> tuple[str, ...]:
-    """Build recall-oriented query terms without consulting verified G2B mappings."""
+def build_market_research_terms(
+    query: ProductQuery,
+    *,
+    max_terms: int = 6,
+    additional_terms: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Build recall-oriented query terms without promoting any inferred mapping.
+
+    `additional_terms` may contain names returned by the official PPS detail-class resolver. They
+    are Research recall hints only: inclusion here does not make a class verified and cannot make
+    any bid/award/pre-spec record direct-price evidence.
+    """
 
     if max_terms < 1:
         raise ValueError("max_terms must be positive")
@@ -38,6 +48,7 @@ def build_market_research_terms(query: ProductQuery, *, max_terms: int = 6) -> t
             raw.append(f"{manufacturer} {model}")
     if product:
         raw.append(product)
+    raw.extend(additional_terms)
     raw.extend(research_terms_for_query(query))
 
     output: list[str] = []
@@ -67,13 +78,6 @@ def is_g2b_research_authorization_error(exc: Exception) -> bool:
 
 
 def _meaningful_term_tokens(term: str) -> tuple[str, ...]:
-    """Return tokens useful for a conservative local relevance check.
-
-    PPS pre-specification PPSSrch has been observed returning unfiltered bulk rows even when a
-    keyword parameter is supplied. These tokens are therefore used only to reject obvious noise
-    after retrieval; they never establish product identity or comparability.
-    """
-
     return tuple(
         token.casefold()
         for token in re.findall(r"[0-9A-Za-z가-힣]+", term)
@@ -82,8 +86,6 @@ def _meaningful_term_tokens(term: str) -> tuple[str, ...]:
 
 
 def _prespec_record_matches_term(record: G2BResearchRecord, term: str) -> bool:
-    """Fail closed on unrelated pre-spec rows when the upstream keyword filter is ineffective."""
-
     term_key = normalize_text(term)
     if not term_key:
         return False
@@ -120,7 +122,7 @@ def _run_source(
     for term in terms:
         try:
             found, requests = search(term, begin, end)
-        except Exception as exc:  # source isolation is intentional; callers still see failure.
+        except Exception as exc:
             request_count += 1
             if is_g2b_research_authorization_error(exc):
                 return ResearchSourceResult(
@@ -179,6 +181,7 @@ def research_g2b_market(
     max_retries: int = 2,
     max_terms: int = 6,
     max_pages_per_window: int = 1,
+    additional_terms: tuple[str, ...] = (),
     bid_base_url: str | None = None,
     award_base_url: str | None = None,
     prespec_base_url: str | None = None,
@@ -188,13 +191,17 @@ def research_g2b_market(
 ) -> MarketResearchBundle:
     """Research bid, award and pre-spec sources even when no verified mapping exists.
 
-    The returned records are research-only. This function never returns CollectedPrice and never
-    calls assess_prices; evidence promotion remains a separate strict-verdict responsibility.
+    Returned rows remain Research-only. This function never promotes them to `CollectedPrice` and
+    never calls `assess_prices`.
     """
 
     if lookback_days < 1:
         raise ValueError("lookback_days must be positive")
-    terms = build_market_research_terms(query, max_terms=max_terms)
+    terms = build_market_research_terms(
+        query,
+        max_terms=max_terms,
+        additional_terms=additional_terms,
+    )
     if not terms:
         empty = tuple(
             ResearchSourceResult(source=source, status=ResearchSourceStatus.SUCCESS_0)
