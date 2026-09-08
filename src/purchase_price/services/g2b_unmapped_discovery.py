@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
 from purchase_price.collectors.g2b_shopping import (
@@ -30,6 +30,14 @@ class G2BDiscoveryCandidate:
     score: int = 0
     match_reason: str = ""
     product_id: str = ""
+    institution: str = ""
+    supplier: str = ""
+    quantity: Decimal | None = None
+    unit: str = ""
+    item_sequence: str = ""
+    original_specification: str = ""
+    delivery_condition: str = ""
+    record_change_order: str = ""
     catalog_status: str = ""
     catalog_summary: str = ""
 
@@ -139,6 +147,24 @@ def _model_matches_title(model_name: str, title: str) -> bool:
     return model_key in normalize_text(title)
 
 
+def _raw_text(record: dict, *names: str) -> str:
+    for name in names:
+        value = record.get(name)
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
+def _raw_decimal(record: dict, *names: str) -> Decimal | None:
+    text = _raw_text(record, *names)
+    if not text:
+        return None
+    try:
+        return Decimal(text.replace(",", "").replace("원", "").strip())
+    except InvalidOperation:
+        return None
+
+
 def _candidate_from_record(
     record: dict,
     query: ProductQuery,
@@ -194,7 +220,21 @@ def _candidate_from_record(
         relevance=relevance,
         score=score,
         match_reason=" · ".join(reasons),
-        product_id=str(record.get("prdctIdntNo") or "").strip(),
+        product_id=_raw_text(record, "prdctIdntNo"),
+        institution=_raw_text(record, "dminsttNm"),
+        supplier=_raw_text(record, "corpNm"),
+        quantity=parsed.quantity or _raw_decimal(record, "prdctQty"),
+        unit=parsed.unit or _raw_text(record, "prdctUnit"),
+        item_sequence=_raw_text(record, "prdctSno"),
+        original_specification=_raw_text(
+            record,
+            "prdctSpcfctn",
+            "spcfctn",
+            "krnPrdctNm",
+            "prdctIdntNoNm",
+        ),
+        delivery_condition=_raw_text(record, "dlvryCndtnNm"),
+        record_change_order=_raw_text(record, "cntrctDlvrReqChgOrd"),
     )
 
 
@@ -230,7 +270,8 @@ def discover_unmapped_g2b_candidates(
     """Search broadly for research candidates without promoting them to direct-price evidence.
 
     Query terms may be broad or curated. Every returned row remains a G2BDiscoveryCandidate and is
-    kept outside CollectedPrice. Model/manufacturer matches only affect research ranking.
+    kept outside CollectedPrice. Model/manufacturer matches only affect research ranking. Raw
+    procurement identity and line provenance are retained for later fingerprinting, not promotion.
     Individual term/window failures are isolated so one weak research query does not erase useful
     candidates from other terms. A partial result is explicitly labelled and never enters pricing.
     """
