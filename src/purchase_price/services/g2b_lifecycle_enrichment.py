@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
+from purchase_price.clients.data_go_kr import PublicDataTransportError
 from purchase_price.services.g2b_lifecycle import G2BLifecycleClient, G2BLifecycleInquiry
 from purchase_price.services.g2b_market_models import (
     G2BResearchRecord,
@@ -116,8 +117,10 @@ def enrich_market_bundle_with_lifecycle(
     records: list[G2BResearchRecord] = []
     seen: set[str] = set()
     errors: list[Exception] = []
+    request_count = 0
 
     for notice in notices:
+        request_count += 1
         try:
             result = active.fetch(
                 inquiry=G2BLifecycleInquiry.BID_NOTICE,
@@ -126,6 +129,8 @@ def enrich_market_bundle_with_lifecycle(
             )
         except Exception as exc:
             errors.append(exc)
+            if isinstance(exc, PublicDataTransportError):
+                break
             continue
         for row in result.records:
             record = _to_research_record(row, search_notice=notice)
@@ -139,7 +144,7 @@ def enrich_market_bundle_with_lifecycle(
         source = ResearchSourceResult(
             source=G2BResearchSource.LIFECYCLE,
             status=ResearchSourceStatus.FAILURE,
-            request_count=len(notices),
+            request_count=request_count,
             error_type=type(first).__name__,
             error_message=_safe_error(first),
         )
@@ -149,7 +154,7 @@ def enrich_market_bundle_with_lifecycle(
             source=G2BResearchSource.LIFECYCLE,
             status=ResearchSourceStatus.PARTIAL,
             records=tuple(records),
-            request_count=len(notices),
+            request_count=request_count,
             error_type=type(first).__name__,
             error_message=_safe_error(first),
         )
@@ -158,7 +163,7 @@ def enrich_market_bundle_with_lifecycle(
             source=G2BResearchSource.LIFECYCLE,
             status=ResearchSourceStatus.SUCCESS if records else ResearchSourceStatus.SUCCESS_0,
             records=tuple(records),
-            request_count=len(notices),
+            request_count=request_count,
         )
 
     return replace(
