@@ -57,16 +57,14 @@ def enrich_market_bundle_with_bid_items(
     max_retries: int = 2,
     client: G2BBidItemClient | None = None,
 ) -> MarketResearchBundle:
-    """Add bounded purchase-object details for explicit bid notices in a research bundle.
-
-    The enrichment is fail-closed: item rows stay G2BResearchRecord(BID_ITEM), estimated unit-price
-    values stay ESTIMATED_UNIT_PRICE, and source failures are represented separately from zero rows.
-    """
+    """Add bounded purchase-object details for explicit bid notices in a research bundle."""
 
     if max_bid_notices < 1 or max_pages_per_bid < 1:
         raise ValueError("enrichment bounds must be positive")
 
-    base_sources = tuple(source for source in bundle.sources if source.source != G2BResearchSource.BID_ITEM)
+    base_sources = tuple(
+        source for source in bundle.sources if source.source != G2BResearchSource.BID_ITEM
+    )
     base_records = tuple(
         record for record in bundle.records if record.source_type != G2BResearchSource.BID_ITEM
     )
@@ -75,7 +73,8 @@ def enrich_market_bundle_with_bid_items(
     if not notices:
         item_source = ResearchSourceResult(
             source=G2BResearchSource.BID_ITEM,
-            status=ResearchSourceStatus.SUCCESS_0,
+            status=ResearchSourceStatus.NOT_RUN,
+            request_count=0,
         )
         return replace(bundle, sources=(*base_sources, item_source), records=base_records)
 
@@ -104,7 +103,7 @@ def enrich_market_bundle_with_bid_items(
                 bid_notice_order=order,
                 max_pages=max_pages_per_bid,
             )
-        except Exception as exc:  # source isolation: a failed detail lookup is not zero rows.
+        except Exception as exc:
             errors.append(exc)
             continue
         request_count += max(0, requests - 1)
@@ -136,7 +135,11 @@ def enrich_market_bundle_with_bid_items(
     else:
         item_source = ResearchSourceResult(
             source=G2BResearchSource.BID_ITEM,
-            status=(ResearchSourceStatus.SUCCESS if item_records else ResearchSourceStatus.SUCCESS_0),
+            status=(
+                ResearchSourceStatus.SUCCESS
+                if item_records
+                else ResearchSourceStatus.SUCCESS_0
+            ),
             records=tuple(item_records),
             request_count=request_count,
         )
