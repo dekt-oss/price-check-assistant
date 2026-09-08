@@ -305,7 +305,7 @@ def research_g2b_market(
                 search=lambda term, start, finish: prespec_client.search(
                     keyword=term,
                     begin=start,
-                    end=end,
+                    end=finish,
                     max_pages_per_window=max_pages_per_window,
                 ),
             ),
