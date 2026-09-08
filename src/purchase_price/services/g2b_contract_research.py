@@ -58,9 +58,15 @@ def _date(value: Any) -> date | None:
     return None
 
 
+def _notice_no(record: Mapping[str, Any]) -> str | None:
+    """Return the official contract notice link, accepting the legacy alias for old fixtures."""
+
+    return _text(_first(record, "ntceNo", "bidNtceNo"))
+
+
 def _record_id(record: Mapping[str, Any]) -> str:
     contract_no = _text(record.get("dcsnCntrctNo")) or "unknown"
-    notice = _text(record.get("bidNtceNo")) or ""
+    notice = _notice_no(record) or ""
     sequence = _text(_first(record, "cntrctDtlSeq", "prdctSeq", "seq")) or ""
     return f"contract:{contract_no}:{notice}:{sequence}"
 
@@ -88,7 +94,7 @@ def parse_contract_research(record: Mapping[str, Any]) -> G2BResearchRecord:
         title=_text(_first(record, "cntrctNm", "prdctClsfcNoNm", "prdctNm")),
         institution=_text(_first(record, "cntrctInsttNm", "dminsttNm")),
         published_date=_date(_first(record, "cntrctCnclsDate", "rgstDt")),
-        bid_notice_no=_text(record.get("bidNtceNo")),
+        bid_notice_no=_notice_no(record),
         bid_notice_order=_text(record.get("bidNtceOrd")),
         contract_no=_text(record.get("dcsnCntrctNo")),
         product_name=_text(_first(record, "prdctClsfcNoNm", "prdctNm")),
@@ -146,7 +152,7 @@ class G2BContractResearchClient:
             self.base_url,
             G2B_CONTRACT_PRODUCT_SEARCH_OPERATION,
             inqryDiv="4",
-            bidNtceNo=notice,
+            ntceNo=notice,
             pageNo=page_no,
             numOfRows=num_of_rows,
         )
