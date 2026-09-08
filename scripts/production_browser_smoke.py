@@ -5,18 +5,18 @@ import os
 import time
 from pathlib import Path
 
-from playwright.sync_api import Page, sync_playwright
+import playwright.sync_api as pw
 
 
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 
 
-def _wait_heading(page: Page, name: str) -> None:
+def _wait_heading(page: pw.Page, name: str) -> None:
     page.get_by_role("heading", name=name, exact=True).wait_for(state="visible", timeout=30_000)
 
 
-def _navigate(page: Page, name: str) -> None:
+def _navigate(page: pw.Page, name: str) -> None:
     page.get_by_role("link", name=name, exact=True).click()
     _wait_heading(page, name)
 
@@ -31,7 +31,7 @@ def main() -> None:
     }
 
     try:
-        with sync_playwright() as playwright:
+        with pw.sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 1200})
             page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
