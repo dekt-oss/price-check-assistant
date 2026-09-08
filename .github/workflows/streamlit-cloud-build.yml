@@ -6,6 +6,7 @@ on:
       - "requirements.txt"
       - "pyproject.toml"
       - "packages.txt"
+      - "packages.ocr.txt"
       - ".github/workflows/streamlit-cloud-build.yml"
   push:
     branches: [main]
@@ -13,6 +14,7 @@ on:
       - "requirements.txt"
       - "pyproject.toml"
       - "packages.txt"
+      - "packages.ocr.txt"
       - ".github/workflows/streamlit-cloud-build.yml"
   workflow_dispatch:
 
@@ -30,14 +32,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Community Cloud apt dependencies
+      - name: Confirm Community Cloud apt bypass
         shell: bash
         run: |
-          apt-get update
-          xargs -r apt-get install -y --no-install-recommends < packages.txt
-          tesseract --version | head -n 1
-          tesseract --list-langs | grep -Fx kor
-          tesseract --list-langs | grep -Fx eng
+          test ! -e packages.txt
+          test -s packages.ocr.txt
+          echo "packages.txt intentionally absent while Streamlit/Debian bullseye apt metadata is broken"
 
       - name: Reproduce uv requirements install
         shell: bash
