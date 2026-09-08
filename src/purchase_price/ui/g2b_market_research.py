@@ -61,6 +61,28 @@ def _row(record: G2BResearchRecord) -> dict[str, object]:
     }
 
 
+def _coverage_caption(bundle: MarketResearchBundle) -> str:
+    parts: list[str] = []
+    for source in bundle.sources:
+        if not source.coverage_start and not source.coverage_end and not source.search_strategy:
+            continue
+        label = _SOURCE_LABELS[source.source]
+        coverage = ""
+        if source.coverage_start and source.coverage_end:
+            coverage = f"{source.coverage_start.isoformat()} ~ {source.coverage_end.isoformat()}"
+        elif source.coverage_start:
+            coverage = f"{source.coverage_start.isoformat()} 이후"
+        elif source.coverage_end:
+            coverage = f"{source.coverage_end.isoformat()}까지"
+        strategy = source.search_strategy.replace("adaptive independent product-name", "단계적 독립 품명검색")
+        strategy = strategy.replace("bid-linked", "공고번호 연결")
+        detail = " · ".join(part for part in (coverage, strategy) if part)
+        if source.requested_lookback_days:
+            detail += f" · 요청 {source.requested_lookback_days}일"
+        parts.append(f"{label}: {detail}")
+    return " / ".join(parts)
+
+
 def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 100) -> None:
     """Render broad external procurement research without implying hospital procurement flow."""
 
@@ -82,12 +104,18 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             column.metric(label, f"{len(source.records)}건")
         elif source.status == ResearchSourceStatus.PARTIAL:
             column.metric(label, f"{len(source.records)}건 · 부분")
+        elif source.status == ResearchSourceStatus.NOT_RUN:
+            column.metric(label, "미조회")
         elif source.status == ResearchSourceStatus.NOT_CONFIGURED:
             column.metric(label, "미설정")
         elif source.status == ResearchSourceStatus.NOT_AUTHORIZED:
             column.metric(label, "인증 미승인")
         else:
             column.metric(label, "조회 실패")
+
+    coverage = _coverage_caption(bundle)
+    if coverage:
+        st.caption(f"실제 조회범위/전략 · {coverage}")
 
     failures = [
         source
@@ -99,6 +127,8 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             ResearchSourceStatus.NOT_AUTHORIZED,
         }
     ]
+    not_run = [source for source in bundle.sources if source.status == ResearchSourceStatus.NOT_RUN]
+
     for source in failures:
         label = _SOURCE_LABELS[source.source]
         if source.status == ResearchSourceStatus.NOT_AUTHORIZED:
@@ -113,14 +143,26 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
                 f"{source.error_type}: {source.error_message}"
             )
 
+    for source in not_run:
+        label = _SOURCE_LABELS[source.source]
+        st.info(
+            f"{label}: 필요한 검색 seed/검색어가 없어 이 후속 조회는 실행하지 않았습니다. "
+            "따라서 0건 검색 결과가 아니라 **미조회** 상태입니다."
+        )
+
     records = sorted(
         bundle.records,
         key=lambda item: (item.published_date is not None, item.published_date),
         reverse=True,
     )
     if not records:
-        if not failures:
+        if not failures and not not_run:
             st.info("API는 정상 응답했지만 현재 조사 기준·기간에서 유의미한 Research 결과가 0건입니다.")
+        elif not_run and not failures:
+            st.info(
+                "실행된 1차 검색에서 연결 가능한 자료를 찾지 못해 일부 후속 조회가 미실행 상태입니다. "
+                "미조회 source를 정상 0건으로 해석하지 마세요."
+            )
         return
 
     shown = records[:max_rows]
