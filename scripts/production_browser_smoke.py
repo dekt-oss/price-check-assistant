@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 
