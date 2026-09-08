@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
+      G2B_CONTRACT_SERVICE_KEY: ${{ secrets.G2B_CONTRACT_SERVICE_KEY }}
       G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
       DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
