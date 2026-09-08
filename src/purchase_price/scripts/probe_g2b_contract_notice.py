@@ -15,13 +15,14 @@ def build_report(
     max_retries: int,
 ) -> dict[str, object]:
     settings = get_settings()
-    key = (settings.resolved_g2b_research_service_key or "").strip()
+    key = (settings.resolved_g2b_contract_service_key or "").strip()
     if not key:
         return {
             "validation_status": "not_configured",
             "bid_notice_no": bid_notice_no,
             "record_count": 0,
-            "message": "G2B research service key is not configured.",
+            "key_source": settings.g2b_contract_key_source,
+            "message": "G2B contract service key is not configured.",
         }
 
     client = G2BContractResearchClient(
@@ -39,6 +40,7 @@ def build_report(
             "validation_status": "failure",
             "bid_notice_no": bid_notice_no,
             "record_count": 0,
+            "key_source": settings.g2b_contract_key_source,
             "error_type": type(exc).__name__,
             "error_message": str(exc)[:500],
         }
@@ -47,6 +49,7 @@ def build_report(
     return {
         "validation_status": "pass" if matching else "unexpected_zero_or_unlinked",
         "bid_notice_no": bid_notice_no,
+        "key_source": settings.g2b_contract_key_source,
         "request_count": request_count,
         "record_count": len(records),
         "matching_notice_count": len(matching),
