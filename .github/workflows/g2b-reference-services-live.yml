@@ -6,6 +6,7 @@ on:
       - ".github/workflows/g2b-reference-services-live.yml"
       - "src/purchase_price/config.py"
       - "src/purchase_price/services/g2b_catalog.py"
+      - "src/purchase_price/services/g2b_classification_resolver.py"
       - "src/purchase_price/services/g2b_lifecycle.py"
       - "src/purchase_price/scripts/probe_g2b_reference_services.py"
   workflow_dispatch:
@@ -37,10 +38,12 @@ jobs:
       - name: Install package
         run: pip install -e .
 
-      - name: Probe official catalog and lifecycle services
+      - name: Probe official catalog classification and lifecycle services
         run: |
           python -m purchase_price.scripts.probe_g2b_reference_services \
             --product-id 24888744 \
+            --detail-class-english-name "Carbon dioxide incubators" \
+            --expected-detail-class-code 4110449801 \
             --bid-notice-no 20160234982 \
             --output artifacts/g2b-reference-services/report.json
 
@@ -54,7 +57,7 @@ jobs:
 
           report = json.loads(Path("artifacts/g2b-reference-services/report.json").read_text())
           print("validation_status=", report.get("validation_status"))
-          for name in ("catalog", "lifecycle"):
+          for name in ("catalog", "classification", "lifecycle"):
               row = report.get(name, {})
               print(
                   name,
@@ -63,6 +66,9 @@ jobs:
                   "error_type=", row.get("error_type", ""),
                   "error_message=", row.get("error_message", ""),
               )
+              if name == "classification":
+                  print("candidate_count=", row.get("candidate_count"))
+                  print("candidate_codes=", row.get("candidate_codes"))
           PY
           fi
 
