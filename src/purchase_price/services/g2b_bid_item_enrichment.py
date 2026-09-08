@@ -8,7 +8,6 @@ from purchase_price.services.g2b_market_models import (
     G2BResearchRecord,
     G2BResearchSource,
     MarketResearchBundle,
-    ResearchAmountType,
     ResearchSourceResult,
     ResearchSourceStatus,
 )
