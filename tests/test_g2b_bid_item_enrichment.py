@@ -115,7 +115,7 @@ def test_enrichment_failure_is_not_reported_as_zero_results() -> None:
     assert not item_source.records
 
 
-def test_no_bid_notices_is_successful_zero_without_api_call() -> None:
+def test_no_bid_notices_is_not_run_without_api_call() -> None:
     bundle = MarketResearchBundle(query_terms=("마취",), sources=(), records=())
     client = FakeItemClient()
 
@@ -127,4 +127,5 @@ def test_no_bid_notices_is_successful_zero_without_api_call() -> None:
 
     assert not client.calls
     assert enriched.sources[-1].source == G2BResearchSource.BID_ITEM
-    assert enriched.sources[-1].status == ResearchSourceStatus.SUCCESS_0
+    assert enriched.sources[-1].status == ResearchSourceStatus.NOT_RUN
+    assert enriched.sources[-1].request_count == 0
