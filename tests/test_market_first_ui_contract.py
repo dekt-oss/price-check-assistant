@@ -25,7 +25,8 @@ def test_market_research_pipeline_keeps_procurement_context_outside_direct_price
     assert "enrich_market_bundle_with_contracts(" in text
     assert "discover_unmapped_g2b_candidates(" in text
     assert "search_all(" in text
-    assert "None of those records are passed to `search_all` or `assess_prices`." in text
+    assert "None of those records or candidates are passed to `search_all`" in text
+    assert "or candidates are passed to `search_all` or `assess_prices`." in text
 
 
 def test_quick_search_uses_full_market_research_pipeline_without_verified_mapping_gate() -> None:
