@@ -67,10 +67,18 @@ def test_transport_outage_opens_source_local_circuit_after_first_term(source) ->
 class StubPortal:
     instances: list[StubPortal] = []
 
-    def __init__(self, service_key: str, *, timeout_seconds: float, max_retries: int) -> None:
+    def __init__(
+        self,
+        service_key: str,
+        *,
+        timeout_seconds: float,
+        max_retries: int,
+        connect_circuit_breaker: bool = False,
+    ) -> None:
         self.service_key = service_key
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self.connect_circuit_breaker = connect_circuit_breaker
         self.closed = False
         type(self).instances.append(self)
 
@@ -109,6 +117,7 @@ def test_auto_built_market_sources_share_one_portal_connection_pool(monkeypatch)
     assert len(StubPortal.instances) == 1
     portal = StubPortal.instances[0]
     assert StubResearchClient.clients == [portal, portal, portal]
+    assert portal.connect_circuit_breaker is True
     assert portal.closed
     assert all(row.status == ResearchSourceStatus.SUCCESS_0 for row in result.sources)
 
