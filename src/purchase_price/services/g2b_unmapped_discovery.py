@@ -54,6 +54,7 @@ class G2BUnmappedDiscoveryResult:
     classification_specification_clues: tuple[str, ...] = ()
     classification_error_types: tuple[str, ...] = ()
     classification_error_messages: tuple[str, ...] = ()
+    targeted_detail_codes: tuple[str, ...] = ()
 
     @property
     def status_label(self) -> str:
@@ -91,13 +92,7 @@ def build_g2b_research_terms(
     *,
     curated_terms: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
-    """Build recall-oriented detail-product search terms without asserting a mapping.
-
-    The server-side operation accepts a detail-product-name substring, not a model-name search.
-    Therefore model/manufacturer strings are used for local ranking, while request terms stay
-    product/classification-oriented. Curated terms are research-only aliases and never become a
-    verified mapping through this function.
-    """
+    """Build recall-oriented detail-product search terms without asserting a mapping."""
 
     output: list[str] = list(build_g2b_discovery_terms(query.product_name))
 
@@ -127,6 +122,21 @@ def build_g2b_research_terms(
     return tuple(deduped[:8])
 
 
+def _normalize_target_codes(codes: tuple[str, ...]) -> tuple[str, ...]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for raw in codes:
+        code = raw.strip()
+        if not code:
+            continue
+        if not code.isdigit() or len(code) != 10:
+            raise ValueError("target detail-product codes must be 10-digit PPS codes")
+        if code not in seen:
+            seen.add(code)
+            output.append(code)
+    return tuple(output[:3])
+
+
 def _normalized_identity_tokens(value: str) -> tuple[str, ...]:
     return tuple(
         normalize_text(token)
@@ -136,8 +146,6 @@ def _normalized_identity_tokens(value: str) -> tuple[str, ...]:
 
 
 def _model_matches_title(model_name: str, title: str) -> bool:
-    """Require a bounded model identity instead of accepting arbitrary short substrings."""
-
     model_key = normalize_text(model_name)
     if not model_key:
         return False
@@ -151,6 +159,7 @@ def _candidate_from_record(
     query: ProductQuery,
     *,
     search_term: str,
+    target_detail_code: str = "",
 ) -> G2BDiscoveryCandidate | None:
     parsed = parse_official_report_record(
         record,
@@ -166,9 +175,11 @@ def _candidate_from_record(
     manufacturer_hit = bool(manufacturer_key) and manufacturer_key in title_key
 
     classification_name = str(record.get("dtilPrdctClsfcNoNm") or "")
+    classification_code = str(record.get("dtilPrdctClsfcNo") or "").strip()
     classification_exact = bool(classification_name) and (
         normalize_text(classification_name) == normalize_text(search_term)
     )
+    targeted_code_match = bool(target_detail_code) and classification_code == target_detail_code
 
     if model_hit:
         relevance = "모델 표기 후보"
@@ -186,18 +197,21 @@ def _candidate_from_record(
         score = 30
         reasons = ["검색 세부품명 범주", "모델·제조사 미확인"]
 
-    if classification_exact:
+    if targeted_code_match:
+        score += 15
+        reasons.append("세부품명번호 서버필터 일치")
+    elif classification_exact:
         score += 10
         reasons.append("세부품명 정확 일치")
 
     return G2BDiscoveryCandidate(
         title=title,
         classification_name=classification_name,
-        classification_code=str(record.get("dtilPrdctClsfcNo") or ""),
+        classification_code=classification_code,
         price=parsed.price,
         transaction_date=parsed.transaction_date,
         source_record_id=parsed.source_record_id or "",
-        search_term=search_term,
+        search_term=(f"code:{target_detail_code}" if target_detail_code else search_term),
         relevance=relevance,
         score=score,
         match_reason=" · ".join(reasons),
@@ -233,13 +247,14 @@ def discover_unmapped_g2b_candidates(
     request_budget: int = 80,
     today: date | None = None,
     curated_terms: tuple[str, ...] | None = None,
+    target_detail_product_codes: tuple[str, ...] = (),
 ) -> G2BUnmappedDiscoveryResult:
-    """Search broadly for research candidates without promoting them to direct-price evidence.
+    """Search Research candidates by broad names plus optional targeted official-class codes.
 
-    Query terms may be broad or curated. Every returned row remains a G2BDiscoveryCandidate and is
-    kept outside CollectedPrice. Model/manufacturer matches only affect research ranking.
-    Individual term/window failures are isolated so one weak research query does not erase useful
-    candidates from other terms. A partial result is explicitly labelled and never enters pricing.
+    A target code may come from a verified mapping or an explicit session-selected resolver
+    candidate. Either way the returned rows remain `G2BDiscoveryCandidate`: code-targeted retrieval
+    improves recall/precision but does not itself establish quote identity, spec equivalence, or
+    eligibility for `assess_prices()`.
     """
 
     if lookback_days < 1:
@@ -250,9 +265,15 @@ def discover_unmapped_g2b_candidates(
         raise ValueError("request_budget must be positive")
 
     terms = build_g2b_research_terms(query, curated_terms=curated_terms)
-    if not terms:
+    target_codes = _normalize_target_codes(target_detail_product_codes)
+    if not terms and not target_codes:
         return G2BUnmappedDiscoveryResult(
-            "success_0", (), 0, 0, (), request_budget=request_budget
+            "success_0",
+            (),
+            0,
+            0,
+            (),
+            request_budget=request_budget,
         )
 
     client = PublicDataPortalClient(
@@ -276,10 +297,13 @@ def discover_unmapped_g2b_candidates(
     budget_exhausted = False
     candidates_by_key: dict[tuple[str, str, str], G2BDiscoveryCandidate] = {}
 
+    selectors = tuple(("code", code) for code in target_codes) + tuple(
+        ("name", term) for term in terms
+    )
     for window_begin, window_end in windows:
         if budget_exhausted:
             break
-        for term in terms:
+        for selector_type, selector_value in selectors:
             if budget_exhausted:
                 break
             fetched_for_query = 0
@@ -292,13 +316,22 @@ def discover_unmapped_g2b_candidates(
                     break
                 request_count += 1
                 try:
-                    page, _ = collector.fetch_specific_item_page(
-                        detail_product_name=term,
-                        begin_date=window_begin,
-                        end_date=window_end,
-                        page_no=page_no,
-                        num_of_rows=num_of_rows,
-                    )
+                    if selector_type == "code":
+                        page, _ = collector.fetch_specific_item_page(
+                            detail_product_code=selector_value,
+                            begin_date=window_begin,
+                            end_date=window_end,
+                            page_no=page_no,
+                            num_of_rows=num_of_rows,
+                        )
+                    else:
+                        page, _ = collector.fetch_specific_item_page(
+                            detail_product_name=selector_value,
+                            begin_date=window_begin,
+                            end_date=window_end,
+                            page_no=page_no,
+                            num_of_rows=num_of_rows,
+                        )
                 except (PublicDataClientError, ValueError) as exc:
                     failed_query_count += 1
                     error_types.add(type(exc).__name__)
@@ -311,7 +344,12 @@ def discover_unmapped_g2b_candidates(
                 fetched_for_query += len(page.items)
                 last_total_count = page.total_count
                 for raw in page.items:
-                    candidate = _candidate_from_record(raw, query, search_term=term)
+                    candidate = _candidate_from_record(
+                        raw,
+                        query,
+                        search_term=selector_value,
+                        target_detail_code=(selector_value if selector_type == "code" else ""),
+                    )
                     if candidate is None:
                         continue
                     key = (
@@ -373,4 +411,5 @@ def discover_unmapped_g2b_candidates(
         truncated_query_count=truncated_query_count,
         error_types=ordered_errors,
         error_messages=ordered_messages,
+        targeted_detail_codes=target_codes,
     )
