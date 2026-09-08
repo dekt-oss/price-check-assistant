@@ -12,15 +12,21 @@ KNOWN_PLATFORM_ERRORS = (
     "Error installing requirements",
     "Error running app",
 )
+APP_IFRAME = 'iframe[title="streamlitApp"]'
 
 
-def _wait_heading(page: Any, name: str, *, timeout: int = 30_000) -> None:
-    page.get_by_role("heading", name=name, exact=True).wait_for(state="visible", timeout=timeout)
+def _app_frame(page: Any) -> Any:
+    return page.frame_locator(APP_IFRAME)
+
+
+def _wait_heading(context: Any, name: str, *, timeout: int = 30_000) -> None:
+    context.get_by_role("heading", name=name, exact=True).wait_for(state="visible", timeout=timeout)
 
 
 def _navigate(page: Any, name: str) -> None:
-    page.get_by_role("link", name=name, exact=True).click()
-    _wait_heading(page, name)
+    app = _app_frame(page)
+    app.get_by_role("link", name=name, exact=True).click()
+    _wait_heading(app, name)
 
 
 def _diagnostic_snapshot(page: Any, *, label: str) -> dict[str, object]:
@@ -30,16 +36,18 @@ def _diagnostic_snapshot(page: Any, *, label: str) -> dict[str, object]:
     except Exception as exc:
         snapshot["title_error"] = f"{type(exc).__name__}: {exc}"[:500]
     try:
-        snapshot["body_text_prefix"] = page.locator("body").inner_text(timeout=5_000)[:3000]
+        snapshot["outer_body_text_prefix"] = page.locator("body").inner_text(timeout=5_000)[:3000]
     except Exception as exc:
-        snapshot["body_error"] = f"{type(exc).__name__}: {exc}"[:500]
+        snapshot["outer_body_error"] = f"{type(exc).__name__}: {exc}"[:500]
+    try:
+        app = _app_frame(page)
+        snapshot["app_body_text_prefix"] = app.locator("body").inner_text(timeout=5_000)[:5000]
+        snapshot["streamlit_app_count"] = app.locator('[data-testid="stApp"]').count()
+    except Exception as exc:
+        snapshot["app_body_error"] = f"{type(exc).__name__}: {exc}"[:500]
     try:
         snapshot["html_prefix"] = page.content()[:12000]
-    except Exception as exc:
-        snapshot["html_error"] = f"{type(exc).__name__}: {exc}"[:500]
-    try:
-        snapshot["streamlit_root_count"] = page.locator("#root").count()
-        snapshot["streamlit_app_count"] = page.locator('[data-testid="stApp"]').count()
+        snapshot["outer_root_count"] = page.locator("#root").count()
         snapshot["iframe_count"] = page.locator("iframe").count()
     except Exception as exc:
         snapshot["dom_probe_error"] = f"{type(exc).__name__}: {exc}"[:500]
@@ -66,12 +74,13 @@ def _install_browser_diagnostics(page: Any, report: dict[str, object]) -> None:
     report["websockets"] = websockets
 
     def on_console(message: Any) -> None:
-        console_messages.append(
-            {
-                "type": str(message.type),
-                "text": str(message.text)[:2000],
-            }
-        )
+        if len(console_messages) < 100:
+            console_messages.append(
+                {
+                    "type": str(message.type),
+                    "text": str(message.text)[:2000],
+                }
+            )
 
     def on_page_error(error: Any) -> None:
         page_errors.append(str(error)[:4000])
@@ -131,8 +140,8 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
     for attempt in range(1, 4):
         response = page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
         page.wait_for_timeout(3_000)
-        body = page.locator("body").inner_text(timeout=5_000)
-        platform_error = next((text for text in KNOWN_PLATFORM_ERRORS if text in body), "")
+        outer_body = page.locator("body").inner_text(timeout=5_000)
+        platform_error = next((text for text in KNOWN_PLATFORM_ERRORS if text in outer_body), "")
         if platform_error:
             snapshot = _diagnostic_snapshot(page, label=f"dashboard-attempt-{attempt}")
             snapshot.update(
@@ -150,7 +159,8 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
             break
 
         try:
-            _wait_heading(page, expected, timeout=30_000)
+            app = _app_frame(page)
+            _wait_heading(app, expected, timeout=30_000)
             attempts.append(
                 {
                     "attempt": attempt,
@@ -199,33 +209,36 @@ def main() -> None:
                 report["checks"].append("dashboard_rendered")
 
                 _navigate(page, "빠른 검색")
-                page.get_by_label("제품명", exact=True).wait_for(state="visible")
-                page.get_by_label("제조사", exact=True).wait_for(state="visible")
-                page.get_by_label("모델명", exact=True).wait_for(state="visible")
-                page.get_by_role("button", name="시장가격 조사", exact=True).wait_for(
+                app = _app_frame(page)
+                app.get_by_label("제품명", exact=True).wait_for(state="visible")
+                app.get_by_label("제조사", exact=True).wait_for(state="visible")
+                app.get_by_label("모델명", exact=True).wait_for(state="visible")
+                app.get_by_role("button", name="시장가격 조사", exact=True).wait_for(
                     state="visible"
                 )
                 report["checks"].append("quick_search_form_rendered")
 
-                page.get_by_role("tab", name="나라장터 계약근거", exact=True).click()
-                page.get_by_label("계약 품명", exact=True).wait_for(state="visible")
-                page.get_by_role("button", name="계약근거 조회", exact=True).wait_for(
+                app.get_by_role("tab", name="나라장터 계약근거", exact=True).click()
+                app.get_by_label("계약 품명", exact=True).wait_for(state="visible")
+                app.get_by_role("button", name="계약근거 조회", exact=True).wait_for(
                     state="visible"
                 )
                 report["checks"].append("contract_tab_rendered")
 
                 _navigate(page, "견적 검토")
-                page.get_by_label("견적서 파일", exact=True).wait_for(state="visible")
+                app = _app_frame(page)
+                app.get_by_label("견적서 파일", exact=True).wait_for(state="visible")
                 report["checks"].append("quote_review_rendered")
 
                 _navigate(page, "의료기기 조회")
-                page.get_by_role("tab", name="등록·시장조사", exact=True).wait_for(
+                app = _app_frame(page)
+                app.get_by_role("tab", name="등록·시장조사", exact=True).wait_for(
                     state="visible"
                 )
-                page.get_by_role("tab", name="Safety·공급사", exact=True).wait_for(
+                app.get_by_role("tab", name="Safety·공급사", exact=True).wait_for(
                     state="visible"
                 )
-                page.get_by_role("tab", name="UDI-DI", exact=True).wait_for(state="visible")
+                app.get_by_role("tab", name="UDI-DI", exact=True).wait_for(state="visible")
                 report["checks"].append("medical_device_tabs_rendered")
 
                 report["final_snapshot"] = _diagnostic_snapshot(
