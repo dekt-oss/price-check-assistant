@@ -85,6 +85,10 @@ def run_market_research(
             max_pages_per_bid=1,
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=min(settings.g2b_max_retries, 2),
+            independent_terms=research_terms_with_basis(query),
+            requested_lookback_days=lookback_days,
+            max_independent_terms=1,
+            max_pages_per_window=1,
         )
         # Integrated lifecycle is identifier-based enrichment, not another keyword search. Keep it
         # tightly bounded because every call follows one already observed bid notice.
