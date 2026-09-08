@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from purchase_price.clients.data_go_kr import PublicDataTransportError
 from purchase_price.services.g2b_bid_items import G2BBidItemClient
 from purchase_price.services.g2b_market_models import (
     G2BResearchRecord,
     G2BResearchSource,
     MarketResearchBundle,
+    ResearchAmountType,
     ResearchSourceResult,
     ResearchSourceStatus,
 )
@@ -105,6 +107,8 @@ def enrich_market_bundle_with_bid_items(
             )
         except Exception as exc:
             errors.append(exc)
+            if isinstance(exc, PublicDataTransportError):
+                break
             continue
         request_count += max(0, requests - 1)
         for record in found:
