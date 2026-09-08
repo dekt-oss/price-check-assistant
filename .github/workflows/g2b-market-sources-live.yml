@@ -5,10 +5,12 @@ on:
     paths:
       - "src/purchase_price/config.py"
       - "src/purchase_price/services/g2b_market_*.py"
+      - "src/purchase_price/services/g2b_contract_research.py"
       - "src/purchase_price/services/market_research.py"
       - "src/purchase_price/services/live_smoke.py"
       - "src/purchase_price/services/runtime_readiness.py"
       - "src/purchase_price/scripts/probe_g2b_market_sources.py"
+      - "src/purchase_price/scripts/probe_g2b_contract_notice.py"
       - "pages/14_운영환경_진단.py"
       - "data/g2b_research_terms.csv"
       - ".github/workflows/g2b-market-sources-live.yml"
@@ -49,6 +51,15 @@ jobs:
             --max-retries 1 \
             --output artifacts/g2b-market-sources-live/report.json
 
+      - name: Run known-positive contract notice lookup
+        if: env.G2B_RESEARCH_SERVICE_KEY != '' || env.DATA_GO_KR_MARKET_SERVICE_KEY != '' || env.G2B_SERVICE_KEY != '' || env.DATA_GO_KR_SERVICE_KEY != ''
+        run: |
+          python -m purchase_price.scripts.probe_g2b_contract_notice \
+            --bid-notice-no "20160234982" \
+            --timeout-seconds 15 \
+            --max-retries 1 \
+            --output artifacts/g2b-market-sources-live/contract-report.json
+
       - name: Record missing secret
         if: env.G2B_RESEARCH_SERVICE_KEY == '' && env.DATA_GO_KR_MARKET_SERVICE_KEY == '' && env.G2B_SERVICE_KEY == '' && env.DATA_GO_KR_SERVICE_KEY == ''
         run: |
@@ -59,6 +70,13 @@ jobs:
             "keyword": "마취",
             "key_source": "미설정",
             "message": "G2B research service key secret is not configured; live acceptance was not measured."
+          }
+          JSON
+          cat > artifacts/g2b-market-sources-live/contract-report.json <<'JSON'
+          {
+            "validation_status": "not_configured",
+            "bid_notice_no": "20160234982",
+            "message": "G2B research service key secret is not configured; live contract acceptance was not measured."
           }
           JSON
 
@@ -78,6 +96,13 @@ jobs:
                   f"source={source.get('source')} status={source.get('status')} "
                   f"records={source.get('record_count')} requests={source.get('request_count')}"
               )
+          contract_path = Path("artifacts/g2b-market-sources-live/contract-report.json")
+          if contract_path.exists():
+              contract = json.loads(contract_path.read_text(encoding="utf-8"))
+              print("contract_validation_status=", contract.get("validation_status"))
+              print("contract_bid_notice_no=", contract.get("bid_notice_no"))
+              print("contract_record_count=", contract.get("record_count"))
+              print("contract_matching_notice_count=", contract.get("matching_notice_count"))
           PY
           fi
 
@@ -105,11 +130,31 @@ jobs:
           print("G2B Research live acceptance PASS: bid/award/prespec all returned normal responses")
           PY
 
+      - name: Enforce known-positive contract notice gate
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("artifacts/g2b-market-sources-live/contract-report.json")
+          if not path.exists():
+              raise SystemExit("live contract acceptance report missing")
+          report = json.loads(path.read_text(encoding="utf-8"))
+          if report.get("validation_status") != "pass":
+              raise SystemExit(
+                  f"G2B contract live acceptance failed: {report.get('validation_status')} "
+                  f"error={report.get('error_type')} {report.get('error_message')}"
+              )
+          if int(report.get("matching_notice_count") or 0) < 1:
+              raise SystemExit("G2B contract live acceptance returned no record linked to known notice")
+          print("G2B contract live acceptance PASS: official ntceNo lookup returned linked contract data")
+          PY
+
       - name: Upload live acceptance report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: g2b-market-sources-live
-          path: artifacts/g2b-market-sources-live/report.json
+          path: artifacts/g2b-market-sources-live/
           if-no-files-found: warn
           retention-days: 14
