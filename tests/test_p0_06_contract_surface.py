@@ -11,7 +11,8 @@ def test_market_research_wires_independent_contract_terms_and_requested_lookback
     )
 
     assert "enrich_market_bundle_with_contracts(" in text
-    assert "independent_terms=research_terms_with_basis(query)" in text
+    assert "research_terms = research_terms_with_basis(query) + resolver_terms" in text
+    assert "independent_terms=research_terms" in text
     assert "requested_lookback_days=lookback_days" in text
     assert "max_independent_terms=1" in text
     assert "max_pages_per_window=1" in text
