@@ -21,6 +21,10 @@ def _evidence(**overrides: str) -> PriceConditionProfile:
     return PriceConditionProfile(**values)
 
 
+def _status(comparison, label: str) -> ConditionComparisonStatus:
+    return next(item.status for item in comparison.comparisons if item.label == label)
+
+
 def test_explicit_same_conditions_match() -> None:
     quote = build_quote_condition_profile(
         vat="포함",
@@ -92,6 +96,41 @@ def test_free_and_included_are_kept_distinct() -> None:
     evidence = _evidence(delivery="배송 포함")
 
     comparison = compare_quote_to_evidence_conditions(quote, evidence)
-    delivery = next(item for item in comparison.comparisons if item.label == "배송")
 
-    assert delivery.status == ConditionComparisonStatus.CONFLICT
+    assert _status(comparison, "배송") == ConditionComparisonStatus.CONFLICT
+
+
+def test_different_vaporizer_types_do_not_match_just_because_both_are_included() -> None:
+    quote = build_quote_condition_profile(options="Desflurane vaporizer 포함")
+    evidence = _evidence(options="Sevoflurane vaporizer 포함")
+
+    comparison = compare_quote_to_evidence_conditions(quote, evidence)
+
+    assert _status(comparison, "옵션") == ConditionComparisonStatus.CONFLICT
+
+
+def test_option_detail_missing_on_one_side_is_unknown_not_match() -> None:
+    quote = build_quote_condition_profile(options="Desflurane vaporizer 포함")
+    evidence = _evidence(options="포함")
+
+    comparison = compare_quote_to_evidence_conditions(quote, evidence)
+
+    assert _status(comparison, "옵션") == ConditionComparisonStatus.UNKNOWN
+
+
+def test_free_warranty_with_different_duration_is_conflict() -> None:
+    quote = build_quote_condition_profile(warranty="무상 3년")
+    evidence = _evidence(warranty="무상 1년")
+
+    comparison = compare_quote_to_evidence_conditions(quote, evidence)
+
+    assert _status(comparison, "보증") == ConditionComparisonStatus.CONFLICT
+
+
+def test_warranty_duration_missing_on_one_side_is_unknown_not_match() -> None:
+    quote = build_quote_condition_profile(warranty="무상 3년")
+    evidence = _evidence(warranty="무상")
+
+    comparison = compare_quote_to_evidence_conditions(quote, evidence)
+
+    assert _status(comparison, "보증") == ConditionComparisonStatus.UNKNOWN
