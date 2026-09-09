@@ -19,17 +19,29 @@ from purchase_price.services.quote_uat_review import (
     quote_item_to_review_row,
     redacted_uat_summary_json,
 )
+from purchase_price.services.quote_uat_strategy import (
+    UAT_STRATEGY_LABELS,
+    default_uat_strategy,
+    uat_strategy_options,
+)
 
 st.set_page_config(page_title="견적추출 UAT", page_icon="🧪", layout="wide")
 st.title("견적추출 UAT")
 st.caption(
-    "실제 견적서를 여러 건 업로드해 자동 추출값과 담당자 원문 대조값을 비교합니다. "
+    "샘플 또는 비식별 처리한 실제 견적을 여러 건 업로드해 자동 추출값과 담당자 원문 대조값을 비교합니다. "
     "업로드 원본과 수정한 정답값은 서버에 영구 저장하지 않으며, 다운로드 결과는 비식별 통계만 포함합니다."
+)
+st.warning(
+    "이 화면은 공개 PoC 검증용입니다. 병원명·담당자·연락처·사업자정보·내부 결재정보 등 식별정보나 "
+    "외부 공개가 곤란한 내용을 제거·치환한 견적 사본만 사용하세요. 실제 본원 구매단가 DB나 비공개 계약자료를 "
+    "업로드하는 용도가 아닙니다."
 )
 
 with st.expander("UAT 운영 원칙", expanded=False):
     st.write(
-        "- 최소 5건을 담당자가 원문 대조 완료해야 1차 UAT 표본 목표를 충족합니다.\n"
+        "- 최소 5건의 샘플 또는 비식별 실제 견적을 담당자가 원문 대조 완료해야 1차 UAT 표본 목표를 충족합니다.\n"
+        "- release gate는 `xlsx`, `xls`, `pdf_text`, `pdf_ocr`, `pdf_commercial` 5개 표본 분류를 모두 요구합니다.\n"
+        "- PDF의 텍스트/OCR 분류는 실제 추출 경로로 기본 제안하지만, `pdf_commercial`은 상업조건이 포함된 PDF를 담당자가 원문 대조할 때만 직접 선택합니다.\n"
         "- 자동 추출값을 그대로 정답으로 간주하지 않습니다. 원문을 보고 수정한 뒤 `원문 대조 완료`를 체크하세요.\n"
         "- 품목이 누락됐으면 정답표에 행을 추가하고, 잘못 추출된 품목은 정답표에서 삭제하세요.\n"
         "- 품목 FP는 원문에 없는데 추출된 품목, FN은 원문에는 있는데 누락된 품목입니다.\n"
@@ -43,7 +55,7 @@ uploaded_files = st.file_uploader(
     "UAT 견적 파일",
     type=["pdf", "xlsx", "xls"],
     accept_multiple_files=True,
-    help="가능하면 서로 다른 업체/양식의 견적을 5건 이상 선택하세요.",
+    help="가능하면 서로 다른 업체/양식의 샘플 또는 비식별 견적을 5건 이상 선택하세요.",
 )
 
 _UI_COLUMNS = {
@@ -122,6 +134,29 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
         c3.metric("추출 경로", diagnostics.strategy_label)
         c4.metric("parser 처리시간", _seconds_text(processing_seconds))
 
+        strategy_values = tuple(strategy.value for strategy in diagnostics.strategies)
+        strategy_options = uat_strategy_options(file_kind=diagnostics.file_kind)
+        suggested_strategy = default_uat_strategy(
+            file_kind=diagnostics.file_kind,
+            extraction_strategies=strategy_values,
+        )
+        uat_strategy = st.selectbox(
+            "UAT 표본 분류",
+            options=strategy_options,
+            index=strategy_options.index(suggested_strategy),
+            format_func=lambda value: f"{UAT_STRATEGY_LABELS[value]} · {value}",
+            key=f"quote_uat_strategy_{case_key}",
+            disabled=len(strategy_options) == 1,
+            help=(
+                "release gate 집계에는 이 canonical 분류가 사용됩니다. 실제 parser 추출 경로는 위에 별도로 표시됩니다. "
+                "pdf_commercial은 배송·설치·옵션·보증·유지보수 등 상업조건을 포함한 PDF를 원문 대조하는 표본에만 선택하세요."
+            ),
+        )
+        if uat_strategy == "pdf_commercial":
+            st.info(
+                "`pdf_commercial`은 자동 추론하지 않습니다. 상업조건이 포함된 PDF를 담당자가 원문과 대조하는 대표 표본인지 확인하세요."
+            )
+
         if extraction_error is not None:
             st.error(str(extraction_error))
         for warning in warnings:
@@ -171,7 +206,7 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
         if confirmed:
             metric = compare_review_rows(
                 case_id=case_id,
-                strategy=diagnostics.strategy_label,
+                strategy=uat_strategy,
                 actual_items=actual_items,
                 expected_rows=expected_rows,
                 extraction_failed=extraction_error is not None,
@@ -216,10 +251,20 @@ f2.metric("누락 품목 FN", summary["false_negative_items"])
 f3.metric("평균 원문대조 시간", _seconds_text(summary["average_review_seconds"]))
 
 if summary["minimum_case_target_met"]:
-    st.success("실제 견적 최소 5건 UAT 표본 목표를 충족했습니다.")
+    st.success("샘플 또는 비식별 실제 견적 최소 5건 UAT 표본 목표를 충족했습니다.")
 else:
     remaining = 5 - int(summary["total_confirmed_cases"])
     st.info(f"1차 UAT 표본 목표까지 원문 대조 완료 견적 {remaining}건이 더 필요합니다.")
+
+release_gate = summary["release_gate"]
+covered = ", ".join(release_gate["covered_strategies"]) or "없음"
+missing = ", ".join(release_gate["missing_strategies"]) or "없음"
+st.caption(f"release gate 표본 분류 · 충족: {covered} · 미충족: {missing}")
+if release_gate["release_ready"]:
+    st.success("견적추출 UAT release gate를 충족했습니다.")
+else:
+    blockers = " / ".join(release_gate["blockers"]) or "미확인"
+    st.warning(f"견적추출 UAT release gate 미충족: {blockers}")
 
 if confirmed_metrics:
     st.markdown("**케이스별 비식별 결과**")
@@ -231,7 +276,7 @@ if confirmed_metrics:
 
     strategy_metrics = summary["strategy_metrics"]
     if strategy_metrics:
-        st.markdown("**추출 전략별 집계**")
+        st.markdown("**UAT 표본 분류별 집계**")
         strategy_frame = pd.DataFrame.from_dict(strategy_metrics, orient="index").reset_index()
         strategy_frame = strategy_frame.rename(columns={"index": "strategy"})
         st.dataframe(strategy_frame, use_container_width=True, hide_index=True)

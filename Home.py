@@ -27,7 +27,19 @@ business_pages = [
     st.Page("pages/4_의료기기_조회.py", title="의료기기 조회", icon="🏥"),
 ]
 
-navigation: dict[str, list[st.Page]] = {"업무": business_pages}
+validation_pages = [
+    st.Page(
+        "pages/13_견적추출_UAT.py",
+        title="견적추출 UAT",
+        icon="🧪",
+        url_path="quote-extraction-uat",
+    )
+]
+
+navigation: dict[str, list[st.Page]] = {
+    "업무": business_pages,
+    "검증": validation_pages,
+}
 if _admin_mode():
     navigation["관리"] = [st.Page("pages/9_관리.py", title="관리", icon="🛠️")]
 

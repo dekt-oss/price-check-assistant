@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import Any
 
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
+EXPECT_QUOTE_UAT = os.getenv("EXPECT_QUOTE_UAT", "").strip().casefold() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 KNOWN_PLATFORM_ERRORS = (
     "Error installing requirements",
@@ -27,6 +33,37 @@ def _navigate(page: Any, name: str) -> None:
     app = _app_frame(page)
     app.get_by_role("link", name=name, exact=True).click()
     _wait_heading(app, name)
+
+
+def _wait_for_navigation_link(
+    page: Any,
+    name: str,
+    *,
+    timeout_seconds: float = 180.0,
+) -> None:
+    """Wait for a newly deployed navigation target without treating rollout lag as app failure."""
+
+    deadline = time.monotonic() + timeout_seconds
+    last_error = ""
+    while time.monotonic() < deadline:
+        try:
+            app = _app_frame(page)
+            link = app.get_by_role("link", name=name, exact=True)
+            if link.count() > 0:
+                link.first.wait_for(state="visible", timeout=5_000)
+                return
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"[:1000]
+
+        try:
+            page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_timeout(5_000)
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"[:1000]
+        page.wait_for_timeout(5_000)
+
+    detail = f"; last_error={last_error}" if last_error else ""
+    raise RuntimeError(f"Production navigation link did not appear: {name}{detail}")
 
 
 def _diagnostic_snapshot(page: Any, *, label: str) -> dict[str, object]:
@@ -195,6 +232,7 @@ def main() -> None:
     started = time.monotonic()
     report: dict[str, object] = {
         "production_url": PRODUCTION_URL,
+        "expect_quote_uat": EXPECT_QUOTE_UAT,
         "status": "failure",
         "checks": [],
     }
@@ -241,9 +279,24 @@ def main() -> None:
                 app.get_by_role("tab", name="UDI-DI", exact=True).wait_for(state="visible")
                 report["checks"].append("medical_device_tabs_rendered")
 
-                report["final_snapshot"] = _diagnostic_snapshot(
-                    page, label="medical-device-page"
-                )
+                final_label = "medical-device-page"
+                if EXPECT_QUOTE_UAT:
+                    _wait_for_navigation_link(page, "견적추출 UAT")
+                    _navigate(page, "견적추출 UAT")
+                    app = _app_frame(page)
+                    app.get_by_label("UAT 견적 파일", exact=True).wait_for(
+                        state="visible", timeout=30_000
+                    )
+                    _wait_heading(app, "UAT 집계", timeout=30_000)
+                    if "quote-extraction-uat" not in page.url:
+                        raise RuntimeError(
+                            "Quote UAT workspace rendered without the expected stable URL path: "
+                            f"{page.url}"
+                        )
+                    report["checks"].append("quote_uat_workspace_rendered")
+                    final_label = "quote-uat-workspace"
+
+                report["final_snapshot"] = _diagnostic_snapshot(page, label=final_label)
                 report["final_url"] = page.url
                 report["status"] = "pass"
             except Exception as exc:
