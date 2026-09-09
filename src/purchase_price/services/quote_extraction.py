@@ -9,6 +9,9 @@ from pathlib import Path
 
 from purchase_price.services import quote_extraction_core as _core
 from purchase_price.services.quote_extraction_core import *  # noqa: F403
+from purchase_price.services.quote_ruled_table_ocr import (
+    recover_sparse_ruled_table_scanned_quote,
+)
 from purchase_price.services.quote_single_item_ocr_fallback import (
     recover_single_item_scanned_quote,
 )
@@ -148,7 +151,9 @@ def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     if result.items:
         return result
 
-    recovered = recover_single_item_scanned_quote(path)
+    recovered = recover_sparse_ruled_table_scanned_quote(path)
+    if recovered is None:
+        recovered = recover_single_item_scanned_quote(path)
     if recovered is None:
         return result
 
