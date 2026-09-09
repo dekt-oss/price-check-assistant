@@ -90,6 +90,38 @@ def _has_same_field_prefix(
     return False
 
 
+def _has_spaced_independent_header_split(
+    span: Sequence[_Word],
+    resolve_header: Callable[[str], str | None],
+) -> bool:
+    """Reject a compound alias when OCR geometry clearly shows two separate columns.
+
+    `Unit Price` is a legitimate compound header, but quotes also commonly contain adjacent
+    independent `Unit` and `Price` columns. Text-only alias matching cannot distinguish them.
+    A large physical gap plus two independently recognized, distinct semantic fields is strong
+    evidence of separate columns; close words remain eligible as one compound header.
+    """
+
+    if len(span) < 2:
+        return False
+    for split in range(1, len(span)):
+        left = span[:split]
+        right = span[split:]
+        left_field = resolve_header(" ".join(word.text for word in left))
+        right_field = resolve_header(" ".join(word.text for word in right))
+        if left_field is None or right_field is None or left_field == right_field:
+            continue
+        left_word = left[-1]
+        right_word = right[0]
+        gap = right_word.x0 - left_word.x1
+        left_width = max(1.0, left_word.x1 - left_word.x0)
+        right_width = max(1.0, right_word.x1 - right_word.x0)
+        threshold = max(12.0, min(left_width, right_width) * 0.6)
+        if gap > threshold:
+            return True
+    return False
+
+
 def _find_partial_header_anchors(
     line: list[_Word],
     resolve_header: Callable[[str], str | None],
@@ -103,11 +135,14 @@ def _find_partial_header_anchors(
         best: tuple[int, str] | None = None
         max_window = min(4, len(line) - index)
         for width in range(max_window, 0, -1):
-            phrase = " ".join(word.text for word in line[index : index + width])
+            span = line[index : index + width]
+            phrase = " ".join(word.text for word in span)
             field = resolve_header(phrase)
             if field is None or field in used_fields:
                 continue
             if _has_same_field_prefix(line, index, width, field, resolve_header):
+                continue
+            if width > 1 and _has_spaced_independent_header_split(span, resolve_header):
                 continue
             best = (width, field)
             break
