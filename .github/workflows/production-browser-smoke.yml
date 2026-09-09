@@ -31,6 +31,9 @@ jobs:
     timeout-minutes: 12
     env:
       PRODUCTION_URL: https://bp-price-research.streamlit.app/
+      # PRs run against the currently deployed main, so they must not require a page that is
+      # only present on the feature branch. Push/manual runs target deployed main and do require it.
+      EXPECT_QUOTE_UAT: ${{ github.event_name == 'pull_request' && '0' || '1' }}
     steps:
       - uses: actions/checkout@v4
 
