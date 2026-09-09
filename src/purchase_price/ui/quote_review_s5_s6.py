@@ -23,7 +23,7 @@ from purchase_price.services.quote_comparable_approval import (
     quote_evidence_pair_key,
 )
 from purchase_price.services.quote_condition_comparison import build_quote_condition_profile
-from purchase_price.services.quote_extraction import parse_quote_decimal
+from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
 from purchase_price.ui.quote_review_export import build_record
 from purchase_price.ui.quote_review_state import QuoteReviewState, can_enter
 
@@ -92,6 +92,20 @@ def condition_diff_rows(
     evidence: CollectedPrice,
     decision: QuoteComparabilityDecision,
 ) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    configuration = decision.configuration_comparison
+    if context.quote_identity is not None and configuration is not None:
+        for key in ("manufacturer", "model", "specification"):
+            axis = configuration.axis(key)
+            rows.append(
+                {
+                    "조건": axis.label,
+                    "견적": axis.quote_value,
+                    "근거": axis.evidence_value,
+                    "결과": axis.status.value,
+                }
+            )
+
     quote_quantity = (
         f"{context.quantity} {context.unit}" if context.quantity is not None else f"미확인 {context.unit}"
     )
@@ -100,20 +114,22 @@ def condition_diff_rows(
         if evidence.quantity is not None
         else f"미확인 {evidence.unit or '미확인'}"
     )
-    rows = [
-        {
-            "조건": "수량 · 단위",
-            "견적": quote_quantity,
-            "근거": evidence_quantity,
-            "결과": _reason_result(decision, ("수량", "단위")),
-        },
-        {
-            "조건": "통화",
-            "견적": "KRW",
-            "근거": evidence.currency,
-            "결과": _reason_result(decision, ("KRW",)),
-        },
-    ]
+    rows.extend(
+        [
+            {
+                "조건": "수량 · 단위",
+                "견적": quote_quantity,
+                "근거": evidence_quantity,
+                "결과": _reason_result(decision, ("수량", "단위")),
+            },
+            {
+                "조건": "통화",
+                "견적": "KRW",
+                "근거": evidence.currency,
+                "결과": _reason_result(decision, ("KRW",)),
+            },
+        ]
+    )
     rows.extend(
         {
             "조건": comparison.label,
@@ -201,8 +217,11 @@ def _context_form(state: QuoteReviewState, index: int) -> None:
                 warranty=warranty,
                 maintenance=maintenance,
             ),
+            quote_identity=quote_item_query(item),
         )
-        st.success("견적 비교조건을 저장했습니다. 기존 session 승인은 무효화했습니다.")
+        st.success(
+            "견적 비교조건과 제품·구성 fingerprint를 저장했습니다. 기존 session 승인은 무효화했습니다."
+        )
         st.rerun()
 
 
@@ -331,7 +350,7 @@ def render_s5(state: QuoteReviewState, index: int) -> None:
         hide_index=True,
     )
     if decision.eligible_candidate:
-        st.success("이 근거는 현재 비교조건에서 승인 가능한 candidate입니다.")
+        st.success("이 근거는 제품·구성과 상업조건이 확인된 승인 가능한 candidate입니다.")
     else:
         st.warning("이 근거는 지금 승인할 수 없습니다. " + decision.reason_text)
     if evidence.source_url:
@@ -412,14 +431,14 @@ def render_s6(state: QuoteReviewState, index: int) -> None:
             st.rerun()
     else:
         confirmed = st.checkbox(
-            "견적 원문과 외부 원문을 직접 확인했고 현재 quote/evidence pair가 동일 비교조건임을 "
+            "견적 원문과 외부 원문을 직접 확인했고 현재 quote/evidence pair가 동일 제품·구성·비교조건임을 "
             "확인했습니다.",
             value=False,
             key=f"quote_approval_confirmed_{index}",
         )
         note = st.text_input(
             "승인 메모 (필수)",
-            placeholder="예: 견적서와 계약상세 원문에서 수량·단위·VAT·설치·보증 조건 대조",
+            placeholder="예: 모델·규격·수량·VAT·설치·옵션·보증을 견적서와 계약상세 원문에서 대조",
             key=f"quote_approval_note_{index}",
         )
         can_approve = confirmed and bool(note.strip()) and bool(state.reviewer.strip())
