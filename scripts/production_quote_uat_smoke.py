@@ -13,7 +13,9 @@ PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamli
 UAT_URL = PRODUCTION_URL.rstrip("/") + "/quote-extraction-uat"
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-COMMERCIAL_GUIDANCE = "배송·설치·옵션·보증·유지보수·기타조건도 원문에 명시된 경우"
+COMMERCIAL_GUIDANCE_PATTERN = re.compile(
+    r"배송·설치·옵션·보증·유지보수·기타조건도\s+원문에\s+명시된\s+경우"
+)
 
 
 def _app_frame(page: Any) -> Any:
@@ -120,11 +122,12 @@ def main() -> None:
                     )
                 report["checks"].append("synthetic_item_extracted")
 
-                body = app.locator("body").inner_text(timeout=10_000)
-                if COMMERCIAL_GUIDANCE not in body:
-                    raise RuntimeError("Commercial-condition UAT guidance is missing from Production")
+                guidance = app.get_by_text(COMMERCIAL_GUIDANCE_PATTERN).first
+                guidance.wait_for(state="visible", timeout=30_000)
+                report["commercial_guidance_text"] = guidance.inner_text(timeout=10_000)
                 report["checks"].append("commercial_review_guidance_rendered")
 
+                body = app.locator("body").inner_text(timeout=10_000)
                 report["body_text_prefix"] = body[:6000]
                 report["final_url"] = page.url
                 page.screenshot(path=str(screenshot_path), full_page=True)
