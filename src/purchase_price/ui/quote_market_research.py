@@ -235,7 +235,6 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
         c2.metric("수량", str(item.quantity) if item.quantity is not None else "미확인")
         c3.metric("단위", item.unit or "미확인")
 
-        # 1-3. Quote identity -> canonical/research basis -> basis verification status.
         render_market_reference_summary(
             discovery,
             query=query,
@@ -244,7 +243,6 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             include_related_candidates=False,
         )
 
-        # 4. Verified same-product actual evidence is always kept ahead of alternatives.
         if run is not None and run.results:
             assessment = assess_prices(run.results, item.unit_price)
             st.markdown("**검증된 동일제품 직접가격 근거**")
@@ -256,18 +254,12 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
         else:
             st.caption("검증된 동일제품 직접가격 근거는 현재 조사 범위에서 확인되지 않았습니다.")
 
-        # Model-labelled Shopping rows stay explicitly unverified and separate from direct evidence.
         render_model_price_research_summary(
             discovery,
             quote_unit_price=item.unit_price,
         )
-
-        # 5-6. Same official classification first, then unverified related/spec-similar candidates.
         render_market_alternative_candidates(discovery, query=query)
-
-        # 7. Other institutions' public procurement lifecycle evidence is last in the core sequence.
         render_procurement_research(market_bundle)
-
         render_external_research_links(query)
 
         with st.expander("상세 근거·비교조건", expanded=False):
@@ -305,7 +297,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
 
     uploaded = st.file_uploader(
         "견적서 파일",
-        type=["pdf", "xlsx", "xls"],
+        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg"],
         key="quote_auto_market_upload",
     )
     if uploaded is not None and (state.file_name != uploaded.name or state.extraction is None):
@@ -313,7 +305,9 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
         state.lookback_days = G2B_DEFAULT_LOOKBACK_DAYS
 
     if state.extraction is None:
-        st.caption("PDF · xlsx · xls 견적서를 업로드하면 품목 추출과 시장조사가 한 번에 시작됩니다.")
+        st.caption(
+            "PDF · Excel(.xlsx/.xls) · PNG · JPG/JPEG 견적서를 업로드하면 품목 추출과 시장조사가 한 번에 시작됩니다."
+        )
         return
 
     top1, top2, top3 = st.columns([1.3, 2.2, 1])
