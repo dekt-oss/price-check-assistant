@@ -51,7 +51,7 @@ def quote_evidence_pair_key(
 
     The fingerprint is intended for current-session identity, not public persistence. Any change to
     quote identity/configuration, price, quantity, unit, date, six commercial-condition values, or
-    the relevant evidence fields produces a different key.
+    the relevant evidence fields/source text produces a different key.
     """
 
     quote_identity = context.quote_identity
@@ -85,6 +85,7 @@ def quote_evidence_pair_key(
             "source_name": evidence.source_name,
             "source_record_id": evidence.source_record_id,
             "source_url": evidence.source_url,
+            "original_title": evidence.original_title,
             "manufacturer": evidence.manufacturer,
             "product_name": evidence.product_name,
             "model_name": evidence.model_name,
