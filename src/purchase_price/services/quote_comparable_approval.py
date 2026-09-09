@@ -18,8 +18,8 @@ class QuoteComparableApproval:
     """Explicit reviewer approval for one quote/evidence pair in the current review session.
 
     This object is deliberately not a property of the public source record. A public price can be
-    comparable to one quote and not comparable to another because quantity, unit, commercial
-    conditions and review date differ.
+    comparable to one quote and not comparable to another because identity, configuration,
+    quantity, unit, commercial conditions and review date differ.
     """
 
     pair_key: str
@@ -50,12 +50,23 @@ def quote_evidence_pair_key(
     """Fingerprint the exact quote/evidence pair so stale approvals cannot be reused.
 
     The fingerprint is intended for current-session identity, not public persistence. Any change to
-    quote price, quantity, unit, date, six commercial-condition values, or the relevant evidence
-    fields produces a different key.
+    quote identity/configuration, price, quantity, unit, date, six commercial-condition values, or
+    the relevant evidence fields produces a different key.
     """
 
+    quote_identity = context.quote_identity
     payload = {
         "quote": {
+            "identity": (
+                {
+                    "product_name": quote_identity.product_name,
+                    "manufacturer": quote_identity.manufacturer,
+                    "model_name": quote_identity.model_name,
+                    "specification": quote_identity.specification,
+                }
+                if quote_identity is not None
+                else None
+            ),
             "unit_price": _decimal_text(context.quote_unit_price),
             "quantity": _decimal_text(context.quantity),
             "unit": context.unit.strip(),
