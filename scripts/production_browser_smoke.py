@@ -36,6 +36,13 @@ def _navigate(page: Any, name: str) -> None:
     _wait_heading(app, name)
 
 
+def _navigate_direct(page: Any, route: str, heading: str) -> None:
+    url = f"{PRODUCTION_URL.rstrip('/')}/{route}"
+    page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+    app = _app_frame(page)
+    _wait_heading(app, heading, timeout=30_000)
+
+
 def _read_readiness_status(body_text: str, label: str) -> dict[str, str]:
     lines = [line.strip() for line in body_text.splitlines() if line.strip()]
     try:
@@ -264,7 +271,7 @@ def main() -> None:
                 app.get_by_role("tab", name="UDI-DI", exact=True).wait_for(state="visible")
                 report["checks"].append("medical_device_tabs_rendered")
 
-                _navigate(page, "운영환경 진단")
+                _navigate_direct(page, "운영환경_진단", "운영환경 진단")
                 app = _app_frame(page)
                 app.get_by_role("heading", name="OCR Python 모듈", exact=True).wait_for(
                     state="visible"
