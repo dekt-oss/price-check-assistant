@@ -147,5 +147,5 @@ def test_quote_extraction_uses_footer_fallback_only_after_zero_items(
     result = quote_extraction.extract_pdf_quote(path)
 
     assert result.items == (recovered,)
-    assert any("TOTAL PRICE/개별단가" in warning for warning in result.warnings)
+    assert any("가격행/합계" in warning for warning in result.warnings)
     assert not any("의미 있는 품목/가격 행을 식별하지 못했습니다" in warning for warning in result.warnings)
