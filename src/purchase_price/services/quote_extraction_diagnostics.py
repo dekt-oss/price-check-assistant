@@ -17,6 +17,8 @@ class QuoteExtractionStrategy(StrEnum):
     PDF_TEXT_UNRESOLVED = "pdf_text_unresolved"
     PDF_SCAN_NO_TEXT = "pdf_scan_no_text"
     PDF_OCR_UNAVAILABLE = "pdf_ocr_unavailable"
+    IMAGE_LOCAL_OCR = "image_local_ocr"
+    IMAGE_OCR_UNAVAILABLE = "image_ocr_unavailable"
     UNKNOWN = "unknown"
 
 
@@ -30,8 +32,11 @@ _STRATEGY_LABELS = {
     QuoteExtractionStrategy.PDF_TEXT_UNRESOLVED: "PDF 텍스트는 있으나 품목 구조 미식별",
     QuoteExtractionStrategy.PDF_SCAN_NO_TEXT: "PDF 텍스트 레이어 없음(OCR 대상)",
     QuoteExtractionStrategy.PDF_OCR_UNAVAILABLE: "PDF OCR 실행 불가",
+    QuoteExtractionStrategy.IMAGE_LOCAL_OCR: "이미지 로컬 OCR(Tesseract kor+eng)",
+    QuoteExtractionStrategy.IMAGE_OCR_UNAVAILABLE: "이미지 OCR 실행 불가",
     QuoteExtractionStrategy.UNKNOWN: "추출 경로 미확인",
 }
+_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg"})
 
 
 @dataclass(frozen=True)
@@ -91,6 +96,8 @@ def diagnose_quote_extraction(
         strategies = (QuoteExtractionStrategy.XLS_TABLE,)
     elif suffix == ".pdf":
         strategies = _pdf_strategies(result)
+    elif suffix in _IMAGE_SUFFIXES:
+        strategies = (QuoteExtractionStrategy.IMAGE_LOCAL_OCR,)
     else:
         strategies = (QuoteExtractionStrategy.UNKNOWN,)
 
@@ -116,6 +123,8 @@ def diagnose_quote_extraction_error(
         strategies = (QuoteExtractionStrategy.PDF_OCR_UNAVAILABLE,)
     elif suffix == ".pdf" and "텍스트 레이어가 없습니다" in message:
         strategies = (QuoteExtractionStrategy.PDF_SCAN_NO_TEXT,)
+    elif suffix in _IMAGE_SUFFIXES and "OCR" in message:
+        strategies = (QuoteExtractionStrategy.IMAGE_OCR_UNAVAILABLE,)
     else:
         strategies = (QuoteExtractionStrategy.UNKNOWN,)
     return QuoteExtractionDiagnostics(

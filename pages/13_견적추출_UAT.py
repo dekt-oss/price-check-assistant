@@ -41,6 +41,7 @@ with st.expander("UAT 운영 원칙", expanded=False):
     st.write(
         "- 최소 5건의 샘플 또는 비식별 실제 견적을 담당자가 원문 대조 완료해야 1차 UAT 표본 목표를 충족합니다.\n"
         "- release gate는 `xlsx`, `xls`, `pdf_text`, `pdf_ocr`, `pdf_commercial` 5개 표본 분류를 모두 요구합니다.\n"
+        "- `image_ocr`은 PNG/JPG/JPEG 직접 업로드 경로의 추가 UAT 표본으로 집계하며 기존 5개 release gate를 대체하지 않습니다.\n"
         "- PDF의 텍스트/OCR 분류는 실제 추출 경로로 기본 제안하지만, `pdf_commercial`은 상업조건이 포함된 PDF를 담당자가 원문 대조할 때만 직접 선택합니다.\n"
         "- `pdf_commercial`은 배송·설치·옵션·보증·유지보수·기타조건 중 최소 1개를 정답표에서 실제 원문 기준으로 확인해야 release gate 표본으로 인정됩니다.\n"
         "- 자동 추출값을 그대로 정답으로 간주하지 않습니다. 원문을 보고 수정한 뒤 `원문 대조 완료`를 체크하세요.\n"
@@ -48,15 +49,15 @@ with st.expander("UAT 운영 원칙", expanded=False):
         "- 품목 FP는 원문에 없는데 추출된 품목, FN은 원문에는 있는데 누락된 품목입니다.\n"
         "- 한 품목의 추가/누락이 뒤 행 전체의 필드 오류로 번지지 않도록 순서를 보존해 행을 정렬한 뒤 필드 정확도를 계산합니다.\n"
         "- 이 화면의 통계는 parser 성능 측정용이며 가격 적정성 판정이나 `QUOTE_COMPARABLE` 승인과 무관합니다.\n"
-        "- 텍스트 레이어가 없는 스캔 PDF는 로컬 Tesseract(kor+eng) OCR을 사용하며 `PDF 로컬 OCR` 전략으로 별도 집계합니다.\n"
-        "- OCR은 앞 12페이지까지만 처리하며, 외부 Vision API로 견적 원문을 전송하지 않습니다."
+        "- 텍스트 레이어가 없는 스캔 PDF와 PNG/JPG/JPEG는 로컬 Tesseract(kor+eng) OCR을 사용합니다.\n"
+        "- PDF OCR은 앞 12페이지까지만 처리하며, 외부 Vision API로 견적 원문을 전송하지 않습니다."
     )
 
 uploaded_files = st.file_uploader(
     "UAT 견적 파일",
-    type=["pdf", "xlsx", "xls"],
+    type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg"],
     accept_multiple_files=True,
-    help="가능하면 서로 다른 업체/양식의 샘플 또는 비식별 견적을 5건 이상 선택하세요.",
+    help="PDF · Excel · PNG/JPG/JPEG를 지원합니다. 가능하면 서로 다른 업체/양식의 샘플 또는 비식별 견적을 5건 이상 선택하세요.",
 )
 
 _UI_COLUMNS = {

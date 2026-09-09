@@ -12,7 +12,9 @@ on:
       - "Home.py"
       - "pages/**"
       - "src/purchase_price/ui/**"
+      - "src/purchase_price/services/**"
       - "requirements.txt"
+      - "pyproject.toml"
       - "packages.txt"
       - "packages.ocr.txt"
       - ".github/workflows/production-browser-smoke.yml"
@@ -33,9 +35,10 @@ jobs:
     timeout-minutes: 12
     env:
       PRODUCTION_URL: https://bp-price-research.streamlit.app/
-      # PRs run against the currently deployed main, so they must not require a page that is
-      # only present on the feature branch. Push/manual runs target deployed main and do require it.
+      # PRs run against the currently deployed main, so they must not require features that exist
+      # only on the feature branch. Push/manual runs target deployed main and do require them.
       EXPECT_QUOTE_UAT: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      EXPECT_QUOTE_IMAGES: ${{ github.event_name == 'pull_request' && '0' || '1' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +49,7 @@ jobs:
       - name: Install browser smoke dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install "playwright>=1.55,<2" "openpyxl>=3.1,<4"
+          pip install "playwright>=1.55,<2" "openpyxl>=3.1,<4" "Pillow>=10,<12"
           python -m playwright install --with-deps chromium
 
       - name: Run production browser smoke
