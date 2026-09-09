@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from purchase_price.services.pdf_word_geometry import extract_word_geometry_rows_from_words
+from purchase_price.services.tesseract_runtime import (
+    TesseractRuntimeError,
+    configured_pytesseract,
+    resolve_tesseract_runtime,
+)
 
 _DEFAULT_DPI = 220
 _DEFAULT_LANGUAGES = "kor+eng"
@@ -92,6 +97,10 @@ def _close_if_possible(value: object) -> None:
         closer()
 
 
+def _required_languages(languages: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in languages.split("+") if part.strip())
+
+
 def run_local_pdf_ocr(
     path: Path,
     resolve_header: Callable[[str], str | None],
@@ -103,7 +112,8 @@ def run_local_pdf_ocr(
     """OCR a scanned PDF locally and reconstruct conservative table rows from word boxes.
 
     No document bytes or recognized text are sent to an external service. The caller remains
-    responsible for validating extracted fields against the original quote.
+    responsible for validating extracted fields against the original quote. On Linux runtimes,
+    Tesseract can fall back to the pinned Python-bundled executable when OS packages are absent.
     """
 
     try:
@@ -114,6 +124,11 @@ def run_local_pdf_ocr(
         raise PdfOcrUnavailableError(
             "로컬 OCR Python 모듈(pypdfium2/pytesseract)을 불러올 수 없습니다."
         ) from exc
+
+    try:
+        runtime = resolve_tesseract_runtime(_required_languages(languages))
+    except TesseractRuntimeError as exc:
+        raise PdfOcrUnavailableError(f"로컬 Tesseract OCR 런타임을 준비할 수 없습니다: {exc}") from exc
 
     try:
         document = pdfium.PdfDocument(str(path))
@@ -137,17 +152,22 @@ def run_local_pdf_ocr(
                 bitmap = page.render(scale=dpi / 72)
                 image = bitmap.to_pil()
                 try:
-                    data = pytesseract.image_to_data(
-                        image,
-                        lang=languages,
-                        config="--psm 6",
-                        output_type=Output.DICT,
-                        timeout=_OCR_TIMEOUT_SECONDS,
-                    )
+                    with configured_pytesseract(
+                        pytesseract,
+                        runtime,
+                        base_config="--psm 6",
+                    ) as config:
+                        data = pytesseract.image_to_data(
+                            image,
+                            lang=languages,
+                            config=config,
+                            output_type=Output.DICT,
+                            timeout=_OCR_TIMEOUT_SECONDS,
+                        )
                 except Exception as exc:
                     raise PdfOcrUnavailableError(
-                        "로컬 Tesseract OCR 실행에 실패했습니다. "
-                        "tesseract-ocr 및 kor/eng 언어팩 배포 상태를 확인하세요."
+                        "로컬 Tesseract OCR 실행에 실패했습니다. OCR 런타임과 kor/eng "
+                        "언어모델 상태를 확인하세요."
                     ) from exc
 
                 words, text = _ocr_words_and_text(data)
