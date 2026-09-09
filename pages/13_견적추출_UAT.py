@@ -19,6 +19,11 @@ from purchase_price.services.quote_uat_review import (
     quote_item_to_review_row,
     redacted_uat_summary_json,
 )
+from purchase_price.services.quote_uat_strategy import (
+    UAT_STRATEGY_LABELS,
+    default_uat_strategy,
+    uat_strategy_options,
+)
 
 st.set_page_config(page_title="견적추출 UAT", page_icon="🧪", layout="wide")
 st.title("견적추출 UAT")
@@ -35,6 +40,8 @@ st.warning(
 with st.expander("UAT 운영 원칙", expanded=False):
     st.write(
         "- 최소 5건의 샘플 또는 비식별 실제 견적을 담당자가 원문 대조 완료해야 1차 UAT 표본 목표를 충족합니다.\n"
+        "- release gate는 `xlsx`, `xls`, `pdf_text`, `pdf_ocr`, `pdf_commercial` 5개 표본 분류를 모두 요구합니다.\n"
+        "- PDF의 텍스트/OCR 분류는 실제 추출 경로로 기본 제안하지만, `pdf_commercial`은 상업조건이 포함된 PDF를 담당자가 원문 대조할 때만 직접 선택합니다.\n"
         "- 자동 추출값을 그대로 정답으로 간주하지 않습니다. 원문을 보고 수정한 뒤 `원문 대조 완료`를 체크하세요.\n"
         "- 품목이 누락됐으면 정답표에 행을 추가하고, 잘못 추출된 품목은 정답표에서 삭제하세요.\n"
         "- 품목 FP는 원문에 없는데 추출된 품목, FN은 원문에는 있는데 누락된 품목입니다.\n"
@@ -127,6 +134,29 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
         c3.metric("추출 경로", diagnostics.strategy_label)
         c4.metric("parser 처리시간", _seconds_text(processing_seconds))
 
+        strategy_values = tuple(strategy.value for strategy in diagnostics.strategies)
+        strategy_options = uat_strategy_options(file_kind=diagnostics.file_kind)
+        suggested_strategy = default_uat_strategy(
+            file_kind=diagnostics.file_kind,
+            extraction_strategies=strategy_values,
+        )
+        uat_strategy = st.selectbox(
+            "UAT 표본 분류",
+            options=strategy_options,
+            index=strategy_options.index(suggested_strategy),
+            format_func=lambda value: f"{UAT_STRATEGY_LABELS[value]} · {value}",
+            key=f"quote_uat_strategy_{case_key}",
+            disabled=len(strategy_options) == 1,
+            help=(
+                "release gate 집계에는 이 canonical 분류가 사용됩니다. 실제 parser 추출 경로는 위에 별도로 표시됩니다. "
+                "pdf_commercial은 배송·설치·옵션·보증·유지보수 등 상업조건을 포함한 PDF를 원문 대조하는 표본에만 선택하세요."
+            ),
+        )
+        if uat_strategy == "pdf_commercial":
+            st.info(
+                "`pdf_commercial`은 자동 추론하지 않습니다. 상업조건이 포함된 PDF를 담당자가 원문과 대조하는 대표 표본인지 확인하세요."
+            )
+
         if extraction_error is not None:
             st.error(str(extraction_error))
         for warning in warnings:
@@ -176,7 +206,7 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
         if confirmed:
             metric = compare_review_rows(
                 case_id=case_id,
-                strategy=diagnostics.strategy_label,
+                strategy=uat_strategy,
                 actual_items=actual_items,
                 expected_rows=expected_rows,
                 extraction_failed=extraction_error is not None,
@@ -226,6 +256,16 @@ else:
     remaining = 5 - int(summary["total_confirmed_cases"])
     st.info(f"1차 UAT 표본 목표까지 원문 대조 완료 견적 {remaining}건이 더 필요합니다.")
 
+release_gate = summary["release_gate"]
+covered = ", ".join(release_gate["covered_strategies"]) or "없음"
+missing = ", ".join(release_gate["missing_strategies"]) or "없음"
+st.caption(f"release gate 표본 분류 · 충족: {covered} · 미충족: {missing}")
+if release_gate["release_ready"]:
+    st.success("견적추출 UAT release gate를 충족했습니다.")
+else:
+    blockers = " / ".join(release_gate["blockers"]) or "미확인"
+    st.warning(f"견적추출 UAT release gate 미충족: {blockers}")
+
 if confirmed_metrics:
     st.markdown("**케이스별 비식별 결과**")
     st.dataframe(
@@ -236,7 +276,7 @@ if confirmed_metrics:
 
     strategy_metrics = summary["strategy_metrics"]
     if strategy_metrics:
-        st.markdown("**추출 전략별 집계**")
+        st.markdown("**UAT 표본 분류별 집계**")
         strategy_frame = pd.DataFrame.from_dict(strategy_metrics, orient="index").reset_index()
         strategy_frame = strategy_frame.rename(columns={"index": "strategy"})
         st.dataframe(strategy_frame, use_container_width=True, hide_index=True)
