@@ -64,23 +64,47 @@ def _build_synthetic_quote(path: Path) -> None:
     workbook.save(path)
 
 
+def _scroll_virtualized_grids_right(page: Any) -> None:
+    app = _app_frame(page)
+    grids = app.locator('[data-testid="stDataFrame"], [data-testid="stDataEditor"]')
+    grids.evaluate_all(
+        """
+        roots => {
+          for (const root of roots) {
+            const elements = [root, ...root.querySelectorAll('*')];
+            for (const element of elements) {
+              if (element.scrollWidth > element.clientWidth + 4) {
+                element.scrollLeft = element.scrollWidth;
+              }
+            }
+          }
+        }
+        """
+    )
+    page.wait_for_timeout(750)
+
+
 def _wait_for_commercial_headers(page: Any, *, timeout_seconds: float = 30.0) -> list[str]:
     deadline = time.monotonic() + timeout_seconds
-    last_headers: list[str] = []
+    observed: list[str] = []
     while time.monotonic() < deadline:
         app = _app_frame(page)
         try:
-            last_headers = [text.strip() for text in app.locator('[role="columnheader"]').all_inner_texts()]
+            current = [text.strip() for text in app.locator('[role="columnheader"]').all_inner_texts()]
+            for text in current:
+                if text and text not in observed:
+                    observed.append(text)
+            if all(header in observed for header in COMMERCIAL_HEADERS):
+                return observed
+            _scroll_virtualized_grids_right(page)
         except Exception:
             page.wait_for_timeout(1_000)
             continue
-        if all(header in last_headers for header in COMMERCIAL_HEADERS):
-            return last_headers
-        page.wait_for_timeout(1_000)
-    missing = [header for header in COMMERCIAL_HEADERS if header not in last_headers]
+        page.wait_for_timeout(500)
+    missing = [header for header in COMMERCIAL_HEADERS if header not in observed]
     raise RuntimeError(
-        "Commercial UAT column headers missing from rendered grids: "
-        f"missing={missing}; observed={last_headers}"
+        "Commercial UAT column headers missing from rendered grids after horizontal scroll: "
+        f"missing={missing}; observed={observed}"
     )
 
 
