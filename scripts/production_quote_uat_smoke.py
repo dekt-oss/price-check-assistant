@@ -122,7 +122,9 @@ def main() -> None:
 
                 uploader = app.get_by_label("UAT 견적 파일", exact=True)
                 uploader.wait_for(state="visible", timeout=30_000)
-                uploader.set_input_files(str(quote_path))
+                file_input = uploader.locator('input[type="file"]')
+                file_input.wait_for(state="attached", timeout=30_000)
+                file_input.set_input_files(str(quote_path))
                 app.get_by_text("UAT-001", exact=False).first.wait_for(state="visible", timeout=45_000)
                 report["checks"].append("synthetic_xlsx_uploaded")
 
