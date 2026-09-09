@@ -74,6 +74,19 @@ class ConfigurationFingerprintComparison:
 
 
 _UNKNOWN = "미확인"
+_PLACEHOLDER_VALUES = frozenset(
+    {
+        "미확인",
+        "미상",
+        "unknown",
+        "na",
+        "none",
+        "없음",
+        "확인필요",
+        "notavailable",
+        "notprovided",
+    }
+)
 
 # These are deliberately tiny, high-precision mutually-exclusive families. They are not a synonym
 # engine. A conflict is emitted only when both sides explicitly state different members of the same
@@ -104,6 +117,20 @@ def _display(value: object) -> str:
 
 def _normalize_phrase(value: str | None) -> str:
     return re.sub(r"[\s_./()\-]+", "", (value or "").casefold())
+
+
+def _is_placeholder(value: str | None) -> bool:
+    raw = (value or "").strip().casefold()
+    if not raw or raw == "-":
+        return True
+    compact = re.sub(r"[\s_./()\-]+", "", raw)
+    return compact in _PLACEHOLDER_VALUES
+
+
+def _normalize_spec_exact(value: str | None) -> str:
+    """Normalize formatting while preserving decimal punctuation and measurement semantics."""
+
+    return re.sub(r"[\s_/()\-]+", "", (value or "").strip().casefold())
 
 
 def _explicit_family_member(value: str | None, members: tuple[tuple[str, ...], ...]) -> int | None:
@@ -139,10 +166,8 @@ def _identity_axis(
 ) -> ConfigurationAxisComparison:
     quote_text = (quote_value or "").strip()
     evidence_text = (evidence_value or "").strip()
-    required = bool(quote_text)
-    if not quote_text:
-        status = ConfigurationAxisStatus.UNKNOWN
-    elif not evidence_text:
+    required = not _is_placeholder(quote_text)
+    if _is_placeholder(quote_text) or _is_placeholder(evidence_text):
         status = ConfigurationAxisStatus.UNKNOWN
     else:
         if canonicalize:
@@ -172,17 +197,18 @@ def _specification_axis(
 ) -> ConfigurationAxisComparison:
     quote_spec = (quote_identity.specification or "").strip()
     evidence_spec = (evidence.specification or "").strip()
-    required = bool(quote_spec)
+    required = not _is_placeholder(quote_spec)
 
-    if not quote_spec or not evidence_spec:
+    if _is_placeholder(quote_spec) or _is_placeholder(evidence_spec):
         status = ConfigurationAxisStatus.UNKNOWN
-    elif normalize_text(quote_spec) == normalize_text(evidence_spec):
-        # Product matching intentionally strips model tokens from specifications. If both source
-        # documents explicitly repeat the same model/configuration text, equality itself confirms
-        # this fingerprint axis even when the broader matcher reports `not_provided`.
-        status = ConfigurationAxisStatus.MATCH
     elif _has_mutually_exclusive_configuration_conflict(quote_spec, evidence_spec):
         status = ConfigurationAxisStatus.CONFLICT
+    elif _normalize_spec_exact(quote_spec) == _normalize_spec_exact(evidence_spec):
+        # Product matching intentionally strips model tokens from specifications. If both source
+        # documents explicitly repeat the same model/configuration text, equality itself confirms
+        # this fingerprint axis even when the broader matcher reports `not_provided`. The exact
+        # normalizer deliberately preserves decimal punctuation so 1.5kW cannot collapse to 15kW.
+        status = ConfigurationAxisStatus.MATCH
     else:
         decision = grade_product_identity(
             quote_identity,
