@@ -273,7 +273,7 @@ def _specification_from_priced_row(text: str, row: _PricedRow) -> str:
 def _extract_context_fields(text: str) -> tuple[str, str, str]:
     warranty = ""
     warranty_match = re.search(
-        r"(?is)(?:무상\s*)?(?:보증|warranty|하자)\s*(?:기간)?[^\r\n]{0,80}?(\d+)\s*년",
+        r"(?is)(?:무상\s*)?(?:보증|warranty|하자)\s*(?:기간)?.{0,100}?(\d+)\s*년",
         text,
     )
     if warranty_match:
