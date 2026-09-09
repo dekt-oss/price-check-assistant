@@ -62,6 +62,32 @@ def test_recovers_sparse_ruled_table_shape_from_real_uat_ocr() -> None:
     assert "리스" in item.other_conditions
 
 
+def test_recovers_when_sparse_ocr_splits_unit_and_total_prices() -> None:
+    sparse_text = """
+    QUOTATION
+    AUTOLOGOUS BLOOD
+    Cell Saver
+    unit
+    1
+    41,000,000
+    41,000,000
+    VAT Included
+    RECOVERY SYSTEM
+    ELITE+
+    """
+
+    item = recover_sparse_single_item_from_text(sparse_text)
+
+    assert item is not None
+    assert item.product_name == "AUTOLOGOUS BLOOD RECOVERY SYSTEM"
+    assert item.specification == "Cell Saver ELITE+"
+    assert item.quantity == Decimal("1")
+    assert item.unit == "unit"
+    assert item.unit_price == Decimal("41000000")
+    assert item.total_amount == Decimal("41000000")
+    assert item.vat_status == "포함"
+
+
 def test_sparse_recovery_rejects_summary_only_repeated_amount() -> None:
     text = """
     견적서
