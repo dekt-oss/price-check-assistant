@@ -8,9 +8,11 @@ UAT_STRATEGY_LABELS: dict[str, str] = {
     "pdf_text": "PDF 텍스트 표본",
     "pdf_ocr": "PDF 스캔/OCR 표본",
     "pdf_commercial": "PDF 상업조건 표본",
+    "image_ocr": "PNG/JPEG 이미지 OCR 표본",
 }
 
 PDF_UAT_STRATEGIES = ("pdf_text", "pdf_ocr", "pdf_commercial")
+IMAGE_FILE_KINDS = frozenset({"png", "jpg", "jpeg"})
 
 
 def default_uat_strategy(*, file_kind: str, extraction_strategies: Sequence[str]) -> str:
@@ -18,7 +20,8 @@ def default_uat_strategy(*, file_kind: str, extraction_strategies: Sequence[str]
 
     `pdf_commercial` is intentionally never inferred. It is a UAT coverage designation that means
     the reviewer selected a PDF whose commercial terms are part of the ground-truth review; the
-    operator must choose it explicitly in the workspace.
+    operator must choose it explicitly in the workspace. Image OCR is tracked as additional coverage
+    and does not replace any of the existing five required release-gate strategies.
     """
 
     kind = file_kind.strip().casefold().lstrip(".")
@@ -26,6 +29,8 @@ def default_uat_strategy(*, file_kind: str, extraction_strategies: Sequence[str]
         return "xlsx"
     if kind == "xls":
         return "xls"
+    if kind in IMAGE_FILE_KINDS:
+        return "image_ocr"
     if kind != "pdf":
         raise ValueError(f"지원하지 않는 UAT 파일 형식: {file_kind}")
 
@@ -41,6 +46,8 @@ def uat_strategy_options(*, file_kind: str) -> tuple[str, ...]:
         return ("xlsx",)
     if kind == "xls":
         return ("xls",)
+    if kind in IMAGE_FILE_KINDS:
+        return ("image_ocr",)
     if kind == "pdf":
         return PDF_UAT_STRATEGIES
     raise ValueError(f"지원하지 않는 UAT 파일 형식: {file_kind}")
