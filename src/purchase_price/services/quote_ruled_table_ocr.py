@@ -64,21 +64,39 @@ def _parse_amount(value: str) -> Decimal | None:
 
 def _repeated_price_line(lines: list[str]) -> tuple[int, Decimal] | None:
     candidates: list[tuple[int, Decimal]] = []
+    single_amount_lines: list[tuple[int, Decimal]] = []
+
     for index, line in enumerate(lines):
         folded = line.casefold()
         if any(marker in folded for marker in ("합계", "총계", "공급가액", "세액")):
             continue
         matches = list(_AMOUNT_RE.finditer(line))
-        if len(matches) < 2:
-            continue
         amounts = [_parse_amount(match.group(0)) for match in matches]
         valid = [amount for amount in amounts if amount is not None]
-        if len(valid) < 2 or valid[0] != valid[1]:
+
+        if len(valid) >= 2 and valid[0] == valid[1]:
+            candidates.append((index, valid[0]))
             continue
-        candidates.append((index, valid[0]))
-        if len(candidates) > 1:
-            return None
-    return candidates[0] if len(candidates) == 1 else None
+
+        if len(valid) == 1:
+            remainder = _AMOUNT_RE.sub("", line)
+            remainder = re.sub(r"[\s₩W\\|:;,.()\[\]{}<>_-]", "", remainder)
+            if not remainder:
+                single_amount_lines.append((index, valid[0]))
+
+    pair_candidates: list[tuple[int, Decimal]] = []
+    for left, right in zip(single_amount_lines, single_amount_lines[1:], strict=False):
+        left_index, left_amount = left
+        right_index, right_amount = right
+        if right_index - left_index <= 2 and left_amount == right_amount:
+            pair_candidates.append((left_index, left_amount))
+
+    all_candidates = [*candidates, *pair_candidates]
+    deduped: list[tuple[int, Decimal]] = []
+    for candidate in all_candidates:
+        if candidate not in deduped:
+            deduped.append(candidate)
+    return deduped[0] if len(deduped) == 1 else None
 
 
 def _nearby_quantity(lines: list[str], price_index: int) -> Decimal | None:
