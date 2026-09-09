@@ -42,6 +42,7 @@ with st.expander("UAT 운영 원칙", expanded=False):
         "- 최소 5건의 샘플 또는 비식별 실제 견적을 담당자가 원문 대조 완료해야 1차 UAT 표본 목표를 충족합니다.\n"
         "- release gate는 `xlsx`, `xls`, `pdf_text`, `pdf_ocr`, `pdf_commercial` 5개 표본 분류를 모두 요구합니다.\n"
         "- PDF의 텍스트/OCR 분류는 실제 추출 경로로 기본 제안하지만, `pdf_commercial`은 상업조건이 포함된 PDF를 담당자가 원문 대조할 때만 직접 선택합니다.\n"
+        "- `pdf_commercial`은 배송·설치·옵션·보증·유지보수·기타조건 중 최소 1개를 정답표에서 실제 원문 기준으로 확인해야 release gate 표본으로 인정됩니다.\n"
         "- 자동 추출값을 그대로 정답으로 간주하지 않습니다. 원문을 보고 수정한 뒤 `원문 대조 완료`를 체크하세요.\n"
         "- 품목이 누락됐으면 정답표에 행을 추가하고, 잘못 추출된 품목은 정답표에서 삭제하세요.\n"
         "- 품목 FP는 원문에 없는데 추출된 품목, FN은 원문에는 있는데 누락된 품목입니다.\n"
@@ -68,6 +69,12 @@ _UI_COLUMNS = {
     "unit_price": "단가",
     "total_amount": "총액",
     "vat_status": "VAT",
+    "delivery_condition": "배송",
+    "installation_condition": "설치",
+    "option_condition": "옵션",
+    "warranty_condition": "보증",
+    "maintenance_condition": "유지보수",
+    "other_conditions": "기타조건",
 }
 _REVERSE_UI_COLUMNS = {label: field for field, label in _UI_COLUMNS.items()}
 
@@ -154,7 +161,8 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
         )
         if uat_strategy == "pdf_commercial":
             st.info(
-                "`pdf_commercial`은 자동 추론하지 않습니다. 상업조건이 포함된 PDF를 담당자가 원문과 대조하는 대표 표본인지 확인하세요."
+                "`pdf_commercial`은 자동 추론하지 않습니다. 상업조건이 포함된 PDF를 담당자가 원문과 대조하고, "
+                "배송·설치·옵션·보증·유지보수·기타조건 중 최소 1개를 정답표에 확인해야 표본으로 인정됩니다."
             )
 
         if extraction_error is not None:
@@ -173,7 +181,8 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
         st.markdown("**담당자 원문 대조 정답표**")
         st.caption(
             "원문을 직접 확인해 수정하세요. 누락 품목은 행 추가, 오인 품목은 행 삭제가 가능합니다. "
-            "빈 값은 해당 필드 정확도 계산에서 제외됩니다."
+            "빈 값은 해당 필드 정확도 계산에서 제외됩니다. 배송·설치·옵션·보증·유지보수·기타조건도 원문에 "
+            "명시된 경우 그대로 대조하세요."
         )
         reviewed = st.data_editor(
             auto_frame,
@@ -220,7 +229,13 @@ for case_index, uploaded in enumerate(uploaded_files or (), start=1):
             m3.metric("오인 품목 FP", metric.false_positive_item_count)
             m4.metric("누락 품목 FN", metric.false_negative_item_count)
             m5.metric("필드 오류", metric.field_errors)
-            m6.metric("처리시간", _seconds_text(metric.processing_seconds))
+            m6.metric("상업조건 채점", metric.commercial_scored_fields)
+            st.caption(f"parser 처리시간: {_seconds_text(metric.processing_seconds)}")
+            if uat_strategy == "pdf_commercial" and metric.commercial_scored_fields == 0:
+                st.warning(
+                    "이 케이스는 `pdf_commercial`로 선택됐지만 채점된 상업조건 ground truth가 없습니다. "
+                    "release gate의 commercial 표본으로 인정되지 않습니다."
+                )
             if metric.status == "PASS":
                 st.success("현재 ground truth 기준으로 품목 대응과 평가 필드가 모두 일치합니다.")
             elif metric.extraction_failed:
@@ -243,12 +258,13 @@ s2.metric("추출 실패", summary["extraction_failures"])
 s3.metric("품목 precision", _rate_text(summary["item_precision"]))
 s4.metric("품목 recall", _rate_text(summary["item_recall"]))
 s5.metric("전체 필드 오류율", _rate_text(summary["field_error_rate"]))
-s6.metric("평균 처리시간", _seconds_text(summary["average_processing_seconds"]))
+s6.metric("상업조건 채점", summary["commercial_scored_fields"])
 
 f1, f2, f3 = st.columns(3)
 f1.metric("오인 품목 FP", summary["false_positive_items"])
 f2.metric("누락 품목 FN", summary["false_negative_items"])
 f3.metric("평균 원문대조 시간", _seconds_text(summary["average_review_seconds"]))
+st.caption(f"평균 parser 처리시간: {_seconds_text(summary['average_processing_seconds'])}")
 
 if summary["minimum_case_target_met"]:
     st.success("샘플 또는 비식별 실제 견적 최소 5건 UAT 표본 목표를 충족했습니다.")
@@ -289,6 +305,6 @@ if confirmed_metrics:
     )
 
 st.caption(
-    "UAT 결과 파일에는 실제 파일명·견적 원문·제품명·제조사명·모델명·규격·단가·총액 값을 포함하지 않습니다. "
-    "자동 추출값 및 수정값은 현재 Streamlit 세션에서만 사용합니다."
+    "UAT 결과 파일에는 실제 파일명·견적 원문·제품/업체 식별값·규격·가격·배송·설치·옵션·보증·유지보수·기타조건의 "
+    "실제 값을 포함하지 않습니다. 자동 추출값 및 수정값은 현재 Streamlit 세션에서만 사용합니다."
 )

@@ -42,6 +42,12 @@ def test_quote_item_to_review_row_preserves_review_fields() -> None:
         "unit_price": 66000000.0,
         "total_amount": 66000000.0,
         "vat_status": "포함",
+        "delivery_condition": "",
+        "installation_condition": "",
+        "option_condition": "",
+        "warranty_condition": "",
+        "maintenance_condition": "",
+        "other_conditions": "",
     }
 
 
@@ -66,6 +72,7 @@ def test_compare_review_rows_passes_exact_ground_truth() -> None:
     assert metric.item_precision == 1.0
     assert metric.item_recall == 1.0
     assert metric.scored_fields == 9
+    assert metric.commercial_scored_fields == 0
     assert metric.field_errors == 0
     assert metric.error_fields == ()
     assert metric.processing_seconds == 0.25
@@ -221,6 +228,7 @@ def test_blank_expected_fields_are_not_scored() -> None:
     )
 
     assert metric.scored_fields == 1
+    assert metric.commercial_scored_fields == 0
     assert metric.field_errors == 0
     assert metric.status == "PASS"
 
@@ -270,6 +278,7 @@ def test_redacted_summary_reports_fp_fn_precision_recall_and_strategy_timing() -
     assert summary["average_processing_seconds"] == 2.5
     assert summary["total_review_seconds"] == 60.0
     assert summary["average_review_seconds"] == 30.0
+    assert summary["commercial_scored_fields"] == 0
     assert strategy["cases"] == 2
     assert strategy["false_negative_items"] == 1
     assert strategy["item_recall"] == 0.5
