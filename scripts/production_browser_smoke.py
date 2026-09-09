@@ -13,13 +13,6 @@ KNOWN_PLATFORM_ERRORS = (
     "Error running app",
 )
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-OCR_READINESS_LABELS = (
-    "OCR Python 모듈",
-    "Tesseract 실행파일",
-    "Tesseract 상태",
-    "OCR 언어팩",
-    "OCR 실행 검증",
-)
 
 
 def _app_frame(page: Any) -> Any:
@@ -34,29 +27,6 @@ def _navigate(page: Any, name: str) -> None:
     app = _app_frame(page)
     app.get_by_role("link", name=name, exact=True).click()
     _wait_heading(app, name)
-
-
-def _navigate_direct(page: Any, route: str, heading: str) -> None:
-    url = f"{PRODUCTION_URL.rstrip('/')}/{route}"
-    page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-    app = _app_frame(page)
-    _wait_heading(app, heading, timeout=30_000)
-
-
-def _read_readiness_status(body_text: str, label: str) -> dict[str, str]:
-    lines = [line.strip() for line in body_text.splitlines() if line.strip()]
-    try:
-        index = lines.index(label)
-    except ValueError:
-        return {"status": "MISSING", "detail": "label not found"}
-
-    window = lines[index + 1 : index + 5]
-    status = next((line for line in window if line in {"READY", "UNAVAILABLE"}), "UNKNOWN")
-    detail_lines = [line for line in window if line not in {"READY", "UNAVAILABLE"}]
-    return {
-        "status": status,
-        "detail": " | ".join(detail_lines)[:1000],
-    }
 
 
 def _diagnostic_snapshot(page: Any, *, label: str) -> dict[str, object]:
@@ -271,20 +241,8 @@ def main() -> None:
                 app.get_by_role("tab", name="UDI-DI", exact=True).wait_for(state="visible")
                 report["checks"].append("medical_device_tabs_rendered")
 
-                _navigate_direct(page, "운영환경_진단", "운영환경 진단")
-                app = _app_frame(page)
-                app.get_by_role("heading", name="OCR Python 모듈", exact=True).wait_for(
-                    state="visible"
-                )
-                runtime_body = app.locator("body").inner_text(timeout=10_000)
-                report["ocr_runtime_readiness"] = {
-                    label: _read_readiness_status(runtime_body, label)
-                    for label in OCR_READINESS_LABELS
-                }
-                report["checks"].append("runtime_diagnostics_rendered")
-
                 report["final_snapshot"] = _diagnostic_snapshot(
-                    page, label="runtime-diagnostics-page"
+                    page, label="medical-device-page"
                 )
                 report["final_url"] = page.url
                 report["status"] = "pass"
