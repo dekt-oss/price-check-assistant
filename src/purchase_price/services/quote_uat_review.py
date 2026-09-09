@@ -10,7 +10,7 @@ from statistics import mean
 
 from purchase_price.services.quote_extraction import QuoteItem, parse_quote_decimal
 
-TEXT_FIELDS = (
+IDENTITY_TEXT_FIELDS = (
     "product_name",
     "manufacturer",
     "model_name",
@@ -18,6 +18,15 @@ TEXT_FIELDS = (
     "unit",
     "vat_status",
 )
+COMMERCIAL_FIELDS = (
+    "delivery_condition",
+    "installation_condition",
+    "option_condition",
+    "warranty_condition",
+    "maintenance_condition",
+    "other_conditions",
+)
+TEXT_FIELDS = IDENTITY_TEXT_FIELDS + COMMERCIAL_FIELDS
 DECIMAL_FIELDS = ("quantity", "unit_price", "total_amount")
 UAT_FIELDS = TEXT_FIELDS + DECIMAL_FIELDS
 _STRONG_IDENTITY_FIELDS = ("product_name", "model_name", "specification")
@@ -40,6 +49,7 @@ class QuoteUatCaseMetric:
     scored_fields: int
     field_errors: int
     error_fields: tuple[str, ...]
+    commercial_scored_fields: int = 0
     extraction_failed: bool = False
     processing_seconds: float | None = None
     review_seconds: float | None = None
@@ -92,6 +102,7 @@ class QuoteUatCaseMetric:
             "item_precision": self.item_precision,
             "item_recall": self.item_recall,
             "scored_fields": self.scored_fields,
+            "commercial_scored_fields": self.commercial_scored_fields,
             "field_errors": self.field_errors,
             "field_error_rate": self.field_error_rate,
             "error_fields": list(self.error_fields),
@@ -104,6 +115,7 @@ class QuoteUatCaseMetric:
 @dataclass(frozen=True)
 class _PairComparison:
     scored_fields: int
+    commercial_scored_fields: int
     field_errors: int
     error_fields: tuple[str, ...]
     alignment_cost: float
@@ -120,6 +132,12 @@ def quote_item_to_review_row(item: QuoteItem) -> dict[str, object]:
         "unit_price": float(item.unit_price) if item.unit_price is not None else None,
         "total_amount": float(item.total_amount) if item.total_amount is not None else None,
         "vat_status": item.vat_status,
+        "delivery_condition": item.delivery_condition,
+        "installation_condition": item.installation_condition,
+        "option_condition": item.option_condition,
+        "warranty_condition": item.warranty_condition,
+        "maintenance_condition": item.maintenance_condition,
+        "other_conditions": item.other_conditions,
     }
 
 
@@ -156,6 +174,7 @@ def _strong_anchor_match(expected: Mapping[str, object], actual: QuoteItem) -> b
 
 def _compare_pair(expected: Mapping[str, object], actual: QuoteItem) -> _PairComparison:
     scored_fields = 0
+    commercial_scored_fields = 0
     field_errors = 0
     error_fields: set[str] = set()
 
@@ -164,6 +183,8 @@ def _compare_pair(expected: Mapping[str, object], actual: QuoteItem) -> _PairCom
         if not expected_value:
             continue
         scored_fields += 1
+        if field in COMMERCIAL_FIELDS:
+            commercial_scored_fields += 1
         actual_value = _normalize_text(_actual_field_value(actual, field))
         if expected_value != actual_value:
             field_errors += 1
@@ -186,6 +207,7 @@ def _compare_pair(expected: Mapping[str, object], actual: QuoteItem) -> _PairCom
 
     return _PairComparison(
         scored_fields=scored_fields,
+        commercial_scored_fields=commercial_scored_fields,
         field_errors=field_errors,
         error_fields=tuple(sorted(error_fields)),
         alignment_cost=alignment_cost,
@@ -261,6 +283,9 @@ def compare_review_rows(
 ) -> QuoteUatCaseMetric:
     aligned = _align_rows(expected_rows, actual_items)
     scored_fields = sum(comparison.scored_fields for _, _, comparison in aligned)
+    commercial_scored_fields = sum(
+        comparison.commercial_scored_fields for _, _, comparison in aligned
+    )
     field_errors = sum(comparison.field_errors for _, _, comparison in aligned)
     error_fields = sorted(
         {field for _, _, comparison in aligned for field in comparison.error_fields}
@@ -278,6 +303,7 @@ def compare_review_rows(
         false_positive_item_count=false_positive_item_count,
         false_negative_item_count=false_negative_item_count,
         scored_fields=scored_fields,
+        commercial_scored_fields=commercial_scored_fields,
         field_errors=field_errors,
         error_fields=tuple(error_fields),
         extraction_failed=extraction_failed,
@@ -306,6 +332,7 @@ def _strategy_summary(metrics: Sequence[QuoteUatCaseMetric]) -> dict[str, dict[s
         actual_items = sum(metric.actual_item_count for metric in group)
         expected_items = sum(metric.expected_item_count for metric in group)
         scored_fields = sum(metric.scored_fields for metric in group)
+        commercial_scored_fields = sum(metric.commercial_scored_fields for metric in group)
         field_errors = sum(metric.field_errors for metric in group)
         summary[strategy] = {
             "cases": len(group),
@@ -316,6 +343,8 @@ def _strategy_summary(metrics: Sequence[QuoteUatCaseMetric]) -> dict[str, dict[s
             "false_negative_items": sum(metric.false_negative_item_count for metric in group),
             "item_precision": _rate(matched_items, actual_items),
             "item_recall": _rate(matched_items, expected_items),
+            "scored_fields": scored_fields,
+            "commercial_scored_fields": commercial_scored_fields,
             "field_error_rate": _rate(field_errors, scored_fields),
             "average_processing_seconds": _average(
                 [metric.processing_seconds for metric in group]
@@ -331,7 +360,15 @@ def evaluate_uat_release_gate(
     minimum_cases: int = 5,
     required_strategies: frozenset[str] = REQUIRED_UAT_STRATEGIES,
 ) -> dict[str, object]:
-    strategies = {metric.strategy for metric in metrics}
+    raw_strategies = {metric.strategy for metric in metrics}
+    strategies = set(raw_strategies)
+    commercial_metrics = [metric for metric in metrics if metric.strategy == "pdf_commercial"]
+    commercial_coverage_valid = any(
+        metric.commercial_scored_fields > 0 for metric in commercial_metrics
+    )
+    if "pdf_commercial" in strategies and not commercial_coverage_valid:
+        strategies.remove("pdf_commercial")
+
     missing_strategies = sorted(required_strategies - strategies)
     blockers: list[str] = []
 
@@ -339,6 +376,8 @@ def evaluate_uat_release_gate(
         blockers.append(f"confirmed cases {len(metrics)}/{minimum_cases}")
     if missing_strategies:
         blockers.append("missing strategies: " + ", ".join(missing_strategies))
+    if commercial_metrics and not commercial_coverage_valid:
+        blockers.append("pdf_commercial requires scored commercial ground truth")
     if any(metric.extraction_failed for metric in metrics):
         blockers.append("extraction failure present")
     if any(metric.false_positive_item_count for metric in metrics):
@@ -366,6 +405,7 @@ def build_redacted_uat_summary(
     extraction_failures = sum(metric.extraction_failed for metric in metrics)
     exact_item_count_cases = sum(metric.exact_item_count for metric in metrics)
     scored_fields = sum(metric.scored_fields for metric in metrics)
+    commercial_scored_fields = sum(metric.commercial_scored_fields for metric in metrics)
     field_errors = sum(metric.field_errors for metric in metrics)
     matched_items = sum(metric.matched_item_count for metric in metrics)
     expected_items = sum(metric.expected_item_count for metric in metrics)
@@ -391,6 +431,7 @@ def build_redacted_uat_summary(
         "item_precision": _rate(matched_items, actual_items),
         "item_recall": _rate(matched_items, expected_items),
         "scored_fields": scored_fields,
+        "commercial_scored_fields": commercial_scored_fields,
         "field_errors": field_errors,
         "field_error_rate": _rate(field_errors, scored_fields),
         "average_processing_seconds": _average(
@@ -404,7 +445,7 @@ def build_redacted_uat_summary(
         "strategy_metrics": _strategy_summary(metrics),
         "cases": [metric.to_redacted_dict() for metric in metrics],
         "privacy_note": (
-            "이 결과에는 파일명, 견적 원문, 제품명, 제조사명, 모델명, 규격, 단가, 총액의 실제 값을 기록하지 않음"
+            "이 결과에는 파일명, 견적 원문, 제품·업체 식별값, 규격, 가격, 배송·설치·옵션·보증·유지보수·기타조건의 실제 값을 기록하지 않음"
         ),
     }
 
