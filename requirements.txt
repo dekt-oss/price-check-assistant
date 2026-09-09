@@ -1,10 +1,11 @@
 -e .
 
 # Streamlit Community Cloud runtime parser manifest.
-# Revision 2026-09-08f: force a clean dependency rebuild after Production install failure.
+# Revision 2026-09-09g: scanned-PDF OCR no longer depends on packages.txt/apt.
 openpyxl>=3.1,<4
 xlrd>=2.0,<3
 pypdf>=6.17,<7
 pdfplumber>=0.11,<1
 pypdfium2>=5.9,<6
 pytesseract>=0.3.13,<1
+tesseract-bin==1.1.0; platform_system == "Linux"

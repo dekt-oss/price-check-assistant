@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from purchase_price.config import Settings
 from purchase_price.services import runtime_readiness
+from purchase_price.services.tesseract_runtime import TesseractRuntime
 
 
 def test_shared_market_key_marks_all_public_data_sources_ready_without_exposing_value() -> None:
@@ -67,11 +68,23 @@ def _installed_packages(monkeypatch) -> None:
     monkeypatch.setattr(runtime_readiness, "_package_version", lambda _: "1.0")
 
 
-def test_ocr_stages_report_missing_binary_without_hiding_python_modules(
-    monkeypatch,
-) -> None:
+def _ready_runtime() -> TesseractRuntime:
+    return TesseractRuntime(
+        command="/opt/python/tesseract",
+        tessdata_dir=None,
+        source="python-bundled",
+        version="5.5.0",
+        languages=("eng", "kor"),
+    )
+
+
+def test_ocr_stages_report_missing_runtime_without_hiding_python_modules(monkeypatch) -> None:
     _installed_packages(monkeypatch)
-    monkeypatch.setattr(runtime_readiness.shutil, "which", lambda _: None)
+    monkeypatch.setattr(
+        runtime_readiness,
+        "_resolve_ocr_runtime",
+        lambda: (None, "runtime unavailable"),
+    )
     by_key = {
         check.key: check for check in runtime_readiness.ocr_runtime_readiness_checks()
     }
@@ -81,24 +94,17 @@ def test_ocr_stages_report_missing_binary_without_hiding_python_modules(
     assert by_key["ocr_execution"].ready is False
 
 
-def _ready_tesseract(monkeypatch) -> None:
+def _mock_ready_runtime(monkeypatch) -> None:
     _installed_packages(monkeypatch)
     monkeypatch.setattr(
-        runtime_readiness.shutil, "which", lambda _: "/usr/bin/tesseract"
+        runtime_readiness,
+        "_resolve_ocr_runtime",
+        lambda: (_ready_runtime(), ""),
     )
-
-    def fake_run(command, **_: object):
-        if command[-1] == "--version":
-            return SimpleNamespace(stdout="tesseract 5.3.4\n")
-        return SimpleNamespace(
-            stdout="List of available languages (3):\neng\nkor\nosd\n"
-        )
-
-    monkeypatch.setattr(runtime_readiness.subprocess, "run", fake_run)
 
 
 def test_ocr_readiness_requires_real_execution_after_dependencies(monkeypatch) -> None:
-    _ready_tesseract(monkeypatch)
+    _mock_ready_runtime(monkeypatch)
     monkeypatch.setattr(
         runtime_readiness,
         "_run_synthetic_ocr_execution",
@@ -108,11 +114,13 @@ def test_ocr_readiness_requires_real_execution_after_dependencies(monkeypatch) -
 
 
 def test_ocr_readiness_reports_ready_only_after_synthetic_execution(monkeypatch) -> None:
-    _ready_tesseract(monkeypatch)
+    _mock_ready_runtime(monkeypatch)
     monkeypatch.setattr(
         runtime_readiness, "_run_synthetic_ocr_execution", lambda: (True, "ok")
     )
-    assert runtime_readiness.ocr_runtime_readiness().ready is True
+    readiness = runtime_readiness.ocr_runtime_readiness()
+    assert readiness.ready is True
+    assert "python-bundled" in readiness.detail
 
 
 def test_build_identity_uses_environment_commit(monkeypatch) -> None:

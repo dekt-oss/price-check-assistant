@@ -4,14 +4,18 @@ import importlib.metadata
 import importlib.util
 import os
 import platform
-import re
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from purchase_price.config import Settings, get_settings
+from purchase_price.services.tesseract_runtime import (
+    TesseractRuntime,
+    TesseractRuntimeError,
+    configured_pytesseract,
+    resolve_tesseract_runtime,
+)
 
 READY = "READY"
 UNAVAILABLE = "UNAVAILABLE"
@@ -119,10 +123,11 @@ def _package_version(name: str) -> str | None:
         return None
 
 
-def _tesseract_version_line(stdout: str) -> str:
-    first_line = stdout.strip().splitlines()[0] if stdout.strip() else ""
-    match = re.search(r"tesseract\s+([^\s]+)", first_line, flags=re.IGNORECASE)
-    return match.group(1) if match else "unknown"
+def _resolve_ocr_runtime() -> tuple[TesseractRuntime | None, str]:
+    try:
+        return resolve_tesseract_runtime(("eng", "kor")), ""
+    except TesseractRuntimeError as exc:
+        return None, str(exc)
 
 
 def _run_synthetic_ocr_execution() -> tuple[bool, str]:
@@ -132,6 +137,10 @@ def _run_synthetic_ocr_execution() -> tuple[bool, str]:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError as exc:
         return False, f"import failed: {type(exc).__name__}"
+
+    runtime, runtime_error = _resolve_ocr_runtime()
+    if runtime is None:
+        return False, f"runtime unavailable: {runtime_error}"
 
     with tempfile.TemporaryDirectory(prefix="ocr-readiness-") as temp_dir:
         pdf_path = Path(temp_dir) / "synthetic.pdf"
@@ -146,9 +155,14 @@ def _run_synthetic_ocr_execution() -> tuple[bool, str]:
             document = pdfium.PdfDocument(str(pdf_path))
             page = document[0]
             bitmap = page.render(scale=2.0)
-            text = pytesseract.image_to_string(
-                bitmap.to_pil(), lang="eng", config="--psm 6", timeout=10
-            )
+            with configured_pytesseract(
+                pytesseract,
+                runtime,
+                base_config="--psm 6",
+            ) as config:
+                text = pytesseract.image_to_string(
+                    bitmap.to_pil(), lang="eng", config=config, timeout=10
+                )
         except Exception as exc:
             return False, f"execution failed: {type(exc).__name__}"
         finally:
@@ -160,7 +174,10 @@ def _run_synthetic_ocr_execution() -> tuple[bool, str]:
     normalized = "".join(c for c in text.upper() if c.isalnum())
     if _OCR_EXECUTION_TOKEN not in normalized:
         return False, "execution completed but synthetic token was not recognized"
-    return True, "synthetic PDF rasterize -> Tesseract OCR succeeded"
+    return (
+        True,
+        f"synthetic PDF rasterize -> Tesseract OCR succeeded ({runtime.source})",
+    )
 
 
 def _ocr_execution_check(prerequisites_ready: bool) -> RuntimeReadinessCheck:
@@ -194,71 +211,39 @@ def ocr_runtime_readiness_checks() -> tuple[RuntimeReadinessCheck, ...]:
         READY if not missing_modules else UNAVAILABLE,
         "; ".join(module_details),
     )
-    executable = shutil.which("tesseract")
+
+    runtime: TesseractRuntime | None = None
+    runtime_error = "Python OCR 모듈이 준비되지 않아 런타임을 확인하지 않음"
+    if module_check.ready:
+        runtime, runtime_error = _resolve_ocr_runtime()
+
     binary_check = RuntimeReadinessCheck(
         "ocr_tesseract_binary",
         "Tesseract 실행파일",
-        READY if executable else UNAVAILABLE,
-        executable or "실행파일을 찾지 못함",
+        READY if runtime is not None else UNAVAILABLE,
+        (
+            f"{runtime.command}; source={runtime.source}"
+            if runtime is not None
+            else runtime_error
+        ),
+    )
+    command_check = RuntimeReadinessCheck(
+        "ocr_tesseract_command",
+        "Tesseract 상태",
+        READY if runtime is not None else UNAVAILABLE,
+        f"version={runtime.version}; source={runtime.source}" if runtime is not None else runtime_error,
     )
 
-    version = "unknown"
-    languages: set[str] = set()
-    command_error = None
-    if executable:
-        try:
-            version_result = subprocess.run(
-                [executable, "--version"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            language_result = subprocess.run(
-                [executable, "--list-langs"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            version = _tesseract_version_line(version_result.stdout)
-            languages = {
-                line.strip()
-                for line in language_result.stdout.splitlines()
-                if line.strip()
-                and not line.lower().startswith("list of available languages")
-            }
-        except (OSError, subprocess.SubprocessError) as exc:
-            command_error = type(exc).__name__
-
-    if not executable:
-        command_check = RuntimeReadinessCheck(
-            "ocr_tesseract_command", "Tesseract 상태", UNAVAILABLE, "실행파일 없음"
-        )
-    elif command_error:
-        command_check = RuntimeReadinessCheck(
-            "ocr_tesseract_command",
-            "Tesseract 상태",
-            UNAVAILABLE,
-            f"상태 확인 실패: {command_error}",
-        )
-    else:
-        command_check = RuntimeReadinessCheck(
-            "ocr_tesseract_command", "Tesseract 상태", READY, f"version={version}"
-        )
-
-    missing_languages = sorted({"kor", "eng"} - languages)
-    language_ready = bool(executable and not command_error and not missing_languages)
-    language_detail = (
-        "kor+eng 사용 가능"
-        if language_ready
-        else f"누락: {', '.join(missing_languages) or '확인 불가'}"
-    )
+    language_ready = bool(runtime and {"kor", "eng"}.issubset(runtime.languages))
     language_check = RuntimeReadinessCheck(
         "ocr_languages",
         "OCR 언어팩",
         READY if language_ready else UNAVAILABLE,
-        language_detail,
+        (
+            f"kor+eng 사용 가능; source={runtime.source}"
+            if language_ready and runtime is not None
+            else runtime_error or "kor/eng 언어모델을 확인하지 못함"
+        ),
     )
     execution_check = _ocr_execution_check(
         module_check.ready
@@ -279,14 +264,14 @@ def ocr_runtime_readiness() -> RuntimeReadinessCheck:
             UNAVAILABLE,
             " / ".join(f"{check.label}: {check.detail}" for check in failed),
         )
-    version = next(
+    runtime_detail = next(
         (check.detail for check in checks if check.key == "ocr_tesseract_command"), ""
     )
     return RuntimeReadinessCheck(
         "local_ocr",
         "PDF 로컬 OCR",
         READY,
-        f"{version}; kor+eng; synthetic execution verified",
+        f"{runtime_detail}; kor+eng; synthetic execution verified",
     )
 
 
