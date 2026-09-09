@@ -31,6 +31,40 @@ def _required_languages(languages: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in languages.split("+") if part.strip())
 
 
+def ocr_pil_image_text(
+    image,
+    *,
+    languages: str = _DEFAULT_LANGUAGES,
+    psm: int = 11,
+) -> str:
+    """OCR a Pillow image through the same resolved/bundled Tesseract runtime as PDF OCR."""
+
+    try:
+        import pytesseract
+    except ImportError as exc:
+        raise ImageOcrUnavailableError("pytesseract를 불러올 수 없습니다.") from exc
+    try:
+        runtime = resolve_tesseract_runtime(_required_languages(languages))
+    except TesseractRuntimeError as exc:
+        raise ImageOcrUnavailableError(
+            f"로컬 Tesseract OCR 런타임을 준비할 수 없습니다: {exc}"
+        ) from exc
+    try:
+        with configured_pytesseract(
+            pytesseract,
+            runtime,
+            base_config=f"--psm {psm}",
+        ) as config:
+            return pytesseract.image_to_string(
+                image,
+                lang=languages,
+                config=config,
+                timeout=_OCR_TIMEOUT_SECONDS,
+            )
+    except Exception as exc:
+        raise ImageOcrUnavailableError("로컬 이미지 OCR 실행에 실패했습니다.") from exc
+
+
 def run_local_image_ocr(
     path: Path,
     resolve_header: Callable[[str], str | None],
