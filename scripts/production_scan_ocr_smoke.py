@@ -147,7 +147,9 @@ def _run_attempt(page: Any, pdf_path: Path, attempt: int) -> dict[str, object]:
         state="visible", timeout=30_000
     )
 
-    uploader = app.get_by_label("견적서 파일", exact=True)
+    uploader = app.locator(
+        'section[aria-label="견적서 파일"] input[type="file"]'
+    )
     uploader.set_input_files(str(pdf_path), timeout=15_000)
     _wait_for_extraction_result(page)
     fields = _verify_extracted_fields(page)
