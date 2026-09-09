@@ -18,6 +18,10 @@ from purchase_price.services.quote_single_item_ocr_fallback import (
     recover_single_item_from_text,
     recover_single_item_scanned_quote,
 )
+from purchase_price.services.tesseract_fallback_context import (
+    FallbackOcrRuntimeUnavailable,
+    configured_fallback_ocr_runtime,
+)
 
 
 _SUMMARY_LABELS = frozenset(
@@ -159,9 +163,13 @@ def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     if result.items:
         return result
 
-    recovered = recover_sparse_ruled_table_scanned_quote(path)
-    if recovered is None:
-        recovered = recover_single_item_scanned_quote(path)
+    try:
+        with configured_fallback_ocr_runtime():
+            recovered = recover_sparse_ruled_table_scanned_quote(path)
+            if recovered is None:
+                recovered = recover_single_item_scanned_quote(path)
+    except FallbackOcrRuntimeUnavailable:
+        recovered = None
     if recovered is None:
         return result
 
