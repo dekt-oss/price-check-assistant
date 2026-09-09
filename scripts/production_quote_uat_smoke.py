@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -108,12 +109,18 @@ def main() -> None:
                 app.get_by_text("UAT-001", exact=False).first.wait_for(state="visible", timeout=45_000)
                 report["checks"].append("synthetic_xlsx_uploaded")
 
-                app.get_by_text("자동 추출 품목", exact=True).wait_for(state="visible", timeout=30_000)
-                body = app.locator("body").inner_text(timeout=10_000)
-                if "자동 추출 품목\n1" not in body and "자동 추출 품목 1" not in body:
-                    raise RuntimeError("Synthetic quote did not render exactly one extracted item")
+                metric = app.locator('[data-testid="stMetric"]').filter(has_text="자동 추출 품목").first
+                metric.wait_for(state="visible", timeout=30_000)
+                metric_text = metric.inner_text(timeout=10_000)
+                report["extracted_item_metric_text"] = metric_text
+                if not re.search(r"자동 추출 품목\s*1(?:\D|$)", metric_text):
+                    raise RuntimeError(
+                        "Synthetic quote did not render exactly one extracted item; "
+                        f"metric={metric_text!r}"
+                    )
                 report["checks"].append("synthetic_item_extracted")
 
+                body = app.locator("body").inner_text(timeout=10_000)
                 if COMMERCIAL_GUIDANCE not in body:
                     raise RuntimeError("Commercial-condition UAT guidance is missing from Production")
                 report["checks"].append("commercial_review_guidance_rendered")
