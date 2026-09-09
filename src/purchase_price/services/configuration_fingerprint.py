@@ -42,11 +42,19 @@ class ConfigurationFingerprintComparison:
 
     @property
     def conflict_axes(self) -> tuple[ConfigurationAxisComparison, ...]:
-        return tuple(axis for axis in self.axes if axis.required and axis.status == ConfigurationAxisStatus.CONFLICT)
+        return tuple(
+            axis
+            for axis in self.axes
+            if axis.required and axis.status == ConfigurationAxisStatus.CONFLICT
+        )
 
     @property
     def unknown_axes(self) -> tuple[ConfigurationAxisComparison, ...]:
-        return tuple(axis for axis in self.axes if axis.required and axis.status == ConfigurationAxisStatus.UNKNOWN)
+        return tuple(
+            axis
+            for axis in self.axes
+            if axis.required and axis.status == ConfigurationAxisStatus.UNKNOWN
+        )
 
     @property
     def blocking_reasons(self) -> tuple[str, ...]:
@@ -168,6 +176,11 @@ def _specification_axis(
 
     if not quote_spec or not evidence_spec:
         status = ConfigurationAxisStatus.UNKNOWN
+    elif normalize_text(quote_spec) == normalize_text(evidence_spec):
+        # Product matching intentionally strips model tokens from specifications. If both source
+        # documents explicitly repeat the same model/configuration text, equality itself confirms
+        # this fingerprint axis even when the broader matcher reports `not_provided`.
+        status = ConfigurationAxisStatus.MATCH
     elif _has_mutually_exclusive_configuration_conflict(quote_spec, evidence_spec):
         status = ConfigurationAxisStatus.CONFLICT
     else:
