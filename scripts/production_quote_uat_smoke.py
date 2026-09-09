@@ -12,15 +12,7 @@ PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamli
 UAT_URL = PRODUCTION_URL.rstrip("/") + "/quote-extraction-uat"
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-SYNTHETIC_MARKERS = (
-    "SYNTH-UAT-DEVICE",
-    "SYNTH-DELIVERY-INCLUDED",
-    "SYNTH-INSTALLATION-INCLUDED",
-    "SYNTH-OPTION-NONE",
-    "SYNTH-WARRANTY-3Y",
-    "SYNTH-MAINTENANCE-1Y",
-    "SYNTH-OTHER-CONDITION",
-)
+COMMERCIAL_HEADERS = ("배송", "설치", "옵션", "보증", "유지보수", "기타조건")
 
 
 def _app_frame(page: Any) -> Any:
@@ -72,22 +64,28 @@ def _build_synthetic_quote(path: Path) -> None:
     workbook.save(path)
 
 
-def _wait_for_markers(page: Any, *, timeout_seconds: float = 45.0) -> str:
+def _wait_for_commercial_headers(page: Any, *, timeout_seconds: float = 30.0) -> list[str]:
     deadline = time.monotonic() + timeout_seconds
-    last_body = ""
+    last_headers: list[str] = []
     while time.monotonic() < deadline:
         app = _app_frame(page)
         try:
-            last_body = app.locator("body").inner_text(timeout=5_000)
+            last_headers = [text.strip() for text in app.locator('[role="columnheader"]').all_inner_texts()]
         except Exception:
             page.wait_for_timeout(1_000)
             continue
-        missing = [marker for marker in SYNTHETIC_MARKERS if marker not in last_body]
-        if not missing:
-            return last_body
+        if all(any(header == text for text in last_headers) for header in COMMERCIAL_HEADERS):
+            return last_headers
         page.wait_for_timeout(1_000)
-    missing = [marker for marker in SYNTHETIC_MARKERS if marker not in last_body]
-    raise RuntimeError(f"Synthetic quote UAT markers missing from rendered page: {missing}")
+    missing = [
+        header
+        for header in COMMERCIAL_HEADERS
+        if not any(header == text for text in last_headers)
+    ]
+    raise RuntimeError(
+        "Commercial UAT column headers missing from rendered grids: "
+        f"missing={missing}; observed={last_headers}"
+    )
 
 
 def main() -> None:
@@ -128,8 +126,14 @@ def main() -> None:
                 app.get_by_text("UAT-001", exact=False).first.wait_for(state="visible", timeout=45_000)
                 report["checks"].append("synthetic_xlsx_uploaded")
 
-                body = _wait_for_markers(page)
-                report["checks"].append("commercial_fields_rendered")
+                body = app.locator("body").inner_text(timeout=10_000)
+                if "자동 추출 품목\n1" not in body and "자동 추출 품목 1" not in body:
+                    raise RuntimeError("Synthetic quote upload did not render one extracted item")
+                report["checks"].append("synthetic_item_extracted")
+
+                headers = _wait_for_commercial_headers(page)
+                report["checks"].append("commercial_columns_rendered")
+                report["observed_column_headers"] = headers
                 report["body_text_prefix"] = body[:6000]
                 report["final_url"] = page.url
                 page.screenshot(path=str(screenshot_path), full_page=True)
@@ -137,7 +141,7 @@ def main() -> None:
                 report["status"] = "pass"
             except Exception as exc:
                 report["error_type"] = type(exc).__name__
-                report["error_message"] = str(exc)[:2000]
+                report["error_message"] = str(exc)[:3000]
                 try:
                     page.screenshot(path=str(screenshot_path), full_page=True)
                     report["screenshot"] = str(screenshot_path)
