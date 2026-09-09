@@ -10,7 +10,11 @@ from purchase_price.domain import (
     ComparisonScope,
     MatchGrade,
 )
-from purchase_price.schemas import CollectedPrice
+from purchase_price.schemas import CollectedPrice, ProductQuery
+from purchase_price.services.configuration_fingerprint import (
+    ConfigurationFingerprintComparison,
+    compare_quote_evidence_configuration,
+)
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.quote_condition_comparison import (
     QuoteConditionProfile,
@@ -22,6 +26,7 @@ SUPPORTED_CURRENCY = "KRW"
 _ALLOWED_INPUT_SCOPES = frozenset(
     {ComparisonScope.OBSERVED_ONLY, ComparisonScope.QUOTE_COMPARABLE}
 )
+_CONFIGURATION_IDENTITY_KEYS = frozenset({"manufacturer", "model", "specification"})
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,9 @@ class QuoteComparabilityContext:
     unit: str
     quote_date: date | None
     conditions: QuoteConditionProfile
+    # Optional for backward compatibility with older callers/tests. Production quote review supplies
+    # this from the extracted/edited QuoteItem so explicit identity/configuration can fail closed.
+    quote_identity: ProductQuery | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +48,7 @@ class QuoteComparabilityDecision:
     condition_comparison: QuoteEvidenceConditionComparison
     evidence_basis_date: date | None
     date_gap_days: int | None
+    configuration_comparison: ConfigurationFingerprintComparison | None = None
 
     @property
     def status_label(self) -> str:
@@ -71,6 +80,11 @@ def evaluate_quote_comparability_candidate(
     Passing this gate does not mutate `comparison_scope`. Promotion to `QUOTE_COMPARABLE` remains
     an explicit downstream action so this helper cannot silently change the price-assessment
     contract.
+
+    When the current quote carries explicit manufacturer/model/specification, the configuration
+    fingerprint must also confirm those fields. Missing public evidence therefore stays UNKNOWN and
+    blocks quote-position use instead of being guessed compatible. Older callers with no
+    `quote_identity` retain the established gate behavior.
     """
 
     reasons: list[str] = []
@@ -113,6 +127,22 @@ def evaluate_quote_comparability_candidate(
     if condition_comparison.unknown_count:
         reasons.append(f"상업조건 미확인 {condition_comparison.unknown_count}개")
 
+    configuration_comparison = compare_quote_evidence_configuration(
+        quote_identity=context.quote_identity,
+        quote_quantity=context.quantity,
+        quote_unit=context.unit,
+        quote_conditions=context.conditions,
+        evidence=evidence,
+    )
+    if context.quote_identity is not None:
+        for axis in configuration_comparison.axes:
+            if axis.key not in _CONFIGURATION_IDENTITY_KEYS or not axis.required:
+                continue
+            if axis.status.value == "충돌":
+                reasons.append(f"{axis.label} 충돌")
+            elif axis.status.value == "미확인":
+                reasons.append(f"{axis.label} 미확인")
+
     basis_date = _evidence_basis_date(evidence)
     date_gap_days: int | None = None
     if context.quote_date is None:
@@ -131,4 +161,5 @@ def evaluate_quote_comparability_candidate(
         condition_comparison=condition_comparison,
         evidence_basis_date=basis_date,
         date_gap_days=date_gap_days,
+        configuration_comparison=configuration_comparison,
     )
