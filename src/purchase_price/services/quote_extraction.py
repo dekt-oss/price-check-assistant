@@ -9,10 +9,13 @@ from pathlib import Path
 
 from purchase_price.services import quote_extraction_core as _core
 from purchase_price.services.quote_extraction_core import *  # noqa: F403
+from purchase_price.services.image_ocr import ImageOcrUnavailableError, run_local_image_ocr
+from purchase_price.services.quote_image_ruled_table import recover_sparse_ruled_table_image_quote
 from purchase_price.services.quote_ruled_table_ocr import (
     recover_sparse_ruled_table_scanned_quote,
 )
 from purchase_price.services.quote_single_item_ocr_fallback import (
+    recover_single_item_from_text,
     recover_single_item_scanned_quote,
 )
 
@@ -35,6 +38,7 @@ _SUMMARY_LABELS = frozenset(
     }
 )
 _SUMMARY_PREFIXES = ("합계", "총계", "소계", "공급가액", "부가세", "부가가치세", "세액", "견적금액")
+_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg"})
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,10 @@ _VAT_CONFLICT_WARNING = (
 _SINGLE_ITEM_FOOTER_WARNING = (
     "일반 표 추출은 실패했지만 단일품목 견적에서 명시된 품명과 가격행/합계 근거를 "
     "별도 OCR로 연결해 1건을 복원했습니다. OCR 오인 가능성이 있으므로 제품명·규격/모델·가격·VAT·보증·설치조건을 원문과 대조하세요."
+)
+_IMAGE_OCR_WARNING = (
+    "PNG/JPEG 견적 이미지를 로컬 Tesseract(kor+eng) OCR로 처리했습니다. 사진 기울기·압축·표 선·글자 크기에 따라 "
+    "오인식할 수 있으므로 제품명·모델·규격·수량·가격·VAT·설치·보증을 원본 이미지와 대조하세요."
 )
 
 
@@ -169,6 +177,64 @@ def extract_pdf_quote(path: Path) -> QuoteExtractionResult:
     )
 
 
+def _extract_image_quote_core(path: Path) -> _core.QuoteExtractionResult:
+    try:
+        ocr = run_local_image_ocr(path, _core._resolve_header_field)
+    except ImageOcrUnavailableError as exc:
+        raise QuoteExtractionError(  # noqa: F405
+            "PNG/JPEG 견적 이미지의 로컬 OCR을 실행할 수 없습니다. Pillow/pytesseract 및 Tesseract kor/eng 런타임을 확인하세요."
+        ) from exc
+
+    warnings = list(ocr.warnings)
+    if not ocr.text.strip():
+        raise QuoteExtractionError(  # noqa: F405
+            "견적 이미지에 로컬 OCR을 실행했지만 인식 가능한 텍스트를 찾지 못했습니다. 더 선명한 원본 이미지, PDF 또는 Excel을 사용하세요."
+        )
+
+    items: list[QuoteItem] = []  # noqa: F405
+    if ocr.table_rows:
+        table_items, _ = _core._extract_sheet_rows("이미지 OCR 단어좌표", ocr.table_rows)
+        items.extend(table_items)
+    if not items:
+        items.extend(_core._extract_pdf_line_candidates(ocr.text, 1))
+    if not items:
+        text_items, _ = _core._extract_sheet_rows(
+            "이미지 OCR 텍스트",
+            _core._pdf_text_rows(ocr.text),
+        )
+        items.extend(text_items)
+
+    items = [item for item in items if _core._has_meaningful_identity(item)]
+    items = _core._dedupe_quote_items(items)
+    items = _core._apply_pdf_context(items, _extract_pdf_context([ocr.text]))
+
+    if not items:
+        recovered = recover_sparse_ruled_table_image_quote(path)
+        if recovered is None:
+            recovered = recover_single_item_from_text(ocr.text, ocr.text, page_number=1)
+            if recovered is not None:
+                recovered = replace(
+                    recovered,
+                    source_sheet="이미지 OCR 단일품목 fallback",
+                )
+        if recovered is not None:
+            items = [recovered]
+            warnings.append(_SINGLE_ITEM_FOOTER_WARNING)
+
+    if items:
+        warnings.append(_IMAGE_OCR_WARNING)
+    else:
+        warnings.append(
+            "이미지 OCR로 텍스트는 인식했지만 의미 있는 품목/가격 행을 식별하지 못했습니다. "
+            "세액·합계를 품목으로 임의 생성하지 않고 자동 추출을 보류했습니다."
+        )
+    return _core.QuoteExtractionResult(items=tuple(items), warnings=tuple(warnings))
+
+
+def extract_image_quote(path: Path) -> QuoteExtractionResult:
+    return _run_with_tracking(_extract_image_quote_core, path)
+
+
 def extract_excel_quote(path: Path) -> QuoteExtractionResult:
     return _run_with_tracking(_core.extract_excel_quote, path)
 
@@ -185,8 +251,10 @@ def extract_quote_file(path: Path) -> QuoteExtractionResult:
         return extract_legacy_excel_quote(path)
     if suffix == ".pdf":
         return extract_pdf_quote(path)
+    if suffix in _IMAGE_SUFFIXES:
+        return extract_image_quote(path)
     raise QuoteExtractionError(  # noqa: F405
-        "지원하지 않는 파일 형식입니다. .xlsx/.xls/.pdf만 업로드하세요."
+        "지원하지 않는 파일 형식입니다. .xlsx/.xls/.pdf/.png/.jpg/.jpeg만 업로드하세요."
     )
 
 
