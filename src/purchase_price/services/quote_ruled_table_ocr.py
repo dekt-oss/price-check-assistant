@@ -40,7 +40,17 @@ _PRODUCT_STOP = (
     "제조",
     "수입",
     "업체",
+    "회사",
+    "상호",
+    "대표",
+    "주소",
+    "전화",
+    "팩스",
+    "담당",
+    "tel",
+    "fax",
 )
+_QUOTE_MARKERS = ("견적", "quotation", "estimate")
 
 
 def _normalize_line(value: str) -> str:
@@ -130,6 +140,28 @@ def _known_unit(text: str) -> str:
     return found[0] if len(found) == 1 else ""
 
 
+def _is_korean_product_candidate(line: str, *, before_price: bool) -> bool:
+    """Recognize a bounded Hangul product label without treating metadata as identity."""
+
+    if not before_price or len(line) > 60:
+        return False
+    hangul_letters = re.findall(r"[가-힣]", line)
+    if len(hangul_letters) < 3:
+        return False
+    ascii_letters = [char for char in line if char.isascii() and char.isalpha()]
+    letter_count = len(hangul_letters) + len(ascii_letters)
+    if letter_count == 0 or len(hangul_letters) / letter_count < 0.55:
+        return False
+    return True
+
+
+def _mixed_line_model_tokens(line: str) -> list[str]:
+    """Keep explicit ASCII model tokens from a Korean product line as specification clues."""
+
+    tokens = re.findall(r"(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9._+/-]{1,30}(?![A-Za-z0-9])", line)
+    return [token for token in tokens if re.search(r"[0-9+/_-]", token)]
+
+
 def _identity_candidates(lines: list[str], price_index: int) -> tuple[str, str]:
     start = max(0, price_index - 5)
     end = min(len(lines), price_index + 6)
@@ -152,12 +184,19 @@ def _identity_candidates(lines: list[str], price_index: int) -> tuple[str, str]:
 
         ascii_letters = [char for char in line if char.isascii() and char.isalpha()]
         hangul_letters = re.findall(r"[가-힣]", line)
+        has_model_marker = bool(re.search(r"[+\-/0-9]", line))
+
+        if _is_korean_product_candidate(line, before_price=index < price_index):
+            product_parts.append((index, line))
+            for token in _mixed_line_model_tokens(line):
+                spec_parts.append((index, token))
+            continue
+
         if len(ascii_letters) < 3:
             continue
         uppercase_ratio = sum(char.isupper() for char in ascii_letters) / len(ascii_letters)
         ascii_share = len(ascii_letters) / max(1, len(ascii_letters) + len(hangul_letters))
         words = re.findall(r"[A-Za-z]+", line)
-        has_model_marker = bool(re.search(r"[+\-/0-9]", line))
 
         if uppercase_ratio >= 0.8 and len(words) >= 2 and not has_model_marker:
             product_parts.append((index, line))
@@ -234,9 +273,10 @@ def recover_sparse_single_item_from_text(
 ) -> QuoteItem | None:
     """Recover one ruled-table quote row from sparse OCR reading order.
 
-    This path is deliberately strict: exactly one repeated unit-price/amount line,
-    exactly one nearby quantity, and both product and specification fragments are required.
-    It never creates a quote item from a document-level total alone.
+    The normal path remains deliberately strict: exactly one repeated unit-price/amount line,
+    exactly one nearby quantity, and a bounded product identity are required. Korean product-only
+    rows may omit a separate specification only when a quote marker and a recognized unit are both
+    present. This keeps market-research recall without inventing an exact model or specification.
     """
 
     lines = _lines(sparse_text)
@@ -248,15 +288,21 @@ def recover_sparse_single_item_from_text(
     if quantity is None:
         return None
     product_name, specification = _identity_candidates(lines, price_index)
-    if not product_name or not specification:
+    if not product_name:
         return None
 
     all_context = "\n".join(text for text in (context_text, sparse_text) if text)
+    unit = _known_unit(all_context)
+    if not specification:
+        has_korean_identity = len(re.findall(r"[가-힣]", product_name)) >= 3
+        looks_like_quote = any(marker in all_context.casefold() for marker in _QUOTE_MARKERS)
+        if not (has_korean_identity and unit and looks_like_quote):
+            return None
+
     vat_included = bool(
         re.search(r"부가\s*세\s*포함", all_context, re.IGNORECASE)
         or re.search(r"\bV\.?\s*A\.?\s*T\.?\s*(?:included?|포함)", all_context, re.IGNORECASE)
     )
-    unit = _known_unit(all_context)
 
     return QuoteItem(
         source_sheet=f"PDF {page_number}페이지 OCR ruled-table fallback",
