@@ -88,6 +88,91 @@ def test_recovers_when_sparse_ocr_splits_unit_and_total_prices() -> None:
     assert item.vat_status == "포함"
 
 
+def test_recovers_korean_product_name_with_model_specification() -> None:
+    sparse_text = """
+    견적서
+    품명
+    규격
+    단위
+    수량
+    단가
+    금액
+    극초단파치료시스템
+    PM-8000
+    SET
+    1
+    66,000,000 66,000,000
+    부가세 포함
+    """
+
+    item = recover_sparse_single_item_from_text(sparse_text)
+
+    assert item is not None
+    assert item.product_name == "극초단파치료시스템"
+    assert item.specification == "PM-8000"
+    assert item.quantity == Decimal("1")
+    assert item.unit == "set"
+    assert item.unit_price == Decimal("66000000")
+    assert item.total_amount == Decimal("66000000")
+    assert item.vat_status == "포함"
+
+
+def test_recovers_korean_product_only_for_market_research_seed() -> None:
+    sparse_text = """
+    견적서
+    품명
+    단위
+    수량
+    단가
+    금액
+    극초단파치료시스템
+    SET
+    1
+    66,000,000 66,000,000
+    """
+
+    item = recover_sparse_single_item_from_text(sparse_text)
+
+    assert item is not None
+    assert item.product_name == "극초단파치료시스템"
+    assert item.specification == ""
+    assert item.quantity == Decimal("1")
+    assert item.unit == "set"
+    assert item.unit_price == Decimal("66000000")
+
+
+def test_korean_product_only_requires_quote_marker_and_unit() -> None:
+    without_quote_marker = """
+    극초단파치료시스템
+    SET
+    1
+    66,000,000 66,000,000
+    """
+    without_unit = """
+    견적서
+    극초단파치료시스템
+    1
+    66,000,000 66,000,000
+    """
+
+    assert recover_sparse_single_item_from_text(without_quote_marker) is None
+    assert recover_sparse_single_item_from_text(without_unit) is None
+
+
+def test_korean_metadata_is_not_promoted_to_product_identity() -> None:
+    text = """
+    견적서
+    회사명 메디컬상사
+    주소 부산광역시 부산진구
+    담당 홍길동
+    SET
+    1
+    66,000,000 66,000,000
+    """
+
+    assert recover_sparse_single_item_from_text(text) is None
+
+
 def test_sparse_recovery_rejects_summary_only_repeated_amount() -> None:
     text = """
     견적서

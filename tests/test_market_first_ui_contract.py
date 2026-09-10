@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from purchase_price.ui.quote_market_research import _filename_product_candidate
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -59,6 +61,17 @@ def test_quote_market_surface_handles_zero_extraction_without_mode_switch() -> N
     assert "품목 저장 후 시장조사" in text
     assert "다른 검토 모드로 이동할 필요 없이" in text
     assert "_render_inline_manual_item_form(state)" in text
+    assert "파일명 기반 후보이며 OCR 확정값이나 공식 제품식별값은 아닙니다" in text
+
+
+def test_filename_product_candidate_recovers_user_quote_name() -> None:
+    assert _filename_product_candidate("극초단파치료시스템 견적1.pdf") == "극초단파치료시스템"
+    assert _filename_product_candidate("02_환자감시장치_견적서_v2.png") == "환자감시장치"
+
+
+def test_filename_product_candidate_does_not_invent_identity_from_generic_filename() -> None:
+    assert _filename_product_candidate("견적1.pdf") == ""
+    assert _filename_product_candidate("2026-09-10.pdf") == ""
 
 
 def test_quote_item_edit_invalidates_stale_identity_and_research() -> None:

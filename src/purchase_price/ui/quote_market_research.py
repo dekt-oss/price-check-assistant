@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import streamlit as st
@@ -30,9 +31,29 @@ from purchase_price.ui.widgets import (
     render_source_status,
 )
 
+_FILENAME_SUFFIX_RE = re.compile(
+    r"(?:^|[\s._-]+)(?:견적서?|quotation|estimate)"
+    r"(?:[\s._-]*(?:\d+|v\d+|rev\d+|최종|final|copy|복사본))*$",
+    re.IGNORECASE,
+)
+
 
 def _money(value) -> str:
     return f"{value:,.0f}원" if value is not None else "미확인"
+
+
+def _filename_product_candidate(file_name: str) -> str:
+    """Return an editable product-name hint only; never a verified identity."""
+
+    stem = re.sub(r"\.[^.]+$", "", (file_name or "").strip())
+    stem = re.sub(r"^\s*\d+[\s._-]+", "", stem)
+    candidate = _FILENAME_SUFFIX_RE.sub("", stem).strip(" ._-()[]")
+    candidate = re.sub(r"\s+", " ", candidate)
+    if len(candidate) < 3 or not re.search(r"[A-Za-z가-힣]", candidate):
+        return ""
+    if candidate.casefold() in {"견적", "견적서", "quotation", "estimate", "quote"}:
+        return ""
+    return candidate
 
 
 def _clear_research(state: QuoteReviewState) -> None:
@@ -53,13 +74,23 @@ def _invalidate_item_review(state: QuoteReviewState, index: int) -> None:
 
 
 def _render_inline_manual_item_form(state: QuoteReviewState) -> None:
+    product_candidate = _filename_product_candidate(state.file_name or "")
     st.warning(
         "자동 추출 결과가 없습니다. 다른 검토 모드로 이동할 필요 없이 이 화면에서 핵심 품목정보를 입력하면 "
         "저장 직후 시장조사를 시작합니다."
     )
+    if product_candidate:
+        st.info(
+            f"OCR이 품목 행을 확정하지 못해 파일명에서 품명 후보 `{product_candidate}`를 미리 채웠습니다. "
+            "파일명 기반 후보이며 OCR 확정값이나 공식 제품식별값은 아닙니다. 확인 후 저장하세요."
+        )
     with st.form("quote_auto_manual_item"):
         c1, c2 = st.columns(2)
-        product_name = c1.text_input("품명", placeholder="예: 극초단파치료시스템")
+        product_name = c1.text_input(
+            "품명",
+            value=product_candidate,
+            placeholder="예: 극초단파치료시스템",
+        )
         manufacturer = c2.text_input("제조사", placeholder="선택")
         model_name = c1.text_input("모델명", placeholder="선택")
         specification = c2.text_input("규격", placeholder="선택")
