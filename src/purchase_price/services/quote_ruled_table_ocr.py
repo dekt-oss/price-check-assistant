@@ -197,7 +197,7 @@ def _identity_candidates(lines: list[str], price_index: int) -> tuple[str, str]:
             continue
         if _AMOUNT_RE.search(line):
             continue
-        if re.fullmatch(r"[^0-9]*(\d+(?:\.\d+)?)[^0-9]*", line):
+        if _quantity_from_sparse_line(line) is not None:
             continue
         if _known_unit(line):
             continue
