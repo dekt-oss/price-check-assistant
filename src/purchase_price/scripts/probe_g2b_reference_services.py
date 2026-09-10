@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from purchase_price.config import get_settings
+from purchase_price.scripts.probe_db_collection_feasibility import build_report as build_db0_report
 from purchase_price.services.g2b_catalog import G2BCatalogClient
 from purchase_price.services.g2b_lifecycle import G2BLifecycleClient, G2BLifecycleInquiry
 
@@ -128,6 +130,10 @@ def build_report(*, product_id: str, bid_notice_no: str) -> dict[str, Any]:
         ),
         "catalog": catalog,
         "lifecycle": lifecycle,
+        # Temporary DB0 evidence hook: this reuses the already-approved same-repository live
+        # validation path instead of introducing a new workflow that can access Repository Secrets.
+        # The hook is removed after its artifact is captured; the standalone DB0 probe remains.
+        "db_collection_feasibility": build_db0_report(end=date.today()),
     }
 
 
