@@ -28,6 +28,7 @@ _STOP_MARKERS = (
 _QUOTE_MARKERS = ("견적서", "quotation", "estimate")
 _INCLUDED_WITH_MARKERS = ("included with", "including", "포함품", "구성품")
 _KNOWN_UNITS = ("unit", "set", "ea", "pcs", "piece", "kit", "대", "개", "식")
+_SUMMARY_MARKERS = ("합계", "총계", "공급가액", "세액", "subtotal", "total")
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ class _PricedRow:
     prefix: str
     quantity: Decimal | None
     unit: str
-    vat_included: bool
+    vat_status: str
 
 
 def _normalize_line(value: str) -> str:
@@ -54,6 +55,40 @@ def _parse_amount(value: str) -> Decimal | None:
     if not number.is_finite() or number <= 0:
         return None
     return number
+
+
+def _vat_status_from_text(text: str) -> str:
+    """Return explicit VAT status without turning any VAT mention into inclusion.
+
+    Exclusion markers win only when inclusion is absent. Conflicting OCR evidence stays unknown so a
+    fallback never reverses an explicit tax condition.
+    """
+
+    normalized = _normalize_line(text).casefold()
+    excluded = bool(
+        re.search(r"부가\s*세\s*(?:별도|미포함|제외)", normalized, re.IGNORECASE)
+        or re.search(
+            r"\bV\.?\s*A\.?\s*T\.?\s*(?:별도|미포함|제외|excluded?|not\s+included)",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+    included = bool(
+        re.search(r"부가\s*세\s*(?:포함)", normalized, re.IGNORECASE)
+        or re.search(
+            r"\bV\.?\s*A\.?\s*T\.?\s*(?:included?|포함)",
+            normalized,
+            re.IGNORECASE,
+        )
+        or re.search(r"\bwith\s+vat\b", normalized, re.IGNORECASE)
+    )
+    if excluded and included:
+        return ""
+    if excluded:
+        return "별도"
+    if included:
+        return "포함"
+    return ""
 
 
 def _looks_like_header(line: str) -> bool:
@@ -101,7 +136,7 @@ def _single_product_name(text: str) -> tuple[str, int] | None:
     return candidates[0] if len(candidates) == 1 else None
 
 
-def _footer_price(text: str) -> tuple[Decimal, bool] | None:
+def _footer_price(text: str) -> tuple[Decimal, str] | None:
     normalized = "\n".join(_normalize_line(line) for line in text.splitlines() if line.strip())
     match = re.search(
         r"(?is)(?:\bTOTAL\s*PRICE\b|합\s*계|총\s*계)"
@@ -113,32 +148,13 @@ def _footer_price(text: str) -> tuple[Decimal, bool] | None:
     amount = _parse_amount(match.group("amount"))
     if amount is None:
         return None
-    context = f"{match.group(0)[:120]} {match.group('context')}".casefold()
-    with_vat = bool(
-        "vat" in context
-        or re.search(r"부가\s*세\s*(?:포함|include)", context, re.IGNORECASE)
-    )
-    return amount, with_vat
+    context = f"{match.group(0)[:120]} {match.group('context')}"
+    return amount, _vat_status_from_text(context)
 
 
 def _looks_like_quote_document(text: str) -> bool:
     folded = text.casefold()
     return any(marker in folded for marker in _QUOTE_MARKERS)
-
-
-def _parse_quantity(prefix: str) -> Decimal | None:
-    segments = [_normalize_line(part) for part in prefix.split("|") if _normalize_line(part)]
-    for segment in segments[1:]:
-        match = re.search(r"(?<![\d,.])(\d+(?:\.\d+)?)(?![\d,.])", segment)
-        if match is None:
-            continue
-        try:
-            value = Decimal(match.group(1))
-        except InvalidOperation:
-            continue
-        if value > 0 and value <= 100000:
-            return value
-    return None
 
 
 def _parse_unit(prefix: str) -> str:
@@ -149,17 +165,58 @@ def _parse_unit(prefix: str) -> str:
     return ""
 
 
-def _repeated_price_row(text: str) -> _PricedRow | None:
-    """Find exactly one item row carrying the same explicit unit and total amount.
+def _standalone_quantity(segment: str) -> Decimal | None:
+    match = re.fullmatch(r"[^0-9]*(\d+(?:\.\d+)?)[^0-9]*", segment)
+    if match is None:
+        return None
+    try:
+        value = Decimal(match.group(1))
+    except InvalidOperation:
+        return None
+    if value <= 0 or value > 100000:
+        return None
+    return value
 
-    A repeated amount by itself is not enough. The row must also contain a non-summary
-    identity fragment before the prices and an explicit quantity token. This protects
-    against manufacturing an item from document-level totals.
+
+def _parse_quantity(prefix: str) -> Decimal | None:
+    """Parse quantity relative to the unit column, never from an arbitrary numeric spec token."""
+
+    segments = [_normalize_line(part) for part in prefix.split("|") if _normalize_line(part)]
+    if len(segments) < 2:
+        return None
+
+    unit_indexes = [index for index, segment in enumerate(segments) if _parse_unit(segment)]
+    if len(unit_indexes) == 1:
+        unit_index = unit_indexes[0]
+        for segment in segments[unit_index + 1 :]:
+            value = _standalone_quantity(segment)
+            if value is not None:
+                return value
+        return None
+
+    # Some OCR rows lose the unit token entirely. In that case recover only when there is exactly
+    # one standalone numeric segment after the identity/specification segment. Multiple numbers are
+    # ambiguous (for example model year + quantity) and must fail closed.
+    candidates: list[Decimal] = []
+    for segment in segments[1:]:
+        value = _standalone_quantity(segment)
+        if value is not None and value not in candidates:
+            candidates.append(value)
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _repeated_price_row(text: str) -> _PricedRow | None:
+    """Find one and only one plausible priced item row with repeated unit/total price.
+
+    Every plausible row carrying two monetary values is counted before the repeated-price heuristic.
+    This prevents a multi-item document from being silently collapsed to the one row whose unit and
+    total happen to be equal.
     """
 
     lines = [_normalize_line(line) for line in text.splitlines()]
     lines = [line for line in lines if line]
-    candidates: list[_PricedRow] = []
+    plausible_rows: list[_PricedRow] = []
+    recoverable_row: _PricedRow | None = None
 
     for line_index, line in enumerate(lines):
         matches = list(_AMOUNT_RE.finditer(line))
@@ -169,39 +226,39 @@ def _repeated_price_row(text: str) -> _PricedRow | None:
         valid_amounts = [amount for amount in amounts if amount is not None]
         if len(valid_amounts) < 2:
             continue
-        amount = valid_amounts[0]
-        if amount is None or valid_amounts.count(amount) < 2:
-            continue
 
         prefix = _normalize_line(line[: matches[0].start()])
         folded_prefix = prefix.casefold()
         if not re.search(r"[A-Za-z가-힣]", prefix):
             continue
-        if any(marker in folded_prefix for marker in ("합계", "총계", "공급가액", "세액")):
+        if any(marker in folded_prefix for marker in _SUMMARY_MARKERS):
             continue
 
         quantity = _parse_quantity(prefix)
         if quantity is None:
             continue
-
-        candidates.append(
-            _PricedRow(
-                line_index=line_index,
-                source_row=line_index + 1,
-                amount=amount,
-                prefix=prefix,
-                quantity=quantity,
-                unit=_parse_unit(prefix),
-                vat_included=bool(
-                    re.search(r"부가\s*세\s*포함", line, re.IGNORECASE)
-                    or re.search(r"\bV\.?\s*A\.?\s*T\.?\s*(?:included?|포함)", line, re.IGNORECASE)
-                ),
-            )
+        unit = _parse_unit(prefix)
+        row = _PricedRow(
+            line_index=line_index,
+            source_row=line_index + 1,
+            amount=valid_amounts[0],
+            prefix=prefix,
+            quantity=quantity,
+            unit=unit,
+            vat_status=_vat_status_from_text(line),
         )
-        if len(candidates) > 1:
+        plausible_rows.append(row)
+        if len(plausible_rows) > 1:
             return None
 
-    return candidates[0] if len(candidates) == 1 else None
+        if len(valid_amounts) == 2 and valid_amounts[0] == valid_amounts[1]:
+            recoverable_row = row
+        else:
+            recoverable_row = None
+
+    if len(plausible_rows) != 1:
+        return None
+    return recoverable_row
 
 
 def _is_uppercase_identity_line(line: str) -> bool:
@@ -327,7 +384,7 @@ def _recover_from_repeated_price_row(
         unit=row.unit,
         unit_price=row.amount,
         total_amount=row.amount,
-        vat_status="포함" if row.vat_included else "",
+        vat_status=row.vat_status,
         installation_condition=installation,
         warranty_condition=warranty,
         other_conditions=other_conditions,
@@ -354,7 +411,7 @@ def recover_single_item_from_text(
     price = _footer_price(footer_text)
     if product is not None and price is not None:
         product_name, source_row = product
-        amount, with_vat = price
+        amount, vat_status = price
 
         folded_footer = footer_text.casefold()
         has_individual_price_label = bool(
@@ -369,7 +426,7 @@ def recover_single_item_from_text(
             product_name=product_name,
             unit_price=amount if has_individual_price_label else None,
             total_amount=amount,
-            vat_status="포함" if with_vat else "",
+            vat_status=vat_status,
             installation_condition=installation,
             warranty_condition=warranty,
             other_conditions=other_conditions,
