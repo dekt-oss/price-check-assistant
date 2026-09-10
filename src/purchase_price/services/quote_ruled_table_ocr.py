@@ -212,20 +212,23 @@ def _identity_candidates(lines: list[str], price_index: int) -> tuple[str, str]:
                 spec_parts.append((index, token))
             continue
 
-        if len(ascii_letters) < 3:
+        if not ascii_letters:
             continue
         uppercase_ratio = sum(char.isupper() for char in ascii_letters) / len(ascii_letters)
         ascii_share = len(ascii_letters) / max(1, len(ascii_letters) + len(hangul_letters))
         words = re.findall(r"[A-Za-z]+", line)
 
-        if uppercase_ratio >= 0.8 and len(words) >= 2 and not has_model_marker:
+        if len(ascii_letters) >= 3 and uppercase_ratio >= 0.8 and len(words) >= 2 and not has_model_marker:
             product_parts.append((index, line))
             continue
         if (
             len(line) <= 60
             and ascii_share >= 0.8
-            and (uppercase_ratio < 0.8 or has_model_marker)
+            and has_model_marker
         ):
+            spec_parts.append((index, line))
+            continue
+        if len(ascii_letters) >= 3 and len(line) <= 60 and ascii_share >= 0.8 and uppercase_ratio < 0.8:
             spec_parts.append((index, line))
 
     def _join(parts: list[tuple[int, str]]) -> str:
