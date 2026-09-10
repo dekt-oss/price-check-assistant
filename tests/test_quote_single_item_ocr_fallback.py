@@ -37,6 +37,37 @@ def test_recovers_single_item_when_product_and_footer_price_are_separated() -> N
     assert item.other_conditions == "결제조건: 리스결제"
 
 
+def test_footer_fallback_preserves_explicit_vat_excluded() -> None:
+    full_text = """
+    병원 견적서
+    품명                 수량        금액        비고
+    재활로봇-X
+    1 구성
+    """
+    footer_text = "합계금액 (VAT 별도) 100,000,000"
+
+    item = recover_single_item_from_text(full_text, footer_text)
+
+    assert item is not None
+    assert item.total_amount == Decimal("100000000")
+    assert item.vat_status == "별도"
+
+
+def test_footer_fallback_leaves_conflicting_vat_evidence_unknown() -> None:
+    full_text = """
+    병원 견적서
+    품명                 수량        금액        비고
+    재활로봇-X
+    1 구성
+    """
+    footer_text = "TOTAL PRICE VAT included / VAT 별도 100,000,000"
+
+    item = recover_single_item_from_text(full_text, footer_text)
+
+    assert item is not None
+    assert item.vat_status == ""
+
+
 def test_recovers_deidentified_ruled_table_scan_split_by_psm4() -> None:
     full_text = """
     견적서
@@ -68,6 +99,33 @@ def test_recovers_deidentified_ruled_table_scan_split_by_psm4() -> None:
     assert item.vat_status == "포함"
     assert item.warranty_condition == "4년"
     assert item.other_conditions == "결제조건: 리스(익월결제)수용"
+
+
+def test_quantity_is_anchored_after_unit_not_numeric_specification() -> None:
+    full_text = """
+    견적서
+    MEDICAL DEVICE
+    Included with
+    Model-X | 2025 | unit | 1 | W10,000,000 | W10,000,000
+    """
+
+    item = recover_single_item_from_text(full_text, "")
+
+    assert item is not None
+    assert item.quantity == Decimal("1")
+    assert item.unit == "unit"
+    assert item.specification == "Model-X"
+
+
+def test_quantity_without_unit_fails_closed_when_multiple_numeric_tokens_exist() -> None:
+    full_text = """
+    견적서
+    MEDICAL DEVICE
+    Included with
+    Model-X | 2025 | 1 | W10,000,000 | W10,000,000
+    """
+
+    assert recover_single_item_from_text(full_text, "") is None
 
 
 def test_does_not_turn_generic_summary_into_a_product() -> None:
@@ -110,6 +168,18 @@ def test_does_not_recover_when_multiple_priced_rows_exist() -> None:
     Included with
     Model-A | unit | 1 | W10,000,000 | W10,000,000
     Model-B | unit | 1 | W20,000,000 | W20,000,000
+    """
+
+    assert recover_single_item_from_text(full_text, "") is None
+
+
+def test_does_not_recover_single_repeated_row_when_another_priced_row_differs() -> None:
+    full_text = """
+    견적서
+    PRODUCT FAMILY
+    Included with
+    Model-A | unit | 1 | W10,000,000 | W10,000,000
+    Model-B | unit | 2 | W20,000,000 | W40,000,000
     """
 
     assert recover_single_item_from_text(full_text, "") is None
