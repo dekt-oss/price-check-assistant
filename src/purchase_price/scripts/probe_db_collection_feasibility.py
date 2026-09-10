@@ -4,11 +4,12 @@ import argparse
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Mapping
+from typing import Any
 
 from purchase_price.clients.data_go_kr import (
     PublicDataClientError,
@@ -33,8 +34,6 @@ GOLDEN_DETAIL_CODES = (
     "4321210501",  # 레이저프린터
     "4321151501",  # 워크스테이션
 )
-
-# Gate 0 deliberately tests one large page without assuming that 999 is supported.
 PROBE_LARGE_PAGE_SIZE = 999
 DEVELOPMENT_DAILY_TRAFFIC_LIMIT = 1000
 
@@ -60,7 +59,6 @@ class ProbeResult:
 
 def _safe_text(value: Any, *, limit: int = 300) -> str:
     text = str(value or "").replace("\n", " ").strip()
-    # Defensive second line of protection: never persist a serviceKey query value.
     text = re.sub(r"(?i)(serviceKey=)[^&\s\"']+", r"\1***", text)
     return text[:limit]
 
@@ -77,9 +75,10 @@ def classify_exception(exc: Exception) -> str:
             "SERVICE_ACCESS_DENIED",
             "SERVICE_KEY_IS_NOT_REGISTERED",
             "SERVICE_KEY_IS_NULL",
-            "AUTH",
+            "DEADLINE_HAS_EXPIRED",
             "CODE=20",
             "CODE=30",
+            "CODE=31",
         )
     ):
         return "AUTH_ERROR"
@@ -87,7 +86,6 @@ def classify_exception(exc: Exception) -> str:
         token in text
         for token in (
             "LIMITED_NUMBER_OF_SERVICE_REQUESTS",
-            "RATE",
             "CODE=22",
             "CODE=23",
         )
@@ -99,11 +97,15 @@ def classify_exception(exc: Exception) -> str:
             "INVALID_REQUEST_PARAMETER",
             "INVALID PARAMETER",
             "필수값",
+            "CODE=08",
             "CODE=10",
             "RESULTCODE=08",
+            "RESULTCODE=10",
         )
     ):
         return "INVALID_PARAMETER"
+    if any(token in text for token in ("SERVICETIMEOUT_ERROR", "CODE=05")):
+        return "TRANSPORT_ERROR"
     return "SOURCE_ERROR"
 
 
@@ -139,11 +141,10 @@ def _first_item_summary(item: Mapping[str, Any] | None) -> dict[str, Any] | None
         "fnlCntrctDlvrReqChgOrdYn",
         "rgstDt",
         "chgDt",
-        "mkrNm",
-        "mnfcturNm",
-        "spec",
-        "cntrctPrce",
-        "vat",
+        "prdctMakrNm",
+        "prdctSpecNm",
+        "cntrctPrceAmt",
+        "vatAplDivNm",
     )
     return {key: item[key] for key in allow if key in item and item[key] not in (None, "")}
 
@@ -172,12 +173,12 @@ def run_page_probe(
         )
 
     code, msg = _response_header(payload)
-    status = "ZERO_RESULT" if page.total_count == 0 or (page.total_count is None and not page.items) else "SUCCESS"
+    empty = page.total_count == 0 or (page.total_count is None and not page.items)
     first = page.items[0] if page.items else None
     return ProbeResult(
         operation=operation,
         case=case,
-        status=status,
+        status="ZERO_RESULT" if empty else "SUCCESS",
         elapsed_ms=round((perf_counter() - started) * 1000),
         request_params=dict(params),
         total_count=page.total_count,
@@ -191,155 +192,248 @@ def run_page_probe(
     )
 
 
-def _code_from_item(item: Mapping[str, Any]) -> str:
-    for key in ("dtilPrdctClsfcNo", "prdctClsfcNo", "prdctClsfcNoUnit10"):
-        value = str(item.get(key) or "").strip()
-        if len(value) == 10 and value.isdigit():
-            return value
-    return ""
+def _fetch_unit10_page(
+    client: PublicDataPortalClient,
+    *,
+    base_url: str,
+    page_no: int,
+    rows: int,
+) -> tuple[ProbeResult, list[dict[str, Any]]]:
+    started = perf_counter()
+    params = {"pageNo": page_no, "numOfRows": rows}
+    try:
+        payload = client.get_json(base_url, UNIT10_OPERATION, **params)
+        page = unwrap_g2b_page(payload)
+    except (PublicDataClientError, PublicDataTransportError, ValueError) as exc:
+        return (
+            ProbeResult(
+                operation=UNIT10_OPERATION,
+                case=f"dictionary_page_{page_no}",
+                status=classify_exception(exc),
+                elapsed_ms=round((perf_counter() - started) * 1000),
+                request_params=params,
+                error_type=type(exc).__name__,
+                error_message=_safe_text(exc),
+            ),
+            [],
+        )
+
+    code, msg = _response_header(payload)
+    empty = page.total_count == 0 or (page.total_count is None and not page.items)
+    first = page.items[0] if page.items else None
+    return (
+        ProbeResult(
+            operation=UNIT10_OPERATION,
+            case=f"dictionary_page_{page_no}",
+            status="ZERO_RESULT" if empty else "SUCCESS",
+            elapsed_ms=round((perf_counter() - started) * 1000),
+            request_params=params,
+            total_count=page.total_count,
+            item_count=len(page.items),
+            page_no=page.page_no,
+            num_of_rows=page.num_of_rows,
+            result_code=code,
+            result_msg=msg,
+            observed_fields=tuple(sorted(first.keys())) if first else (),
+            sample=_first_item_summary(first),
+        ),
+        [dict(item) for item in page.items],
+    )
 
 
 def probe_unit10(client: PublicDataPortalClient, *, base_url: str) -> dict[str, Any]:
-    results: list[ProbeResult] = []
-    results.append(
-        run_page_probe(
-            client=client,
-            base_url=base_url,
-            operation=UNIT10_OPERATION,
-            case="unfiltered_page_1",
-            params={"pageNo": 1, "numOfRows": 1},
-        )
+    first, first_items = _fetch_unit10_page(
+        client,
+        base_url=base_url,
+        page_no=1,
+        rows=PROBE_LARGE_PAGE_SIZE,
     )
-    results.append(
-        run_page_probe(
-            client=client,
-            base_url=base_url,
-            operation=UNIT10_OPERATION,
-            case="large_page_999",
-            params={"pageNo": 1, "numOfRows": PROBE_LARGE_PAGE_SIZE},
-        )
-    )
-
-    # The exact selector name is itself part of the feasibility question. We test the most
-    # conservative official-code-shaped selector and verify that the response actually contains
-    # the requested code; a normal response that ignores the selector is not counted as verified.
-    golden: dict[str, dict[str, Any]] = {}
-    for detail_code in GOLDEN_DETAIL_CODES:
-        result = run_page_probe(
-            client=client,
-            base_url=base_url,
-            operation=UNIT10_OPERATION,
-            case=f"golden_{detail_code}",
-            params={"pageNo": 1, "numOfRows": 10, "prdctClsfcNo": detail_code},
-        )
-        results.append(result)
-        matched = False
-        if result.status in {"SUCCESS", "ZERO_RESULT"} and result.sample:
-            matched = _code_from_item(result.sample) == detail_code
-        golden[detail_code] = {
-            "request_status": result.status,
-            "exact_code_observed_in_first_item": matched,
-            "verification": "VERIFIED" if matched else "미검증",
+    if first.status not in {"SUCCESS", "ZERO_RESULT"} or first.total_count is None:
+        return {
+            "operation": UNIT10_OPERATION,
+            "full_enumeration": "미검증",
+            "max_tested_num_of_rows": PROBE_LARGE_PAGE_SIZE,
+            "golden_codes": {code: "미검증" for code in GOLDEN_DETAIL_CODES},
+            "probes": [asdict(first)],
         }
 
-    unfiltered = results[0]
-    full_enumeration = (
-        "VERIFIED"
-        if unfiltered.status in {"SUCCESS", "ZERO_RESULT"} and unfiltered.total_count is not None
-        else "미검증"
-    )
+    total_pages = max(1, math.ceil(first.total_count / PROBE_LARGE_PAGE_SIZE))
+    probes = [first]
+    items = list(first_items)
+    for page_no in range(2, total_pages + 1):
+        result, page_items = _fetch_unit10_page(
+            client,
+            base_url=base_url,
+            page_no=page_no,
+            rows=PROBE_LARGE_PAGE_SIZE,
+        )
+        probes.append(result)
+        if result.status not in {"SUCCESS", "ZERO_RESULT"}:
+            return {
+                "operation": UNIT10_OPERATION,
+                "full_enumeration": "PARTIAL_SUCCESS",
+                "total_count": first.total_count,
+                "page_count_expected": total_pages,
+                "page_count_succeeded": page_no - 1,
+                "max_tested_num_of_rows": PROBE_LARGE_PAGE_SIZE,
+                "golden_codes": {code: "미검증" for code in GOLDEN_DETAIL_CODES},
+                "probes": [asdict(row) for row in probes],
+            }
+        items.extend(page_items)
+
+    by_code = {
+        str(item.get("dtilPrdctClsfcNo") or "").strip(): str(
+            item.get("dtilPrdctClsfcNoNm") or ""
+        ).strip()
+        for item in items
+        if str(item.get("dtilPrdctClsfcNo") or "").strip()
+    }
+    golden = {
+        code: {
+            "verification": "VERIFIED" if code in by_code else "NOT_FOUND",
+            "name": by_code.get(code) or None,
+        }
+        for code in GOLDEN_DETAIL_CODES
+    }
+    complete = len(items) >= first.total_count
     return {
         "operation": UNIT10_OPERATION,
-        "full_enumeration": full_enumeration,
-        "total_count": unfiltered.total_count,
-        "max_tested_num_of_rows": (
-            PROBE_LARGE_PAGE_SIZE if results[1].status in {"SUCCESS", "ZERO_RESULT"} else 1
-        ),
+        "full_enumeration": "VERIFIED" if complete else "PARTIAL_SUCCESS",
+        "total_count": first.total_count,
+        "collected_count": len(items),
+        "unique_code_count": len(by_code),
+        "page_count": total_pages,
+        "request_count": total_pages,
+        "max_tested_num_of_rows": PROBE_LARGE_PAGE_SIZE,
+        "stable_fields": ["dtilPrdctClsfcNo", "dtilPrdctClsfcNoNm", "chgDate", "useYn"],
         "golden_codes": golden,
-        "probes": [asdict(row) for row in results],
+        "probes": [asdict(row) for row in probes],
     }
 
 
-def _track_a_field_contract(result: ProbeResult) -> dict[str, Any]:
+def _field_contract(result: ProbeResult) -> dict[str, list[str]]:
     fields = set(result.observed_fields)
     groups = {
         "request_no": ("cntrctDlvrReqNo",),
         "change_order": ("cntrctDlvrReqChgOrd",),
         "line_no": ("prdctSno",),
         "product_id": ("prdctIdntNo",),
+        "detail_code": ("dtilPrdctClsfcNo",),
         "unit_price": ("prdctUprc", "dlvrUprc", "cntrctUprc"),
         "quantity": ("prdctQty",),
         "unit": ("prdctUnit", "unitNm"),
         "institution": ("dminsttNm", "dminsttCd"),
-        "supplier": ("corpNm", "bizrno"),
+        "supplier": ("corpNm", "bizno", "bizrno"),
         "final_flag": ("fnlCntrctDlvrReqChgOrdYn",),
     }
-    return {
-        name: [key for key in aliases if key in fields]
-        for name, aliases in groups.items()
-    }
+    return {name: [key for key in aliases if key in fields] for name, aliases in groups.items()}
 
 
 def probe_track_a(client: PublicDataPortalClient, *, base_url: str, end: date) -> dict[str, Any]:
     begin = end - timedelta(days=6)
-    base_params = {
+    basic = {
         "pageNo": 1,
         "numOfRows": 1,
         "inqryBgnDate": begin.strftime("%Y%m%d"),
         "inqryEndDate": end.strftime("%Y%m%d"),
     }
-    first = run_page_probe(
+    date_only = run_page_probe(
         client=client,
         base_url=base_url,
         operation=G2BShoppingOperation.DELIVERY_REQUEST_DETAILS.value,
         case="date_only_7d",
-        params=base_params,
+        params=basic,
     )
-    large = run_page_probe(
+    with_div = run_page_probe(
         client=client,
         base_url=base_url,
         operation=G2BShoppingOperation.DELIVERY_REQUEST_DETAILS.value,
-        case="date_only_7d_page_999",
-        params={**base_params, "numOfRows": PROBE_LARGE_PAGE_SIZE},
+        case="date_only_7d_inqryDiv_1",
+        params={**basic, "inqryDiv": "1"},
     )
-    year_begin = end - timedelta(days=364)
+    accepted = next(
+        (row for row in (date_only, with_div) if row.status in {"SUCCESS", "ZERO_RESULT"}),
+        None,
+    )
+    large = (
+        run_page_probe(
+            client=client,
+            base_url=base_url,
+            operation=G2BShoppingOperation.DELIVERY_REQUEST_DETAILS.value,
+            case="date_only_7d_page_999",
+            params={**accepted.request_params, "numOfRows": PROBE_LARGE_PAGE_SIZE},
+        )
+        if accepted is not None
+        else None
+    )
+    year_params: dict[str, Any] = {
+        "pageNo": 1,
+        "numOfRows": 1,
+        "inqryBgnDate": (end - timedelta(days=364)).strftime("%Y%m%d"),
+        "inqryEndDate": end.strftime("%Y%m%d"),
+    }
+    if accepted is not None and accepted.request_params.get("inqryDiv") is not None:
+        year_params["inqryDiv"] = accepted.request_params["inqryDiv"]
     year = run_page_probe(
         client=client,
         base_url=base_url,
         operation=G2BShoppingOperation.DELIVERY_REQUEST_DETAILS.value,
         case="date_only_365d_window",
-        params={
-            "pageNo": 1,
-            "numOfRows": 1,
-            "inqryBgnDate": year_begin.strftime("%Y%m%d"),
-            "inqryEndDate": end.strftime("%Y%m%d"),
-        },
+        params=year_params,
     )
-    effective_page = PROBE_LARGE_PAGE_SIZE if large.status in {"SUCCESS", "ZERO_RESULT"} else 1
-    seven_day_pages = (
-        math.ceil(first.total_count / effective_page)
-        if first.total_count is not None and effective_page > 0
+
+    evidence = large or accepted or date_only
+    contract = _field_contract(evidence)
+    page_size = (
+        PROBE_LARGE_PAGE_SIZE
+        if large is not None and large.status in {"SUCCESS", "ZERO_RESULT"}
+        else 1
+    )
+    pages_per_7d = (
+        math.ceil(evidence.total_count / page_size)
+        if evidence.total_count is not None
         else None
     )
+    probes = [date_only, with_div, year]
+    if large is not None:
+        probes.insert(2, large)
     return {
         "operation": G2BShoppingOperation.DELIVERY_REQUEST_DETAILS.value,
-        "date_only_contract": "VERIFIED" if first.status in {"SUCCESS", "ZERO_RESULT"} else "미검증",
-        "window_365d": "ACCEPTED" if year.status in {"SUCCESS", "ZERO_RESULT"} else year.status,
-        "max_tested_num_of_rows": effective_page,
-        "field_contract": _track_a_field_contract(first),
+        "date_only_contract": "VERIFIED" if accepted is not None else "HOLD",
+        "accepted_extra_params": (
+            {
+                key: value
+                for key, value in accepted.request_params.items()
+                if key not in {"pageNo", "numOfRows", "inqryBgnDate", "inqryEndDate"}
+            }
+            if accepted is not None
+            else {}
+        ),
+        "window_365d": (
+            "ACCEPTED" if year.status in {"SUCCESS", "ZERO_RESULT"} else year.status
+        ),
+        "max_tested_num_of_rows": page_size,
+        "field_contract": contract,
         "stable_key_candidate": "cntrctDlvrReqNo + cntrctDlvrReqChgOrd + prdctSno",
         "stable_key_verified": (
             "VERIFIED"
-            if all(_track_a_field_contract(first)[key] for key in ("request_no", "change_order", "line_no"))
+            if all(contract[key] for key in ("request_no", "change_order", "line_no"))
             else "미검증"
         ),
-        "seven_day_total_count": first.total_count,
-        "estimated_pages_per_7d_window": seven_day_pages,
-        "probes": [asdict(first), asdict(large), asdict(year)],
+        "seven_day_total_count": evidence.total_count,
+        "estimated_pages_per_7d_window": pages_per_7d,
+        "probes": [asdict(row) for row in probes],
     }
 
 
-def _track_b_params(*, begin: date, end: date, detail_code: str | None, rows: int, final: str | None = None) -> dict[str, Any]:
+def _track_b_params(
+    *,
+    begin: date,
+    end: date,
+    detail_code: str | None,
+    rows: int,
+    final: str | None = None,
+) -> dict[str, Any]:
     params: dict[str, Any] = {
         "pageNo": 1,
         "numOfRows": rows,
@@ -358,18 +452,16 @@ def _track_b_params(*, begin: date, end: date, detail_code: str | None, rows: in
 def probe_track_b(client: PublicDataPortalClient, *, base_url: str, end: date) -> dict[str, Any]:
     begin = end - timedelta(days=364)
     operation = G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS.value
-    exact_results: list[ProbeResult] = []
-    for detail_code in GOLDEN_DETAIL_CODES:
-        exact_results.append(
-            run_page_probe(
-                client=client,
-                base_url=base_url,
-                operation=operation,
-                case=f"exact_code_{detail_code}",
-                params=_track_b_params(begin=begin, end=end, detail_code=detail_code, rows=1),
-            )
+    exact = [
+        run_page_probe(
+            client=client,
+            base_url=base_url,
+            operation=operation,
+            case=f"exact_code_{code}",
+            params=_track_b_params(begin=begin, end=end, detail_code=code, rows=1),
         )
-
+        for code in GOLDEN_DETAIL_CODES
+    ]
     date_only = run_page_probe(
         client=client,
         base_url=base_url,
@@ -377,7 +469,7 @@ def probe_track_b(client: PublicDataPortalClient, *, base_url: str, end: date) -
         case="date_only_without_product_selector",
         params=_track_b_params(begin=begin, end=end, detail_code=None, rows=1),
     )
-    large = run_page_probe(
+    all_changes = run_page_probe(
         client=client,
         base_url=base_url,
         operation=operation,
@@ -389,7 +481,7 @@ def probe_track_b(client: PublicDataPortalClient, *, base_url: str, end: date) -
             rows=PROBE_LARGE_PAGE_SIZE,
         ),
     )
-    final_y = run_page_probe(
+    final_only = run_page_probe(
         client=client,
         base_url=base_url,
         operation=operation,
@@ -402,12 +494,9 @@ def probe_track_b(client: PublicDataPortalClient, *, base_url: str, end: date) -
             final="Y",
         ),
     )
-
-    exact_ok = all(row.status in {"SUCCESS", "ZERO_RESULT"} for row in exact_results)
-    first_nonempty = next((row for row in exact_results if row.observed_fields), exact_results[0])
-    contract = _track_a_field_contract(first_nonempty)
-    stable = all(contract[key] for key in ("request_no", "change_order", "line_no"))
-    explicit_price_fields = contract["unit_price"]
+    exact_ok = all(row.status in {"SUCCESS", "ZERO_RESULT"} for row in exact)
+    evidence = next((row for row in exact if row.observed_fields), exact[0])
+    contract = _field_contract(evidence)
     return {
         "operation": operation,
         "exact_10_digit_contract": "VERIFIED" if exact_ok else "미검증",
@@ -415,18 +504,33 @@ def probe_track_b(client: PublicDataPortalClient, *, base_url: str, end: date) -
         "date_only_rejected_as_required": date_only.status == "INVALID_PARAMETER",
         "window_days_tested": 365,
         "max_tested_num_of_rows": (
-            PROBE_LARGE_PAGE_SIZE if large.status in {"SUCCESS", "ZERO_RESULT"} else 1
+            PROBE_LARGE_PAGE_SIZE
+            if all_changes.status in {"SUCCESS", "ZERO_RESULT"}
+            else 1
         ),
         "all_change_orders_without_final_filter": (
-            "ACCEPTED" if large.status in {"SUCCESS", "ZERO_RESULT"} else "미검증"
+            "VERIFIED"
+            if all_changes.status in {"SUCCESS", "ZERO_RESULT"}
+            else "미검증"
         ),
-        "final_y_total_count": final_y.total_count,
-        "no_final_filter_total_count": large.total_count,
-        "stable_key_candidate": "cntrctDlvrReqNo + cntrctDlvrReqChgOrd + prdctSno",
-        "stable_key_fields_observed": "VERIFIED" if stable else "미검증",
-        "explicit_unit_price_fields_observed": explicit_price_fields or ["미검증"],
-        "golden_counts": {row.case.removeprefix("exact_code_"): row.total_count for row in exact_results},
-        "probes": [asdict(row) for row in [*exact_results, date_only, large, final_y]],
+        "final_y_total_count": final_only.total_count,
+        "no_final_filter_total_count": all_changes.total_count,
+        "change_order_delta": (
+            all_changes.total_count - final_only.total_count
+            if all_changes.total_count is not None and final_only.total_count is not None
+            else "미검증"
+        ),
+        "stable_key": "cntrctDlvrReqNo + cntrctDlvrReqChgOrd + prdctSno",
+        "stable_key_fields_observed": (
+            "VERIFIED"
+            if all(contract[key] for key in ("request_no", "change_order", "line_no"))
+            else "미검증"
+        ),
+        "explicit_unit_price_fields_observed": contract["unit_price"] or ["미검증"],
+        "golden_counts": {
+            row.case.removeprefix("exact_code_"): row.total_count for row in exact
+        },
+        "probes": [asdict(row) for row in [*exact, date_only, all_changes, final_only]],
     }
 
 
@@ -436,61 +540,73 @@ def probe_track_c(client: PublicDataPortalClient, *, base_url: str, end: date) -
         G2BShoppingOperation.MAS_CONTRACT_PRODUCTS.value,
         G2BShoppingOperation.SHOPPING_MALL_PRODUCTS.value,
     )
-    results: list[ProbeResult] = []
-    # Do not guess unverified registration/change parameter names. The two known operations are
-    # checked for their minimum request contract; rgstDt/chgDt incremental selectors remain
-    # explicitly unverified until a live/documented parameter contract is observed.
-    for operation in operations:
-        results.append(
-            run_page_probe(
-                client=client,
-                base_url=base_url,
-                operation=operation,
-                case="bounded_date_window_candidate",
-                params={
-                    "pageNo": 1,
-                    "numOfRows": 1,
-                    "inqryBgnDate": begin.strftime("%Y%m%d"),
-                    "inqryEndDate": end.strftime("%Y%m%d"),
-                },
-            )
+    results = [
+        run_page_probe(
+            client=client,
+            base_url=base_url,
+            operation=operation,
+            case="bounded_date_window",
+            params={
+                "pageNo": 1,
+                "numOfRows": 1,
+                "inqryBgnDate": begin.strftime("%Y%m%d"),
+                "inqryEndDate": end.strftime("%Y%m%d"),
+            },
         )
+        for operation in operations
+    ]
     return {
         "operations_tested": list(operations),
         "registration_increment_contract": "미검증",
         "change_increment_contract": "미검증",
         "three_party_vs_general_unit_separation": "미검증",
+        "observed_increment_fields": {
+            row.operation: [key for key in ("rgstDt", "chgDt") if key in row.observed_fields]
+            for row in results
+        },
         "note": (
-            "PR-DB0 does not invent rgstDt/chgDt request parameter names. Add the exact live/documented "
-            "contract only after a successful service probe."
+            "Response fields rgstDt/chgDt do not prove the request selector contract. "
+            "Do not implement incremental Track C until the documented/live selector is verified."
         ),
         "probes": [asdict(row) for row in results],
     }
 
 
-def _budget(track_a: Mapping[str, Any], track_b: Mapping[str, Any]) -> dict[str, Any]:
-    a_pages = track_a.get("estimated_pages_per_7d_window")
-    a_30 = a_pages * 30 if isinstance(a_pages, int) else None
+def _budget(
+    unit10: Mapping[str, Any],
+    track_a: Mapping[str, Any],
+    track_b: Mapping[str, Any],
+) -> dict[str, Any]:
+    dictionary_calls = unit10.get("request_count")
+    track_a_daily = track_a.get("estimated_pages_per_7d_window")
+    track_a_30 = track_a_daily * 30 if isinstance(track_a_daily, int) else None
+
     golden_counts = track_b.get("golden_counts")
     page_size = track_b.get("max_tested_num_of_rows")
-    golden_backfill = None
+    track_b_backfill = None
     if isinstance(golden_counts, Mapping) and isinstance(page_size, int) and page_size > 0:
         known = [value for value in golden_counts.values() if isinstance(value, int)]
         if len(known) == len(GOLDEN_DETAIL_CODES):
-            golden_backfill = sum(math.ceil(value / page_size) for value in known)
-    measured = [value for value in (a_30, golden_backfill) if isinstance(value, int)]
-    subtotal = sum(measured) if len(measured) == 2 else None
+            track_b_backfill = sum(math.ceil(value / page_size) for value in known)
+
     return {
         "development_daily_limit_documented": DEVELOPMENT_DAILY_TRAFFIC_LIMIT,
-        "track_a_30d_calls_if_daily_7d_replay": a_30 if a_30 is not None else "미검증",
+        "unit10_full_dictionary_calls": (
+            dictionary_calls if isinstance(dictionary_calls, int) else "미검증"
+        ),
+        "track_a_30d_calls_if_daily_7d_replay": (
+            track_a_30 if track_a_30 is not None else "미검증"
+        ),
         "track_b_golden_7_code_one_year_backfill_calls": (
-            golden_backfill if golden_backfill is not None else "미검증"
+            track_b_backfill if track_b_backfill is not None else "미검증"
         ),
         "track_c_30d_calls": "미검증",
-        "unit10_full_dictionary_calls": "미검증",
-        "measured_subtotal_excluding_unverified_tracks": subtotal if subtotal is not None else "미검증",
+        "full_23609_code_track_b_backfill_calls": "미검증",
         "production_limit": "활용사례 등록 후 증설 신청 가능; 실제 승인량 미검증",
-        "warning": "This is a feasibility budget, not authorization to consume the full daily quota.",
+        "warning": (
+            "Measured calls are feasibility evidence only. They are not authorization "
+            "for an all-industry backfill."
+        ),
     }
 
 
@@ -498,16 +614,18 @@ def build_report(*, end: date) -> dict[str, Any]:
     settings = get_settings()
     shopping_key = (settings.resolved_g2b_shopping_service_key or "").strip()
     catalog_key = (settings.resolved_g2b_catalog_service_key or "").strip()
-
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "verified_at": datetime.now(UTC).isoformat(),
         "end_date": end.isoformat(),
         "secret_sources": {
             "shopping": settings.g2b_shopping_key_source,
             "catalog": settings.g2b_catalog_key_source,
         },
-        "secrets_present": {"shopping": bool(shopping_key), "catalog": bool(catalog_key)},
+        "secrets_present": {
+            "shopping": bool(shopping_key),
+            "catalog": bool(catalog_key),
+        },
         "hosted_postgresql": {
             "status": "미검증",
             "required_roles": ["collector_writer", "streamlit_reader", "migration_admin"],
@@ -520,9 +638,9 @@ def build_report(*, end: date) -> dict[str, Any]:
             catalog_key,
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=settings.g2b_max_retries,
-        ) as catalog_client:
+        ) as client:
             report["unit10_dictionary"] = probe_unit10(
-                catalog_client,
+                client,
                 base_url=settings.g2b_catalog_base_url or G2B_CATALOG_BASE_URL,
             )
     else:
@@ -537,23 +655,29 @@ def build_report(*, end: date) -> dict[str, Any]:
             shopping_key,
             timeout_seconds=settings.g2b_request_timeout_seconds,
             max_retries=settings.g2b_max_retries,
-        ) as shopping_client:
-            shopping_base = settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL
-            report["track_a"] = probe_track_a(shopping_client, base_url=shopping_base, end=end)
-            report["track_b"] = probe_track_b(shopping_client, base_url=shopping_base, end=end)
-            report["track_c"] = probe_track_c(shopping_client, base_url=shopping_base, end=end)
+        ) as client:
+            base_url = settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL
+            report["track_a"] = probe_track_a(client, base_url=base_url, end=end)
+            report["track_b"] = probe_track_b(client, base_url=base_url, end=end)
+            report["track_c"] = probe_track_c(client, base_url=base_url, end=end)
     else:
         missing = {"status": "AUTH_ERROR", "reason": "shopping service key is not configured"}
         report["track_a"] = dict(missing)
         report["track_b"] = dict(missing)
         report["track_c"] = dict(missing)
 
-    report["call_budget"] = _budget(report["track_a"], report["track_b"])
+    report["call_budget"] = _budget(
+        report["unit10_dictionary"],
+        report["track_a"],
+        report["track_b"],
+    )
     return report
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Bounded live probe for DB Collection PR-DB0")
+    parser = argparse.ArgumentParser(
+        description="Bounded live probe for DB Collection PR-DB0"
+    )
     parser.add_argument("--end-date", type=date.fromisoformat, default=date.today())
     parser.add_argument("--output", type=Path, required=True)
     return parser
@@ -563,15 +687,28 @@ def main() -> int:
     args = _build_parser().parse_args()
     report = build_report(end=args.end_date)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     print(f"db0_probe_output={args.output}")
     print(f"verified_at={report['verified_at']}")
-    print(f"unit10={report['unit10_dictionary'].get('full_enumeration', report['unit10_dictionary'].get('status'))}")
-    print(f"track_a={report['track_a'].get('date_only_contract', report['track_a'].get('status'))}")
-    print(f"track_b={report['track_b'].get('exact_10_digit_contract', report['track_b'].get('status'))}")
-    print(f"track_c_registration={report['track_c'].get('registration_increment_contract', report['track_c'].get('status'))}")
-    # Feasibility measurement records HOLD/failure as data; CI success must not be confused with
-    # live API acceptance success. Schema/contract errors are enforced by offline tests.
+    print(
+        "unit10="
+        f"{report['unit10_dictionary'].get('full_enumeration', report['unit10_dictionary'].get('status'))}"
+    )
+    print(
+        "track_a="
+        f"{report['track_a'].get('date_only_contract', report['track_a'].get('status'))}"
+    )
+    print(
+        "track_b="
+        f"{report['track_b'].get('exact_10_digit_contract', report['track_b'].get('status'))}"
+    )
+    print(
+        "track_c_registration="
+        f"{report['track_c'].get('registration_increment_contract', report['track_c'].get('status'))}"
+    )
     return 0
 
 
