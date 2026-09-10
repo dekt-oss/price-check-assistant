@@ -109,6 +109,32 @@ def _repeated_price_line(lines: list[str]) -> tuple[int, Decimal] | None:
     return deduped[0] if len(deduped) == 1 else None
 
 
+def _quantity_from_sparse_line(line: str) -> Decimal | None:
+    """Accept a quantity cell, but never a model/year/specification token."""
+
+    candidate = _normalize_line(line)
+    unit = _known_unit(candidate)
+    if unit:
+        candidate = re.sub(
+            rf"(?<![0-9a-z가-힣]){re.escape(unit)}(?![0-9a-z가-힣])",
+            "",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+    if re.search(r"[A-Za-z가-힣]", candidate):
+        return None
+    match = re.fullmatch(r"[|()\[\]\s]*([0-9]+(?:\.[0-9]+)?)[|()\[\]\s]*", candidate)
+    if match is None:
+        return None
+    try:
+        value = Decimal(match.group(1))
+    except InvalidOperation:
+        return None
+    if value <= 0 or value > 100000:
+        return None
+    return value
+
+
 def _nearby_quantity(lines: list[str], price_index: int) -> Decimal | None:
     values: list[Decimal] = []
     start = max(0, price_index - 4)
@@ -117,16 +143,10 @@ def _nearby_quantity(lines: list[str], price_index: int) -> Decimal | None:
         if index == price_index:
             continue
         line = lines[index]
-        match = re.fullmatch(r"[^0-9]*(\d+(?:\.\d+)?)[^0-9]*", line)
-        if match is None:
-            continue
         if re.search(r"\d\s*(?:부|page|쪽)\b", line, re.IGNORECASE):
             continue
-        try:
-            value = Decimal(match.group(1))
-        except InvalidOperation:
-            continue
-        if 0 < value <= 100000 and value not in values:
+        value = _quantity_from_sparse_line(line)
+        if value is not None and value not in values:
             values.append(value)
     return values[0] if len(values) == 1 else None
 
