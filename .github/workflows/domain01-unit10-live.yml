@@ -1,0 +1,57 @@
+name: Domain01 Unit10 Dictionary Live Capture
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/domain01-unit10-live.yml"
+      - "src/purchase_price/scripts/capture_domain01_unit10_dictionary.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture-unit10:
+    if: github.event_name != 'pull_request' || github.head_ref == 'feat/domain01-medical-diagnostics-collection'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Capture official Unit10 dictionary
+        run: |
+          python -m purchase_price.scripts.capture_domain01_unit10_dictionary \
+            --output artifacts/domain01-unit10/unit10_dictionary.json \
+            --summary-output artifacts/domain01-unit10/summary.json
+
+      - name: Print safe summary
+        if: always()
+        run: |
+          if [ -f artifacts/domain01-unit10/summary.json ]; then
+            cat artifacts/domain01-unit10/summary.json
+          fi
+
+      - name: Upload public dictionary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: domain01-unit10-dictionary
+          path: artifacts/domain01-unit10/
+          if-no-files-found: warn
+          retention-days: 14
