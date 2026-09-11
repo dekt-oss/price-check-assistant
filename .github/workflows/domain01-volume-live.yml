@@ -1,0 +1,59 @@
+name: Domain01 Enabled Track B Volume Live Probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/domain01-volume-live.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe-domain01-volume:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'synchronize' && github.head_ref == 'feat/domain01-medical-diagnostics-collection')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Probe exact enabled-code Track B volume
+        run: |
+          python -m purchase_price.scripts.probe_domain01_enabled_volume \
+            --allowlist data/pps_collect_tracks.csv \
+            --output artifacts/domain01-volume/report.json \
+            --per-code-output artifacts/domain01-volume/per_code.json
+
+      - name: Print safe summary
+        if: always()
+        run: |
+          if [ -f artifacts/domain01-volume/report.json ]; then
+            cat artifacts/domain01-volume/report.json
+          fi
+
+      - name: Upload public sizing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: domain01-track-b-volume
+          path: artifacts/domain01-volume/
+          if-no-files-found: warn
+          retention-days: 14
