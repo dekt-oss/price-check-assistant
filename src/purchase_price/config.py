@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,11 @@ class Settings(BaseSettings):
     r2_endpoint_url: str | None = None
     r2_raw_prefix: str = "raw/v1"
     r2_backup_prefix: str = "db-backups/v1"
+    # R2 Standard includes 10 GB-month free storage. Stay below that billing boundary with a
+    # conservative 1 GB reserve. This value may only be lowered, never raised above 9 GB, so a
+    # deployment cannot accidentally disable the zero-cost storage policy through configuration.
+    r2_zero_cost_hard_limit_gb: float = Field(default=9.0, gt=0, le=9.0)
+    r2_zero_cost_warn_limit_gb: float = Field(default=8.0, gt=0, le=8.0)
 
     # Legacy/common key kept for backward compatibility with the original public-data setup.
     data_go_kr_service_key: str | None = None
@@ -84,6 +90,15 @@ class Settings(BaseSettings):
                 self.r2_secret_access_key,
             )
         )
+
+    @property
+    def r2_zero_cost_hard_limit_bytes(self) -> int:
+        # Cloudflare bills storage in decimal GB; use the same unit for the fail-closed guard.
+        return int(self.r2_zero_cost_hard_limit_gb * 1_000_000_000)
+
+    @property
+    def r2_zero_cost_warn_limit_bytes(self) -> int:
+        return int(self.r2_zero_cost_warn_limit_gb * 1_000_000_000)
 
     @property
     def resolved_mfds_service_key(self) -> str | None:
