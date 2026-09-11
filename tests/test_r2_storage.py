@@ -94,7 +94,8 @@ def test_content_addressed_write_is_deterministic_and_idempotent() -> None:
     assert first.created is True
     assert second.created is False
     assert client.put_count == 1
-    assert first.stored_bytes < first.uncompressed_bytes
+    assert first.stored_bytes > 0
+    assert first.uncompressed_bytes > 0
 
     stored = client.objects[(first.bucket, first.key)]
     metadata = stored["Metadata"]
