@@ -10,6 +10,17 @@ class Settings(BaseSettings):
     )
     log_level: str = "INFO"
 
+    # Cloudflare R2 raw-evidence / backup object storage.
+    # Keep credentials in deployment secrets only. The raw prefix is content-addressed and
+    # intended for public procurement evidence only; private hospital purchasing data is excluded.
+    r2_account_id: str | None = None
+    r2_bucket_name: str | None = None
+    r2_access_key_id: str | None = None
+    r2_secret_access_key: str | None = None
+    r2_endpoint_url: str | None = None
+    r2_raw_prefix: str = "raw/v1"
+    r2_backup_prefix: str = "db-backups/v1"
+
     # Legacy/common key kept for backward compatibility with the original public-data setup.
     data_go_kr_service_key: str | None = None
     # Shared key alias used for approved market/public-data APIs.
@@ -44,6 +55,26 @@ class Settings(BaseSettings):
     mfds_max_retries: int = 3
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @property
+    def resolved_r2_endpoint_url(self) -> str | None:
+        if self.r2_endpoint_url and self.r2_endpoint_url.strip():
+            return self.r2_endpoint_url.rstrip("/")
+        if self.r2_account_id and self.r2_account_id.strip():
+            return f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
+        return None
+
+    @property
+    def r2_configured(self) -> bool:
+        return all(
+            value and value.strip()
+            for value in (
+                self.resolved_r2_endpoint_url,
+                self.r2_bucket_name,
+                self.r2_access_key_id,
+                self.r2_secret_access_key,
+            )
+        )
 
     @property
     def resolved_mfds_service_key(self) -> str | None:
