@@ -99,11 +99,12 @@ class R2RawEvidenceStore:
         if not settings.r2_configured:
             raise R2ConfigurationError(
                 "R2 is not fully configured; set R2_ACCOUNT_ID or R2_ENDPOINT_URL, "
-                "R2_BUCKET_NAME, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY"
+                "R2_BUCKET_NAME (or R2_BUCKET), R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY"
             )
         endpoint = settings.resolved_r2_endpoint_url
+        bucket = settings.resolved_r2_bucket_name
         assert endpoint is not None
-        assert settings.r2_bucket_name is not None
+        assert bucket is not None
         assert settings.r2_access_key_id is not None
         assert settings.r2_secret_access_key is not None
         client = boto3.client(
@@ -115,7 +116,7 @@ class R2RawEvidenceStore:
         )
         return cls(
             client=client,
-            bucket=settings.r2_bucket_name,
+            bucket=bucket,
             raw_prefix=settings.r2_raw_prefix,
         )
 
