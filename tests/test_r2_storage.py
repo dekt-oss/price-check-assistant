@@ -20,6 +20,7 @@ class FakeS3Client:
     def __init__(self) -> None:
         self.objects: dict[tuple[str, str], dict[str, object]] = {}
         self.put_count = 0
+        self.list_count = 0
 
     def head_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
         stored = self.objects.get((Bucket, Key))
@@ -60,6 +61,7 @@ class FakeS3Client:
         return {}
 
     def list_objects_v2(self, **kwargs: object) -> dict[str, object]:
+        self.list_count += 1
         bucket = str(kwargs["Bucket"])
         prefix = str(kwargs.get("Prefix") or "")
         max_keys = int(kwargs.get("MaxKeys") or 1000)
@@ -228,3 +230,24 @@ def test_duplicate_does_not_need_extra_capacity() -> None:
 
     assert second.created is False
     assert client.put_count == 1
+
+
+def test_quota_scan_is_reused_for_multiple_new_writes() -> None:
+    client = FakeS3Client()
+    store = R2RawEvidenceStore(
+        client=client,
+        bucket="price-check-raw",
+        hard_limit_bytes=10_000,
+        warn_limit_bytes=9_000,
+    )
+
+    first = store.put_public_json(source_operation="track-b", payload={"row": 1})
+    lists_after_first = client.list_count
+    second = store.put_public_json(source_operation="track-b", payload={"row": 2})
+
+    assert first.created is True
+    assert second.created is True
+    assert lists_after_first == 1
+    assert client.list_count == 1
+    status = store.quota_status()
+    assert status.stored_bytes == first.stored_bytes + second.stored_bytes
