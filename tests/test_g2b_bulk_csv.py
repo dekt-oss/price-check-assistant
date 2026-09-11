@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -49,9 +50,9 @@ def test_bulk_ingest_filters_scope_and_stores_manifest(tmp_path: Path) -> None:
     summary = ingest_bulk_csv(
         path=path,
         store=store,
-        begin=__import__("datetime").date(2025, 9, 12),
-        end=__import__("datetime").date(2026, 9, 11),
-        retrieved_date=__import__("datetime").date(2026, 9, 12),
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        retrieved_date=date(2026, 9, 12),
         chunk_size=1,
     )
 
@@ -62,8 +63,9 @@ def test_bulk_ingest_filters_scope_and_stores_manifest(tmp_path: Path) -> None:
     assert summary.latest_approval_date == "2026-09-10"
     assert summary.gap_plan.strategy == "BULK_ONLY"
     assert summary.gap_plan.api_gap_begin_date is None
-    assert summary.chunks_stored == 3  # two data chunks + one manifest
-    assert len(store.payloads) == 3
+    assert summary.data_chunks_stored == 2
+    assert summary.manifest_object_key.endswith(".json.gz")
+    assert len(store.payloads) == 3  # two data chunks + one manifest
 
     first = store.payloads[0]
     assert isinstance(first, dict)
@@ -74,8 +76,6 @@ def test_bulk_ingest_filters_scope_and_stores_manifest(tmp_path: Path) -> None:
 
 
 def test_gap_plan_only_requests_post_bulk_freshness_window() -> None:
-    from datetime import date
-
     plan = build_gap_plan(retrieved_date=date(2026, 9, 11), requested_end=date(2026, 9, 11))
 
     assert plan.strategy == "RECENT_GAP_ONLY"
@@ -92,8 +92,6 @@ def test_cp949_bulk_csv_is_supported(tmp_path: Path) -> None:
 
 
 def test_missing_required_header_fails_closed(tmp_path: Path) -> None:
-    from datetime import date
-
     path = tmp_path / "bad.csv"
     path.write_text("결재일자,납품단가\n2026-09-10,100\n", encoding="utf-8")
 
