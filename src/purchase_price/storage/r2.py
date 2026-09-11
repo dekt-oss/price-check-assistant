@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 import boto3
 from botocore.exceptions import ClientError
@@ -191,6 +192,33 @@ class R2RawEvidenceStore:
             "key_count": int(response.get("KeyCount") or 0),
             "status": "SUCCESS",
         }
+
+    def probe_write_access(self) -> dict[str, object]:
+        """Verify write/head/delete permissions outside the locked raw prefix."""
+
+        key = f"smoke/v1/{uuid4().hex}.txt"
+        body = b"price-check-assistant-r2-smoke"
+        wrote = False
+        try:
+            self._client.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=body,
+                ContentType="text/plain",
+                Metadata={"purpose": "connection-smoke"},
+                StorageClass="STANDARD",
+            )
+            wrote = True
+            head = self._client.head_object(Bucket=self.bucket, Key=key)
+            return {
+                "bucket": self.bucket,
+                "key": key,
+                "stored_bytes": int(head.get("ContentLength") or 0),
+                "status": "SUCCESS",
+            }
+        finally:
+            if wrote:
+                self._client.delete_object(Bucket=self.bucket, Key=key)
 
     def _head_if_exists(self, key: str) -> dict[str, Any] | None:
         try:
