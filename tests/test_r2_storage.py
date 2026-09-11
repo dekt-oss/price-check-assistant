@@ -76,6 +76,19 @@ def test_settings_derive_r2_endpoint_and_require_complete_credentials() -> None:
         r2_secret_access_key="secret",
     )
     assert configured.r2_configured is True
+    assert configured.resolved_r2_bucket_name == "raw"
+
+
+def test_settings_accept_existing_r2_bucket_alias() -> None:
+    configured = Settings(
+        r2_account_id="abc123",
+        r2_bucket="price-check-raw",
+        r2_access_key_id="access",
+        r2_secret_access_key="secret",
+    )
+
+    assert configured.r2_configured is True
+    assert configured.resolved_r2_bucket_name == "price-check-raw"
 
 
 def test_content_addressed_write_is_deterministic_and_idempotent() -> None:
