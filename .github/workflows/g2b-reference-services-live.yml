@@ -8,7 +8,6 @@ on:
       - "src/purchase_price/services/g2b_catalog.py"
       - "src/purchase_price/services/g2b_lifecycle.py"
       - "src/purchase_price/scripts/probe_g2b_reference_services.py"
-      - "src/purchase_price/scripts/collect_g2b_track_b_r2.py"
   workflow_dispatch:
 
 permissions:
@@ -17,7 +16,7 @@ permissions:
 jobs:
   reference-services:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 8
     env:
       G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
       G2B_LIFECYCLE_SERVICE_KEY: ${{ secrets.G2B_LIFECYCLE_SERVICE_KEY }}
@@ -25,10 +24,6 @@ jobs:
       DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
     steps:
       - name: Checkout
@@ -48,36 +43,6 @@ jobs:
             --product-id 24888744 \
             --bid-notice-no 20160234982 \
             --output artifacts/g2b-reference-services/report.json
-
-      - name: Run first bounded Track B backfill batch
-        if: github.event_name == 'pull_request' && github.head_ref == 'feat/track-b-r2-backfill'
-        run: |
-          python -m purchase_price.scripts.collect_g2b_track_b_r2 \
-            --start-index 0 \
-            --start-page 1 \
-            --request-budget 250 \
-            --days 365 \
-            --end-date 2026-09-11 \
-            --output artifacts/track-b-backfill/batch-000.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          path = Path("artifacts/track-b-backfill/batch-000.json")
-          report = json.loads(path.read_text(encoding="utf-8"))
-          print("track_b_status=", report.get("status"))
-          print("stop_reason=", report.get("stop_reason"))
-          print("total_requests=", report.get("total_requests"))
-          print("codes_completed=", report.get("codes_completed"))
-          print("pages_stored=", report.get("pages_stored"))
-          print("rows_seen=", report.get("rows_seen"))
-          print("r2_objects_created=", report.get("r2_objects_created"))
-          print("r2_objects_reused=", report.get("r2_objects_reused"))
-          print("r2_stored_bytes_created=", report.get("r2_stored_bytes_created"))
-          print("next_cursor=", report.get("next_cursor"))
-          if report.get("stop_reason") not in {"REQUEST_BUDGET_EXHAUSTED", "TARGET_COMPLETE"}:
-              raise SystemExit(1)
-          PY
 
       - name: Print safe summary
         if: always()
@@ -100,15 +65,6 @@ jobs:
               )
           PY
           fi
-
-      - name: Upload Track B backfill evidence
-        if: always() && github.event_name == 'pull_request' && github.head_ref == 'feat/track-b-r2-backfill'
-        uses: actions/upload-artifact@v4
-        with:
-          name: track-b-backfill-first-batch
-          path: artifacts/track-b-backfill/batch-000.json
-          if-no-files-found: warn
-          retention-days: 14
 
       - name: Upload validation evidence
         if: always()
