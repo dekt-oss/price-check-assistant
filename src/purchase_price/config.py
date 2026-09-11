@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     # intended for public procurement evidence only; private hospital purchasing data is excluded.
     r2_account_id: str | None = None
     r2_bucket_name: str | None = None
+    # Compatibility alias for deployments that already use R2_BUCKET.
+    r2_bucket: str | None = None
     r2_access_key_id: str | None = None
     r2_secret_access_key: str | None = None
     r2_endpoint_url: str | None = None
@@ -65,12 +67,19 @@ class Settings(BaseSettings):
         return None
 
     @property
+    def resolved_r2_bucket_name(self) -> str | None:
+        for value in (self.r2_bucket_name, self.r2_bucket):
+            if value and value.strip():
+                return value.strip()
+        return None
+
+    @property
     def r2_configured(self) -> bool:
         return all(
             value and value.strip()
             for value in (
                 self.resolved_r2_endpoint_url,
-                self.r2_bucket_name,
+                self.resolved_r2_bucket_name,
                 self.r2_access_key_id,
                 self.r2_secret_access_key,
             )
