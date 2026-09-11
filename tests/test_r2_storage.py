@@ -53,6 +53,10 @@ class FakeS3Client:
         assert isinstance(body, bytes)
         return {"Body": BytesIO(body)}
 
+    def delete_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
+        self.objects.pop((Bucket, Key), None)
+        return {}
+
     def list_objects_v2(self, **kwargs: object) -> dict[str, object]:
         bucket = str(kwargs["Bucket"])
         prefix = str(kwargs.get("Prefix") or "")
@@ -99,7 +103,7 @@ def test_content_addressed_write_is_deterministic_and_idempotent() -> None:
     assert metadata["data-classification"] == "public-provenance"
 
 
-def test_roundtrip_verifies_payload_hash() -> None:
+def test_roundtrip_verifies_payload_hash_and_smokes_permissions() -> None:
     client = FakeS3Client()
     store = R2RawEvidenceStore(client=client, bucket="price-check-raw")
     payload = {"prdctUprc": "97500000", "qty": 2}
@@ -108,6 +112,8 @@ def test_roundtrip_verifies_payload_hash() -> None:
 
     assert store.get_public_json(ref) == payload
     assert store.probe_read_access()["status"] == "SUCCESS"
+    assert store.probe_write_access()["status"] == "SUCCESS"
+    assert all(not key.startswith("smoke/") for _, key in client.objects)
 
 
 def test_existing_object_with_wrong_hash_metadata_fails_closed() -> None:
