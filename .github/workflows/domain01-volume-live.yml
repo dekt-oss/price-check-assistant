@@ -1,9 +1,6 @@
 name: Domain01 Enabled Track B Volume Live Probe
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/domain01-volume-live.yml"
   workflow_dispatch:
 
 permissions:
@@ -11,9 +8,6 @@ permissions:
 
 jobs:
   probe-domain01-volume:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.action == 'synchronize' && github.head_ref == 'feat/domain01-medical-diagnostics-collection')
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:

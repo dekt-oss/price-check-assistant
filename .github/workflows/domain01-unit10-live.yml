@@ -1,10 +1,6 @@
 name: Domain01 Unit10 Dictionary Live Capture
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/domain01-unit10-live.yml"
-      - "src/purchase_price/scripts/capture_domain01_unit10_dictionary.py"
   workflow_dispatch:
 
 permissions:
@@ -12,7 +8,6 @@ permissions:
 
 jobs:
   capture-unit10:
-    if: github.event_name != 'pull_request' || github.head_ref == 'feat/domain01-medical-diagnostics-collection'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
