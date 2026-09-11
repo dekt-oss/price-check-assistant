@@ -27,6 +27,10 @@ class R2IntegrityError(RuntimeError):
     """Raised when an existing object does not match its content-addressed key."""
 
 
+class R2QuotaExceededError(RuntimeError):
+    """Raised before a write would cross the zero-cost R2 storage ceiling."""
+
+
 @dataclass(frozen=True)
 class RawObjectRef:
     bucket: str
@@ -35,6 +39,22 @@ class RawObjectRef:
     uncompressed_bytes: int
     stored_bytes: int
     created: bool
+
+
+@dataclass(frozen=True)
+class R2BucketUsage:
+    object_count: int
+    stored_bytes: int
+    hard_limit_bytes: int
+    warn_limit_bytes: int
+
+    @property
+    def remaining_bytes(self) -> int:
+        return max(self.hard_limit_bytes - self.stored_bytes, 0)
+
+    @property
+    def warning(self) -> bool:
+        return self.stored_bytes >= self.warn_limit_bytes
 
 
 def _json_default(value: object) -> str:
@@ -85,14 +105,33 @@ class R2RawEvidenceStore:
     therefore resolves to the same object. PostgreSQL should store only the returned object key,
     hash, byte sizes and normalized serving data; private hospital purchasing data must not be
     passed to this store in the public PoC.
+
+    Every new object is guarded by an exact bucket-size scan before PUT. The default ceiling is
+    9.0 decimal GB, leaving 1.0 GB below R2 Standard's 10 GB-month free-storage boundary. This is
+    deliberately conservative. The zero-cost guarantee assumes the Cloudflare account is dedicated
+    to this project; other R2 buckets in the same account would consume the same free allowance.
     """
 
-    def __init__(self, *, client: Any, bucket: str, raw_prefix: str = "raw/v1") -> None:
+    def __init__(
+        self,
+        *,
+        client: Any,
+        bucket: str,
+        raw_prefix: str = "raw/v1",
+        hard_limit_bytes: int = 9_000_000_000,
+        warn_limit_bytes: int = 8_000_000_000,
+    ) -> None:
         if not bucket.strip():
             raise R2ConfigurationError("R2 bucket name is required")
+        if hard_limit_bytes <= 0:
+            raise R2ConfigurationError("R2 hard limit must be positive")
+        if warn_limit_bytes <= 0 or warn_limit_bytes > hard_limit_bytes:
+            raise R2ConfigurationError("R2 warning limit must be positive and <= hard limit")
         self._client = client
         self.bucket = bucket.strip()
         self.raw_prefix = raw_prefix.strip("/") or "raw/v1"
+        self.hard_limit_bytes = hard_limit_bytes
+        self.warn_limit_bytes = warn_limit_bytes
 
     @classmethod
     def from_settings(cls, settings: Settings) -> R2RawEvidenceStore:
@@ -118,6 +157,8 @@ class R2RawEvidenceStore:
             client=client,
             bucket=bucket,
             raw_prefix=settings.r2_raw_prefix,
+            hard_limit_bytes=settings.r2_zero_cost_hard_limit_bytes,
+            warn_limit_bytes=settings.r2_zero_cost_warn_limit_bytes,
         )
 
     def put_public_json(self, *, source_operation: str, payload: object) -> RawObjectRef:
@@ -146,6 +187,7 @@ class R2RawEvidenceStore:
                 created=False,
             )
 
+        self._assert_capacity_for_new_object(len(compressed))
         safe_operation = _safe_segment(source_operation)
         self._client.put_object(
             Bucket=self.bucket,
@@ -181,6 +223,44 @@ class R2RawEvidenceStore:
             )
         return json.loads(canonical.decode("utf-8"))
 
+    def measure_bucket_usage(self) -> R2BucketUsage:
+        """Measure exact stored bytes for the dedicated project bucket.
+
+        S3/R2 does not expose an atomic bucket-size counter through the object API, so the safe
+        path paginates every object and sums the server-reported Size. This costs LIST operations,
+        not storage, and keeps the write gate fail-closed without maintaining a drift-prone local
+        counter.
+        """
+
+        object_count = 0
+        stored_bytes = 0
+        continuation_token: str | None = None
+        while True:
+            kwargs: dict[str, object] = {"Bucket": self.bucket, "MaxKeys": 1000}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+            response = self._client.list_objects_v2(**kwargs)
+            contents = response.get("Contents") or []
+            if not isinstance(contents, list):
+                raise R2IntegrityError("R2 ListObjectsV2 returned invalid Contents")
+            for item in contents:
+                if not isinstance(item, dict):
+                    continue
+                stored_bytes += int(item.get("Size") or 0)
+                object_count += 1
+            if not response.get("IsTruncated"):
+                break
+            continuation_token = str(response.get("NextContinuationToken") or "").strip()
+            if not continuation_token:
+                raise R2IntegrityError("R2 ListObjectsV2 truncated without continuation token")
+
+        return R2BucketUsage(
+            object_count=object_count,
+            stored_bytes=stored_bytes,
+            hard_limit_bytes=self.hard_limit_bytes,
+            warn_limit_bytes=self.warn_limit_bytes,
+        )
+
     def probe_read_access(self) -> dict[str, object]:
         response = self._client.list_objects_v2(
             Bucket=self.bucket,
@@ -199,6 +279,7 @@ class R2RawEvidenceStore:
 
         key = f"smoke/v1/{uuid4().hex}.txt"
         body = b"price-check-assistant-r2-smoke"
+        self._assert_capacity_for_new_object(len(body))
         wrote = False
         try:
             self._client.put_object(
@@ -220,6 +301,20 @@ class R2RawEvidenceStore:
         finally:
             if wrote:
                 self._client.delete_object(Bucket=self.bucket, Key=key)
+
+    def _assert_capacity_for_new_object(self, new_object_bytes: int) -> R2BucketUsage:
+        if new_object_bytes < 0:
+            raise ValueError("new_object_bytes must be non-negative")
+        usage = self.measure_bucket_usage()
+        projected = usage.stored_bytes + new_object_bytes
+        if projected > usage.hard_limit_bytes:
+            raise R2QuotaExceededError(
+                "R2 zero-cost hard limit would be exceeded: "
+                f"current={usage.stored_bytes} new={new_object_bytes} "
+                f"projected={projected} hard_limit={usage.hard_limit_bytes}. "
+                "Write blocked before PUT."
+            )
+        return usage
 
     def _head_if_exists(self, key: str) -> dict[str, Any] | None:
         try:
