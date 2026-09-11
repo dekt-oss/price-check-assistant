@@ -8,6 +8,8 @@ on:
       - "src/purchase_price/services/g2b_catalog.py"
       - "src/purchase_price/services/g2b_lifecycle.py"
       - "src/purchase_price/scripts/probe_g2b_reference_services.py"
+      - "src/purchase_price/scripts/probe_r2_storage.py"
+      - "src/purchase_price/storage/r2.py"
   workflow_dispatch:
 
 permissions:
@@ -24,6 +26,11 @@ jobs:
       DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
     steps:
       - name: Checkout
@@ -43,6 +50,10 @@ jobs:
             --product-id 24888744 \
             --bid-notice-no 20160234982 \
             --output artifacts/g2b-reference-services/report.json
+
+      - name: R2 live smoke for price-check branch
+        if: github.event_name == 'pull_request' && github.head_ref == 'feat/r2-raw-evidence-foundation'
+        run: python -m purchase_price.scripts.probe_r2_storage --write-smoke --raw-smoke
 
       - name: Print safe summary
         if: always()
