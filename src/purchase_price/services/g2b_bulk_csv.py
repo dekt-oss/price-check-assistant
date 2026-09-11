@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 from dataclasses import asdict, dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Protocol
 
@@ -12,6 +12,8 @@ from purchase_price.storage.r2 import RawObjectRef
 DATASET_ID = "15053481"
 REPORT_ID = "UI-ADOXAA-038R"
 DATASET_NAME = "조달청_나라장터쇼핑몰 납품요구 물품 내역"
+DATASET_URL = "https://www.data.go.kr/data/15053481/fileData.do"
+BULK_DOWNLOAD_URL = "https://data.g2b.go.kr/link/AISC001_01/?reptNm=UI-ADOXAA-038R"
 DEFAULT_TARGET_SEGMENTS = ("42", "41", "43", "44", "23", "27", "46", "39")
 
 _DETAIL_CODE_ALIASES = (
@@ -75,7 +77,8 @@ class BulkCsvSummary:
     distinct_detail_codes: int
     earliest_approval_date: str | None
     latest_approval_date: str | None
-    chunks_stored: int
+    data_chunks_stored: int
+    manifest_object_key: str
     r2_objects_created: int
     r2_objects_reused: int
     r2_stored_bytes_created: int
@@ -102,7 +105,8 @@ def _resolve_header(fieldnames: Iterable[str], aliases: tuple[str, ...], label: 
 
 
 def detect_csv_encoding(path: Path) -> str:
-    sample = path.read_bytes()[:131_072]
+    with path.open("rb") as handle:
+        sample = handle.read(131_072)
     for encoding in ("utf-8-sig", "cp949"):
         try:
             sample.decode(encoding)
@@ -131,8 +135,6 @@ def parse_source_date(value: str) -> date:
         "%Y.%m.%d",
         "%Y-%m-%d %H:%M:%S",
     )
-    from datetime import datetime
-
     for fmt in candidates:
         try:
             return datetime.strptime(raw, fmt).date()
@@ -157,7 +159,7 @@ def normalize_detail_code(value: str) -> str:
 
 
 def build_gap_plan(*, retrieved_date: date, requested_end: date) -> BulkGapPlan:
-    # The official dataset contract states that the file contains data through D-1.
+    # Official metadata states this report is complete through D-1 by approval date.
     source_cutoff = retrieved_date - timedelta(days=1)
     if requested_end <= source_cutoff:
         return BulkGapPlan(
@@ -176,8 +178,8 @@ def build_gap_plan(*, retrieved_date: date, requested_end: date) -> BulkGapPlan:
         api_gap_end_date=requested_end.isoformat(),
         strategy="RECENT_GAP_ONLY",
         reason=(
-            "Use the API only for the post-bulk freshness window. Do not re-scan historical "
-            "10-digit classifications already covered by the authoritative bulk file."
+            "Use Track B API only for the post-bulk freshness window and only for exact "
+            "requested/gap codes; never repeat the historical all-code sweep."
         ),
     )
 
@@ -236,7 +238,7 @@ def ingest_bulk_csv(
     seen_codes: set[str] = set()
     earliest: date | None = None
     latest: date | None = None
-    chunks_stored = 0
+    data_chunks_stored = 0
     created = 0
     reused = 0
     created_bytes = 0
@@ -246,7 +248,7 @@ def ingest_bulk_csv(
     chunk_first_line = 0
 
     def flush_chunk(last_line: int) -> None:
-        nonlocal chunks_stored, created, reused, created_bytes, first_key, last_key
+        nonlocal data_chunks_stored, created, reused, created_bytes, first_key, last_key
         nonlocal chunk_rows, chunk_first_line
         if not chunk_rows:
             return
@@ -256,6 +258,7 @@ def ingest_bulk_csv(
                 "dataset_id": DATASET_ID,
                 "report_id": REPORT_ID,
                 "dataset_name": DATASET_NAME,
+                "dataset_url": DATASET_URL,
                 "source_sha256": source_hash,
                 "encoding": encoding,
                 "retrieved_date": retrieved_date.isoformat(),
@@ -274,7 +277,7 @@ def ingest_bulk_csv(
             source_operation="g2b-shopping-delivery-bulk-csv-chunk",
             payload=payload,
         )
-        chunks_stored += 1
+        data_chunks_stored += 1
         first_key = first_key or ref.key
         last_key = ref.key
         if ref.created:
@@ -298,6 +301,11 @@ def ingest_bulk_csv(
         request_no_column = _optional_header(reader.fieldnames, _REQUEST_NO_ALIASES)
         change_order_column = _optional_header(reader.fieldnames, _CHANGE_ORDER_ALIASES)
         line_no_column = _optional_header(reader.fieldnames, _LINE_NO_ALIASES)
+        detail_key = _normalized_header(detail_column)
+        approval_key = _normalized_header(approval_column)
+        request_key = _normalized_header(request_no_column) if request_no_column else None
+        change_key = _normalized_header(change_order_column) if change_order_column else None
+        line_key = _normalized_header(line_no_column) if line_no_column else None
 
         for source_line, raw_row in enumerate(reader, start=2):
             rows_read += 1
@@ -306,19 +314,17 @@ def ingest_bulk_csv(
                 for key, value in raw_row.items()
                 if key is not None
             }
-            raw_code = row.get(_normalized_header(detail_column), "")
+            raw_code = row.get(detail_key, "")
             if not raw_code.strip():
                 continue
             try:
                 detail_code = normalize_detail_code(raw_code)
             except BulkCsvContractError:
-                # Non-item summary rows may exist in exported reports. Ignore rows that cannot
-                # identify a 10-digit detail classification instead of misclassifying them.
+                # Exported reports can contain summary rows without a 10-digit item code.
                 continue
             if detail_code[:2] not in segment_set:
                 continue
-            approval_value = row.get(_normalized_header(approval_column), "")
-            approval_date = parse_source_date(approval_value)
+            approval_date = parse_source_date(row.get(approval_key, ""))
             if approval_date < begin or approval_date > end:
                 continue
 
@@ -326,13 +332,9 @@ def ingest_bulk_csv(
             row["_normalized_approval_date"] = approval_date.isoformat()
             stable_key = _stable_source_key(
                 row,
-                request_no_column=_normalized_header(request_no_column)
-                if request_no_column
-                else None,
-                change_order_column=_normalized_header(change_order_column)
-                if change_order_column
-                else None,
-                line_no_column=_normalized_header(line_no_column) if line_no_column else None,
+                request_no_column=request_key,
+                change_order_column=change_key,
+                line_no_column=line_key,
             )
             if stable_key:
                 row["_stable_source_key"] = stable_key
@@ -353,6 +355,8 @@ def ingest_bulk_csv(
         "schema": "g2b-shopping-delivery-bulk-manifest-v1",
         "dataset_id": DATASET_ID,
         "report_id": REPORT_ID,
+        "dataset_url": DATASET_URL,
+        "bulk_download_url": BULK_DOWNLOAD_URL,
         "source_sha256": source_hash,
         "retrieved_date": retrieved_date.isoformat(),
         "source_cutoff_date": gap_plan.source_cutoff_date,
@@ -364,14 +368,13 @@ def ingest_bulk_csv(
         "distinct_detail_codes": len(seen_codes),
         "earliest_approval_date": earliest.isoformat() if earliest else None,
         "latest_approval_date": latest.isoformat() if latest else None,
-        "chunks_stored": chunks_stored,
+        "data_chunks_stored": data_chunks_stored,
         "gap_plan": asdict(gap_plan),
     }
     manifest_ref = store.put_public_json(
         source_operation="g2b-shopping-delivery-bulk-csv-manifest",
         payload=manifest_payload,
     )
-    chunks_stored += 1
     first_key = first_key or manifest_ref.key
     last_key = manifest_ref.key
     if manifest_ref.created:
@@ -394,7 +397,8 @@ def ingest_bulk_csv(
         distinct_detail_codes=len(seen_codes),
         earliest_approval_date=earliest.isoformat() if earliest else None,
         latest_approval_date=latest.isoformat() if latest else None,
-        chunks_stored=chunks_stored,
+        data_chunks_stored=data_chunks_stored,
+        manifest_object_key=manifest_ref.key,
         r2_objects_created=created,
         r2_objects_reused=reused,
         r2_stored_bytes_created=created_bytes,
