@@ -8,8 +8,6 @@ on:
       - "src/purchase_price/services/g2b_catalog.py"
       - "src/purchase_price/services/g2b_lifecycle.py"
       - "src/purchase_price/scripts/probe_g2b_reference_services.py"
-      - "src/purchase_price/scripts/probe_collection_scope_size.py"
-      - "src/purchase_price/scripts/probe_collection_volume_sample.py"
   workflow_dispatch:
 
 permissions:
@@ -45,14 +43,6 @@ jobs:
             --product-id 24888744 \
             --bid-notice-no 20160234982 \
             --output artifacts/g2b-reference-services/report.json
-
-      - name: Size intended Track B classification scope
-        if: always() && github.event_name == 'pull_request' && github.head_ref == 'feat/r2-raw-evidence-foundation'
-        run: python -m purchase_price.scripts.probe_collection_scope_size
-
-      - name: Estimate Track B one-year collection volume
-        if: always() && github.event_name == 'pull_request' && github.head_ref == 'feat/r2-raw-evidence-foundation'
-        run: python -m purchase_price.scripts.probe_collection_volume_sample
 
       - name: Print safe summary
         if: always()
