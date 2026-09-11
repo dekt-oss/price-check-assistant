@@ -4,8 +4,8 @@ from datetime import date
 from typing import Any
 
 from purchase_price.scripts.collect_g2b_track_b_r2 import (
-    CollectionCursor,
     TRACK_B_OPERATION,
+    CollectionCursor,
     collect_track_b_batch,
 )
 from purchase_price.storage.r2 import RawObjectRef, payload_sha256
