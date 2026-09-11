@@ -21,7 +21,8 @@ from purchase_price.storage.r2 import R2RawEvidenceStore, RawObjectRef
 UNIT10_OPERATION = "getPrdctClsfcNoUnit10Info02"
 TRACK_B_OPERATION = G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS.value
 PAGE_SIZE = 999
-TARGET_SEGMENTS = ("23", "27", "39", "41", "42", "43", "44", "46")
+# Collection priority follows the hospital-use scope: medical -> lab -> IT -> office -> tools/safety/electrical.
+TARGET_SEGMENTS = ("42", "41", "43", "44", "23", "27", "46", "39")
 MAX_REQUEST_BUDGET = 900
 
 
@@ -92,14 +93,16 @@ def _fetch_dictionary(
 
 
 def _target_codes(items: list[dict[str, Any]], segments: tuple[str, ...]) -> list[str]:
-    segment_set = set(segments)
-    codes: set[str] = set()
+    by_segment: dict[str, set[str]] = {segment: set() for segment in segments}
     for item in items:
         code = str(item.get("dtilPrdctClsfcNo") or "").strip()
         use_yn = str(item.get("useYn") or "").strip().upper()
-        if len(code) == 10 and code.isdigit() and code[:2] in segment_set and use_yn == "Y":
-            codes.add(code)
-    return sorted(codes)
+        if len(code) != 10 or not code.isdigit() or use_yn != "Y":
+            continue
+        segment = code[:2]
+        if segment in by_segment:
+            by_segment[segment].add(code)
+    return [code for segment in segments for code in sorted(by_segment[segment])]
 
 
 def _track_b_params(
