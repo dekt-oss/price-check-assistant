@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import io
 import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TextIO
 
 from purchase_price.storage.r2 import RawObjectRef
 
@@ -27,10 +26,11 @@ _LINE_NO_ALIASES = ("납품요구물품순번", "물품순번", "품목", "prdct
 _FROM_RE = re.compile(r"기준일자\(From\)\s*\r?\n\s*(\d{8})")
 _TO_RE = re.compile(r"기준일자\(To\)\s*\r?\n\s*(\d{8})")
 _OUTPUT_RE = re.compile(r"출력일자\s*:\s*(\d{4}-\d{2}-\d{2})")
+_MAX_PREAMBLE_LINES = 500
 
 
 class BulkCsvContractError(RuntimeError):
-    """Raised when the official bulk export cannot be interpreted safely."""
+    """Raised when the official G2B bulk export cannot be interpreted safely."""
 
 
 class RawStore(Protocol):
@@ -42,8 +42,8 @@ class BulkSourceContract:
     encoding: str
     delimiter: str
     header_line: int
-    query_begin_date: str | None
-    query_end_date: str | None
+    query_begin_date: str
+    query_end_date: str
     output_date: str | None
 
 
@@ -105,10 +105,7 @@ def _resolve_header(fieldnames: Iterable[str], aliases: tuple[str, ...], label: 
 
 def _optional_header(fieldnames: Iterable[str], aliases: tuple[str, ...]) -> str | None:
     normalized = {_normalized_header(name): name for name in fieldnames if name is not None}
-    for alias in aliases:
-        if alias in normalized:
-            return normalized[alias]
-    return None
+    return next((normalized[alias] for alias in aliases if alias in normalized), None)
 
 
 def detect_csv_encoding(path: Path) -> str:
@@ -137,40 +134,49 @@ def _parse_yyyymmdd(value: str) -> date:
     return datetime.strptime(value, "%Y%m%d").date()
 
 
-def inspect_bulk_export(path: Path) -> tuple[BulkSourceContract, str]:
+def inspect_bulk_export(path: Path) -> BulkSourceContract:
     encoding = detect_csv_encoding(path)
-    text = path.read_text(encoding=encoding)
-    lines = text.splitlines()
-    header_index: int | None = None
+    preamble_lines: list[str] = []
     delimiter: str | None = None
-    for index, line in enumerate(lines):
-        normalized = line.replace('"', "")
-        if "납품요구번호" not in normalized or "세부품명번호" not in normalized:
-            continue
-        if "\t" in line:
-            delimiter = "\t"
-        elif "," in line:
-            delimiter = ","
-        else:
-            continue
-        header_index = index
-        break
-    if header_index is None or delimiter is None:
+    header_line: int | None = None
+    with path.open("r", encoding=encoding, newline="") as handle:
+        for line_no, line in enumerate(handle, start=1):
+            normalized = line.replace('"', "")
+            if "납품요구번호" in normalized and "세부품명번호" in normalized:
+                delimiter = "\t" if "\t" in line else "," if "," in line else None
+                header_line = line_no
+                break
+            preamble_lines.append(line)
+            if line_no >= _MAX_PREAMBLE_LINES:
+                break
+    if header_line is None or delimiter is None:
         raise BulkCsvContractError("Could not locate the G2B bulk export header row")
 
-    preamble = "\n".join(lines[:header_index])
+    preamble = "".join(preamble_lines)
     from_match = _FROM_RE.search(preamble)
     to_match = _TO_RE.search(preamble)
+    if not from_match or not to_match:
+        raise BulkCsvContractError("Official G2B export must include verified From/To search dates")
     output_match = _OUTPUT_RE.search(preamble)
-    contract = BulkSourceContract(
+    return BulkSourceContract(
         encoding=encoding,
         delimiter=delimiter,
-        header_line=header_index + 1,
-        query_begin_date=_parse_yyyymmdd(from_match.group(1)).isoformat() if from_match else None,
-        query_end_date=_parse_yyyymmdd(to_match.group(1)).isoformat() if to_match else None,
+        header_line=header_line,
+        query_begin_date=_parse_yyyymmdd(from_match.group(1)).isoformat(),
+        query_end_date=_parse_yyyymmdd(to_match.group(1)).isoformat(),
         output_date=output_match.group(1) if output_match else None,
     )
-    return contract, "\n".join(lines[header_index:])
+
+
+def _data_reader(path: Path, contract: BulkSourceContract) -> tuple[TextIO, csv.DictReader]:
+    handle = path.open("r", encoding=contract.encoding, newline="")
+    try:
+        for _ in range(contract.header_line - 1):
+            next(handle)
+        return handle, csv.DictReader(handle, delimiter=contract.delimiter)
+    except Exception:
+        handle.close()
+        raise
 
 
 def parse_source_date(value: str) -> date:
@@ -203,16 +209,15 @@ def build_gap_plan(
     retrieved_date: date,
     requested_begin: date,
     requested_end: date,
-    source_begin: date | None = None,
-    source_end: date | None = None,
+    source_begin: date,
+    source_end: date,
 ) -> BulkGapPlan:
     declared_cutoff = retrieved_date - timedelta(days=1)
-    effective_begin = source_begin or requested_begin
-    effective_end = min(source_end or declared_cutoff, declared_cutoff)
-    if effective_begin > requested_begin:
+    effective_end = min(source_end, declared_cutoff)
+    if source_begin > requested_begin:
         raise BulkCsvContractError(
             "Bulk export does not cover the requested historical start: "
-            f"source_begin={effective_begin.isoformat()} requested_begin={requested_begin.isoformat()}"
+            f"source_begin={source_begin.isoformat()} requested_begin={requested_begin.isoformat()}"
         )
     if effective_end < requested_begin:
         raise BulkCsvContractError(
@@ -221,7 +226,7 @@ def build_gap_plan(
         )
     if requested_end <= effective_end:
         return BulkGapPlan(
-            source_begin_date=effective_begin.isoformat(),
+            source_begin_date=source_begin.isoformat(),
             source_cutoff_date=effective_end.isoformat(),
             requested_end_date=requested_end.isoformat(),
             api_gap_begin_date=None,
@@ -231,7 +236,7 @@ def build_gap_plan(
         )
     gap_begin = effective_end + timedelta(days=1)
     return BulkGapPlan(
-        source_begin_date=effective_begin.isoformat(),
+        source_begin_date=source_begin.isoformat(),
         source_cutoff_date=effective_end.isoformat(),
         requested_end_date=requested_end.isoformat(),
         api_gap_begin_date=gap_begin.isoformat(),
@@ -246,7 +251,6 @@ def build_gap_plan(
 
 def _stable_source_key(
     row: dict[str, str],
-    *,
     request_no_column: str | None,
     change_order_column: str | None,
     line_no_column: str | None,
@@ -274,9 +278,9 @@ def ingest_bulk_csv(
     if not path.is_file():
         raise FileNotFoundError(path)
 
-    contract, data_text = inspect_bulk_export(path)
-    source_begin = date.fromisoformat(contract.query_begin_date) if contract.query_begin_date else None
-    source_end = date.fromisoformat(contract.query_end_date) if contract.query_end_date else None
+    contract = inspect_bulk_export(path)
+    source_begin = date.fromisoformat(contract.query_begin_date)
+    source_end = date.fromisoformat(contract.query_end_date)
     gap_plan = build_gap_plan(
         retrieved_date=retrieved_date,
         requested_begin=begin,
@@ -287,13 +291,11 @@ def ingest_bulk_csv(
     source_hash = sha256_file(path)
     segment_set = set(target_segments)
 
-    rows_read = 0
-    rows_in_scope = 0
+    rows_read = rows_in_scope = data_chunks_stored = 0
+    created = reused = created_bytes = 0
     seen_codes: set[str] = set()
     earliest: date | None = None
     latest: date | None = None
-    data_chunks_stored = 0
-    created = reused = created_bytes = 0
     first_key: str | None = None
     last_key: str | None = None
     chunk_rows: list[dict[str, str]] = []
@@ -340,60 +342,57 @@ def ingest_bulk_csv(
         chunk_rows = []
         chunk_first_line = 0
 
-    reader = csv.DictReader(io.StringIO(data_text), delimiter=contract.delimiter)
-    if not reader.fieldnames:
-        raise BulkCsvContractError("Bulk export has no header row")
-    detail_column = _resolve_header(reader.fieldnames, _DETAIL_CODE_ALIASES, "detail code")
-    approval_column = _resolve_header(reader.fieldnames, _APPROVAL_DATE_ALIASES, "approval date")
-    request_column = _optional_header(reader.fieldnames, _REQUEST_NO_ALIASES)
-    change_column = _optional_header(reader.fieldnames, _CHANGE_ORDER_ALIASES)
-    line_column = _optional_header(reader.fieldnames, _LINE_NO_ALIASES)
-    detail_key = _normalized_header(detail_column)
-    approval_key = _normalized_header(approval_column)
-    request_key = _normalized_header(request_column) if request_column else None
-    change_key = _normalized_header(change_column) if change_column else None
-    line_key = _normalized_header(line_column) if line_column else None
+    handle, reader = _data_reader(path, contract)
+    try:
+        if not reader.fieldnames:
+            raise BulkCsvContractError("Bulk export has no header row")
+        detail_column = _resolve_header(reader.fieldnames, _DETAIL_CODE_ALIASES, "detail code")
+        approval_column = _resolve_header(reader.fieldnames, _APPROVAL_DATE_ALIASES, "approval date")
+        request_column = _optional_header(reader.fieldnames, _REQUEST_NO_ALIASES)
+        change_column = _optional_header(reader.fieldnames, _CHANGE_ORDER_ALIASES)
+        line_column = _optional_header(reader.fieldnames, _LINE_NO_ALIASES)
+        detail_key = _normalized_header(detail_column)
+        approval_key = _normalized_header(approval_column)
+        request_key = _normalized_header(request_column) if request_column else None
+        change_key = _normalized_header(change_column) if change_column else None
+        line_key = _normalized_header(line_column) if line_column else None
 
-    for source_line, raw_row in enumerate(reader, start=contract.header_line + 1):
-        rows_read += 1
-        row = {
-            _normalized_header(str(key)): "" if value is None else str(value).strip()
-            for key, value in raw_row.items()
-            if key is not None
-        }
-        raw_code = row.get(detail_key, "")
-        if not raw_code.strip():
-            continue
-        try:
-            detail_code = normalize_detail_code(raw_code)
-        except BulkCsvContractError:
-            continue
-        if detail_code[:2] not in segment_set:
-            continue
-        approval_date = parse_source_date(row.get(approval_key, ""))
-        if approval_date < begin or approval_date > end:
-            continue
-
-        row["_normalized_detail_code"] = detail_code
-        row["_normalized_approval_date"] = approval_date.isoformat()
-        stable_key = _stable_source_key(
-            row,
-            request_no_column=request_key,
-            change_order_column=change_key,
-            line_no_column=line_key,
-        )
-        if stable_key:
-            row["_stable_source_key"] = stable_key
-        if not chunk_rows:
-            chunk_first_line = source_line
-        chunk_rows.append(row)
-        rows_in_scope += 1
-        seen_codes.add(detail_code)
-        earliest = approval_date if earliest is None else min(earliest, approval_date)
-        latest = approval_date if latest is None else max(latest, approval_date)
-        if len(chunk_rows) >= chunk_size:
-            flush_chunk(source_line)
-    flush_chunk(contract.header_line + rows_read)
+        for source_line, raw_row in enumerate(reader, start=contract.header_line + 1):
+            rows_read += 1
+            row = {
+                _normalized_header(str(key)): "" if value is None else str(value).strip()
+                for key, value in raw_row.items()
+                if key is not None
+            }
+            raw_code = row.get(detail_key, "")
+            if not raw_code.strip():
+                continue
+            try:
+                detail_code = normalize_detail_code(raw_code)
+            except BulkCsvContractError:
+                continue
+            if detail_code[:2] not in segment_set:
+                continue
+            approval_date = parse_source_date(row.get(approval_key, ""))
+            if approval_date < begin or approval_date > end:
+                continue
+            row["_normalized_detail_code"] = detail_code
+            row["_normalized_approval_date"] = approval_date.isoformat()
+            stable_key = _stable_source_key(row, request_key, change_key, line_key)
+            if stable_key:
+                row["_stable_source_key"] = stable_key
+            if not chunk_rows:
+                chunk_first_line = source_line
+            chunk_rows.append(row)
+            rows_in_scope += 1
+            seen_codes.add(detail_code)
+            earliest = approval_date if earliest is None else min(earliest, approval_date)
+            latest = approval_date if latest is None else max(latest, approval_date)
+            if len(chunk_rows) >= chunk_size:
+                flush_chunk(source_line)
+        flush_chunk(contract.header_line + rows_read)
+    finally:
+        handle.close()
 
     manifest_payload = {
         "schema": "g2b-shopping-delivery-bulk-manifest-v2",
@@ -431,9 +430,6 @@ def ingest_bulk_csv(
         created_bytes += manifest_ref.stored_bytes
     else:
         reused += 1
-
-    if not contract.query_begin_date or not contract.query_end_date:
-        raise BulkCsvContractError("Official G2B export must include verified From/To search dates")
 
     return BulkCsvSummary(
         source_path=str(path),
