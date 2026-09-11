@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import csv
 import hashlib
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Protocol
 
 from purchase_price.storage.r2 import RawObjectRef
 
