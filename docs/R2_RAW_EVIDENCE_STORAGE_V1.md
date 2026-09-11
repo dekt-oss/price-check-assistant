@@ -3,13 +3,13 @@
 - 작성일: 2026-09-11
 - Repository: `dekt-oss/price-check-assistant`
 - 목적: PostgreSQL은 검색/정규화/가격판정용 Operational DB로 유지하고, 공개 원천 Raw Evidence와 향후 DB backup은 Cloudflare R2에 분리 보관한다.
-- 상태: **Foundation implemented / live bucket smoke pending**
+- 상태: **Live R2 read/write + G2B→R2 vertical slice PASSED / zero-cost guard·bucket lock pending**
 
 ---
 
 ## 1. 결정
 
-기존 DB Collection v3의 `raw_source_records.payload_json` 장기보관 방향을 다음과 같이 수정한다.
+DB Collection v3의 Raw Evidence 장기보관은 다음 구조를 사용한다.
 
 ```text
 G2B / MFDS / public source
@@ -38,16 +38,14 @@ G2B / MFDS / public source
 2. PostgreSQL은 query, FK, unique, upsert, supersession, cursor, serving을 담당한다.
 3. R2는 공개 Raw Evidence의 저비용 장기보관 및 재처리 원본을 담당한다.
 4. Public PoC에서 병원 내부 비공개 견적·구매데이터는 R2에 저장하지 않는다.
-5. API key, Authorization header, deployment secret을 payload에 저장하지 않는다.
-6. 전체 HTTP envelope를 무조건 저장하지 않고 기존 `public_provenance` allow-list를 적용한다.
-
-이 문서는 DB Collection v3의 Raw payload 장기보관 위치에 한해 우선한다. 나머지 identity, supersession, observation 계약은 그대로 유지한다.
+5. API key, Authorization header, deployment secret을 raw payload에 저장하지 않는다.
+6. content-addressed 저장으로 동일 payload 재수집 중복을 억제한다.
 
 ---
 
-## 2. Bucket 권장 설정
+## 2. Bucket / 권한
 
-### Bucket
+권장 bucket은 프로젝트 전용 private Standard bucket이다.
 
 ```text
 price-check-raw
@@ -60,11 +58,9 @@ price-check-raw
 - Custom domain: 사용하지 않음
 - CORS: 사용하지 않음
 - Collector token: 해당 bucket에만 `Object Read & Write`
-- Streamlit Production: R2 credential을 기본적으로 주입하지 않음
+- Streamlit Production: R2 writer credential을 기본적으로 주입하지 않음
 
-Streamlit은 PostgreSQL의 serving data를 조회한다. Raw 원문 직접열람 기능이 필요해질 때 별도 read-only credential을 검토한다.
-
-### Prefix
+Prefix:
 
 ```text
 raw/v1/
@@ -86,17 +82,11 @@ Raw object는 수집시각이 아니라 canonical payload SHA-256으로 주소�
 raw/v1/<source_operation>/<sha[0:2]>/<sha[2:4]>/<sha256>.json.gz
 ```
 
-예:
-
-```text
-raw/v1/getSpcifyPrdlstPrcureInfoList/6a/91/6a91....json.gz
-```
-
 효과:
 
-- 최근 7일 sliding window 재조회로 동일 record를 반복 수집해도 object key는 동일하다.
+- sliding-window 재조회로 동일 record를 반복 수집해도 object key는 동일하다.
 - JSON key 순서가 달라도 canonical JSON이 같으면 동일 hash가 된다.
-- payload가 한 글자라도 달라지면 새 object가 생성되어 변경 이력이 보존된다.
+- payload가 바뀌면 새 object가 생성되어 변경 이력이 보존된다.
 - gzip은 `mtime=0`으로 생성하여 동일 canonical JSON은 동일 compressed bytes를 만든다.
 
 Object metadata:
@@ -110,7 +100,109 @@ data-classification=public-provenance
 
 ---
 
-## 4. PostgreSQL DB1 반영 계약
+## 4. 실제 Live 검증 결과
+
+### 4.1 R2 storage smoke
+
+2026-09-11 실제 GitHub Actions에서 프로젝트 전용 R2 credential로 검증했다.
+
+검증 경로:
+
+```text
+GitHub Secrets
+→ R2 인증
+→ bucket list
+→ smoke object PUT
+→ HEAD
+→ DELETE
+→ deterministic raw JSON upload
+→ GET
+→ gzip 해제
+→ SHA-256 검증
+→ 동일 payload 재업로드
+```
+
+결과:
+
+- 설정 인식: **SUCCESS**
+- bucket list: **SUCCESS**
+- `put → head → delete`: **SUCCESS**
+- raw sample upload/get/hash: **SUCCESS**
+- 동일 static payload 재실행: `created=false` 확인
+
+사용자 배포 Secret 이름은 다음을 표준으로 사용한다.
+
+```text
+R2_ACCOUNT_ID
+R2_BUCKET
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+```
+
+`R2_BUCKET_NAME`은 코드의 이전 호환 alias로만 남길 수 있으며 신규 운영설정에는 요구하지 않는다.
+
+### 4.2 실제 G2B → R2 세로절단
+
+GitHub Actions:
+
+```text
+workflow: G2B Catalog and Lifecycle Live Validation
+run: 34555382527
+job: 103126860717
+result: SUCCESS
+```
+
+실제 경로:
+
+```text
+G2B live API
+getPrdctIndvAtrbInfoList02
+product_id = 24888744
+        ↓
+원본 JSON 수신
+        ↓
+canonical JSON + SHA-256
+        ↓
+gzip
+        ↓
+R2 raw/v1/...json.gz PUT
+        ↓
+R2 GET
+        ↓
+해제 + SHA-256 + JSON 동일성 검증
+        ↓
+동일 payload 재저장
+        ↓
+created=false 확인
+```
+
+실측 결과:
+
+```text
+status: SUCCESS
+source: G2B_CATALOG
+operation: getPrdctIndvAtrbInfoList02
+product_id: 24888744
+roundtrip_equal: true
+first_created: true
+duplicate_created: false
+uncompressed_bytes: 3640
+stored_bytes: 601
+```
+
+압축률 기준으로 원본 3,640 bytes가 601 bytes로 저장되어 약 83.5% 감소했다. 이 수치는 단일 catalog 응답 실측이며 전체 데이터셋 평균으로 일반화하지 않는다.
+
+실제 object key:
+
+```text
+raw/v1/getPrdctIndvAtrbInfoList02/e1/12/e11268b9461b4112285843de4d2d0d2dcdf41127420756089a885dfe5582b08c.json.gz
+```
+
+세로절단 종료 후 PR에서 R2 Secret을 소비하던 임시 workflow hook은 제거했다. live evidence는 Actions run에 남기고, 일반 PR 코드가 writer secret을 소비하지 않도록 원복한다.
+
+---
+
+## 5. PostgreSQL DB1 반영 계약
 
 DB1 구현 시 `raw_source_records`는 raw body 자체보다 R2 pointer/index 역할을 맡는다.
 
@@ -138,13 +230,11 @@ INDEX(source_operation, stable_key)
 INDEX(fetched_at)
 ```
 
-`payload_json`은 장기 source-of-truth로 사용하지 않는다. migration compatibility 때문에 기존 필드가 남더라도 신규 v3 collector는 R2 pointer를 기준으로 구현한다.
-
-Raw object upload와 DB insert 순서:
+Raw object upload와 DB insert 순서는 다음으로 고정한다.
 
 ```text
 API record
-→ allow-list
+→ public provenance allow-list
 → canonical JSON + SHA-256
 → R2 put/head
 → raw_source_records upsert
@@ -152,48 +242,13 @@ API record
 → page commit
 ```
 
-R2 upload 성공 후 DB transaction이 실패해 orphan object가 생겨도 허용한다. Content-addressed object이므로 재실행 시 같은 key를 재사용하며, 추후 orphan audit로 정리할 수 있다.
-
-반대로 DB pointer를 먼저 commit하고 R2 upload를 나중에 수행하지 않는다.
+R2 upload 성공 후 DB transaction이 실패해 orphan object가 생기는 것은 허용한다. content-addressed object이므로 재실행 시 같은 key를 재사용할 수 있다. 반대로 DB pointer를 먼저 commit하고 R2 upload를 나중에 수행하지 않는다.
 
 ---
 
-## 5. 권한 경계
+## 6. Bucket lock / lifecycle
 
-### Collector / GitHub Actions
-
-필요 환경변수:
-
-```text
-R2_ACCOUNT_ID
-R2_BUCKET_NAME
-R2_ACCESS_KEY_ID
-R2_SECRET_ACCESS_KEY
-R2_RAW_PREFIX=raw/v1
-R2_BACKUP_PREFIX=db-backups/v1
-```
-
-`R2_ENDPOINT_URL`은 특수 endpoint를 쓰는 경우만 지정한다. 기본 endpoint는:
-
-```text
-https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
-```
-
-### Streamlit
-
-기본 구성에서는 R2 secret을 넣지 않는다.
-
-```text
-Streamlit -> PostgreSQL streamlit_reader -> serving views/tables
-```
-
-원본 재확인 UI가 필요해질 경우 writer credential 재사용은 금지하고 별도 read-only token을 사용한다.
-
----
-
-## 6. Bucket lock / lifecycle 권고
-
-Pilot 권장:
+Pilot 권장 후보:
 
 ```text
 raw/v1/        최소 180일 Bucket Lock
@@ -201,76 +256,55 @@ smoke/v1/      Lock 없음
 db-backups/v1/ 초기 Lock 없음
 ```
 
-Raw prefix는 content-addressed immutable 데이터이므로 overwrite/delete가 정상 운영경로가 아니다. 180일 lock은 실수 삭제 방지용이다.
-
-`db-backups/v1/`은 실제 backup job이 구현된 후 retention을 별도 결정한다. 예: 일일 backup 35일 보관. Raw와 backup의 retention을 같은 rule로 묶지 않는다.
-
-Bucket lock을 설정하기 전에 반드시 `smoke/v1/`이 lock 대상에서 제외되어 write/head/delete smoke가 정상 동작하는지 확인한다.
+다만 lock은 아직 적용·재검증하지 않았다. retention 확정 전 Production-ready로 간주하지 않는다.
 
 ---
 
-## 7. 코드
+## 7. Zero-cost 운영 원칙
 
-R2 adapter:
+사용자 운영 원칙은 **월 비용 0원**이다.
+
+따라서 R2 무료범위를 넘어 자동 과금되는 상황을 막기 위해 애플리케이션 차원의 quota guard가 필요하다. 구체 임계치는 별도 구현에서 확정한다.
+
+예시 정책 후보:
 
 ```text
-src/purchase_price/storage/r2.py
+8 GB   경고
+9 GB   신규 대량 backfill 중단
+9.5 GB raw 신규 적재 중단 또는 수동 승인 필요
 ```
 
-주요 계약:
-
-- `R2RawEvidenceStore.from_settings()`
-- `put_public_json()`
-- `get_public_json()`
-- `probe_read_access()`
-- `probe_write_access()`
-
-연결 probe:
-
-```bash
-python -m purchase_price.scripts.probe_r2_storage
-python -m purchase_price.scripts.probe_r2_storage --write-smoke
-```
-
-`--write-smoke`는 `smoke/v1/`에 작은 객체를 생성하고 HEAD 확인 후 즉시 삭제한다.
+위 임계치는 아직 구현되지 않은 후보값이며 확정 정책이 아니다.
 
 ---
 
-## 8. Live Gate
-
-R2 foundation을 Production-ready로 판정하려면 실제 bucket에서 아래를 확인한다.
+## 8. Live Gate 상태
 
 ```text
-[ ] private bucket 생성
-[ ] bucket-scoped Object Read & Write token 생성
-[ ] read probe SUCCESS
-[ ] write/head/delete smoke SUCCESS
-[ ] raw/v1 sample upload SUCCESS
-[ ] 동일 payload 재업로드 시 created=false
-[ ] sample get + SHA-256 검증 SUCCESS
-[ ] Streamlit 환경에 writer token이 없는지 확인
-[ ] raw/v1 bucket lock 설정 후 재검증
+[x] private project bucket 생성
+[x] bucket credential로 실제 접근 성공
+[x] read probe SUCCESS
+[x] write/head/delete smoke SUCCESS
+[x] raw/v1 sample upload SUCCESS
+[x] 동일 payload 재업로드 시 created=false
+[x] sample get + SHA-256 검증 SUCCESS
+[x] 실제 G2B → R2 vertical slice SUCCESS
+[ ] Streamlit 환경에 writer token이 없는지 별도 확인
+[ ] raw/v1 bucket lock 적용 후 재검증
+[ ] zero-cost quota guard 구현
 ```
 
-실제 Cloudflare credential이 없는 CI에서는 위 항목을 성공했다고 간주하지 않는다.
+R2 데이터 경로 자체는 **검증 완료**다. 남은 항목은 운영 안전장치다.
 
 ---
 
-## 9. 비용 메모
+## 9. 다음 단계
 
-2026-09-11 기준 Cloudflare R2 Standard의 무료 포함량은 월 10 GB-month, Class A 100만 요청, Class B 1,000만 요청이며 egress는 무료다. 가격/무료구간은 운영 전에 Cloudflare 공식 문서를 다시 확인한다.
+DB1 전에 다음을 처리한다.
 
-본 Pilot의 초기 Raw Evidence 예상량은 무료 저장구간 안에 머물 가능성이 높지만, 비용보다 G2B API 호출 quota가 먼저 병목이 될 가능성이 높다.
-
----
-
-## 10. 다음 단계
-
-R2 live Gate 이후 DB1 migration에서 다음을 구현한다.
-
-1. `raw_source_records`에 R2 pointer/byte-size 필드 반영
-2. raw ingest repository와 `R2RawEvidenceStore` 연결
-3. page transaction 전에 R2 write
-4. collector service account와 Streamlit read-only DB account 분리
-5. raw byte-size 실측을 기반으로 30일 storage growth report 생성
-6. PostgreSQL backup job은 DB 안정화 후 `db-backups/v1/`로 별도 구현
+1. zero-cost quota guard 임계치 확정·구현
+2. `raw/v1/` retention / Bucket Lock 확정
+3. `raw_source_records`에 R2 pointer/byte-size 필드 반영
+4. raw ingest repository와 `R2RawEvidenceStore` 연결
+5. collector writer와 Streamlit read-only DB account 분리
+6. 실제 수집으로 30일 storage growth를 측정하여 용량 예측 갱신
