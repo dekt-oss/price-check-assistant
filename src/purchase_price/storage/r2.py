@@ -106,10 +106,11 @@ class R2RawEvidenceStore:
     hash, byte sizes and normalized serving data; private hospital purchasing data must not be
     passed to this store in the public PoC.
 
-    Every new object is guarded by an exact bucket-size scan before PUT. The default ceiling is
-    9.0 decimal GB, leaving 1.0 GB below R2 Standard's 10 GB-month free-storage boundary. This is
-    deliberately conservative. The zero-cost guarantee assumes the Cloudflare account is dedicated
-    to this project; other R2 buckets in the same account would consume the same free allowance.
+    The first new write in one collector process performs an exact bucket-size scan. Later writes
+    reuse that baseline and add bytes created by this store instance, avoiding an O(N objects)
+    bucket scan before every record. The default 9.0 GB ceiling leaves 1.0 GB below R2 Standard's
+    10 GB-month free-storage boundary. The reserve also protects against small concurrent/external
+    writes between scans. Production collection should still use a single writer schedule.
     """
 
     def __init__(
@@ -132,6 +133,8 @@ class R2RawEvidenceStore:
         self.raw_prefix = raw_prefix.strip("/") or "raw/v1"
         self.hard_limit_bytes = hard_limit_bytes
         self.warn_limit_bytes = warn_limit_bytes
+        self._quota_baseline: R2BucketUsage | None = None
+        self._new_bytes_since_baseline = 0
 
     @classmethod
     def from_settings(cls, settings: Settings) -> R2RawEvidenceStore:
@@ -203,6 +206,7 @@ class R2RawEvidenceStore:
             },
             StorageClass="STANDARD",
         )
+        self._new_bytes_since_baseline += len(compressed)
         return RawObjectRef(
             bucket=self.bucket,
             key=key,
@@ -224,13 +228,7 @@ class R2RawEvidenceStore:
         return json.loads(canonical.decode("utf-8"))
 
     def measure_bucket_usage(self) -> R2BucketUsage:
-        """Measure exact stored bytes for the dedicated project bucket.
-
-        S3/R2 does not expose an atomic bucket-size counter through the object API, so the safe
-        path paginates every object and sums the server-reported Size. This costs LIST operations,
-        not storage, and keeps the write gate fail-closed without maintaining a drift-prone local
-        counter.
-        """
+        """Measure exact stored bytes for the dedicated project bucket."""
 
         object_count = 0
         stored_bytes = 0
@@ -259,6 +257,24 @@ class R2RawEvidenceStore:
             stored_bytes=stored_bytes,
             hard_limit_bytes=self.hard_limit_bytes,
             warn_limit_bytes=self.warn_limit_bytes,
+        )
+
+    def quota_status(self, *, refresh: bool = False) -> R2BucketUsage:
+        """Return conservative usage for this writer process.
+
+        A refresh performs a full bucket scan and resets the local write delta. Without refresh the
+        result is baseline + bytes successfully created by this store instance.
+        """
+
+        if refresh or self._quota_baseline is None:
+            self._quota_baseline = self.measure_bucket_usage()
+            self._new_bytes_since_baseline = 0
+        baseline = self._quota_baseline
+        return R2BucketUsage(
+            object_count=baseline.object_count,
+            stored_bytes=baseline.stored_bytes + self._new_bytes_since_baseline,
+            hard_limit_bytes=baseline.hard_limit_bytes,
+            warn_limit_bytes=baseline.warn_limit_bytes,
         )
 
     def probe_read_access(self) -> dict[str, object]:
@@ -305,7 +321,7 @@ class R2RawEvidenceStore:
     def _assert_capacity_for_new_object(self, new_object_bytes: int) -> R2BucketUsage:
         if new_object_bytes < 0:
             raise ValueError("new_object_bytes must be non-negative")
-        usage = self.measure_bucket_usage()
+        usage = self.quota_status()
         projected = usage.stored_bytes + new_object_bytes
         if projected > usage.hard_limit_bytes:
             raise R2QuotaExceededError(
