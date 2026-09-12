@@ -105,6 +105,27 @@ def _target_codes(items: list[dict[str, Any]], segments: tuple[str, ...]) -> lis
     return [code for segment in segments for code in sorted(by_segment[segment])]
 
 
+def _validated_target_codes(
+    values: tuple[str, ...],
+    segments: tuple[str, ...],
+) -> list[str]:
+    segment_set = set(segments)
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in values:
+        code = raw.strip()
+        if len(code) != 10 or not code.isdigit():
+            raise ValueError(f"target code must be exactly 10 digits: {raw!r}")
+        if code[:2] not in segment_set:
+            raise ValueError(f"target code is outside configured segments: {code}")
+        if code not in seen:
+            seen.add(code)
+            ordered.append(code)
+    if not ordered:
+        raise ValueError("target code list must not be empty")
+    return ordered
+
+
 def _track_b_params(
     *,
     detail_code: str,
@@ -174,6 +195,7 @@ def collect_track_b_batch(
     request_budget: int,
     segments: tuple[str, ...] = TARGET_SEGMENTS,
     page_size: int = PAGE_SIZE,
+    target_codes: tuple[str, ...] | None = None,
 ) -> CollectionSummary:
     if request_budget < 1 or request_budget > MAX_REQUEST_BUDGET:
         raise ValueError(f"request_budget must be between 1 and {MAX_REQUEST_BUDGET}")
@@ -183,12 +205,17 @@ def collect_track_b_batch(
         raise ValueError("invalid start cursor")
 
     started = datetime.now(UTC)
-    dictionary_items, dictionary_requests = _fetch_dictionary(
-        catalog_client,
-        base_url=catalog_base_url,
-        page_size=page_size,
-    )
-    codes = _target_codes(dictionary_items, segments)
+    if target_codes is None:
+        dictionary_items, dictionary_requests = _fetch_dictionary(
+            catalog_client,
+            base_url=catalog_base_url,
+            page_size=page_size,
+        )
+        codes = _target_codes(dictionary_items, segments)
+    else:
+        dictionary_requests = 0
+        codes = _validated_target_codes(target_codes, segments)
+
     if start_cursor.code_index > len(codes):
         raise ValueError("start cursor is past the target code list")
     if dictionary_requests >= request_budget:
@@ -302,13 +329,29 @@ def collect_track_b_batch(
     )
 
 
+def _load_codes_file(path: Path) -> tuple[str, ...]:
+    text = path.read_text(encoding="utf-8")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        values = [line.strip() for line in text.splitlines() if line.strip()]
+        return tuple(values)
+    if isinstance(payload, list):
+        return tuple(str(value).strip() for value in payload if str(value).strip())
+    if isinstance(payload, dict) and isinstance(payload.get("codes"), list):
+        return tuple(str(value).strip() for value in payload["codes"] if str(value).strip())
+    raise ValueError("codes file must be a JSON list, {'codes': [...]}, or newline-delimited text")
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect bounded Track B pages into Cloudflare R2")
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--start-page", type=int, default=1)
     parser.add_argument("--request-budget", type=int, default=300)
     parser.add_argument("--days", type=int, default=365)
+    parser.add_argument("--begin-date", type=date.fromisoformat, default=None)
     parser.add_argument("--end-date", type=date.fromisoformat, default=date.today())
+    parser.add_argument("--codes-file", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args()
 
@@ -321,13 +364,15 @@ def main() -> int:
     settings = get_settings()
     catalog_key = (settings.resolved_g2b_catalog_service_key or "").strip()
     shopping_key = (settings.resolved_g2b_shopping_service_key or "").strip()
-    if not catalog_key or not shopping_key:
-        raise RuntimeError("G2B catalog/shopping service keys are not configured")
+    if not shopping_key:
+        raise RuntimeError("G2B shopping service key is not configured")
+    if args.codes_file is None and not catalog_key:
+        raise RuntimeError("G2B catalog service key is required when --codes-file is omitted")
     if not settings.r2_configured:
         raise RuntimeError("R2 writer configuration is incomplete")
 
     catalog_client = PublicDataPortalClient(
-        catalog_key,
+        catalog_key or shopping_key,
         timeout_seconds=settings.g2b_request_timeout_seconds,
         max_retries=settings.g2b_max_retries,
     )
@@ -338,7 +383,8 @@ def main() -> int:
     )
     store = R2RawEvidenceStore.from_settings(settings)
     end = args.end_date
-    begin = end - timedelta(days=args.days - 1)
+    begin = args.begin_date or (end - timedelta(days=args.days - 1))
+    target_codes = _load_codes_file(args.codes_file) if args.codes_file is not None else None
     summary = collect_track_b_batch(
         catalog_client=catalog_client,
         shopping_client=shopping_client,
@@ -349,6 +395,7 @@ def main() -> int:
         end=end,
         start_cursor=CollectionCursor(args.start_index, args.start_page),
         request_budget=args.request_budget,
+        target_codes=target_codes,
     )
     rendered = json.dumps(asdict(summary), ensure_ascii=False, indent=2)
     print(rendered)
