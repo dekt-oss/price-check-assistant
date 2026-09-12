@@ -35,13 +35,27 @@ jobs:
 
       - name: Run bounded Track B backfill batch
         run: |
-          python -m purchase_price.scripts.collect_g2b_track_b_r2 \
-            --start-index 1 \
-            --start-page 1 \
-            --request-budget 900 \
-            --days 365 \
-            --end-date 2026-09-11 \
-            --output artifacts/track-b-backfill/batch-001.json
+          set +e
+          rc=1
+          for attempt in 1 2 3; do
+            echo "collector_attempt=$attempt"
+            rm -f artifacts/track-b-backfill/batch-001.json
+            python -m purchase_price.scripts.collect_g2b_track_b_r2 \
+              --start-index 1 \
+              --start-page 1 \
+              --request-budget 900 \
+              --days 365 \
+              --end-date 2026-09-11 \
+              --output artifacts/track-b-backfill/batch-001.json
+            rc=$?
+            if [ -f artifacts/track-b-backfill/batch-001.json ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep 20
+            fi
+          done
+          exit "$rc"
 
       - name: Validate and print safe summary
         if: always()
@@ -52,7 +66,7 @@ jobs:
 
           path = Path("artifacts/track-b-backfill/batch-001.json")
           if not path.exists():
-              raise SystemExit("Track B summary artifact was not created")
+              raise SystemExit("Track B summary artifact was not created after transient retries")
           report = json.loads(path.read_text(encoding="utf-8"))
           fields = (
               "status", "stop_reason", "total_requests", "dictionary_requests",
