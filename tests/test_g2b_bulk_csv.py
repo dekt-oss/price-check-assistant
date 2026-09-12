@@ -74,7 +74,7 @@ def test_real_utf16_tsv_export_is_detected(tmp_path: Path) -> None:
     path = tmp_path / "UI-ADOXAA-038R.csv"
     _write_official_export(path)
 
-    contract, _ = inspect_bulk_export(path)
+    contract = inspect_bulk_export(path)
 
     assert detect_csv_encoding(path) == "utf-16"
     assert contract.delimiter == "\t"
@@ -154,7 +154,7 @@ def test_cp949_comma_export_is_supported(tmp_path: Path) -> None:
     path = tmp_path / "g2b-cp949.csv"
     _write_official_export(path, encoding="cp949", delimiter=",")
 
-    contract, _ = inspect_bulk_export(path)
+    contract = inspect_bulk_export(path)
 
     assert detect_csv_encoding(path) == "cp949"
     assert contract.delimiter == ","
