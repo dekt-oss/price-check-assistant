@@ -1,26 +1,29 @@
-name: G2B Track B Live Backfill
+name: G2B Catalog and Lifecycle Live Validation
 
 on:
   pull_request:
     paths:
       - ".github/workflows/g2b-reference-services-live.yml"
+      - "src/purchase_price/config.py"
+      - "src/purchase_price/services/g2b_catalog.py"
+      - "src/purchase_price/services/g2b_lifecycle.py"
+      - "src/purchase_price/scripts/probe_g2b_reference_services.py"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  track-b-backfill:
-    runs-on: macos-14
-    timeout-minutes: 20
+  reference-services:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
     env:
-      PYTHONPATH: src
+      G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
+      G2B_LIFECYCLE_SERVICE_KEY: ${{ secrets.G2B_LIFECYCLE_SERVICE_KEY }}
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
       DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
     steps:
       - name: Checkout
@@ -31,74 +34,43 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install collector dependencies only
-        run: |
-          python -m pip install \
-            "httpx>=0.27,<1" \
-            "tenacity>=9,<10" \
-            "pydantic>=2.8,<3" \
-            "pydantic-settings>=2.4,<3" \
-            "boto3>=1.35,<2"
+      - name: Install package
+        run: pip install -e .
 
-      - name: Run bounded Track B backfill batch
+      - name: Probe official catalog and lifecycle services
         run: |
-          set +e
-          rc=1
-          for attempt in 1 2; do
-            echo "collector_attempt=$attempt"
-            rm -f artifacts/track-b-backfill/batch-001.json
-            python -m purchase_price.scripts.collect_g2b_track_b_r2 \
-              --start-index 1 \
-              --start-page 1 \
-              --request-budget 900 \
-              --days 365 \
-              --end-date 2026-09-11 \
-              --output artifacts/track-b-backfill/batch-001.json
-            rc=$?
-            if [ -f artifacts/track-b-backfill/batch-001.json ]; then
-              break
-            fi
-            if [ "$attempt" -lt 2 ]; then
-              sleep 15
-            fi
-          done
-          exit "$rc"
+          python -m purchase_price.scripts.probe_g2b_reference_services \
+            --product-id 24888744 \
+            --bid-notice-no 20160234982 \
+            --output artifacts/g2b-reference-services/report.json
 
-      - name: Validate and print safe summary
+      - name: Print safe summary
         if: always()
         run: |
-          python - <<'PY'
+          if [ -f artifacts/g2b-reference-services/report.json ]; then
+            python - <<'PY'
           import json
           from pathlib import Path
 
-          path = Path("artifacts/track-b-backfill/batch-001.json")
-          if not path.exists():
-              raise SystemExit("Track B summary artifact was not created")
-          report = json.loads(path.read_text(encoding="utf-8"))
-          fields = (
-              "status", "stop_reason", "total_requests", "dictionary_requests",
-              "track_b_requests", "codes_completed", "pages_stored", "rows_seen",
-              "r2_objects_created", "r2_objects_reused", "r2_stored_bytes_created",
-              "next_cursor", "error_type", "error_message",
-          )
-          for field in fields:
-              print(f"{field}=", report.get(field))
-
-          stop = report.get("stop_reason")
-          if stop in {"REQUEST_BUDGET_EXHAUSTED", "TARGET_COMPLETE"}:
-              raise SystemExit(0)
-          if stop == "SOURCE_OR_STORAGE_ERROR":
-              message = str(report.get("error_message") or "")
-              if "code=22" in message or "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR" in message:
-                  raise SystemExit(0)
-          raise SystemExit(1)
+          report = json.loads(Path("artifacts/g2b-reference-services/report.json").read_text())
+          print("validation_status=", report.get("validation_status"))
+          for name in ("catalog", "lifecycle"):
+              row = report.get(name, {})
+              print(
+                  name,
+                  "status=", row.get("status"),
+                  "key_source=", row.get("key_source"),
+                  "error_type=", row.get("error_type", ""),
+                  "error_message=", row.get("error_message", ""),
+              )
           PY
+          fi
 
-      - name: Upload Track B backfill evidence
+      - name: Upload validation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: track-b-backfill-batch-001
-          path: artifacts/track-b-backfill/batch-001.json
+          name: g2b-reference-services-live
+          path: artifacts/g2b-reference-services/report.json
           if-no-files-found: warn
           retention-days: 14
