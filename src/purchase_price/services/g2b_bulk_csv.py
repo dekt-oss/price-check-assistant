@@ -18,7 +18,7 @@ DATASET_URL = "https://www.data.go.kr/data/15053481/fileData.do"
 BULK_DOWNLOAD_URL = "https://data.g2b.go.kr/link/AISC001_01/?reptNm=UI-ADOXAA-038R"
 DEFAULT_TARGET_SEGMENTS = ("42", "41", "43", "44", "23", "27", "46", "39")
 
-_DETAIL_CODE_ALIASES = ("세부품명", "세부품명번호", "세부물품분류번호", "dtilPrdctClsfcNo")
+_DETAIL_CODE_ALIASES = ("세부품명번호", "세부물품분류번호", "dtilPrdctClsfcNo", "세부품명")
 _APPROVAL_DATE_ALIASES = ("결재일자", "납품요구일자", "계약(납품요구)일자", "approval_date")
 _REQUEST_NO_ALIASES = ("납품요구번호", "계약(납품요구)번호", "cntrctDlvrReqNo")
 _CHANGE_ORDER_ALIASES = ("납품요구변경차수", "변경차수", "cntrctDlvrReqChgOrd")
