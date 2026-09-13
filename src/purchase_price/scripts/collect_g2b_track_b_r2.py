@@ -16,6 +16,13 @@ from purchase_price.collectors.g2b_shopping import (
 )
 from purchase_price.config import get_settings
 from purchase_price.services.g2b_catalog import G2B_CATALOG_BASE_URL
+from purchase_price.services.g2b_target_code_snapshot import (
+    TargetCodeSnapshotError,
+    build_target_code_snapshot,
+    load_target_code_snapshot,
+    target_codes_from_dictionary,
+    write_target_code_snapshot,
+)
 from purchase_price.storage.r2 import R2RawEvidenceStore, RawObjectRef
 
 UNIT10_OPERATION = "getPrdctClsfcNoUnit10Info02"
@@ -49,6 +56,8 @@ class CollectionSummary:
     end_date: str
     target_segments: tuple[str, ...]
     target_code_count: int
+    target_code_source: str
+    target_code_snapshot_sha256: str | None
     start_cursor: CollectionCursor
     next_cursor: CollectionCursor
     request_budget: int
@@ -92,17 +101,42 @@ def _fetch_dictionary(
     return items, page_count
 
 
-def _target_codes(items: list[dict[str, Any]], segments: tuple[str, ...]) -> list[str]:
-    by_segment: dict[str, set[str]] = {segment: set() for segment in segments}
-    for item in items:
-        code = str(item.get("dtilPrdctClsfcNo") or "").strip()
-        use_yn = str(item.get("useYn") or "").strip().upper()
-        if len(code) != 10 or not code.isdigit() or use_yn != "Y":
-            continue
-        segment = code[:2]
-        if segment in by_segment:
-            by_segment[segment].add(code)
-    return [code for segment in segments for code in sorted(by_segment[segment])]
+def _resolve_target_codes(
+    *,
+    catalog_client: JsonClient,
+    catalog_base_url: str,
+    segments: tuple[str, ...],
+    page_size: int,
+    snapshot_path: Path | None,
+    refresh_snapshot: bool,
+) -> tuple[list[str], int, str, str | None]:
+    if refresh_snapshot and snapshot_path is None:
+        raise ValueError("refresh_target_code_snapshot requires target_code_snapshot_path")
+
+    if snapshot_path is not None and not refresh_snapshot:
+        if not snapshot_path.exists():
+            raise TargetCodeSnapshotError(
+                f"target-code snapshot does not exist: {snapshot_path}; use refresh_target_code_snapshot explicitly"
+            )
+        snapshot = load_target_code_snapshot(snapshot_path, expected_segments=segments)
+        return list(snapshot.codes), 0, "SNAPSHOT", snapshot.sha256
+
+    dictionary_items, dictionary_requests = _fetch_dictionary(
+        catalog_client,
+        base_url=catalog_base_url,
+        page_size=page_size,
+    )
+    codes = target_codes_from_dictionary(dictionary_items, segments)
+    snapshot_sha256: str | None = None
+    if snapshot_path is not None:
+        snapshot = build_target_code_snapshot(
+            dictionary_items=dictionary_items,
+            segments=segments,
+            dictionary_requests=dictionary_requests,
+        )
+        write_target_code_snapshot(snapshot_path, snapshot)
+        snapshot_sha256 = snapshot.sha256
+    return codes, dictionary_requests, "LIVE_DICTIONARY", snapshot_sha256
 
 
 def _track_b_params(
@@ -161,6 +195,20 @@ def _page_payload(
     }
 
 
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).upper()
+    return any(
+        marker in message
+        for marker in (
+            "HTTP 429",
+            "STATUS=429",
+            "CODE=22",
+            "RESULTCODE=22",
+            "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR",
+        )
+    )
+
+
 def collect_track_b_batch(
     *,
     catalog_client: JsonClient,
@@ -174,6 +222,8 @@ def collect_track_b_batch(
     request_budget: int,
     segments: tuple[str, ...] = TARGET_SEGMENTS,
     page_size: int = PAGE_SIZE,
+    target_code_snapshot_path: Path | None = None,
+    refresh_target_code_snapshot: bool = False,
 ) -> CollectionSummary:
     if request_budget < 1 or request_budget > MAX_REQUEST_BUDGET:
         raise ValueError(f"request_budget must be between 1 and {MAX_REQUEST_BUDGET}")
@@ -183,12 +233,14 @@ def collect_track_b_batch(
         raise ValueError("invalid start cursor")
 
     started = datetime.now(UTC)
-    dictionary_items, dictionary_requests = _fetch_dictionary(
-        catalog_client,
-        base_url=catalog_base_url,
+    codes, dictionary_requests, target_code_source, snapshot_sha256 = _resolve_target_codes(
+        catalog_client=catalog_client,
+        catalog_base_url=catalog_base_url,
+        segments=segments,
         page_size=page_size,
+        snapshot_path=target_code_snapshot_path,
+        refresh_snapshot=refresh_target_code_snapshot,
     )
-    codes = _target_codes(dictionary_items, segments)
     if start_cursor.code_index > len(codes):
         raise ValueError("start cursor is past the target code list")
     if dictionary_requests >= request_budget:
@@ -228,9 +280,11 @@ def collect_track_b_batch(
                 page_no=page_no,
                 page_size=page_size,
             )
-            payload = shopping_client.get_json(shopping_base_url, TRACK_B_OPERATION, **params)
+            # Count an attempted remote request before awaiting the response: failed requests
+            # still consume public-data quota and therefore belong in the bounded budget.
             remaining -= 1
             track_b_requests += 1
+            payload = shopping_client.get_json(shopping_base_url, TRACK_B_OPERATION, **params)
             page = unwrap_g2b_page(payload)
             total_count = int(page.total_count or 0)
             total_pages = max(1, math.ceil(total_count / page_size))
@@ -268,8 +322,10 @@ def collect_track_b_batch(
             else:
                 cursor = CollectionCursor(code_index=cursor.code_index, page_no=page_no + 1)
     except Exception as exc:
-        status = "PARTIAL_SUCCESS" if pages_stored else "FAILED"
-        stop_reason = "SOURCE_OR_STORAGE_ERROR"
+        # A remote/storage failure is never a successful batch merely because earlier pages
+        # were persisted. Keep the resumable cursor, but return a non-zero process status.
+        status = "FAILED"
+        stop_reason = "RATE_LIMIT_EXHAUSTED" if _is_rate_limit_error(exc) else "SOURCE_OR_STORAGE_ERROR"
         error_type = type(exc).__name__
         error_message = str(exc)[:500]
 
@@ -282,6 +338,8 @@ def collect_track_b_batch(
         end_date=end.isoformat(),
         target_segments=segments,
         target_code_count=len(codes),
+        target_code_source=target_code_source,
+        target_code_snapshot_sha256=snapshot_sha256,
         start_cursor=start_cursor,
         next_cursor=cursor,
         request_budget=request_budget,
@@ -310,6 +368,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--days", type=int, default=365)
     parser.add_argument("--end-date", type=date.fromisoformat, default=date.today())
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--target-code-snapshot",
+        type=Path,
+        default=None,
+        help="Validated Unit10 target-code snapshot; when present, normal batches spend zero dictionary requests",
+    )
+    parser.add_argument(
+        "--refresh-target-code-snapshot",
+        action="store_true",
+        help="Explicitly refresh --target-code-snapshot from the live Unit10 dictionary before collecting",
+    )
     return parser.parse_args()
 
 
@@ -349,6 +418,8 @@ def main() -> int:
         end=end,
         start_cursor=CollectionCursor(args.start_index, args.start_page),
         request_budget=args.request_budget,
+        target_code_snapshot_path=args.target_code_snapshot,
+        refresh_target_code_snapshot=args.refresh_target_code_snapshot,
     )
     rendered = json.dumps(asdict(summary), ensure_ascii=False, indent=2)
     print(rendered)
