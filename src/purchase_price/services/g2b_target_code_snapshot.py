@@ -3,10 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 TARGET_CODE_SNAPSHOT_SCHEMA = "g2b-target-code-snapshot-v1"
 TARGET_CODE_SNAPSHOT_SOURCE = "data.go.kr/G2B ShoppingMallPrdctInfoService"
