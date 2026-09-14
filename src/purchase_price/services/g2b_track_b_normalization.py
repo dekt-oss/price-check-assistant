@@ -132,9 +132,20 @@ class TrackBBatchNormalizationResult:
 
 
 class TrackBNormalizedRepository(Protocol):
-    """Persistence seam for DB1; no DB migration is required for this pipeline."""
+    """Future DB1 write boundary; implementations must keep raw evidence immutable."""
 
-    def persist(self, records: Sequence[NormalizedTrackBRecord]) -> None: ...
+    def upsert_record(self, record: NormalizedTrackBRecord) -> None: ...
+
+    def record_conflict(
+        self,
+        identity: TrackBStableIdentity,
+        *,
+        existing_item_sha256: str,
+        incoming_item_sha256: str,
+        incoming_raw_object_key: str,
+    ) -> None: ...
+
+    def save_price_candidate(self, record: NormalizedTrackBRecord, candidate: CollectedPrice) -> None: ...
 
 
 def normalize_track_b_page(
@@ -278,13 +289,20 @@ def project_change_order_state(
 ) -> tuple[TrackBChangeOrderState, ...]:
     """Preserve every change order while marking the latest version of each logical line."""
 
+    unique_records = consolidate_track_b_records(records)
     groups: dict[tuple[str, str], list[NormalizedTrackBRecord]] = defaultdict(list)
-    for record in records:
+    for record in unique_records:
         groups[record.identity.logical_line_key].append(record)
 
     state_by_identity: dict[TrackBStableIdentity, TrackBChangeOrderState] = {}
     for group in groups.values():
-        ordered = sorted(group, key=lambda record: _change_order_key(record.identity.change_order))
+        if any(not record.identity.change_order.isdigit() for record in group):
+            raise TrackBNormalizationError("non-numeric change order cannot be projected as latest")
+        ordered = sorted(group, key=lambda record: int(record.identity.change_order))
+        if len(ordered) > 1 and int(ordered[-1].identity.change_order) == int(
+            ordered[-2].identity.change_order
+        ):
+            raise TrackBNormalizationError("ambiguous latest change order for logical line")
         latest = ordered[-1]
         for record in ordered:
             state_by_identity[record.identity] = TrackBChangeOrderState(
@@ -293,7 +311,15 @@ def project_change_order_state(
                 superseded_by=None if record.identity == latest.identity else latest.identity,
             )
 
-    return tuple(state_by_identity[record.identity] for record in records)
+    return tuple(state_by_identity[record.identity] for record in unique_records)
+
+
+def project_latest_track_b_records(
+    records: Sequence[NormalizedTrackBRecord],
+) -> tuple[NormalizedTrackBRecord, ...]:
+    """Derived current view; the input history and raw evidence remain untouched."""
+
+    return tuple(state.record for state in project_change_order_state(records) if state.is_latest)
 
 
 def build_track_b_price_candidate(
@@ -469,7 +495,8 @@ def _decimal_or_none(value: Any) -> Decimal | None:
     if text is None:
         return None
     try:
-        return Decimal(text.replace(",", "").replace("원", "").strip())
+        value = Decimal(text.replace(",", "").replace("원", "").strip())
+        return value if value.is_finite() else None
     except InvalidOperation:
         return None
 
@@ -512,10 +539,3 @@ def _item_sha256(item: Mapping[str, Any]) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
-
-
-def _change_order_key(value: str) -> tuple[int, int | str]:
-    stripped = value.strip()
-    if stripped.isdigit():
-        return 0, int(stripped)
-    return 1, stripped

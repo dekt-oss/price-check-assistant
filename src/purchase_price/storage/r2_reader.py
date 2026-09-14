@@ -22,6 +22,13 @@ class R2RawObject:
     last_modified: datetime | None
 
 
+@dataclass(frozen=True)
+class R2RawObjectPage:
+    objects: tuple[R2RawObject, ...]
+    next_cursor: str | None
+    has_more: bool
+
+
 class R2RawEvidenceReader:
     """Read-only access to content-addressed raw evidence in R2.
 
@@ -66,52 +73,79 @@ class R2RawEvidenceReader:
     ) -> tuple[R2RawObject, ...]:
         if limit is not None and limit < 1:
             raise ValueError("limit must be positive")
+        results: list[R2RawObject] = []
+        cursor: str | None = None
+        while True:
+            page = self.list_public_json_page(
+                source_operation=source_operation,
+                limit=min(1000, limit - len(results)) if limit else 1000,
+                after_key=cursor,
+            )
+            results.extend(page.objects)
+            if limit is not None and len(results) >= limit:
+                return tuple(results[:limit])
+            if not page.has_more:
+                break
+            if page.next_cursor == cursor:
+                raise R2IntegrityError("R2 listing did not advance its resume key")
+            cursor = page.next_cursor
+        return tuple(results)
+
+    def list_public_json_page(
+        self,
+        *,
+        source_operation: str | None = None,
+        limit: int = 1000,
+        after_key: str | None = None,
+    ) -> R2RawObjectPage:
+        """Read one bounded, lexically ordered page; cursor is the last listed key.
+
+        StartAfter is stable across process restarts, unlike an opaque S3 continuation token.
+        Callers must checkpoint only after processing all returned objects successfully.
+        """
+        if not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
         prefix = f"{self.raw_prefix}/"
         if source_operation:
             operation = source_operation.strip("/")
             if not operation or "/" in operation:
                 raise ValueError("source_operation must be one object-key segment")
-            prefix = f"{prefix}{operation}/"
-
-        results: list[R2RawObject] = []
-        continuation_token: str | None = None
-        while True:
-            kwargs: dict[str, object] = {
-                "Bucket": self.bucket,
-                "Prefix": prefix,
-                "MaxKeys": min(1000, limit - len(results)) if limit else 1000,
-            }
-            if continuation_token:
-                kwargs["ContinuationToken"] = continuation_token
-            response = self._client.list_objects_v2(**kwargs)
-            contents = response.get("Contents") or []
-            if not isinstance(contents, list):
-                raise R2IntegrityError("R2 ListObjectsV2 returned invalid Contents")
-            for item in contents:
-                if not isinstance(item, dict):
-                    continue
-                key = str(item.get("Key") or "")
-                if not key.endswith(".json.gz"):
-                    continue
-                payload_hash = self._hash_from_key(key)
-                last_modified = item.get("LastModified")
-                results.append(
-                    R2RawObject(
-                        bucket=self.bucket,
-                        key=key,
-                        payload_hash=payload_hash,
-                        stored_bytes=int(item.get("Size") or 0),
-                        last_modified=last_modified if isinstance(last_modified, datetime) else None,
-                    )
-                )
-                if limit is not None and len(results) >= limit:
-                    return tuple(results)
-            if not response.get("IsTruncated"):
-                break
-            continuation_token = str(response.get("NextContinuationToken") or "").strip()
-            if not continuation_token:
-                raise R2IntegrityError("R2 ListObjectsV2 truncated without continuation token")
-        return tuple(results)
+            prefix += f"{operation}/"
+        if after_key is not None and not after_key.startswith(prefix):
+            raise ValueError("after_key must be inside the selected prefix")
+        kwargs: dict[str, object] = {"Bucket": self.bucket, "Prefix": prefix, "MaxKeys": limit}
+        if after_key is not None:
+            kwargs["StartAfter"] = after_key
+        response = self._client.list_objects_v2(**kwargs)
+        contents = response.get("Contents") or []
+        if not isinstance(contents, list):
+            raise R2IntegrityError("R2 ListObjectsV2 returned invalid Contents")
+        if any(not isinstance(item, dict) for item in contents):
+            raise R2IntegrityError("R2 ListObjectsV2 returned an invalid object entry")
+        keys = [str(item.get("Key") or "") for item in contents]
+        if keys != sorted(keys) or len(keys) != len(set(keys)):
+            raise R2IntegrityError("R2 ListObjectsV2 keys are not strictly ordered")
+        if any(not key.startswith(prefix) or (after_key is not None and key <= after_key) for key in keys):
+            raise R2IntegrityError("R2 ListObjectsV2 returned a key outside the requested range")
+        objects = tuple(
+            R2RawObject(
+                bucket=self.bucket,
+                key=key,
+                payload_hash=self._hash_from_key(key),
+                stored_bytes=int(item.get("Size") or 0),
+                last_modified=(
+                    item.get("LastModified")
+                    if isinstance(item.get("LastModified"), datetime)
+                    else None
+                ),
+            )
+            for item, key in zip(contents, keys, strict=True)
+            if key.endswith(".json.gz")
+        )
+        has_more = bool(response.get("IsTruncated"))
+        if has_more and not keys:
+            raise R2IntegrityError("R2 ListObjectsV2 truncated without a resume key")
+        return R2RawObjectPage(objects, keys[-1] if keys else None, has_more)
 
     def get_public_json(self, obj: R2RawObject) -> object:
         if obj.bucket != self.bucket:
@@ -120,6 +154,15 @@ class R2RawEvidenceReader:
         if expected_hash != obj.payload_hash:
             raise R2IntegrityError("R2 object reference hash does not match content-addressed key")
         response = self._client.get_object(Bucket=self.bucket, Key=obj.key)
+        metadata = response.get("Metadata") or {}
+        operation = obj.key[len(self.raw_prefix) + 1 :].split("/", 1)[0]
+        if (
+            metadata.get("sha256") != expected_hash
+            or metadata.get("schema") != "raw-v1"
+            or metadata.get("source-operation") != operation
+            or metadata.get("data-classification") != "public-provenance"
+        ):
+            raise R2IntegrityError(f"R2 object {obj.key} metadata does not match its key")
         body = response["Body"].read()
         try:
             canonical = gzip.decompress(body)
@@ -139,10 +182,15 @@ class R2RawEvidenceReader:
         required_prefix = f"{self.raw_prefix}/"
         if not key.startswith(required_prefix):
             raise R2IntegrityError(f"R2 object key is outside raw prefix: {key}")
-        filename = key.rsplit("/", 1)[-1]
+        parts = key[len(required_prefix) :].split("/")
+        if len(parts) != 4 or not all(parts):
+            raise R2IntegrityError(f"R2 raw object key has invalid content-addressed layout: {key}")
+        _, first_shard, second_shard, filename = parts
         if not filename.endswith(".json.gz"):
             raise R2IntegrityError(f"R2 raw object key has unexpected suffix: {key}")
         digest = filename[: -len(".json.gz")]
         if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
             raise R2IntegrityError(f"R2 raw object key lacks a lowercase SHA-256 digest: {key}")
+        if first_shard != digest[:2] or second_shard != digest[2:4]:
+            raise R2IntegrityError(f"R2 raw object key shards do not match its SHA-256 digest: {key}")
         return digest

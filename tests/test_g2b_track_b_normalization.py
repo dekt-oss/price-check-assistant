@@ -9,12 +9,14 @@ from purchase_price.domain import ComparisonScope, EvidenceType
 from purchase_price.services.g2b_track_b_normalization import (
     TrackBAmountCheck,
     TrackBIdentityConflictError,
+    TrackBNormalizationError,
     TrackBRawPage,
     build_track_b_price_candidate,
     consolidate_track_b_records,
     normalize_track_b_page,
     normalize_track_b_pages,
     project_change_order_state,
+    project_latest_track_b_records,
 )
 
 
@@ -174,6 +176,31 @@ def test_change_order_projection_preserves_history_and_marks_latest() -> None:
     assert states[1].record.identity.change_order == "01"
     assert states[1].is_latest is True
     assert states[1].superseded_by is None
+
+
+def test_latest_projection_is_order_independent_and_does_not_remove_history() -> None:
+    history = [
+        normalize_track_b_page(_page([_item(change_order=order)])).records[0]
+        for order in ("00", "10", "02")
+    ]
+    original_ids = [record.identity for record in history]
+
+    for ordering in (history, list(reversed(history))):
+        latest = project_latest_track_b_records(ordering)
+        assert len(latest) == 1
+        assert latest[0].identity.change_order == "10"
+    assert project_latest_track_b_records(history + [history[1]]) == (history[1],)
+
+    assert [record.identity for record in history] == original_ids
+
+
+def test_latest_projection_rejects_ambiguous_numeric_change_order() -> None:
+    records = [
+        normalize_track_b_page(_page([_item(change_order=order)])).records[0]
+        for order in ("0", "00")
+    ]
+    with pytest.raises(TrackBNormalizationError, match="ambiguous"):
+        project_latest_track_b_records(records)
 
 
 def test_same_page_duplicate_and_conflict_are_explicit() -> None:
