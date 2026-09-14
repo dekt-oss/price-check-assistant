@@ -218,11 +218,15 @@ def parse_official_report_record(
         value = _first_value(record, logical_name)
         if value not in (None, ""):
             conditions_parts.append(f"{label}={value}")
-    source_record_id = (
-        build_track_b_source_record_id(record)
-        if operation == G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
-        else build_g2b_source_record_id(record)
-    )
+    if operation == G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS:
+        # Complete raw Track B rows use the verified three-field identity. Legacy/adaptive
+        # callers may provide reduced records; preserve their old identifier only as a
+        # compatibility fallback rather than inventing missing Track B key parts.
+        source_record_id = build_track_b_source_record_id(record) or build_g2b_source_record_id(
+            record
+        )
+    else:
+        source_record_id = build_g2b_source_record_id(record)
     return CollectedPrice(
         manufacturer=None,
         product_name=str(product_name),
