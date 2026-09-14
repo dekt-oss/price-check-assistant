@@ -10,6 +10,7 @@ from purchase_price.collectors.g2b_shopping import (
     G2BShoppingCollector,
     G2BShoppingOperation,
     build_g2b_source_record_id,
+    build_track_b_source_record_id,
     parse_official_report_record,
     unwrap_g2b_page,
 )
@@ -57,33 +58,58 @@ def test_delivery_unit_price_is_classified_as_delivery_evidence() -> None:
     assert result.evidence_type == EvidenceType.DELIVERY_ORDER_UNIT_PRICE
 
 
-def test_specific_item_unit_price_requires_contract_or_delivery_semantics() -> None:
-    delivery_record = {
+def test_specific_item_requires_exact_prdct_uprc_field() -> None:
+    generic_label_only = {
         "물품식별번호": "TEST-003",
         "품명": "테스트 특정품목",
         "단가": "128000",
         "계약납품구분": "납품",
     }
-    contract_record = {
+    contract_alias_only = {
         "물품식별번호": "TEST-004",
         "품명": "테스트 특정품목",
-        "단가": "130000",
+        "계약단가": "130000",
         "계약납품구분": "계약",
     }
+    explicit = {
+        "prdctIdntNo": "TEST-005",
+        "prdctIdntNoNm": "테스트 특정품목",
+        "prdctUprc": "131000",
+        "cntrctDlvrDivNm": "납품요구",
+    }
 
-    delivery = parse_official_report_record(
-        delivery_record, operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
+    assert (
+        parse_official_report_record(
+            generic_label_only, operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
+        )
+        is None
     )
-    contract = parse_official_report_record(
-        contract_record, operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
+    assert (
+        parse_official_report_record(
+            contract_alias_only, operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
+        )
+        is None
     )
+    result = parse_official_report_record(
+        explicit, operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
+    )
+    assert result is not None
+    assert result.price == Decimal("131000")
+    assert result.evidence_type == EvidenceType.DELIVERY_ORDER_UNIT_PRICE
 
-    assert delivery is not None
-    assert delivery.price == Decimal("128000")
-    assert delivery.evidence_type == EvidenceType.DELIVERY_ORDER_UNIT_PRICE
-    assert contract is not None
-    assert contract.price == Decimal("130000")
-    assert contract.evidence_type == EvidenceType.CONTRACT_UNIT_PRICE
+
+def test_specific_item_non_positive_prdct_uprc_is_not_promoted() -> None:
+    for value in ("0", "-1"):
+        record = {
+            "prdctIdntNoNm": "테스트 특정품목",
+            "prdctUprc": value,
+        }
+        assert (
+            parse_official_report_record(
+                record, operation=G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
+            )
+            is None
+        )
 
 
 def test_live_specific_item_schema_is_parsed_without_guessing() -> None:
@@ -100,9 +126,7 @@ def test_live_specific_item_schema_is_parsed_without_guessing() -> None:
     assert result.total_amount == Decimal("450000")
     assert result.unit == "대"
     assert result.transaction_date == date(2026, 7, 15)
-    assert result.source_record_id == (
-        "delivery:R26TB02131828|change:00|product:24138760|line:1"
-    )
+    assert result.source_record_id == "delivery:R26TB02131828|change:00|line:1"
     assert result.evidence_type == EvidenceType.DELIVERY_ORDER_UNIT_PRICE
     assert result.match_grade == MatchGrade.X
     assert "공급업체=주식회사 나우이엘" in (result.conditions or "")
@@ -131,6 +155,20 @@ def test_same_delivery_request_has_distinct_item_level_source_ids() -> None:
     assert first_id == "delivery:R26TB-SAME|change:00|product:PRODUCT-1|line:1"
     assert second_id == "delivery:R26TB-SAME|change:00|product:PRODUCT-2|line:2"
     assert first_id != second_id
+
+
+def test_track_b_stable_identity_ignores_product_id_but_preserves_line_and_change_order() -> None:
+    first = {
+        "cntrctDlvrReqNo": "R26TB-SAME",
+        "cntrctDlvrReqChgOrd": "01",
+        "prdctSno": "7",
+        "prdctIdntNo": "OLD-PRODUCT-ID",
+    }
+    same_identity = {**first, "prdctIdntNo": "CORRECTED-PRODUCT-ID"}
+
+    expected = "delivery:R26TB-SAME|change:01|line:7"
+    assert build_track_b_source_record_id(first) == expected
+    assert build_track_b_source_record_id(same_identity) == expected
 
 
 def test_specific_item_live_query_contract_uses_verified_parameters() -> None:
@@ -181,10 +219,11 @@ def test_generic_amount_without_verified_unit_price_is_not_promoted() -> None:
     assert result is None
 
 
-def test_specific_item_unit_price_without_contract_delivery_type_is_not_promoted() -> None:
+def test_specific_item_unit_price_without_exact_source_field_is_not_promoted() -> None:
     record = {
         "물품식별명": "테스트 품목",
         "단가": "128000",
+        "계약납품구분": "납품",
     }
 
     result = parse_official_report_record(
