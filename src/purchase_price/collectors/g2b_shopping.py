@@ -155,6 +155,17 @@ def build_g2b_source_record_id(record: Mapping[str, Any]) -> str | None:
     return "|".join(parts) or None
 
 
+def build_track_b_source_record_id(record: Mapping[str, Any]) -> str | None:
+    """Build the verified Track B identity: request number + change order + line sequence."""
+
+    delivery_request = _first_value(record, "delivery_request_number")
+    change_order = _first_value(record, "delivery_request_change_order")
+    product_sequence = _first_value(record, "product_sequence")
+    if any(value in (None, "") for value in (delivery_request, change_order, product_sequence)):
+        return None
+    return f"delivery:{delivery_request}|change:{change_order}|line:{product_sequence}"
+
+
 def _evidence_amount(
     record: Mapping[str, Any], operation: G2BShoppingOperation
 ) -> tuple[Decimal, EvidenceType] | None:
@@ -207,6 +218,11 @@ def parse_official_report_record(
         value = _first_value(record, logical_name)
         if value not in (None, ""):
             conditions_parts.append(f"{label}={value}")
+    source_record_id = (
+        build_track_b_source_record_id(record)
+        if operation == G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS
+        else build_g2b_source_record_id(record)
+    )
     return CollectedPrice(
         manufacturer=None,
         product_name=str(product_name),
@@ -222,7 +238,7 @@ def parse_official_report_record(
         quantity=quantity,
         unit=str(unit) if unit not in (None, "") else None,
         total_amount=total_amount,
-        source_record_id=build_g2b_source_record_id(record),
+        source_record_id=source_record_id,
         original_title=str(product_name),
         conditions="; ".join(conditions_parts) or None,
         match_grade=MatchGrade.X,
