@@ -10,6 +10,7 @@ from purchase_price.collectors.g2b_shopping import (
     G2BShoppingCollector,
     G2BShoppingOperation,
     build_g2b_source_record_id,
+    build_track_b_source_record_id,
     parse_official_report_record,
     unwrap_g2b_page,
 )
@@ -125,9 +126,7 @@ def test_live_specific_item_schema_is_parsed_without_guessing() -> None:
     assert result.total_amount == Decimal("450000")
     assert result.unit == "대"
     assert result.transaction_date == date(2026, 7, 15)
-    assert result.source_record_id == (
-        "delivery:R26TB02131828|change:00|product:24138760|line:1"
-    )
+    assert result.source_record_id == "delivery:R26TB02131828|change:00|line:1"
     assert result.evidence_type == EvidenceType.DELIVERY_ORDER_UNIT_PRICE
     assert result.match_grade == MatchGrade.X
     assert "공급업체=주식회사 나우이엘" in (result.conditions or "")
@@ -156,6 +155,20 @@ def test_same_delivery_request_has_distinct_item_level_source_ids() -> None:
     assert first_id == "delivery:R26TB-SAME|change:00|product:PRODUCT-1|line:1"
     assert second_id == "delivery:R26TB-SAME|change:00|product:PRODUCT-2|line:2"
     assert first_id != second_id
+
+
+def test_track_b_stable_identity_ignores_product_id_but_preserves_line_and_change_order() -> None:
+    first = {
+        "cntrctDlvrReqNo": "R26TB-SAME",
+        "cntrctDlvrReqChgOrd": "01",
+        "prdctSno": "7",
+        "prdctIdntNo": "OLD-PRODUCT-ID",
+    }
+    same_identity = {**first, "prdctIdntNo": "CORRECTED-PRODUCT-ID"}
+
+    expected = "delivery:R26TB-SAME|change:01|line:7"
+    assert build_track_b_source_record_id(first) == expected
+    assert build_track_b_source_record_id(same_identity) == expected
 
 
 def test_specific_item_live_query_contract_uses_verified_parameters() -> None:
