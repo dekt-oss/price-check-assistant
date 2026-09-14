@@ -155,25 +155,37 @@ def build_g2b_source_record_id(record: Mapping[str, Any]) -> str | None:
     return "|".join(parts) or None
 
 
-def _evidence_amount(record: Mapping[str, Any], operation: G2BShoppingOperation) -> tuple[Decimal, EvidenceType] | None:
+def _evidence_amount(
+    record: Mapping[str, Any], operation: G2BShoppingOperation
+) -> tuple[Decimal, EvidenceType] | None:
     delivery_unit_price = _decimal_or_none(_first_value(record, "delivery_unit_price"))
     contract_unit_price = _decimal_or_none(_first_value(record, "contract_unit_price"))
-    if operation == G2BShoppingOperation.DELIVERY_REQUEST_DETAILS and delivery_unit_price is not None:
+    if (
+        operation == G2BShoppingOperation.DELIVERY_REQUEST_DETAILS
+        and delivery_unit_price is not None
+    ):
         return delivery_unit_price, EvidenceType.DELIVERY_ORDER_UNIT_PRICE
-    if operation in {G2BShoppingOperation.MAS_CONTRACT_PRODUCTS, G2BShoppingOperation.SHOPPING_MALL_PRODUCTS} and contract_unit_price is not None:
+    if (
+        operation
+        in {
+            G2BShoppingOperation.MAS_CONTRACT_PRODUCTS,
+            G2BShoppingOperation.SHOPPING_MALL_PRODUCTS,
+        }
+        and contract_unit_price is not None
+    ):
         return contract_unit_price, EvidenceType.SHOPPING_CONTRACT_UNIT_PRICE
     if operation == G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS:
-        delivery_or_contract = str(_first_value(record, "contract_delivery_type") or "")
-        generic_unit_price = _decimal_or_none(_first_value(record, "generic_unit_price")) or delivery_unit_price or contract_unit_price
-        if generic_unit_price is not None:
-            if "납품" in delivery_or_contract:
-                return generic_unit_price, EvidenceType.DELIVERY_ORDER_UNIT_PRICE
-            if "계약" in delivery_or_contract:
-                return generic_unit_price, EvidenceType.CONTRACT_UNIT_PRICE
+        # Track B has one verified direct-price field. Do not fall back to generic labels,
+        # contract/delivery aliases, or prdctAmt / prdctQty arithmetic.
+        explicit_unit_price = _decimal_or_none(record.get("prdctUprc"))
+        if explicit_unit_price is not None and explicit_unit_price > 0:
+            return explicit_unit_price, EvidenceType.DELIVERY_ORDER_UNIT_PRICE
     return None
 
 
-def parse_official_report_record(record: Mapping[str, Any], *, operation: G2BShoppingOperation) -> CollectedPrice | None:
+def parse_official_report_record(
+    record: Mapping[str, Any], *, operation: G2BShoppingOperation
+) -> CollectedPrice | None:
     evidence = _evidence_amount(record, operation)
     if evidence is None:
         return None
@@ -186,7 +198,12 @@ def parse_official_report_record(record: Mapping[str, Any], *, operation: G2BSho
     unit = _first_value(record, "unit")
     transaction_date = _date_or_none(_first_value(record, "transaction_date"))
     conditions_parts: list[str] = []
-    for label, logical_name in (("공급업체", "supplier"), ("수요기관", "demand_institution"), ("계약구분", "contract_type"), ("납품조건", "delivery_condition")):
+    for label, logical_name in (
+        ("공급업체", "supplier"),
+        ("수요기관", "demand_institution"),
+        ("계약구분", "contract_type"),
+        ("납품조건", "delivery_condition"),
+    ):
         value = _first_value(record, logical_name)
         if value not in (None, ""):
             conditions_parts.append(f"{label}={value}")
@@ -218,11 +235,19 @@ def parse_official_report_record(record: Mapping[str, Any], *, operation: G2BSho
 class G2BShoppingCollector:
     name = SOURCE_NAME
 
-    def __init__(self, service_key: str, *, base_url: str = G2B_SHOPPING_BASE_URL, client: PublicDataPortalClient | None = None) -> None:
+    def __init__(
+        self,
+        service_key: str,
+        *,
+        base_url: str = G2B_SHOPPING_BASE_URL,
+        client: PublicDataPortalClient | None = None,
+    ) -> None:
         self.base_url = base_url
         self.client = client or PublicDataPortalClient(service_key)
 
-    def fetch_page(self, operation: G2BShoppingOperation, **params: Any) -> tuple[G2BShoppingPage, dict[str, Any]]:
+    def fetch_page(
+        self, operation: G2BShoppingOperation, **params: Any
+    ) -> tuple[G2BShoppingPage, dict[str, Any]]:
         payload = self.client.get_json(self.base_url, operation.value, **params)
         return unwrap_g2b_page(payload), payload
 
@@ -262,7 +287,9 @@ class G2BShoppingCollector:
             **selector,
         )
 
-    def parse_payload(self, payload: Mapping[str, Any], *, operation: G2BShoppingOperation) -> list[CollectedPrice]:
+    def parse_payload(
+        self, payload: Mapping[str, Any], *, operation: G2BShoppingOperation
+    ) -> list[CollectedPrice]:
         page = unwrap_g2b_page(payload)
         parsed: list[CollectedPrice] = []
         for item in page.items:
@@ -273,5 +300,7 @@ class G2BShoppingCollector:
 
     def search(self, query: ProductQuery) -> list[CollectedPrice]:
         raise RuntimeError(
-            "A verified model/product-name query parameter is not available yet. Use fetch_specific_item_page for classification-based procurement history; general ProductQuery search will be wired only after its live contract is verified."
+            "A verified model/product-name query parameter is not available yet. "
+            "Use fetch_specific_item_page for classification-based procurement history; "
+            "general ProductQuery search will be wired only after its live contract is verified."
         )
