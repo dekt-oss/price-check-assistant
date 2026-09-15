@@ -102,6 +102,19 @@ def test_replay_is_idempotent_and_divergent_identity_fails_closed(session: Sessi
     assert len(session.scalars(select(TrackBDeliveryLine)).all()) == 1
 
 
+def test_cross_page_non_serving_field_change_is_semantic_replay(session: Session) -> None:
+    first = _item()
+    first["dlvrTmlmtDate"] = "20260910"
+    changed_deadline = _item()
+    changed_deadline["dlvrTmlmtDate"] = "20260911"
+
+    assert ingest_track_b_page(session, _page([first])).inserted == 1
+    replay = ingest_track_b_page(session, _page([changed_deadline]))
+
+    assert replay.inserted == 0
+    assert replay.replayed == 1
+
+
 def test_missing_or_zero_unit_price_is_not_displayed(session: Session) -> None:
     missing = _item(price=None)
     zero = _item(change="01", price="0")

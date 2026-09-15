@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -91,7 +92,7 @@ def _line_from_record(record: NormalizedTrackBRecord) -> TrackBDeliveryLine:
         change_order=change_order,
         change_order_number=int(change_order),
         product_sequence=record.identity.product_sequence,
-        item_sha256=record.item_sha256,
+        item_sha256=_serving_item_sha256(record),
         raw_object_key=record.provenance.raw_object_key,
         raw_payload_sha256=record.provenance.raw_payload_sha256,
         detail_code=record.detail_code,
@@ -116,6 +117,36 @@ def _line_from_record(record: NormalizedTrackBRecord) -> TrackBDeliveryLine:
         demand_institution=record.demand_institution,
         api_params_json=json.dumps(dict(record.provenance.api_params), sort_keys=True),
     )
+
+
+def _serving_item_sha256(record: NormalizedTrackBRecord) -> str:
+    """Fingerprint fields that can affect the DB serving result, excluding raw-only metadata."""
+    payload = {
+        "detail_code": record.detail_code,
+        "detail_name": record.detail_name,
+        "product_id": record.product_id,
+        "product_name": record.product_name,
+        "unit_price": str(record.unit_price) if record.unit_price is not None else None,
+        "quantity": str(record.quantity) if record.quantity is not None else None,
+        "unit": record.unit,
+        "total_amount": str(record.total_amount) if record.total_amount is not None else None,
+        "amount_check": record.amount_check.value,
+        "supplier": record.supplier,
+        "demand_institution": record.demand_institution,
+        "transaction_date": (
+            record.transaction_date.isoformat() if record.transaction_date is not None else None
+        ),
+        "contract_delivery_type": record.contract_delivery_type,
+        "contract_type": record.contract_type,
+        "delivery_condition": record.delivery_condition,
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def ingest_track_b_page(session: Session, page: TrackBRawPage) -> TrackBIngestResult:
@@ -159,7 +190,7 @@ def ingest_track_b_page(session: Session, page: TrackBRawPage) -> TrackBIngestRe
         )
         existing = exact_rows.get(exact_key)
         if existing is not None:
-            if existing.item_sha256 != record.item_sha256:
+            if existing.item_sha256 != _serving_item_sha256(record):
                 raise TrackBIdentityConflictError(
                     f"stable identity {identity.source_record_id} has divergent payloads"
                 )
