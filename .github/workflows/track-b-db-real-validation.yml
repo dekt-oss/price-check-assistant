@@ -6,6 +6,7 @@ on:
       - codex/quote-track-b-db-comparison
     paths:
       - .github/workflows/track-b-db-real-validation.yml
+      - src/purchase_price/scripts/validate_g2b_track_b_db_live.py
 
 permissions:
   contents: read

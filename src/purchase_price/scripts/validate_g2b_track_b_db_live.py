@@ -17,8 +17,37 @@ from purchase_price.db import Base
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
 from purchase_price.scripts.import_g2b_track_b_r2_to_db import run as import_track_b
-from purchase_price.services.track_b_db_quote_comparison import compare_track_b_quote
+from purchase_price.services.track_b_db_quote_comparison import (
+    TrackBQuoteComparison,
+    compare_track_b_quote,
+)
 from purchase_price.storage.r2_reader import R2RawEvidenceReader
+
+
+def _find_comparison_case(
+    session: Session,
+) -> tuple[TrackBDeliveryLine, Decimal, TrackBQuoteComparison]:
+    rows = session.scalars(
+        select(TrackBDeliveryLine).where(
+            TrackBDeliveryLine.unit_price > 0,
+            TrackBDeliveryLine.model_key.is_not(None),
+            TrackBDeliveryLine.product_class.is_not(None),
+        ).order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc()).limit(1000)
+    ).all()
+    for sample in rows:
+        if sample.unit_price is None or sample.model_name is None:
+            continue
+        query = ProductQuery(
+            product_name=sample.product_class or "",
+            manufacturer=sample.manufacturer or "",
+            model_name=sample.model_name,
+            specification=sample.specification or "",
+        )
+        quote_price = (sample.unit_price * Decimal("1.10")).quantize(Decimal("0.01"))
+        matched = compare_track_b_quote(session, query, quote_unit_price=quote_price)
+        if matched.candidates:
+            return sample, quote_price, matched
+    raise RuntimeError("bounded real sample contained no searchable current priced model")
 
 
 def run(*, limit: int) -> dict[str, object]:
@@ -49,24 +78,13 @@ def run(*, limit: int) -> dict[str, object]:
                     TrackBDeliveryLine.model_key.is_not(None)
                 )
             ) or 0
-            sample = session.scalar(
-                select(TrackBDeliveryLine).where(
-                    TrackBDeliveryLine.unit_price > 0,
-                    TrackBDeliveryLine.model_key.is_not(None),
-                    TrackBDeliveryLine.product_class.is_not(None),
-                ).order_by(TrackBDeliveryLine.transaction_date.desc())
-            )
-            if sample is None or sample.unit_price is None or sample.model_name is None:
-                raise RuntimeError("bounded real sample contained no searchable priced model")
+            sample, quote_price, matched = _find_comparison_case(session)
+            assert sample.model_name is not None
             query = ProductQuery(
                 product_name=sample.product_class or "",
                 manufacturer=sample.manufacturer or "",
                 model_name=sample.model_name,
                 specification=sample.specification or "",
-            )
-            quote_price = (sample.unit_price * Decimal("1.10")).quantize(Decimal("0.01"))
-            matched = compare_track_b_quote(
-                session, query, quote_unit_price=quote_price
             )
             near_miss = compare_track_b_quote(
                 session,

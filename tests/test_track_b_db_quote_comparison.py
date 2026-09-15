@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from purchase_price.db import Base
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
+from purchase_price.scripts.validate_g2b_track_b_db_live import _find_comparison_case
 from purchase_price.services.g2b_track_b_normalization import (
     TrackBIdentityConflictError,
     TrackBRawPage,
@@ -170,3 +171,19 @@ def test_verified_origin_qualifier_remains_eligible(session: Session) -> None:
     result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
     assert len(result.candidates) == 1
     assert result.candidates[0].delta_percent == Decimal("11.1")
+
+
+def test_live_validation_selects_searchable_current_row_not_superseded_row(
+    session: Session,
+) -> None:
+    ingest_track_b_page(
+        session, _page([_item(change="00", title="제습기, 나우이엘, OLD-MODEL, 45L/d")])
+    )
+    ingest_track_b_page(
+        session, _page([_item(change="01", title="제습기, 나우이엘, NEW-MODEL, 45L/d")])
+    )
+    session.commit()
+
+    sample, _, comparison = _find_comparison_case(session)
+    assert sample.model_name == "NEW-MODEL"
+    assert comparison.candidates
