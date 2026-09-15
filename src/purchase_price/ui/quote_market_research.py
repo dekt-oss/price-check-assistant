@@ -12,7 +12,10 @@ from purchase_price.services.g2b_search_policy import (
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
-from purchase_price.services.track_b_db_quote_comparison import lookup_track_b_quote
+from purchase_price.services.track_b_db_quote_comparison import (
+    TrackBQuoteCandidate,
+    lookup_track_b_quote,
+)
 from purchase_price.ui.market_research import (
     render_external_research_links,
     render_market_alternative_candidates,
@@ -34,6 +37,32 @@ from purchase_price.ui.widgets import (
 
 def _money(value) -> str:
     return f"{value:,.0f}원" if value is not None else "미확인"
+
+
+def _track_b_candidate_rows(
+    candidates: tuple[TrackBQuoteCandidate, ...],
+) -> list[dict[str, str]]:
+    amount_check_labels = {
+        "consistent": "일치",
+        "inconsistent": "불일치",
+        "not_checked": "미검증",
+    }
+    return [
+        {
+            "수집 품목": candidate.product_title,
+            "납품요구 단가": _money(candidate.price),
+            "견적 대비": (
+                f"{candidate.delta_percent:+.1f}%"
+                if candidate.delta_percent is not None
+                else "비교조건 확인 필요"
+            ),
+            "식별 등급": candidate.match_grade.value,
+            "거래일": candidate.transaction_date or "미확인",
+            "금액검산": amount_check_labels.get(candidate.amount_check, candidate.amount_check),
+            "원문 키": candidate.raw_object_key,
+        }
+        for candidate in candidates
+    ]
 
 
 def _clear_research(state: QuoteReviewState) -> None:
@@ -255,21 +284,13 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
         else:
             if track_b.status == "partial":
                 st.warning("후보가 조회 상한을 초과했습니다. 아래 결과는 일부이며 추가 검토가 필요합니다.")
+            if any(candidate.amount_check == "inconsistent" for candidate in track_b.candidates):
+                st.warning(
+                    "단가×수량과 총액이 일치하지 않는 수집 행이 포함되어 있습니다. "
+                    "명시 단가는 Research로만 확인하세요."
+                )
             st.dataframe(
-                [
-                    {
-                        "수집 품목": candidate.product_title,
-                        "납품요구 단가": _money(candidate.price),
-                        "견적 대비": (
-                            f"{candidate.delta_percent:+.1f}%"
-                            if candidate.delta_percent is not None else "비교조건 확인 필요"
-                        ),
-                        "식별 등급": candidate.match_grade.value,
-                        "거래일": candidate.transaction_date or "미확인",
-                        "원문 키": candidate.raw_object_key,
-                    }
-                    for candidate in track_b.candidates
-                ],
+                _track_b_candidate_rows(track_b.candidates),
                 use_container_width=True,
                 hide_index=True,
             )
