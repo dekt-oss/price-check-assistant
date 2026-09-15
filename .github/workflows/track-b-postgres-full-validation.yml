@@ -1,6 +1,13 @@
 name: Track B PostgreSQL Full Validation
 
 on:
+  push:
+    branches:
+      - codex/quote-track-b-db-comparison
+    paths:
+      - .github/workflows/track-b-postgres-full-validation.yml
+      - src/purchase_price/scripts/validate_g2b_track_b_postgres_full.py
+      - src/purchase_price/services/track_b_db_quote_comparison.py
   workflow_dispatch:
     inputs:
       object_limit:
@@ -57,4 +64,4 @@ jobs:
       - name: Import and validate PostgreSQL serving index
         run: >-
           python -m purchase_price.scripts.validate_g2b_track_b_postgres_full
-          --limit "${{ inputs.object_limit }}"
+          --limit "${{ inputs.object_limit || '3488' }}"
