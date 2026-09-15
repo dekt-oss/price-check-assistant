@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from purchase_price.db import Base
@@ -122,6 +122,46 @@ def test_model_prefix_is_not_promoted_to_price_comparison(session: Session) -> N
 
     assert result.status == "success_0"
     assert result.candidates == ()
+
+
+def test_one_character_model_typo_is_only_an_identity_suggestion(session: Session) -> None:
+    ingest_track_b_page(session, _page([_item()]))
+    session.commit()
+
+    result = compare_track_b_quote(
+        session,
+        _query(model="MA-045DX"),
+        quote_unit_price=Decimal("100"),
+    )
+
+    assert result.status == "success_0"
+    assert result.candidates == ()
+    assert len(result.suggestions) == 1
+    assert result.suggestions[0].model_name == "MA-045DT"
+    assert not hasattr(result.suggestions[0], "price")
+
+
+def test_ingest_batches_existing_identity_queries(session: Session) -> None:
+    items = []
+    for sequence in range(1, 101):
+        item = _item(title=f"제습기, 나우이엘, MA-{sequence:04d}, 45L/d")
+        item["prdctSno"] = str(sequence)
+        items.append(item)
+    selects = 0
+
+    def count_selects(_conn, _cursor, statement, _parameters, _context, _executemany) -> None:
+        nonlocal selects
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects += 1
+
+    event.listen(session.bind, "before_cursor_execute", count_selects)
+    try:
+        result = ingest_track_b_page(session, _page(items))
+    finally:
+        event.remove(session.bind, "before_cursor_execute", count_selects)
+
+    assert result.inserted == 100
+    assert selects <= 2
 
 
 def test_latest_change_without_unit_price_suppresses_older_price(session: Session) -> None:

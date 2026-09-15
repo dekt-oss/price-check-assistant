@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -47,10 +48,20 @@ class TrackBQuoteCandidate:
 
 
 @dataclass(frozen=True)
+class TrackBIdentitySuggestion:
+    product_title: str
+    manufacturer: str | None
+    model_name: str
+    transaction_date: str | None
+    match_reason: str
+
+
+@dataclass(frozen=True)
 class TrackBQuoteComparison:
     status: str
     candidates: tuple[TrackBQuoteCandidate, ...]
     examined: int
+    suggestions: tuple[TrackBIdentitySuggestion, ...] = ()
 
 
 def lookup_track_b_quote(
@@ -119,15 +130,34 @@ def ingest_track_b_page(session: Session, page: TrackBRawPage) -> TrackBIngestRe
         raise TrackBIdentityConflictError("Track B page has divergent stable identity payloads")
     inserted = 0
     replayed = result.duplicate_count
+    delivery_request_numbers = {
+        record.identity.delivery_request_number for record in result.records
+    }
+    existing_rows = (
+        session.scalars(
+            select(TrackBDeliveryLine).where(
+                TrackBDeliveryLine.delivery_request_number.in_(delivery_request_numbers)
+            )
+        ).all()
+        if delivery_request_numbers
+        else []
+    )
+    exact_rows = {
+        (row.delivery_request_number, row.change_order, row.product_sequence): row
+        for row in existing_rows
+    }
+    numeric_rows = {
+        (row.delivery_request_number, row.change_order_number, row.product_sequence): row
+        for row in existing_rows
+    }
     for record in result.records:
         identity = record.identity
-        existing = session.scalar(
-            select(TrackBDeliveryLine).where(
-                TrackBDeliveryLine.delivery_request_number == identity.delivery_request_number,
-                TrackBDeliveryLine.change_order == identity.change_order,
-                TrackBDeliveryLine.product_sequence == identity.product_sequence,
-            )
+        exact_key = (
+            identity.delivery_request_number,
+            identity.change_order,
+            identity.product_sequence,
         )
+        existing = exact_rows.get(exact_key)
         if existing is not None:
             if existing.item_sha256 != record.item_sha256:
                 raise TrackBIdentityConflictError(
@@ -135,21 +165,24 @@ def ingest_track_b_page(session: Session, page: TrackBRawPage) -> TrackBIngestRe
                 )
             replayed += 1
             continue
-        numeric_collision = session.scalar(
-            select(TrackBDeliveryLine).where(
-                TrackBDeliveryLine.delivery_request_number == identity.delivery_request_number,
-                TrackBDeliveryLine.change_order_number == int(identity.change_order),
-                TrackBDeliveryLine.product_sequence == identity.product_sequence,
-            )
+        numeric_key = (
+            identity.delivery_request_number,
+            int(identity.change_order),
+            identity.product_sequence,
         )
+        numeric_collision = numeric_rows.get(numeric_key)
         if numeric_collision is not None:
             raise TrackBIdentityConflictError(
                 f"change order {identity.change_order} collides with stored"
                 f" {numeric_collision.change_order} for {identity.source_record_id}"
             )
-        session.add(_line_from_record(record))
-        session.flush()
+        line = _line_from_record(record)
+        session.add(line)
+        exact_rows[exact_key] = line
+        numeric_rows[numeric_key] = line
         inserted += 1
+    if inserted:
+        session.flush()
     return TrackBIngestResult(
         inserted=inserted,
         replayed=replayed,
@@ -157,6 +190,74 @@ def ingest_track_b_page(session: Session, page: TrackBRawPage) -> TrackBIngestRe
             issue.code in {"INVALID_ITEM", "INVALID_IDENTITY"} for issue in result.issues
         ),
     )
+
+
+def _model_edit_distance(left: str, right: str) -> int:
+    left_compact = re.sub(r"[^0-9a-z]+", "", left.casefold())
+    right_compact = re.sub(r"[^0-9a-z]+", "", right.casefold())
+    if left_compact == right_compact:
+        return 0
+    if abs(len(left_compact) - len(right_compact)) > 1:
+        return 2
+    previous = list(range(len(right_compact) + 1))
+    for row_index, left_char in enumerate(left_compact, start=1):
+        current = [row_index]
+        for column_index, right_char in enumerate(right_compact, start=1):
+            current.append(
+                min(
+                    current[-1] + 1,
+                    previous[column_index] + 1,
+                    previous[column_index - 1] + (left_char != right_char),
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def _suggest_similar_identities(
+    session: Session,
+    *,
+    model_key: str,
+    class_key: str,
+    current_clause,
+    limit: int = 5,
+) -> tuple[TrackBIdentitySuggestion, ...]:
+    compact_query = re.sub(r"[^0-9a-z]+", "", model_key.casefold())
+    if len(compact_query) < 5 or not class_key:
+        return ()
+    rows = session.scalars(
+        select(TrackBDeliveryLine)
+        .where(
+            current_clause,
+            TrackBDeliveryLine.class_key == class_key,
+            TrackBDeliveryLine.model_key.is_not(None),
+        )
+        .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
+        .limit(200)
+    ).all()
+    suggestions: list[TrackBIdentitySuggestion] = []
+    seen: set[tuple[str, str | None]] = set()
+    for row in rows:
+        if not row.model_key or not row.model_name or _model_edit_distance(model_key, row.model_key) != 1:
+            continue
+        identity_key = (row.model_key, row.manufacturer)
+        if identity_key in seen or row.product_title is None:
+            continue
+        seen.add(identity_key)
+        suggestions.append(
+            TrackBIdentitySuggestion(
+                product_title=row.product_title,
+                manufacturer=row.manufacturer,
+                model_name=row.model_name,
+                transaction_date=(
+                    row.transaction_date.isoformat() if row.transaction_date is not None else None
+                ),
+                match_reason="모델명 편집거리 1 — 식별 확인 필요",
+            )
+        )
+        if len(suggestions) >= limit:
+            break
+    return tuple(suggestions)
 
 
 def compare_track_b_quote(
@@ -239,8 +340,19 @@ def compare_track_b_quote(
     status = "partial" if len(rows) > limit else "success" if candidates else "success_0"
     if status == "success_0" and session.scalar(select(TrackBDeliveryLine.id).limit(1)) is None:
         status = "not_ingested"
+    suggestions = (
+        _suggest_similar_identities(
+            session,
+            model_key=model_key,
+            class_key=class_key,
+            current_clause=current,
+        )
+        if status == "success_0" and model_key
+        else ()
+    )
     return TrackBQuoteComparison(
         status=status,
         candidates=tuple(candidates),
         examined=min(len(rows), limit),
+        suggestions=suggestions,
     )

@@ -3,6 +3,7 @@ from decimal import Decimal
 from purchase_price.domain import MatchGrade
 from purchase_price.services.quote_extraction import QuoteItem
 from purchase_price.services.track_b_db_quote_comparison import (
+    TrackBIdentitySuggestion,
     TrackBQuoteCandidate,
     TrackBQuoteComparison,
 )
@@ -24,7 +25,7 @@ def test_auto_quote_flow_loads_db_comparison_and_invalidates_it(monkeypatch) -> 
         return expected
 
     monkeypatch.setattr(quote_market_research, "lookup_track_b_quote", lookup)
-    quote_market_research._ensure_market_research(state)
+    quote_market_research._ensure_track_b_comparison(state)
     assert calls == [("MA-045DT", Decimal("100"))]
     assert state.track_b_db[0] is expected
 
@@ -46,3 +47,19 @@ def test_track_b_table_exposes_amount_mismatch() -> None:
     )
     rows = quote_market_research._track_b_candidate_rows((candidate,))
     assert rows[0]["금액검산"] == "불일치"
+
+
+def test_similar_identity_rows_never_expose_price() -> None:
+    suggestion = TrackBIdentitySuggestion(
+        product_title="제습기, 제조사, MA-045DT",
+        manufacturer="제조사",
+        model_name="MA-045DT",
+        transaction_date="2026-09-01",
+        match_reason="모델명 편집거리 1 — 식별 확인 필요",
+    )
+
+    rows = quote_market_research._track_b_suggestion_rows((suggestion,))
+
+    assert rows[0]["모델명"] == "MA-045DT"
+    assert "단가" not in rows[0]
+    assert "견적 대비" not in rows[0]

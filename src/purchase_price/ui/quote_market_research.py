@@ -13,6 +13,7 @@ from purchase_price.services.price_conditions import build_price_condition_profi
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
 from purchase_price.services.track_b_db_quote_comparison import (
+    TrackBIdentitySuggestion,
     TrackBQuoteCandidate,
     lookup_track_b_quote,
 )
@@ -62,6 +63,21 @@ def _track_b_candidate_rows(
             "원문 키": candidate.raw_object_key,
         }
         for candidate in candidates
+    ]
+
+
+def _track_b_suggestion_rows(
+    suggestions: tuple[TrackBIdentitySuggestion, ...],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "수집 품목": suggestion.product_title,
+            "제조사": suggestion.manufacturer or "미확인",
+            "모델명": suggestion.model_name,
+            "거래일": suggestion.transaction_date or "미확인",
+            "제안 근거": suggestion.match_reason,
+        }
+        for suggestion in suggestions
     ]
 
 
@@ -187,7 +203,7 @@ def _render_compact_item_editor(state: QuoteReviewState) -> None:
             st.rerun()
 
 
-def _ensure_market_research(state: QuoteReviewState) -> None:
+def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
     if not state.items:
         return
     for index, item in enumerate(state.items):
@@ -195,9 +211,14 @@ def _ensure_market_research(state: QuoteReviewState) -> None:
             state.track_b_db[index] = lookup_track_b_quote(
                 quote_item_query(item), quote_unit_price=item.unit_price
             )
+
+
+def _ensure_market_research(state: QuoteReviewState) -> bool:
+    if not state.items:
+        return False
     missing = [index for index in range(len(state.items)) if index not in state.search_runs]
     if not missing:
-        return
+        return False
 
     progress = st.progress(0, text="견적 품목의 시장가격을 자동 조사하고 있습니다...")
     total = len(missing)
@@ -222,6 +243,7 @@ def _ensure_market_research(state: QuoteReviewState) -> None:
         state.discoveries[index] = discovery
         state.market_bundles[index] = market_bundle
     progress.progress(1.0, text="시장가격 자동 조사를 완료했습니다.")
+    return True
 
 
 def _render_overview(state: QuoteReviewState) -> None:
@@ -281,6 +303,16 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             st.info("품명 또는 모델명이 없어 수집 DB의 가격 후보를 검색할 수 없습니다.")
         elif track_b.status == "success_0":
             st.info("수집 DB 조회는 완료했지만 현재 식별정보로 확인된 단가 후보가 없습니다.")
+            if track_b.suggestions:
+                st.warning(
+                    "모델명 오타 가능성이 있는 식별 후보입니다. 단가 비교에는 사용하지 않았으며 "
+                    "원문 모델명을 확인한 뒤 다시 검색하세요."
+                )
+                st.dataframe(
+                    _track_b_suggestion_rows(track_b.suggestions),
+                    use_container_width=True,
+                    hide_index=True,
+                )
         else:
             if track_b.status == "partial":
                 st.warning("후보가 조회 상한을 초과했습니다. 아래 결과는 일부이며 추가 검토가 필요합니다.")
@@ -355,8 +387,8 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
 
 def render_quote_market_research(state: QuoteReviewState) -> None:
     st.info(
-        "견적서를 업로드하면 품목을 추출하고 제품 식별 확인을 기다리지 않은 채 바로 시장조사를 시작합니다. "
-        "입찰·낙찰·계약 금액은 Research 참고자료이며 동일제품 직접단가 판정과 분리됩니다."
+        "견적서를 업로드하면 품목을 추출하고 수집 DB 단가를 바로 비교합니다. "
+        "여러 외부 출처의 광범위 시장조사는 DB 비교 결과를 확인한 뒤 별도로 시작할 수 있습니다."
     )
 
     uploaded = st.file_uploader(
@@ -430,9 +462,21 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
             _clear_research(state)
             st.rerun()
 
-    _ensure_market_research(state)
+    _ensure_track_b_comparison(state)
     _render_overview(state)
 
     st.subheader("품목별 시장조사")
     for index in range(len(state.items)):
         _render_item_result(state, index)
+
+    missing_market = [
+        index for index in range(len(state.items)) if index not in state.search_runs
+    ]
+    if missing_market:
+        st.info(
+            "수집 DB 비교는 완료했습니다. 입찰·낙찰·쇼핑몰 등 외부 출처까지 조사하려면 "
+            "아래 버튼을 누르세요."
+        )
+        if st.button("외부 시장가격 조사 시작", key="quote_auto_start_external_research"):
+            if _ensure_market_research(state):
+                st.rerun()
