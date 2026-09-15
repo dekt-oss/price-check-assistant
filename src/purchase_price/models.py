@@ -4,6 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -118,3 +119,49 @@ class PriceObservation(Base):
 
     product: Mapped[Product] = relationship(back_populates="observations")
     evidence: Mapped[RawEvidence] = relationship(back_populates="observations")
+
+
+class TrackBDeliveryLine(Base):
+    """DB serving index for immutable Track B delivery-line history held in R2."""
+
+    __tablename__ = "track_b_delivery_lines"
+    __table_args__ = (
+        UniqueConstraint(
+            "delivery_request_number", "change_order", "product_sequence",
+            name="uq_track_b_stable_identity",
+        ),
+        UniqueConstraint(
+            "delivery_request_number", "change_order_number", "product_sequence",
+            name="uq_track_b_numeric_change_order",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    delivery_request_number: Mapped[str] = mapped_column(String(120), index=True)
+    change_order: Mapped[str] = mapped_column(String(30))
+    change_order_number: Mapped[int] = mapped_column(Integer)
+    product_sequence: Mapped[str] = mapped_column(String(40))
+    item_sha256: Mapped[str] = mapped_column(String(64))
+    raw_object_key: Mapped[str] = mapped_column(Text)
+    raw_payload_sha256: Mapped[str] = mapped_column(String(64))
+    detail_code: Mapped[str] = mapped_column(String(10), index=True)
+    product_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    product_title: Mapped[str | None] = mapped_column(Text)
+    product_class: Mapped[str | None] = mapped_column(String(300))
+    class_key: Mapped[str | None] = mapped_column(String(300), index=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(300))
+    manufacturer_qualifier: Mapped[str | None] = mapped_column(String(50))
+    model_name: Mapped[str | None] = mapped_column(String(300))
+    model_qualifier: Mapped[str | None] = mapped_column(String(50))
+    model_qualifier_verified_as_origin: Mapped[bool] = mapped_column(Boolean, default=False)
+    model_key: Mapped[str | None] = mapped_column(String(300), index=True)
+    specification: Mapped[str | None] = mapped_column(Text)
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3))
+    unit: Mapped[str | None] = mapped_column(String(50))
+    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    amount_check: Mapped[str] = mapped_column(String(30))
+    transaction_date: Mapped[date | None] = mapped_column(Date)
+    supplier: Mapped[str | None] = mapped_column(String(300))
+    demand_institution: Mapped[str | None] = mapped_column(String(300))
+    api_params_json: Mapped[str] = mapped_column(Text)

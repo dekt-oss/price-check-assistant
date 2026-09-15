@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from purchase_price.services.quote_extraction import QuoteExtractionResult, QuoteItem
     from purchase_price.services.quote_extraction_diagnostics import QuoteExtractionDiagnostics
     from purchase_price.services.search import SearchRun
+    from purchase_price.services.track_b_db_quote_comparison import TrackBQuoteComparison
 
 QUOTE_REVIEW_STATE_SESSION_KEY = "quote_review_state"
 QUOTE_REVIEW_STEPS = (
@@ -54,6 +55,7 @@ class QuoteReviewState:
     search_runs: dict[int, SearchRun] = field(default_factory=dict)
     discoveries: dict[int, G2BUnmappedDiscoveryResult | None] = field(default_factory=dict)
     market_bundles: dict[int, MarketResearchBundle | None] = field(default_factory=dict)
+    track_b_db: dict[int, TrackBQuoteComparison] = field(default_factory=dict)
     lookback_days: int = 365
     comparability_context: dict[int, QuoteComparabilityContext] = field(default_factory=dict)
     approvals: dict[str, QuoteComparableApproval] = field(default_factory=dict)
@@ -69,6 +71,7 @@ class QuoteReviewState:
             self.search_runs.clear()
             self.discoveries.clear()
             self.market_bundles.clear()
+            self.track_b_db.clear()
         if after_step < 5:
             self.comparability_context.clear()
         if after_step < 6:
