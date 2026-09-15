@@ -23,8 +23,8 @@ state: QuoteReviewState = st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY]
 
 st.title("견적 검토")
 st.caption(
-    "견적서를 한 번 업로드하면 품목 추출과 시장조사를 바로 실행하고 결과를 한 화면에서 보여줍니다. "
-    "동일제품 직접비교나 최종 승인·판정이 필요할 때만 아래 상세 검증을 진행합니다."
+    "견적서를 한 번 업로드하면 품목 추출과 수집 DB 가격 비교를 바로 실행합니다. "
+    "외부 시장조사와 동일제품 직접비교, 최종 승인·판정은 필요한 경우 이어서 진행합니다."
 )
 
 render_quote_market_research(state)
