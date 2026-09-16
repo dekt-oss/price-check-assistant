@@ -1,0 +1,57 @@
+name: R2 Search Recall UAT
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/r2-search-recall-uat.yml"
+      - "data/uat/r2-search-recall-cases.json"
+      - "src/purchase_price/scripts/measure_r2_search_recall.py"
+      - "src/purchase_price/services/track_b_r2_quote_index.py"
+      - "src/purchase_price/services/track_b_db_quote_comparison.py"
+      - "tests/test_measure_r2_search_recall.py"
+
+permissions:
+  contents: read
+
+jobs:
+  recall-uat:
+    name: read-only Production R2 recall measurement
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: src
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package
+        run: pip install -e .
+      - name: Run deterministic recall unit tests
+        run: pytest -q tests/test_measure_r2_search_recall.py
+      - name: Measure Production R2 recall without writes
+        run: >-
+          python -m purchase_price.scripts.measure_r2_search_recall
+          --manifest data/uat/r2-search-recall-cases.json
+          --output artifacts/r2-search-recall/report.json
+          --summary artifacts/r2-search-recall/summary.md
+      - name: Print recall summary
+        if: always()
+        run: |
+          if [ -f artifacts/r2-search-recall/summary.md ]; then
+            cat artifacts/r2-search-recall/summary.md
+          fi
+      - name: Upload recall evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2-search-recall-uat
+          path: artifacts/r2-search-recall/
+          if-no-files-found: warn
+          retention-days: 14
