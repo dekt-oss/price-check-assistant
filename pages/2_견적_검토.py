@@ -27,6 +27,9 @@ st.caption(
     "외부 시장조사와 동일제품 직접비교, 최종 승인·판정은 필요한 경우 이어서 진행합니다."
 )
 
+if state.extraction is None:
+    st.info("견적서를 업로드하면 품목을 추출하고 가격·판매처·구매처·거래이력을 바로 검색합니다.")
+
 render_quote_market_research(state)
 
 if state.extraction is not None:

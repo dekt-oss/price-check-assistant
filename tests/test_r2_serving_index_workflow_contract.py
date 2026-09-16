@@ -9,6 +9,9 @@ def test_r2_serving_index_workflow_runs_after_daily_backfill() -> None:
     assert "R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}" in text
     assert "DATABASE_URL" not in text
     assert "group: track-b-r2-pipeline" in text
+    assert "push:" in text
+    assert "branches:" in text
+    assert "- main" in text
 
 
 def test_home_is_unified_search_and_upload_entrypoint() -> None:
@@ -19,3 +22,10 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     assert "home_quote_upload" in text
     assert 'st.switch_page("pages/2_견적_검토.py")' in text
     assert "lookup_track_b_quote_from_r2" in text
+    assert "나라장터 거래가격" in text
+    assert '"판매처"' in text
+    assert '"구매처"' in text
+    assert '"거래기록"' in text
+    assert "상세 조사·근거 보기" in text
+    assert "model_probe_query = model_probe_input.to_product_query()" in text
+    assert "query = model_probe_query" in text

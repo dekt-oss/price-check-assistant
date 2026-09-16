@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -133,8 +135,29 @@ class R2ServingIndexStore:
             raise R2IntegrityError(
                 f"R2 serving index hash mismatch: expected {ref.sha256}, got {digest}"
             )
+
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(raw)
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=destination.parent,
+                prefix=f".{destination.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temp_path = Path(handle.name)
+                handle.write(raw)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, destination)
+            temp_path = None
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
         return destination
 
     def delete(self, key: str) -> None:

@@ -6,6 +6,7 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBIdentitySuggestion,
     TrackBQuoteCandidate,
     TrackBQuoteComparison,
+    TrackBReferenceCandidate,
 )
 from purchase_price.ui import quote_market_research
 from purchase_price.ui.quote_review_state import QuoteReviewState
@@ -33,7 +34,7 @@ def test_auto_quote_flow_loads_db_comparison_and_invalidates_it(monkeypatch) -> 
     assert state.track_b_db == {}
 
 
-def test_track_b_table_exposes_amount_mismatch() -> None:
+def test_track_b_table_exposes_purchase_transaction_context() -> None:
     candidate = TrackBQuoteCandidate(
         source_record_id="delivery:1|change:00|line:1",
         product_title="제습기, 제조사, MODEL",
@@ -42,11 +43,47 @@ def test_track_b_table_exposes_amount_mismatch() -> None:
         match_note="exact",
         delta_percent=Decimal("11.1"),
         raw_object_key="raw/key",
-        amount_check="inconsistent",
+        amount_check="consistent",
         transaction_date="2026-09-01",
+        supplier="공급사A",
+        demand_institution="구매기관B",
+        quantity=Decimal("2"),
+        unit="대",
     )
+
     rows = quote_market_research._track_b_candidate_rows((candidate,))
-    assert rows[0]["금액검산"] == "불일치"
+
+    assert rows[0]["가격"] == 90.0
+    assert rows[0]["판매처"] == "공급사A"
+    assert rows[0]["구매처"] == "구매기관B"
+    assert rows[0]["거래일"] == "2026-09-01"
+    assert rows[0]["수량/단위"] == "2 대"
+    assert rows[0]["거래기록"] == "나라장터 납품요구"
+    assert rows[0]["비교수준"] == "동일 모델"
+
+
+def test_reference_rows_expose_price_but_make_reference_scope_explicit() -> None:
+    candidate = TrackBReferenceCandidate(
+        source_record_id="delivery:2|change:00|line:1",
+        product_title="마취기, Maquet, FLOW-C",
+        price=Decimal("60000000"),
+        reference_reason="품명 키워드 참고 · 마취기",
+        raw_object_key="raw/key2",
+        transaction_date="2026-08-01",
+        supplier="공급사C",
+        demand_institution="병원D",
+        quantity=Decimal("1"),
+        unit="SET",
+        model_name="FLOW-C",
+    )
+
+    rows = quote_market_research._track_b_reference_rows((candidate,))
+
+    assert rows[0]["가격"] == 60000000.0
+    assert rows[0]["판매처"] == "공급사C"
+    assert rows[0]["구매처"] == "병원D"
+    assert rows[0]["비교수준"] == "품명 키워드 참고 · 마취기"
+    assert rows[0]["견적 대비"] == "참고만"
 
 
 def test_similar_identity_rows_never_expose_price() -> None:
@@ -61,5 +98,5 @@ def test_similar_identity_rows_never_expose_price() -> None:
     rows = quote_market_research._track_b_suggestion_rows((suggestion,))
 
     assert rows[0]["모델명"] == "MA-045DT"
-    assert "단가" not in rows[0]
+    assert "가격" not in rows[0]
     assert "견적 대비" not in rows[0]

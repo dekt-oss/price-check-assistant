@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
@@ -47,6 +47,27 @@ class TrackBQuoteCandidate:
     raw_object_key: str
     amount_check: str
     transaction_date: str | None
+    supplier: str | None = None
+    demand_institution: str | None = None
+    quantity: Decimal | None = None
+    unit: str | None = None
+    transaction_type: str = "나라장터 납품요구"
+
+
+@dataclass(frozen=True)
+class TrackBReferenceCandidate:
+    source_record_id: str
+    product_title: str
+    price: Decimal
+    reference_reason: str
+    raw_object_key: str
+    transaction_date: str | None
+    supplier: str | None = None
+    demand_institution: str | None = None
+    quantity: Decimal | None = None
+    unit: str | None = None
+    model_name: str | None = None
+    transaction_type: str = "나라장터 납품요구"
 
 
 @dataclass(frozen=True)
@@ -64,6 +85,7 @@ class TrackBQuoteComparison:
     candidates: tuple[TrackBQuoteCandidate, ...]
     examined: int
     suggestions: tuple[TrackBIdentitySuggestion, ...] = ()
+    reference_candidates: tuple[TrackBReferenceCandidate, ...] = ()
 
 
 def lookup_track_b_quote(
@@ -305,6 +327,124 @@ def _suggest_similar_identities(
     return tuple(suggestions)
 
 
+def _reference_tokens(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    stop = {"machine", "system", "device", "equipment", "medical"}
+    tokens = re.findall(r"[0-9A-Za-z가-힣]{2,}", value)
+    normalized: list[str] = []
+    for token in tokens:
+        key = token.casefold()
+        if key in stop:
+            continue
+        if key not in normalized:
+            normalized.append(key)
+    return tuple(sorted(normalized, key=len, reverse=True)[:4])
+
+
+def _reference_reason(
+    row: TrackBDeliveryLine,
+    *,
+    model_key: str,
+    class_key: str,
+    tokens: tuple[str, ...],
+) -> str:
+    if model_key and row.model_key == model_key:
+        return "동일 모델명 · 제조사/규격 조건 확인 필요"
+    if model_key and row.model_key and (model_key in row.model_key or row.model_key in model_key):
+        return "유사 모델명 참고"
+    if class_key and row.class_key == class_key:
+        return "동일 품목명 참고"
+    title = (row.product_title or "").casefold()
+    matched = next((token for token in tokens if token in title), None)
+    return f"품명 키워드 참고 · {matched}" if matched else "검색 참고"
+
+
+def _find_reference_candidates(
+    session: Session,
+    *,
+    query: ProductQuery,
+    model_key: str,
+    class_key: str,
+    current_clause,
+    limit: int = 25,
+) -> tuple[TrackBReferenceCandidate, ...]:
+    """Return broad observed-price references without promoting them to comparable evidence."""
+    conditions = []
+    if model_key:
+        conditions.append(TrackBDeliveryLine.model_key.like(f"%{model_key}%"))
+    if class_key:
+        conditions.append(TrackBDeliveryLine.class_key.like(f"%{class_key}%"))
+    tokens = _reference_tokens(query.product_name)
+    for token in tokens:
+        conditions.append(TrackBDeliveryLine.product_title.ilike(f"%{token}%"))
+    if not conditions:
+        return ()
+
+    rows = session.scalars(
+        select(TrackBDeliveryLine)
+        .where(
+            current_clause,
+            or_(*conditions),
+            TrackBDeliveryLine.unit_price > 0,
+            TrackBDeliveryLine.identity_conflict.is_(False),
+        )
+        .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
+        .limit(200)
+    ).all()
+
+    ranked = sorted(
+        rows,
+        key=lambda row: (
+            0
+            if model_key and row.model_key == model_key
+            else 1
+            if model_key
+            and row.model_key
+            and (model_key in row.model_key or row.model_key in model_key)
+            else 2
+            if class_key and row.class_key == class_key
+            else 3,
+            -(row.transaction_date.toordinal() if row.transaction_date is not None else 0),
+            -row.id,
+        ),
+    )
+    references: list[TrackBReferenceCandidate] = []
+    seen: set[str] = set()
+    for row in ranked:
+        if row.unit_price is None or row.product_title is None:
+            continue
+        source_record_id = (
+            f"delivery:{row.delivery_request_number}"
+            f"|change:{row.change_order}|line:{row.product_sequence}"
+        )
+        if source_record_id in seen:
+            continue
+        seen.add(source_record_id)
+        references.append(
+            TrackBReferenceCandidate(
+                source_record_id=source_record_id,
+                product_title=row.product_title,
+                price=row.unit_price,
+                reference_reason=_reference_reason(
+                    row, model_key=model_key, class_key=class_key, tokens=tokens
+                ),
+                raw_object_key=row.raw_object_key,
+                transaction_date=(
+                    row.transaction_date.isoformat() if row.transaction_date is not None else None
+                ),
+                supplier=row.supplier,
+                demand_institution=row.demand_institution,
+                quantity=row.quantity,
+                unit=row.unit,
+                model_name=row.model_name,
+            )
+        )
+        if len(references) >= limit:
+            break
+    return tuple(references)
+
+
 def compare_track_b_quote(
     session: Session,
     query: ProductQuery,
@@ -385,6 +525,10 @@ def compare_track_b_quote(
                 transaction_date=(
                     row.transaction_date.isoformat() if row.transaction_date is not None else None
                 ),
+                supplier=row.supplier,
+                demand_institution=row.demand_institution,
+                quantity=row.quantity,
+                unit=row.unit,
             )
         )
     status = "partial" if len(rows) > limit else "success" if candidates else "success_0"
@@ -400,9 +544,21 @@ def compare_track_b_quote(
         if status == "success_0" and model_key
         else ()
     )
+    references = (
+        _find_reference_candidates(
+            session,
+            query=query,
+            model_key=model_key,
+            class_key=class_key,
+            current_clause=current,
+        )
+        if status == "success_0"
+        else ()
+    )
     return TrackBQuoteComparison(
         status=status,
         candidates=tuple(candidates),
         examined=min(len(rows), limit),
         suggestions=suggestions,
+        reference_candidates=references,
     )
