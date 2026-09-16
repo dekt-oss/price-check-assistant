@@ -11,6 +11,8 @@ def test_r2_serving_index_workflow_runs_after_daily_backfill_and_main_changes() 
     assert "github.event_name == 'push'" in text
     assert "sync_g2b_track_b_r2_index" in text
     assert "track_b_reference_prices.py" in text
+    assert '"httpx>=0.27,<1"' in text
+    assert '"tenacity>=9,<10"' in text
     assert "R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}" in text
     assert "DATABASE_URL" not in text
     assert "group: track-b-r2-pipeline" in text
