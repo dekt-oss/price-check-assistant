@@ -32,7 +32,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install package
-        run: pip install -e .
+        run: pip install -e ".[dev]"
       - name: Run deterministic recall unit tests
         run: pytest -q tests/test_measure_r2_search_recall.py
       - name: Measure Production R2 recall without writes
