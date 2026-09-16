@@ -3,7 +3,7 @@ name: Track B R2 Serving Index
 on:
   workflow_run:
     workflows:
-      - "Track B Daily Backfill and PostgreSQL Sync"
+      - "Track B Daily Backfill"
     types:
       - completed
     branches:
