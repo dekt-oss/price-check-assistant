@@ -21,9 +21,9 @@ def _admin_mode() -> bool:
 
 
 business_pages = [
-    st.Page("pages/1_대시보드.py", title="대시보드", icon="🏠", default=True),
+    st.Page("pages/1_대시보드.py", title="통합 검색", icon="🔎", default=True),
     st.Page("pages/2_견적_검토.py", title="견적 검토", icon="📋"),
-    st.Page("pages/3_빠른_검색.py", title="빠른 검색", icon="🔎"),
+    st.Page("pages/3_빠른_검색.py", title="상세 검색", icon="🧭"),
     st.Page("pages/4_의료기기_조회.py", title="의료기기 조회", icon="🏥"),
 ]
 

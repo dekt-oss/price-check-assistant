@@ -1,0 +1,60 @@
+name: Track B R2 Serving Index
+
+on:
+  workflow_run:
+    workflows:
+      - "Track B Daily Backfill"
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      max_bootstrap_objects:
+        description: Safety ceiling for initial R2 raw -> SQLite index bootstrap
+        required: true
+        default: "100000"
+
+concurrency:
+  group: track-b-r2-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync-index:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONPATH: src
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install serving-index dependencies
+        run: >-
+          python -m pip install
+          "sqlalchemy>=2,<3"
+          "pydantic>=2.8,<3"
+          "pydantic-settings>=2.4,<3"
+          "boto3>=1.35,<2"
+      - name: Build or increment R2-hosted SQLite serving index
+        run: >-
+          python -m purchase_price.scripts.sync_g2b_track_b_r2_index
+          --max-bootstrap-objects "${{ inputs.max_bootstrap_objects || '100000' }}"
+          --output artifacts/track-b-daily/r2-serving-index.json
+      - name: Upload sync evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: track-b-r2-serving-index
+          path: artifacts/track-b-daily/r2-serving-index.json
+          if-no-files-found: warn
+          retention-days: 14
