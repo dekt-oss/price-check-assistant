@@ -4,6 +4,11 @@ from pathlib import Path
 def test_daily_workflow_keeps_quota_checkpoint_and_db_guards() -> None:
     text = Path(".github/workflows/track-b-daily-backfill-postgres.yml").read_text()
 
+    assert "pull_request:" in text
+    assert "production secret readiness" in text
+    assert "github.event_name == 'pull_request'" in text
+    assert "github.event_name != 'pull_request'" in text
+    assert "production_secret_contract=READY" in text
     assert 'cron: "10 18 * * *"' in text
     assert "group: track-b-daily-backfill-postgres" in text
     assert "cancel-in-progress: false" in text
