@@ -24,6 +24,17 @@ def test_r2_serving_index_pr_gate_is_read_only_recovery_proof() -> None:
     assert "state_store.write_json" not in text
 
 
+def test_r2_serving_index_main_run_checks_flow_c_serving_path() -> None:
+    text = Path(".github/workflows/track-b-r2-serving-index.yml").read_text()
+
+    assert "Verify R2 serving lookup with FLOW-C" in text
+    assert 'model_name="FLOW-C"' in text
+    assert "flow-c-serving-smoke.json" in text
+    assert "candidate_count" in text
+    assert "reference_count" in text
+    assert 'blocked = {"unavailable", "not_ingested"}' in text
+
+
 def test_serving_index_bootstrap_can_recover_validated_legacy_state() -> None:
     text = Path("src/purchase_price/scripts/sync_g2b_track_b_r2_index.py").read_text()
 
