@@ -18,6 +18,7 @@ from purchase_price.storage.r2_state import R2OperationalStateStore
 
 POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
 _CACHE_DIR = Path(tempfile.gettempdir()) / "price-check-track-b"
+_VALIDATED_CACHE_FILES: dict[str, tuple[int, int, int, int]] = {}
 
 
 def _sha256_file(path: Path) -> str:
@@ -26,6 +27,25 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _file_fingerprint(path: Path) -> tuple[int, int, int, int]:
+    stat = path.stat()
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+
+def _cache_file_is_valid(path: Path, sha256: str) -> bool:
+    fingerprint = _file_fingerprint(path)
+    if _VALIDATED_CACHE_FILES.get(sha256) == fingerprint:
+        return True
+    if _sha256_file(path) != sha256:
+        return False
+    _VALIDATED_CACHE_FILES[sha256] = fingerprint
+    return True
+
+
+def _remember_validated_cache(path: Path, sha256: str) -> None:
+    _VALIDATED_CACHE_FILES[sha256] = _file_fingerprint(path)
 
 
 def _local_index_path(settings: Settings) -> Path | None:
@@ -42,8 +62,9 @@ def _local_index_path(settings: Settings) -> Path | None:
 
     destination = _CACHE_DIR / f"{sha256}.sqlite"
     if destination.exists():
-        if _sha256_file(destination) == sha256:
+        if _cache_file_is_valid(destination, sha256):
             return destination
+        _VALIDATED_CACHE_FILES.pop(sha256, None)
         try:
             destination.unlink()
         except OSError as exc:
@@ -57,6 +78,7 @@ def _local_index_path(settings: Settings) -> Path | None:
     )
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     R2ServingIndexStore.from_settings(settings).download_sqlite(ref, destination)
+    _remember_validated_cache(destination, sha256)
     for stale in _CACHE_DIR.glob("*.sqlite"):
         if stale != destination:
             try:
