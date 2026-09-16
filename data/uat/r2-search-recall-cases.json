@@ -1,0 +1,19 @@
+{
+  "schema": "r2-search-recall-uat-v1",
+  "cases": [
+    {
+      "case_id": "flow_c",
+      "product_name": "가스 마취기",
+      "manufacturer": "Maquet",
+      "model_name": "FLOW-C",
+      "specification": ""
+    },
+    {
+      "case_id": "apc30d",
+      "product_name": "CO₂ Incubator(Water Jacket)",
+      "manufacturer": "ASTEC",
+      "model_name": "APC-30D",
+      "specification": ""
+    }
+  ]
+}
