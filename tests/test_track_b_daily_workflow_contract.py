@@ -11,7 +11,7 @@ def test_daily_workflow_keeps_quota_and_r2_guards() -> None:
     assert "github.event_name != 'pull_request'" in text
     assert "production_collection_contract=READY_R2" in text
     assert 'cron: "10 18 * * *"' in text
-    assert "group: track-b-daily-backfill" in text
+    assert "group: track-b-r2-pipeline" in text
     assert "cancel-in-progress: false" in text
     assert "--request-budget \"${{ inputs.request_budget || '900' }}\"" in text
     assert "actions/artifacts/10320004586/zip" in text
