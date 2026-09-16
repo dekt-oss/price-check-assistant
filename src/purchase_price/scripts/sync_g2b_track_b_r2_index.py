@@ -56,12 +56,16 @@ def _load_or_bootstrap_pipeline_state(
     state_store: R2OperationalStateStore,
     reader: R2RawEvidenceReader,
 ) -> tuple[TrackBPipelineState, bool]:
-    """Load pipeline state or safely recover the validated legacy bootstrap state.
+    """Load pipeline state or synthesize a validated legacy state in memory.
 
-    The historical R2 corpus predates the daily-pipeline state object.  A missing state object is
-    therefore not equivalent to an empty corpus.  Recovery is allowed only when the same batch-004
+    The historical R2 corpus predates the daily-pipeline state object. A missing state object is
+    therefore not equivalent to an empty corpus. Recovery is allowed only when the same batch-004
     proof used by the daily collector is present: at least the validated object count and the known
-    content-addressed proof object.  Otherwise fail closed rather than guessing a collection cursor.
+    content-addressed proof object. Otherwise fail closed rather than guessing a collection cursor.
+
+    A synthesized state is deliberately *not* persisted here. The caller commits it only after the
+    serving-index pointer is successfully published, so a failed bootstrap retry preserves the
+    `state_recovered=true` audit signal instead of looking like a normal pre-existing state.
     """
 
     payload = state_store.read_json(STATE_NAME)
@@ -76,9 +80,7 @@ def _load_or_bootstrap_pipeline_state(
             "the validated batch-004 bootstrap proof"
         )
 
-    pipeline = TrackBPipelineState.bootstrap()
-    state_store.write_json(STATE_NAME, pipeline.to_payload())
-    return pipeline, True
+    return TrackBPipelineState.bootstrap(), True
 
 
 def _raw_object_for_key(reader: R2RawEvidenceReader, key: str) -> R2RawObject:
@@ -221,6 +223,12 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
                 "row_count": row_count,
                 **report,
             }
+            if state_recovered:
+                pipeline.mark_pending_indexed(
+                    [],
+                    {**report, "mode": mode, "state_recovered": True, "row_count": row_count},
+                )
+                state_store.write_json(STATE_NAME, pipeline.to_payload())
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(
                 json.dumps(final, ensure_ascii=False, indent=2) + "\n",
