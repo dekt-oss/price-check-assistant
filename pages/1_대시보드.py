@@ -1,49 +1,207 @@
+from __future__ import annotations
+
+import re
+from decimal import Decimal, InvalidOperation
+
 import streamlit as st
 
-st.set_page_config(page_title="대시보드", page_icon="🏠", layout="wide")
-st.title("구매가격 검색·검토 보조시스템")
-st.caption("공개정보 기반 PoC · 구매결정이 아닌 구매검토 보조도구")
-
-st.markdown("## 업무 시작")
-c1, c2, c3 = st.columns(3)
-with c1:
-    with st.container(border=True):
-        st.markdown("### 📋 견적 검토")
-        st.write("견적 업로드부터 제품 식별, 근거 수집, 조건 대조, 승인·판정까지 한 화면에서 진행합니다.")
-        st.caption("왼쪽 업무 메뉴에서 `견적 검토`를 선택하세요.")
-with c2:
-    with st.container(border=True):
-        st.markdown("### 🔎 빠른 검색")
-        st.write("제품명·제조사·모델·규격으로 공개 가격근거와 나라장터 계약근거를 직접 조회합니다.")
-        st.caption("왼쪽 업무 메뉴에서 `빠른 검색`을 선택하세요.")
-with c3:
-    with st.container(border=True):
-        st.markdown("### 🏥 의료기기 조회")
-        st.write("식약처 등록모델, 업허가·Safety 확인, UDI-DI 공식조회를 한 영역에서 확인합니다.")
-        st.caption("왼쪽 업무 메뉴에서 `의료기기 조회`를 선택하세요.")
-
-st.markdown("## 검토 흐름")
-st.markdown(
-    """
-1. **견적 업로드·품목 확인** — 자동 추출값은 반드시 원문과 대조합니다.
-2. **제품 식별** — verified mapping 또는 명시적 조사요청, 의료기기는 MFDS exact identity를 확인합니다.
-3. **공개 근거 수집** — 출처 실패·0건·미검증 후보를 직접가격과 분리합니다.
-4. **조건 대조·승인** — 수량·단위·VAT·배송·설치·옵션·보증·유지보수·기준일을 대조합니다.
-5. **견적 위치 확인** — 담당자가 승인한 동일조건 pair만 사용하며 구매 권고나 적정/부적정 판정은 하지 않습니다.
-"""
+from purchase_price.services.g2b_search_policy import (
+    G2B_DEFAULT_LOOKBACK_DAYS,
+    G2B_LOOKBACK_OPTIONS,
+    g2b_lookback_label,
+)
+from purchase_price.services.pricing import assess_prices
+from purchase_price.services.purchase_review import build_purchase_review_input
+from purchase_price.services.track_b_r2_quote_index import lookup_track_b_quote_from_r2
+from purchase_price.ui.market_research import (
+    render_market_reference_summary,
+    render_procurement_research,
+    run_market_research,
+)
+from purchase_price.ui.quote_review_state import (
+    QUOTE_REVIEW_STATE_SESSION_KEY,
+    QuoteReviewState,
+)
+from purchase_price.ui.quote_review_steps import _store_extraction
+from purchase_price.ui.widgets import (
+    render_evidence_table,
+    render_observation_cards,
+    render_source_status,
 )
 
-st.markdown("## 현재 조사 Source")
+st.set_page_config(page_title="구매가격 검색", page_icon="🔎", layout="wide")
+
 st.markdown(
     """
-- **나라장터 쇼핑/납품:** verified exact-model mapping이 있는 경우 공개 구매·납품실적 조회
-- **나라장터 계약정보:** 계약번호·기관·계약방법·상세원문 확인. 계약총액은 제품 단가로 자동 환산하지 않음
-- **식약처:** 등록모델·업허가·UDI 및 공식 Safety 확인 경로
-- **제조사 공개가격:** 사람이 검증한 공식 공개가격 snapshot
-- **웹:** 보조 탐색만 수행하며 공식근거보다 낮은 우선순위
-"""
+<style>
+.block-container {max-width: 1180px; padding-top: 2.2rem;}
+[data-testid="stForm"] {border: 0; padding: 0;}
+[data-testid="stFileUploader"] {margin-top: 0.2rem;}
+.home-kicker {text-align:center; color:#6b7280; font-size:0.95rem; margin-bottom:0.15rem;}
+.home-title {text-align:center; font-size:2.35rem; font-weight:750; margin:0.2rem 0 0.35rem 0;}
+.home-subtitle {text-align:center; color:#6b7280; margin-bottom:1.6rem;}
+.home-section {margin-top:1.15rem;}
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
-st.info(
-    "근거가 부족하거나 조건이 다르면 판정을 보류합니다. 검색 실패와 검색 0건도 서로 다른 상태로 표시합니다."
+st.markdown('<div class="home-kicker">공개 조달·시장근거 기반 구매검토</div>', unsafe_allow_html=True)
+st.markdown('<div class="home-title">무엇을 조사할까요?</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="home-subtitle">제품을 바로 검색하거나 견적서를 올리면 시장가격 조사부터 시작합니다.</div>',
+    unsafe_allow_html=True,
+)
+
+with st.form("home_unified_search"):
+    search_col, button_col = st.columns([8, 1.35], gap="small")
+    with search_col:
+        search_text = st.text_input(
+            "통합 검색",
+            placeholder="제품명 · 제조사 · 모델명 검색  예) FLOW-C, Veriti Pro Dx, 레이저프린터",
+            label_visibility="collapsed",
+        )
+    with button_col:
+        submitted = st.form_submit_button("검색", type="primary", use_container_width=True)
+
+    with st.expander("상세 검색조건", expanded=False):
+        a1, a2 = st.columns(2)
+        product_name = a1.text_input("품명", placeholder="예: 가스마취기")
+        manufacturer = a2.text_input("제조사", placeholder="예: Getinge / Maquet")
+        model_name = a1.text_input("모델명", placeholder="예: FLOW-C")
+        specification = a2.text_input("규격", placeholder="선택")
+        quote_text = a1.text_input("현재 견적 단가", placeholder="선택 · 예: 66000000")
+        lookback_days = a2.selectbox(
+            "나라장터 검색기간",
+            options=G2B_LOOKBACK_OPTIONS,
+            index=G2B_LOOKBACK_OPTIONS.index(G2B_DEFAULT_LOOKBACK_DAYS),
+            format_func=g2b_lookback_label,
+        )
+
+st.markdown('<div class="home-section"></div>', unsafe_allow_html=True)
+with st.container(border=True):
+    upload_left, upload_right = st.columns([4.8, 1.2])
+    with upload_left:
+        st.markdown("**견적서로 바로 시작**")
+        st.caption("PDF · Excel · 이미지 견적서를 올리면 품목을 추출하고 수집 가격과 비교합니다.")
+    uploaded = st.file_uploader(
+        "견적서 업로드",
+        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg"],
+        label_visibility="collapsed",
+        key="home_quote_upload",
+    )
+
+if uploaded is not None:
+    if QUOTE_REVIEW_STATE_SESSION_KEY not in st.session_state:
+        st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY] = QuoteReviewState()
+    quote_state: QuoteReviewState = st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY]
+    if quote_state.file_name != uploaded.name or quote_state.extraction is None:
+        with st.spinner("견적서에서 품목을 추출하고 있습니다..."):
+            _store_extraction(uploaded, quote_state)
+    st.switch_page("pages/2_견적_검토.py")
+
+if submitted:
+    raw_search = search_text.strip()
+    inferred_model = ""
+    if (
+        raw_search
+        and not model_name.strip()
+        and re.search(r"[A-Za-z]", raw_search)
+        and re.search(r"\d", raw_search)
+        and len(raw_search.split()) <= 2
+    ):
+        inferred_model = raw_search
+
+    resolved_model = model_name.strip() or inferred_model
+    resolved_product = product_name.strip() or ("" if inferred_model else raw_search)
+    if not resolved_product and not resolved_model and not manufacturer.strip() and not specification.strip():
+        st.warning("검색어를 입력하거나 상세 검색조건을 하나 이상 입력하세요.")
+        st.stop()
+
+    quote = None
+    if quote_text.strip():
+        try:
+            quote = Decimal(quote_text.replace(",", "").strip())
+        except InvalidOperation:
+            st.error("견적 단가는 숫자로 입력하세요.")
+            st.stop()
+
+    review_input = build_purchase_review_input(
+        product_name=resolved_product,
+        manufacturer=manufacturer,
+        model_name=resolved_model,
+        specification=specification,
+        quote_unit_price=quote,
+    )
+    if review_input is None:
+        st.warning("검색조건을 확인하세요.")
+        st.stop()
+    query = review_input.to_product_query()
+
+    st.divider()
+    heading = resolved_model or resolved_product or raw_search
+    st.subheader(f"{heading} 검색 결과")
+
+    track_b = lookup_track_b_quote_from_r2(query, quote_unit_price=review_input.quote_unit_price)
+    with st.container(border=True):
+        st.markdown("**수집된 나라장터 납품단가**")
+        if track_b.status == "unavailable":
+            st.info("R2 가격 검색 인덱스를 불러오지 못했습니다. 외부 나라장터 조사는 계속 진행합니다.")
+        elif track_b.status == "not_ingested":
+            st.info("R2 원자료는 수집 중이며 빠른 검색용 가격 인덱스는 아직 생성 전입니다.")
+        elif track_b.status == "insufficient_identity":
+            st.info("품명 또는 모델명을 입력하면 수집 단가를 조회할 수 있습니다.")
+        elif track_b.status == "success_0":
+            st.info("현재 식별정보와 일치하는 수집 납품단가 후보가 없습니다.")
+        else:
+            rows = [
+                {
+                    "수집 품목": candidate.product_title,
+                    "납품단가": float(candidate.price),
+                    "식별": candidate.match_grade.value,
+                    "견적 대비": (
+                        f"{candidate.delta_percent:+.1f}%"
+                        if candidate.delta_percent is not None
+                        else "조건 확인 필요"
+                    ),
+                    "거래일": candidate.transaction_date or "",
+                }
+                for candidate in track_b.candidates
+            ]
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+            st.caption("명시된 품목단가만 표시하며 설치·옵션·VAT 등 조건 확인 전에는 참고가격입니다.")
+
+    with st.status("나라장터와 공개 시장자료를 조사하고 있습니다...", expanded=False) as status:
+        run, discovery, market_bundle = run_market_research(
+            query,
+            lookback_days=int(lookback_days),
+            research_pages_per_term=1,
+            research_request_budget=18,
+            procurement_detail_limit=4,
+        )
+        status.update(label="시장자료 조사 완료", state="complete")
+
+    render_market_reference_summary(
+        discovery,
+        query=query,
+        quote_unit_price=review_input.quote_unit_price,
+    )
+    render_procurement_research(market_bundle)
+
+    with st.expander("검증된 직접가격 · 출처상태", expanded=bool(run.results)):
+        render_source_status(run)
+        if run.results:
+            assessment = assess_prices(run.results, review_input.quote_unit_price)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("직접가격 근거", f"{assessment.observed_count}건")
+            m2.metric("독립 출처", f"{assessment.source_count}개")
+            m3.metric("근거 신뢰도", assessment.confidence)
+            render_observation_cards(run.results)
+            render_evidence_table(run.results)
+        else:
+            st.caption("엄격한 동일제품 직접가격은 현재 조사 범위에서 확인되지 않았습니다.")
+
+st.caption(
+    "가격이 보인다는 사실과 현재 견적과 직접 비교 가능하다는 판단은 분리합니다. "
+    "모델·규격·수량·VAT·설치·옵션 조건이 다르면 비교등급을 낮추거나 판정을 보류합니다."
 )
