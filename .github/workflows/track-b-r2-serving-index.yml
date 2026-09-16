@@ -135,11 +135,68 @@ jobs:
           python -m purchase_price.scripts.sync_g2b_track_b_r2_index
           --max-bootstrap-objects "${{ inputs.max_bootstrap_objects || '100000' }}"
           --output artifacts/track-b-daily/r2-serving-index.json
+      - name: Verify R2 serving lookup with FLOW-C
+        run: |
+          python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          from purchase_price.schemas import ProductQuery
+          from purchase_price.services.track_b_r2_quote_index import lookup_track_b_quote_from_r2
+
+          def snapshot(label, query, quote_unit_price=None):
+              result = lookup_track_b_quote_from_r2(
+                  query,
+                  quote_unit_price=quote_unit_price,
+              )
+              return {
+                  "label": label,
+                  "status": result.status,
+                  "examined": result.examined,
+                  "candidate_count": len(result.candidates),
+                  "reference_count": len(result.reference_candidates),
+                  "suggestion_count": len(result.suggestions),
+                  "candidate_prices": [str(item.price) for item in result.candidates[:5]],
+                  "reference_prices": [str(item.price) for item in result.reference_candidates[:5]],
+                  "suppliers": [item.supplier for item in result.candidates[:5]],
+                  "demand_institutions": [
+                      item.demand_institution for item in result.candidates[:5]
+                  ],
+              }
+
+          payload = {
+              "strict_quote": snapshot(
+                  "Maquet FLOW-C quote",
+                  ProductQuery(
+                      product_name="가스 마취기(Anesthesia Machine)",
+                      manufacturer="Maquet",
+                      model_name="FLOW-C",
+                      specification="Flow-C",
+                  ),
+                  Decimal("66000000"),
+              ),
+              "model_probe": snapshot(
+                  "FLOW-C model-only probe",
+                  ProductQuery(model_name="FLOW-C"),
+              ),
+          }
+          output = Path("artifacts/track-b-daily/flow-c-serving-smoke.json")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          output.write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+          blocked = {"unavailable", "not_ingested"}
+          if any(item["status"] in blocked for item in payload.values()):
+              raise SystemExit("R2 serving index is not consumable after sync")
+          PY
       - name: Upload sync evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: track-b-r2-serving-index
-          path: artifacts/track-b-daily/r2-serving-index.json
+          path: artifacts/track-b-daily/
           if-no-files-found: warn
           retention-days: 14
