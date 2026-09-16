@@ -1,0 +1,246 @@
+from __future__ import annotations
+
+import argparse
+import json
+import tempfile
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import sessionmaker
+
+from purchase_price.config import Settings
+from purchase_price.db import Base
+from purchase_price.models import TrackBDeliveryLine
+from purchase_price.scripts.import_g2b_track_b_r2_to_db import (
+    TRACK_B_PAGE_OPERATION,
+    run as import_r2_pages,
+)
+from purchase_price.services.g2b_track_b_normalization import TrackBRawPage
+from purchase_price.services.track_b_db_quote_comparison import ingest_track_b_page
+from purchase_price.services.track_b_pipeline_state import (
+    SERVING_INDEX_STATE_NAME,
+    STATE_NAME,
+    TrackBPipelineState,
+)
+from purchase_price.storage.r2_reader import R2RawEvidenceReader, R2RawObject
+from purchase_price.storage.r2_serving_index import R2ServingIndexRef, R2ServingIndexStore
+from purchase_price.storage.r2_state import R2OperationalStateStore
+
+POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _ref_from_pointer(payload: Mapping[str, Any]) -> R2ServingIndexRef:
+    if payload.get("schema") != POINTER_SCHEMA:
+        raise ValueError("Track B serving-index pointer schema mismatch")
+    key = str(payload.get("key") or "").strip()
+    sha256 = str(payload.get("sha256") or "").strip()
+    if not key or len(sha256) != 64:
+        raise ValueError("Track B serving-index pointer is incomplete")
+    return R2ServingIndexRef(
+        key=key,
+        sha256=sha256,
+        stored_bytes=int(payload.get("stored_bytes") or 0),
+        uncompressed_bytes=int(payload.get("uncompressed_bytes") or 0),
+    )
+
+
+def _raw_object_for_key(reader: R2RawEvidenceReader, key: str) -> R2RawObject:
+    prefix = f"{reader.raw_prefix}/{TRACK_B_PAGE_OPERATION}/"
+    if not key.startswith(prefix) or not key.endswith(".json.gz"):
+        raise ValueError(f"pending Track B key is outside the expected operation prefix: {key}")
+    digest = key.rsplit("/", 1)[-1][: -len(".json.gz")]
+    if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+        raise ValueError(f"pending Track B key lacks a valid SHA-256 digest: {key}")
+    return R2RawObject(
+        bucket=reader.bucket,
+        key=key,
+        payload_hash=digest,
+        stored_bytes=0,
+        last_modified=None,
+    )
+
+
+def _sync_exact_keys(*, reader: R2RawEvidenceReader, session_factory, keys: list[str]) -> dict[str, int]:
+    totals = {"objects_scanned": 0, "inserted": 0, "replayed": 0, "invalid_rows": 0, "conflicts": 0}
+    for key in dict.fromkeys(keys):
+        obj = _raw_object_for_key(reader, key)
+        payload = reader.get_public_json(obj)
+        if not isinstance(payload, Mapping):
+            raise ValueError(f"Track B R2 page must be a JSON object: {key}")
+        with session_factory() as session, session.begin():
+            result = ingest_track_b_page(
+                session,
+                TrackBRawPage(
+                    payload=payload,
+                    raw_object_key=obj.key,
+                    raw_payload_sha256=obj.payload_hash,
+                ),
+            )
+        totals["objects_scanned"] += 1
+        totals["inserted"] += result.inserted
+        totals["replayed"] += result.replayed
+        totals["invalid_rows"] += result.invalid_rows
+        totals["conflicts"] += result.conflicts
+    return totals
+
+
+def _full_bootstrap(*, reader: R2RawEvidenceReader, session_factory, max_objects: int) -> dict[str, int]:
+    totals = {"objects_scanned": 0, "inserted": 0, "replayed": 0, "invalid_rows": 0, "conflicts": 0}
+    cursor: str | None = None
+    while totals["objects_scanned"] < max_objects:
+        remaining = max_objects - totals["objects_scanned"]
+        report = import_r2_pages(
+            reader=reader,
+            session_factory=session_factory,
+            limit=min(1000, remaining),
+            cursor=cursor,
+        )
+        for field in totals:
+            totals[field] += int(report.get(field) or 0)
+        cursor = report.get("resume_cursor") or cursor
+        if not report.get("has_more"):
+            return totals
+        if int(report.get("objects_scanned") or 0) == 0:
+            raise RuntimeError("Track B R2 serving-index bootstrap cursor did not advance")
+    raise RuntimeError(f"Track B R2 serving-index bootstrap exceeded {max_objects} objects")
+
+
+def sync(*, max_bootstrap_objects: int, output: Path) -> int:
+    settings = Settings()
+    if not settings.r2_configured:
+        raise RuntimeError("R2 configuration is required for Track B serving-index sync")
+
+    state_store = R2OperationalStateStore.from_settings(settings)
+    state_payload = state_store.read_json(STATE_NAME)
+    if state_payload is None:
+        raise RuntimeError("Track B pipeline state is missing; run collection bootstrap first")
+    pipeline = TrackBPipelineState.from_payload(state_payload)
+    pointer = state_store.read_json(SERVING_INDEX_STATE_NAME)
+    reader = R2RawEvidenceReader.from_settings(settings)
+    artifact_store = R2ServingIndexStore.from_settings(settings)
+
+    with tempfile.TemporaryDirectory(prefix="track-b-r2-index-") as temp_dir:
+        db_path = Path(temp_dir) / "track-b-serving.sqlite"
+        previous_ref: R2ServingIndexRef | None = None
+        mode = "full-bootstrap"
+        indexed_keys = list(pipeline.pending_object_keys)
+
+        if pointer is not None:
+            previous_ref = _ref_from_pointer(pointer)
+            artifact_store.download_sqlite(previous_ref, db_path)
+            mode = "incremental"
+
+        engine = create_engine(f"sqlite+pysqlite:///{db_path}")
+        Base.metadata.create_all(engine, tables=[TrackBDeliveryLine.__table__])
+        session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+        try:
+            if mode == "full-bootstrap":
+                report = _full_bootstrap(
+                    reader=reader,
+                    session_factory=session_factory,
+                    max_objects=max_bootstrap_objects,
+                )
+            elif indexed_keys:
+                report = _sync_exact_keys(
+                    reader=reader,
+                    session_factory=session_factory,
+                    keys=indexed_keys,
+                )
+            else:
+                report = {
+                    "objects_scanned": 0,
+                    "inserted": 0,
+                    "replayed": 0,
+                    "invalid_rows": 0,
+                    "conflicts": 0,
+                }
+
+            with session_factory() as session:
+                row_count = int(session.scalar(select(func.count()).select_from(TrackBDeliveryLine)) or 0)
+            with engine.begin() as connection:
+                connection.exec_driver_sql("PRAGMA optimize")
+        finally:
+            engine.dispose()
+
+        if mode == "incremental" and not indexed_keys:
+            final = {
+                "status": "NO_CHANGE",
+                "mode": mode,
+                "row_count": row_count,
+                **report,
+            }
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(final, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            print(json.dumps(final, ensure_ascii=False, sort_keys=True))
+            return 0
+
+        ref = artifact_store.put_sqlite(db_path)
+        pointer_payload = {
+            "schema": POINTER_SCHEMA,
+            "key": ref.key,
+            "sha256": ref.sha256,
+            "stored_bytes": ref.stored_bytes,
+            "uncompressed_bytes": ref.uncompressed_bytes,
+            "row_count": row_count,
+            "updated_at": _now(),
+            "mode": mode,
+            "collection_cursor": {
+                "code_index": pipeline.collection_cursor.code_index,
+                "page_no": pipeline.collection_cursor.page_no,
+            },
+        }
+        state_store.write_json(SERVING_INDEX_STATE_NAME, pointer_payload)
+        pipeline.mark_pending_indexed(indexed_keys, {**report, "mode": mode, "row_count": row_count})
+        state_store.write_json(STATE_NAME, pipeline.to_payload())
+
+        if previous_ref is not None and previous_ref.key != ref.key:
+            try:
+                artifact_store.delete(previous_ref.key)
+            except Exception:
+                # The new pointer is already committed. A stale rebuildable artifact is preferable
+                # to failing the live serving index because cleanup permissions were narrower.
+                pass
+
+        final = {
+            "status": "PARTIAL" if report["invalid_rows"] or report["conflicts"] else "SUCCESS",
+            "mode": mode,
+            "row_count": row_count,
+            "index_key": ref.key,
+            "index_sha256": ref.sha256,
+            "stored_bytes": ref.stored_bytes,
+            "uncompressed_bytes": ref.uncompressed_bytes,
+            **report,
+        }
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(final, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(final, ensure_ascii=False, sort_keys=True))
+        return 0
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build/update the Track B SQLite serving index in R2")
+    parser.add_argument("--max-bootstrap-objects", type=int, default=100000)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("artifacts/track-b-daily/r2-serving-index.json"),
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
+    if args.max_bootstrap_objects < 1:
+        raise ValueError("max-bootstrap-objects must be positive")
+    return sync(max_bootstrap_objects=args.max_bootstrap_objects, output=args.output)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
