@@ -1,0 +1,67 @@
+name: Track B PostgreSQL Full Validation
+
+on:
+  push:
+    branches:
+      - codex/quote-track-b-db-comparison
+    paths:
+      - .github/workflows/track-b-postgres-full-validation.yml
+      - src/purchase_price/scripts/validate_g2b_track_b_postgres_full.py
+      - src/purchase_price/services/track_b_db_quote_comparison.py
+  workflow_dispatch:
+    inputs:
+      object_limit:
+        description: R2 objects to import into the isolated PostgreSQL service
+        required: true
+        default: "10000"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: purchase_price_validation
+          POSTGRES_USER: purchase_user
+          POSTGRES_PASSWORD: purchase_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U purchase_user -d purchase_price_validation"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PYTHONPATH: src
+      DATABASE_URL: postgresql+psycopg://purchase_user:purchase_pass@localhost:5432/purchase_price_validation
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install runtime dependencies
+        run: >-
+          python -m pip install
+          "sqlalchemy>=2,<3"
+          "alembic>=1.14,<2"
+          "psycopg[binary]>=3.2,<4"
+          "pydantic>=2.8,<3"
+          "pydantic-settings>=2.4,<3"
+          "boto3>=1.35,<2"
+          "httpx>=0.27,<1"
+          "tenacity>=9,<10"
+      - name: Apply serving migrations
+        run: alembic upgrade head
+      - name: Import and validate PostgreSQL serving index
+        run: >-
+          python -m purchase_price.scripts.validate_g2b_track_b_postgres_full
+          --limit "${{ inputs.object_limit || '10000' }}"
