@@ -54,6 +54,8 @@ jobs:
           "pydantic>=2.8,<3"
           "pydantic-settings>=2.4,<3"
           "boto3>=1.35,<2"
+          "httpx>=0.27,<1"
+          "tenacity>=9,<10"
       - name: Build or increment R2-hosted SQLite serving index
         run: >-
           python -m purchase_price.scripts.sync_g2b_track_b_r2_index
