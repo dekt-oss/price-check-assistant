@@ -146,10 +146,10 @@ class R2ServingIndexStore:
                 suffix=".tmp",
                 delete=False,
             ) as handle:
+                temp_path = Path(handle.name)
                 handle.write(raw)
                 handle.flush()
                 os.fsync(handle.fileno())
-                temp_path = Path(handle.name)
             os.replace(temp_path, destination)
             temp_path = None
         finally:
