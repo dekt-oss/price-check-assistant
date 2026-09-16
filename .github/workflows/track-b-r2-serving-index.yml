@@ -31,7 +31,9 @@ on:
         default: "100000"
 
 concurrency:
-  group: track-b-r2-pipeline
+  # Production writer runs share track-b-r2-pipeline with collection. PR recovery checks are
+  # read-only and use a separate group so PR workflows cannot cancel one another.
+  group: ${{ github.event_name == 'pull_request' && format('track-b-index-pr-{0}', github.event.pull_request.number) || 'track-b-r2-pipeline' }}
   cancel-in-progress: false
 
 permissions:
