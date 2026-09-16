@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from purchase_price.clients.data_go_kr import PublicDataPortalClient
 from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL
@@ -53,15 +54,16 @@ def _restore_snapshot(
     output_path: Path,
 ) -> Path:
     persisted = state_store.read_json(SNAPSHOT_STATE_NAME)
+    should_persist = persisted is None
     if persisted is None:
         if bootstrap_snapshot is None or not bootstrap_snapshot.exists():
             raise RuntimeError(
-                "validated target-code snapshot is not persisted in R2 and bootstrap artifact is unavailable"
+                "validated target-code snapshot is not persisted in R2 "
+                "and bootstrap artifact is unavailable"
             )
         payload = json.loads(bootstrap_snapshot.read_text(encoding="utf-8"))
         if not isinstance(payload, Mapping):
             raise RuntimeError("bootstrap target-code snapshot must be a JSON object")
-        state_store.write_json(SNAPSHOT_STATE_NAME, dict(payload))
         persisted = dict(payload)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
@@ -73,6 +75,8 @@ def _restore_snapshot(
         raise RuntimeError(f"target-code snapshot SHA mismatch: {snapshot.sha256}")
     if snapshot.code_count != EXPECTED_TARGET_CODE_COUNT:
         raise RuntimeError(f"target-code snapshot count mismatch: {snapshot.code_count}")
+    if should_persist:
+        state_store.write_json(SNAPSHOT_STATE_NAME, persisted)
     return output_path
 
 
@@ -135,7 +139,7 @@ def run_daily(
         return 0
 
     if state.backfill_complete:
-        report = {
+        report: dict[str, Any] = {
             "status": "SUCCESS",
             "stop_reason": "ALREADY_COMPLETE",
             "next_cursor": {
