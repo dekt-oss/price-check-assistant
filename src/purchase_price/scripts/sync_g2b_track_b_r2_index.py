@@ -19,6 +19,8 @@ from purchase_price.scripts.import_g2b_track_b_r2_to_db import run as import_r2_
 from purchase_price.services.g2b_track_b_normalization import TrackBRawPage
 from purchase_price.services.track_b_db_quote_comparison import ingest_track_b_page
 from purchase_price.services.track_b_pipeline_state import (
+    BOOTSTRAP_LAST_OBJECT_KEY,
+    BOOTSTRAP_MIN_R2_OBJECTS,
     SERVING_INDEX_STATE_NAME,
     STATE_NAME,
     TrackBPipelineState,
@@ -47,6 +49,38 @@ def _ref_from_pointer(payload: Mapping[str, Any]) -> R2ServingIndexRef:
         stored_bytes=int(payload.get("stored_bytes") or 0),
         uncompressed_bytes=int(payload.get("uncompressed_bytes") or 0),
     )
+
+
+def _load_or_bootstrap_pipeline_state(
+    *,
+    state_store: R2OperationalStateStore,
+    reader: R2RawEvidenceReader,
+) -> tuple[TrackBPipelineState, bool]:
+    """Load pipeline state or synthesize a validated legacy state in memory.
+
+    The historical R2 corpus predates the daily-pipeline state object. A missing state object is
+    therefore not equivalent to an empty corpus. Recovery is allowed only when the same batch-004
+    proof used by the daily collector is present: at least the validated object count and the known
+    content-addressed proof object. Otherwise fail closed rather than guessing a collection cursor.
+
+    A synthesized state is deliberately *not* persisted here. The caller commits it only after the
+    serving-index pointer is successfully published, so a failed bootstrap retry preserves the
+    `state_recovered=true` audit signal instead of looking like a normal pre-existing state.
+    """
+
+    payload = state_store.read_json(STATE_NAME)
+    if payload is not None:
+        return TrackBPipelineState.from_payload(payload), False
+
+    objects = reader.list_public_json(source_operation=TRACK_B_PAGE_OPERATION)
+    keys = {obj.key for obj in objects}
+    if len(objects) < BOOTSTRAP_MIN_R2_OBJECTS or BOOTSTRAP_LAST_OBJECT_KEY not in keys:
+        raise RuntimeError(
+            "cannot recover missing Track B pipeline state: existing R2 evidence does not match "
+            "the validated batch-004 bootstrap proof"
+        )
+
+    return TrackBPipelineState.bootstrap(), True
 
 
 def _raw_object_for_key(reader: R2RawEvidenceReader, key: str) -> R2RawObject:
@@ -128,12 +162,12 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
         raise RuntimeError("R2 configuration is required for Track B serving-index sync")
 
     state_store = R2OperationalStateStore.from_settings(settings)
-    state_payload = state_store.read_json(STATE_NAME)
-    if state_payload is None:
-        raise RuntimeError("Track B pipeline state is missing; run collection bootstrap first")
-    pipeline = TrackBPipelineState.from_payload(state_payload)
-    pointer = state_store.read_json(SERVING_INDEX_STATE_NAME)
     reader = R2RawEvidenceReader.from_settings(settings)
+    pipeline, state_recovered = _load_or_bootstrap_pipeline_state(
+        state_store=state_store,
+        reader=reader,
+    )
+    pointer = state_store.read_json(SERVING_INDEX_STATE_NAME)
     artifact_store = R2ServingIndexStore.from_settings(settings)
 
     with tempfile.TemporaryDirectory(prefix="track-b-r2-index-") as temp_dir:
@@ -185,9 +219,16 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             final = {
                 "status": "NO_CHANGE",
                 "mode": mode,
+                "state_recovered": state_recovered,
                 "row_count": row_count,
                 **report,
             }
+            if state_recovered:
+                pipeline.mark_pending_indexed(
+                    [],
+                    {**report, "mode": mode, "state_recovered": True, "row_count": row_count},
+                )
+                state_store.write_json(STATE_NAME, pipeline.to_payload())
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(
                 json.dumps(final, ensure_ascii=False, indent=2) + "\n",
@@ -206,6 +247,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             "row_count": row_count,
             "updated_at": _now(),
             "mode": mode,
+            "state_recovered": state_recovered,
             "collection_cursor": {
                 "code_index": pipeline.collection_cursor.code_index,
                 "page_no": pipeline.collection_cursor.page_no,
@@ -214,7 +256,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
         state_store.write_json(SERVING_INDEX_STATE_NAME, pointer_payload)
         pipeline.mark_pending_indexed(
             indexed_keys,
-            {**report, "mode": mode, "row_count": row_count},
+            {**report, "mode": mode, "state_recovered": state_recovered, "row_count": row_count},
         )
         state_store.write_json(STATE_NAME, pipeline.to_payload())
 
@@ -229,6 +271,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
         final = {
             "status": "PARTIAL" if report["invalid_rows"] or report["conflicts"] else "SUCCESS",
             "mode": mode,
+            "state_recovered": state_recovered,
             "row_count": row_count,
             "index_key": ref.key,
             "index_sha256": ref.sha256,
