@@ -10,7 +10,8 @@ def test_r2_serving_index_workflow_runs_after_daily_backfill() -> None:
     assert "DATABASE_URL" not in text
     assert "group: track-b-r2-pipeline" in text
     assert "push:" in text
-    assert "branches: [main]" in text
+    assert "branches:" in text
+    assert "- main" in text
 
 
 def test_home_is_unified_search_and_upload_entrypoint() -> None:
