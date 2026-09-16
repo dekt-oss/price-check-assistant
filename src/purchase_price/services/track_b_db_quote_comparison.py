@@ -69,14 +69,21 @@ class TrackBQuoteComparison:
 def lookup_track_b_quote(
     query: ProductQuery, *, quote_unit_price: Decimal | None
 ) -> TrackBQuoteComparison:
-    """UI adapter: a missing or offline DB is distinct from a successful zero-result search."""
+    """Prefer the R2-hosted serving index; keep the SQL DB as a development fallback."""
+    from purchase_price.services.track_b_r2_quote_index import lookup_track_b_quote_from_r2
+
+    r2_result = lookup_track_b_quote_from_r2(query, quote_unit_price=quote_unit_price)
+    if r2_result.status not in {"unavailable", "not_ingested"}:
+        return r2_result
+
     from purchase_price.db import SessionLocal
 
     try:
         with SessionLocal() as session:
-            return compare_track_b_quote(session, query, quote_unit_price=quote_unit_price)
+            db_result = compare_track_b_quote(session, query, quote_unit_price=quote_unit_price)
     except SQLAlchemyError:
-        return TrackBQuoteComparison("unavailable", (), 0)
+        return r2_result
+    return db_result if db_result.status != "not_ingested" else r2_result
 
 
 def _line_from_record(record: NormalizedTrackBRecord) -> TrackBDeliveryLine:
@@ -108,8 +115,8 @@ def _line_from_record(record: NormalizedTrackBRecord) -> TrackBDeliveryLine:
         model_name=parsed.model_name,
         model_qualifier=parsed.model_qualifier,
         model_qualifier_verified_as_origin=parsed.model_qualifier_verified_as_origin,
-        model_key=normalize_text(parsed.model_name) or None,
         specification=parsed.specification,
+        model_key=normalize_text(parsed.model_name) or None,
         unit_price=record.unit_price,
         quantity=record.quantity,
         unit=record.unit,
