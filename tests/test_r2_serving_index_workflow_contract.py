@@ -24,3 +24,5 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     assert "home_quote_upload" in text
     assert 'st.switch_page("pages/2_견적_검토.py")' in text
     assert "lookup_track_b_quote_from_r2" in text
+    assert "C · 동일품목 참고" in text
+    assert "직접 가격비교에는 사용하지 않습니다" in text
