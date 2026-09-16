@@ -46,7 +46,7 @@ def _validated_legacy_keys() -> list[str]:
     ]
 
 
-def test_missing_state_recovers_only_after_validated_r2_proof() -> None:
+def test_missing_state_is_synthesized_only_after_validated_r2_proof() -> None:
     state_store = FakeStateStore()
     reader = FakeReader(_validated_legacy_keys())
 
@@ -59,8 +59,10 @@ def test_missing_state_recovers_only_after_validated_r2_proof() -> None:
     assert reader.calls == 1
     assert pipeline.collection_cursor.code_index == 3196
     assert pipeline.collection_cursor.page_no == 1
-    assert state_store.payloads[STATE_NAME] == pipeline.to_payload()
-    assert state_store.writes and state_store.writes[-1][0] == STATE_NAME
+    # Recovery stays in memory until the serving pointer commits successfully. This preserves the
+    # state_recovered audit signal if a full-bootstrap attempt fails and must be retried.
+    assert STATE_NAME not in state_store.payloads
+    assert not state_store.writes
 
 
 def test_missing_state_fails_closed_when_legacy_proof_is_incomplete() -> None:
