@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from purchase_price.domain import MatchGrade
 from purchase_price.schemas import ProductQuery
@@ -107,7 +108,9 @@ def _evaluate_case(
             if candidate.match_grade in {MatchGrade.A, MatchGrade.B}
         ]
     elif tier == "CLASS_C":
-        observations = [candidate for candidate in candidate_rows if candidate.match_grade == MatchGrade.C]
+        observations = [
+            candidate for candidate in candidate_rows if candidate.match_grade == MatchGrade.C
+        ]
     elif tier == "BROAD_REFERENCE":
         observations = reference_rows
     else:
