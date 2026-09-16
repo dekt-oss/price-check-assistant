@@ -137,6 +137,11 @@ class R2ServingIndexStore:
         destination.write_bytes(raw)
         return destination
 
+    def delete(self, key: str) -> None:
+        if not key.startswith(f"{self.prefix}/"):
+            raise ValueError("serving-index delete key is outside the derived prefix")
+        self._client.delete_object(Bucket=self.bucket, Key=key)
+
     def _head_if_exists(self, key: str) -> dict[str, Any] | None:
         try:
             response = self._client.head_object(Bucket=self.bucket, Key=key)
