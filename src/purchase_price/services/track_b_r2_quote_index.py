@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import tempfile
 from pathlib import Path
 
+from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +18,14 @@ from purchase_price.storage.r2_state import R2OperationalStateStore
 
 POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
 _CACHE_DIR = Path(tempfile.gettempdir()) / "price-check-track-b"
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _local_index_path(settings: Settings) -> Path | None:
@@ -32,7 +42,12 @@ def _local_index_path(settings: Settings) -> Path | None:
 
     destination = _CACHE_DIR / f"{sha256}.sqlite"
     if destination.exists():
-        return destination
+        if _sha256_file(destination) == sha256:
+            return destination
+        try:
+            destination.unlink()
+        except OSError as exc:
+            raise R2IntegrityError("Corrupt Track B serving-index cache cannot be replaced") from exc
 
     ref = R2ServingIndexRef(
         key=key,
@@ -76,5 +91,13 @@ def lookup_track_b_quote_from_r2(query: ProductQuery, *, quote_unit_price):
                 return compare_track_b_quote(session, query, quote_unit_price=quote_unit_price)
         finally:
             engine.dispose()
-    except (OSError, SQLAlchemyError, R2ConfigurationError, R2IntegrityError, ValueError):
+    except (
+        BotoCoreError,
+        ClientError,
+        OSError,
+        SQLAlchemyError,
+        R2ConfigurationError,
+        R2IntegrityError,
+        ValueError,
+    ):
         return TrackBQuoteComparison("unavailable", (), 0)
