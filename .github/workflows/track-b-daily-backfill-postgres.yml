@@ -1,11 +1,10 @@
-name: Track B Daily Backfill and PostgreSQL Sync
+name: Track B Daily Backfill
 
 on:
   pull_request:
     paths:
       - ".github/workflows/track-b-daily-backfill-postgres.yml"
       - "src/purchase_price/scripts/run_g2b_track_b_daily.py"
-      - "src/purchase_price/scripts/sync_g2b_track_b_postgres.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
       - "src/purchase_price/storage/r2_state.py"
   schedule:
@@ -17,13 +16,9 @@ on:
         description: Maximum G2B requests for this backfill batch (hard cap 900)
         required: true
         default: "900"
-      max_bootstrap_objects:
-        description: Safety ceiling for the one-time full R2 -> PostgreSQL bootstrap
-        required: true
-        default: "100000"
 
 concurrency:
-  group: track-b-daily-backfill-postgres
+  group: track-b-daily-backfill
   cancel-in-progress: false
 
 permissions:
@@ -32,13 +27,12 @@ permissions:
 
 jobs:
   readiness:
-    name: production secret readiness
+    name: R2 and G2B secret readiness
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       PYTHONPATH: src
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
       G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
       G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY }}
       G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
@@ -56,23 +50,13 @@ jobs:
           python-version: "3.11"
       - name: Install settings dependencies
         run: python -m pip install "pydantic>=2.8,<3" "pydantic-settings>=2.4,<3"
-      - name: Verify required production secret contract without revealing values
+      - name: Verify production collection secret contract
         run: |
           python - <<'PY'
-          import os
           from purchase_price.config import Settings
 
           settings = Settings()
           errors = []
-          database_url = (os.getenv("DATABASE_URL") or "").strip()
-          if not database_url:
-              print("::warning::DATABASE_URL repository secret is missing; daily R2 backfill remains enabled and PostgreSQL sync will be skipped")
-              database_status = "NO_DATABASE"
-          elif not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg://")):
-              errors.append("DATABASE_URL is not a supported PostgreSQL URL")
-              database_status = "INVALID_DATABASE"
-          else:
-              database_status = "DATABASE_READY"
           if not settings.r2_configured:
               errors.append("R2 repository secret set is incomplete")
           if not (settings.resolved_g2b_catalog_service_key or "").strip():
@@ -83,11 +67,11 @@ jobs:
               for error in errors:
                   print(f"::error::{error}")
               raise SystemExit(1)
-          print(f"production_secret_contract=READY_{database_status}")
+          print("production_collection_contract=READY_R2")
           PY
 
   collect:
-    name: bounded Track B backfill
+    name: bounded Track B backfill to R2
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-14
     timeout-minutes: 70
@@ -147,74 +131,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: track-b-daily-collection
-          path: artifacts/track-b-daily/
-          if-no-files-found: warn
-          retention-days: 14
-
-  postgres-sync:
-    name: R2 to production PostgreSQL
-    needs: collect
-    if: ${{ always() && github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    env:
-      PYTHONPATH: src
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Detect and normalize production PostgreSQL secret
-        run: |
-          mkdir -p artifacts/track-b-daily
-          if [ -z "${DATABASE_URL}" ]; then
-            echo "::warning::DATABASE_URL is not configured; preserving daily R2 backfill and skipping PostgreSQL sync."
-            echo "SKIP_POSTGRES_SYNC=1" >> "$GITHUB_ENV"
-            cat > artifacts/track-b-daily/postgres-sync.json <<'JSON'
-          {"status":"SKIPPED","reason":"DATABASE_URL_MISSING","collection_continues":true}
-          JSON
-            exit 0
-          fi
-          case "${DATABASE_URL}" in
-            postgresql+psycopg://*) ;;
-            postgresql://*)
-              echo "DATABASE_URL=postgresql+psycopg://${DATABASE_URL#postgresql://}" >> "$GITHUB_ENV"
-              ;;
-            postgres://*)
-              echo "DATABASE_URL=postgresql+psycopg://${DATABASE_URL#postgres://}" >> "$GITHUB_ENV"
-              ;;
-            *) echo "DATABASE_URL must be PostgreSQL." >&2; exit 1 ;;
-          esac
-          echo "SKIP_POSTGRES_SYNC=0" >> "$GITHUB_ENV"
-      - name: Install PostgreSQL sync dependencies
-        if: ${{ env.SKIP_POSTGRES_SYNC != '1' }}
-        run: >-
-          python -m pip install
-          "sqlalchemy>=2,<3"
-          "alembic>=1.14,<2"
-          "psycopg[binary]>=3.2,<4"
-          "pydantic>=2.8,<3"
-          "pydantic-settings>=2.4,<3"
-          "boto3>=1.35,<2"
-      - name: Apply serving migrations
-        if: ${{ env.SKIP_POSTGRES_SYNC != '1' }}
-        run: alembic upgrade head
-      - name: Bootstrap or incrementally sync Track B serving index
-        if: ${{ env.SKIP_POSTGRES_SYNC != '1' }}
-        run: >-
-          python -m purchase_price.scripts.sync_g2b_track_b_postgres
-          --max-bootstrap-objects "${{ inputs.max_bootstrap_objects || '100000' }}"
-          --output artifacts/track-b-daily/postgres-sync.json
-      - name: Upload PostgreSQL sync evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: track-b-postgres-sync
           path: artifacts/track-b-daily/
           if-no-files-found: warn
           retention-days: 14
