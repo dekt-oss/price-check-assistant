@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_daily_workflow_keeps_quota_and_r2_guards() -> None:
-    text = Path(".github/workflows/track-b-daily-backfill-postgres.yml").read_text()
+    text = Path(".github/workflows/track-b-daily-backfill.yml").read_text()
 
     assert "name: Track B Daily Backfill" in text
     assert "pull_request:" in text
