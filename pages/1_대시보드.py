@@ -154,21 +154,36 @@ if submitted:
         elif track_b.status == "success_0":
             st.info("현재 식별정보와 일치하는 수집 납품단가 후보가 없습니다.")
         else:
+            if track_b.status == "reference":
+                st.warning(
+                    "정확히 같은 모델의 수집 단가는 확인되지 않았습니다. 아래는 동일 품목분류의 "
+                    "다른 모델 실제 납품단가이며 C등급 참고가격입니다. 직접 가격비교에는 사용하지 않습니다."
+                )
             rows = [
                 {
                     "수집 품목": candidate.product_title,
                     "납품단가": float(candidate.price),
-                    "식별": candidate.match_grade.value,
+                    "식별": (
+                        "C · 동일품목 참고"
+                        if track_b.status == "reference"
+                        else candidate.match_grade.value
+                    ),
                     "견적 대비": (
                         f"{candidate.delta_percent:+.1f}%"
                         if candidate.delta_percent is not None
-                        else "조건 확인 필요"
+                        else "직접비교 제외"
                     ),
                     "거래일": candidate.transaction_date or "",
                 }
                 for candidate in track_b.candidates
             ]
             st.dataframe(rows, use_container_width=True, hide_index=True)
+            prices = [candidate.price for candidate in track_b.candidates]
+            if track_b.status == "reference" and prices:
+                p1, p2, p3 = st.columns(3)
+                p1.metric("참고가격 건수", f"{len(prices)}건")
+                p2.metric("최저 관측단가", f"{min(prices):,.0f}원")
+                p3.metric("최고 관측단가", f"{max(prices):,.0f}원")
             st.caption("명시된 품목단가만 표시하며 설치·옵션·VAT 등 조건 확인 전에는 참고가격입니다.")
 
     with st.status("나라장터와 공개 시장자료를 조사하고 있습니다...", expanded=False) as status:
