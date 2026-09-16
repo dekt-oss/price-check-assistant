@@ -21,13 +21,24 @@ If either condition is missing, bootstrap fails closed and does not write a gues
 
 When the proof passes:
 
-1. create the validated legacy `TrackBPipelineState.bootstrap()` cursor;
-2. persist it to `track-b/daily-pipeline`;
-3. scan the existing Track B raw corpus into the SQLite serving index;
-4. publish the content-addressed SQLite artifact and pointer;
-5. persist serving-index sync evidence including `state_recovered=true`.
+1. synthesize the validated legacy `TrackBPipelineState.bootstrap()` cursor **in memory only**;
+2. scan the existing Track B raw corpus into the SQLite serving index;
+3. publish the content-addressed SQLite artifact and serving pointer;
+4. only after successful pointer publication, persist `track-b/daily-pipeline` and serving-index sync evidence with `state_recovered=true`.
+
+Deferring the state write is intentional. If the full scan or artifact/pointer publication fails, the retry still sees the state as missing and records the recovery path again instead of incorrectly reporting `state_recovered=false`.
 
 Existing pipeline state always wins and does not trigger a legacy corpus rescan just for recovery.
+
+## Production read-only proof
+
+PR #155 added a read-only readiness gate against the real R2 bucket. It does not write state or index objects.
+
+Observed on 2026-09-16:
+
+- `state_present=False`
+- `raw_object_count=4107`
+- `legacy_bootstrap_proof=True`
 
 ## Verification required after merge
 
@@ -37,4 +48,5 @@ The hotfix is not complete until a real Production run confirms:
 - mode = `full-bootstrap` on the first successful run;
 - `state_recovered = true` for the legacy-state recovery path;
 - `objects_scanned`, `row_count`, compressed/uncompressed index sizes are non-zero and plausible;
-- Streamlit can download the pointer-selected SQLite artifact and return transaction rows for a real lookup.
+- the workflow's `FLOW-C` serving smoke can download the pointer-selected SQLite artifact;
+- the smoke output records strict-quote/model-probe candidate/reference counts instead of `unavailable` or `not_ingested`.
