@@ -26,6 +26,11 @@ def require_postgres(database_url: str) -> None:
         raise ValueError("full import validation requires an isolated PostgreSQL database")
 
 
+def require_complete_import(report: dict[str, object]) -> None:
+    if report.get("has_more") is not False:
+        raise RuntimeError("object limit reached before the current R2 collection was exhausted")
+
+
 def run(*, limit: int) -> dict[str, object]:
     if limit < 1:
         raise ValueError("limit must be positive")
@@ -39,6 +44,7 @@ def run(*, limit: int) -> dict[str, object]:
         session_factory=SessionLocal,
         limit=limit,
     )
+    require_complete_import(imported)
     import_seconds = round(time.monotonic() - started, 3)
 
     with SessionLocal() as session:
@@ -109,7 +115,7 @@ def run(*, limit: int) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--limit", type=int, default=3488)
+    parser.add_argument("--limit", type=int, default=10000)
     args = parser.parse_args()
     print(json.dumps(run(limit=args.limit), ensure_ascii=False, indent=2, sort_keys=True))
     return 0
