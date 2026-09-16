@@ -26,3 +26,5 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     assert '"구매처"' in text
     assert '"거래기록"' in text
     assert "상세 조사·근거 보기" in text
+    assert "model_probe_query = model_probe_input.to_product_query()" in text
+    assert "query = model_probe_query" in text
