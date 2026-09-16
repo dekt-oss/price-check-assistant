@@ -70,3 +70,28 @@ def test_quote_item_edit_invalidates_stale_identity_and_research() -> None:
     assert "state.identity.pop(index, None)" in text
     assert "state.item_confirmed[index] = False" in text
     assert "_clear_research(state)" in text
+
+
+def test_quote_review_primary_surface_is_transaction_first() -> None:
+    text = (
+        REPO_ROOT / "src" / "purchase_price" / "ui" / "quote_market_research.py"
+    ).read_text(encoding="utf-8")
+
+    assert "가격 · 거래 이력" in text
+    assert "나라장터 거래가격" in text
+    assert '"판매처"' in text
+    assert '"구매처"' in text
+    assert '"거래일"' in text
+    assert '"거래기록"' in text
+    assert "상세 조사·근거 보기" in text
+    assert "검토 요약" not in text
+    assert "수집 DB 납품요구 단가 비교 (Research)" not in text
+
+
+def test_quote_review_keeps_reference_prices_out_of_auto_verdict() -> None:
+    text = (
+        REPO_ROOT / "src" / "purchase_price" / "ui" / "quote_market_research.py"
+    ).read_text(encoding="utf-8")
+
+    assert "견적 적정성 판정에는 자동 사용하지 않습니다" in text
+    assert "검색 참고" in text
