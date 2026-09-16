@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +10,24 @@ class Settings(BaseSettings):
         "postgresql+psycopg://purchase_user:purchase_pass@localhost:5432/purchase_price"
     )
     log_level: str = "INFO"
+
+    # Cloudflare R2 raw-evidence / backup object storage.
+    # Keep credentials in deployment secrets only. The raw prefix is content-addressed and
+    # intended for public procurement evidence only; private hospital purchasing data is excluded.
+    r2_account_id: str | None = None
+    r2_bucket_name: str | None = None
+    # Compatibility alias for deployments that already use R2_BUCKET.
+    r2_bucket: str | None = None
+    r2_access_key_id: str | None = None
+    r2_secret_access_key: str | None = None
+    r2_endpoint_url: str | None = None
+    r2_raw_prefix: str = "raw/v1"
+    r2_backup_prefix: str = "db-backups/v1"
+    # R2 Standard includes 10 GB-month free storage. Stay below that billing boundary with a
+    # conservative 1 GB reserve. This value may only be lowered, never raised above 9 GB, so a
+    # deployment cannot accidentally disable the zero-cost storage policy through configuration.
+    r2_zero_cost_hard_limit_gb: float = Field(default=9.0, gt=0, le=9.0)
+    r2_zero_cost_warn_limit_gb: float = Field(default=8.0, gt=0, le=8.0)
 
     # Legacy/common key kept for backward compatibility with the original public-data setup.
     data_go_kr_service_key: str | None = None
@@ -44,6 +63,42 @@ class Settings(BaseSettings):
     mfds_max_retries: int = 3
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @property
+    def resolved_r2_endpoint_url(self) -> str | None:
+        if self.r2_endpoint_url and self.r2_endpoint_url.strip():
+            return self.r2_endpoint_url.rstrip("/")
+        if self.r2_account_id and self.r2_account_id.strip():
+            return f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
+        return None
+
+    @property
+    def resolved_r2_bucket_name(self) -> str | None:
+        for value in (self.r2_bucket_name, self.r2_bucket):
+            if value and value.strip():
+                return value.strip()
+        return None
+
+    @property
+    def r2_configured(self) -> bool:
+        return all(
+            value and value.strip()
+            for value in (
+                self.resolved_r2_endpoint_url,
+                self.resolved_r2_bucket_name,
+                self.r2_access_key_id,
+                self.r2_secret_access_key,
+            )
+        )
+
+    @property
+    def r2_zero_cost_hard_limit_bytes(self) -> int:
+        # Cloudflare bills storage in decimal GB; use the same unit for the fail-closed guard.
+        return int(self.r2_zero_cost_hard_limit_gb * 1_000_000_000)
+
+    @property
+    def r2_zero_cost_warn_limit_bytes(self) -> int:
+        return int(self.r2_zero_cost_warn_limit_gb * 1_000_000_000)
 
     @property
     def resolved_mfds_service_key(self) -> str | None:
