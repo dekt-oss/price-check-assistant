@@ -191,6 +191,10 @@ def build_report(
     }
 
 
+def _md_text(value: object) -> str:
+    return str(value or "-").replace("|", "/").replace("\n", " ")
+
+
 def _write_markdown(report: dict[str, Any], path: Path) -> None:
     summary = report["summary"]
     lines = [
@@ -218,6 +222,31 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
                 price_range=price_range,
             )
         )
+    lines.extend(["", "## Sample evidence", ""])
+    for row in report["cases"]:
+        if not row["sample_rows"]:
+            continue
+        lines.extend(
+            [
+                f"### {row['case_id']}",
+                "",
+                "| Title | Price | Qty/Unit | Model | Reason |",
+                "|---|---:|---|---|---|",
+            ]
+        )
+        for sample in row["sample_rows"][:3]:
+            qty_unit = f"{_md_text(sample.get('quantity'))} {_md_text(sample.get('unit'))}"
+            reason = sample.get("reason") or sample.get("match_note") or "-"
+            lines.append(
+                "| {title} | {price} | {qty_unit} | {model} | {reason} |".format(
+                    title=_md_text(sample.get("product_title")),
+                    price=_md_text(sample.get("price")),
+                    qty_unit=qty_unit,
+                    model=_md_text(sample.get("model_name")),
+                    reason=_md_text(reason),
+                )
+            )
+        lines.append("")
     lines.extend(["", "## Tier summary", ""])
     for tier in TIERS:
         key = tier.lower()
