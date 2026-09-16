@@ -1,6 +1,15 @@
 name: Track B R2 Serving Index
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/track-b-r2-serving-index.yml"
+      - "src/purchase_price/scripts/sync_g2b_track_b_r2_index.py"
+      - "src/purchase_price/services/track_b_r2_quote_index.py"
+      - "src/purchase_price/services/track_b_reference_prices.py"
+      - "src/purchase_price/storage/r2_serving_index.py"
   workflow_run:
     workflows:
       - "Track B Daily Backfill"
@@ -24,7 +33,7 @@ permissions:
 
 jobs:
   sync-index:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
