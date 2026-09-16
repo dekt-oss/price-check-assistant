@@ -16,7 +16,7 @@ on:
         default: "100000"
 
 concurrency:
-  group: track-b-r2-serving-index
+  group: track-b-r2-pipeline
   cancel-in-progress: false
 
 permissions:
