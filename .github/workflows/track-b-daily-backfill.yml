@@ -18,7 +18,7 @@ on:
         default: "900"
 
 concurrency:
-  group: track-b-daily-backfill
+  group: track-b-r2-pipeline
   cancel-in-progress: false
 
 permissions:
