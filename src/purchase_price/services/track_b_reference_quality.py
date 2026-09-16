@@ -238,14 +238,16 @@ def refine_track_b_reference_quality(
         return result
 
     current = _current_clause()
-    references = _verified_classification_references(
+    # A model string observed in the actual delivered-item title is more useful than a broad
+    # classification basket, but it is still Research-only evidence and never becomes A/B here.
+    references = _strong_model_references(
         session,
         query,
         current_clause=current,
         limit=limit,
     )
     if not references:
-        references = _strong_model_references(
+        references = _verified_classification_references(
             session,
             query,
             current_clause=current,
