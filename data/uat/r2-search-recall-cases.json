@@ -14,6 +14,104 @@
       "manufacturer": "ASTEC",
       "model_name": "APC-30D",
       "specification": ""
+    },
+    {
+      "case_id": "sophie",
+      "product_name": "인공호흡기",
+      "manufacturer": "Stephan",
+      "model_name": "Sophie",
+      "specification": "Sophie"
+    },
+    {
+      "case_id": "veriti_pro_dx",
+      "product_name": "핵산증폭기",
+      "manufacturer": "Thermo Fisher Scientific",
+      "model_name": "Veriti Pro Dx",
+      "specification": "Veriti Pro Dx"
+    },
+    {
+      "case_id": "apeos_c5570",
+      "product_name": "컬러 레이저프린터",
+      "manufacturer": "FUJIFILM Business Innovation",
+      "model_name": "ApeosPrint C5570 GK",
+      "specification": "A3, 55PPM"
+    },
+    {
+      "case_id": "galaxybook6_pro",
+      "product_name": "노트북컴퓨터",
+      "manufacturer": "삼성전자",
+      "model_name": "NT960XJG-K72AG",
+      "specification": ""
+    },
+    {
+      "case_id": "thinkstation_p2",
+      "product_name": "워크스테이션",
+      "manufacturer": "Lenovo",
+      "model_name": "ThinkStation P2 Tower",
+      "specification": ""
+    },
+    {
+      "case_id": "gmsr182",
+      "product_name": "약품냉장고",
+      "manufacturer": "GMS",
+      "model_name": "GMSR-182",
+      "specification": "182L"
+    },
+    {
+      "case_id": "dfm100",
+      "product_name": "심장 충격기",
+      "manufacturer": "필립스",
+      "model_name": "Efficia DFM100",
+      "specification": ""
+    },
+    {
+      "case_id": "mac5",
+      "product_name": "심전도기",
+      "manufacturer": "GE HealthCare",
+      "model_name": "MAC5",
+      "specification": ""
+    },
+    {
+      "case_id": "tn500",
+      "product_name": "인큐베이터(인공보육기)",
+      "manufacturer": "Draeger",
+      "model_name": "TN500",
+      "specification": "TN500"
+    },
+    {
+      "case_id": "cx30n",
+      "product_name": "영상 판독용 모니터",
+      "manufacturer": "WIDE",
+      "model_name": "CX30N",
+      "specification": ""
+    },
+    {
+      "case_id": "ft10",
+      "product_name": "전기수술기",
+      "manufacturer": "Medtronic",
+      "model_name": "FT10",
+      "specification": "FT10"
+    },
+    {
+      "case_id": "minion_mk1d",
+      "product_name": "염기서열분석기",
+      "manufacturer": "Oxford Nanopore",
+      "model_name": "MinION Mk1D",
+      "specification": "MinION Mk1D"
+    },
+    {
+      "case_id": "rotapro",
+      "product_name": "혈관박리카테터장치",
+      "manufacturer": "Boston Scientific",
+      "model_name": "ROTAPRO",
+      "specification": "ROTAPRO"
+    },
+    {
+      "case_id": "exoatlet_negative_control",
+      "product_name": "엑소아틀레트 - II",
+      "manufacturer": "",
+      "model_name": "",
+      "specification": ""
     }
   ]
 }
