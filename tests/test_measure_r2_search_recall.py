@@ -38,10 +38,12 @@ def test_tier_distinguishes_class_reference_and_zero() -> None:
     assert _tier_for_result(_result(status="not_ingested")) == "INDEX_ERROR"
 
 
-def test_manifest_contains_initial_real_uat_cases() -> None:
+def test_manifest_keeps_initial_real_uat_cases_when_matrix_expands() -> None:
     cases = _load_manifest(Path("data/uat/r2-search-recall-cases.json"))
+    case_ids = {case["case_id"] for case in cases}
 
-    assert {case["case_id"] for case in cases} == {"flow_c", "apc30d"}
+    assert {"flow_c", "apc30d"}.issubset(case_ids)
+    assert len(cases) >= 2
     flow = next(case for case in cases if case["case_id"] == "flow_c")
     assert flow["manufacturer"] == "Maquet"
     assert flow["model_name"] == "FLOW-C"
