@@ -14,6 +14,16 @@ def test_r2_serving_index_workflow_runs_after_daily_backfill() -> None:
     assert "- main" in text
 
 
+def test_serving_index_bootstrap_can_recover_validated_legacy_state() -> None:
+    text = Path("src/purchase_price/scripts/sync_g2b_track_b_r2_index.py").read_text()
+
+    assert "BOOTSTRAP_MIN_R2_OBJECTS" in text
+    assert "BOOTSTRAP_LAST_OBJECT_KEY" in text
+    assert "_load_or_bootstrap_pipeline_state" in text
+    assert '"state_recovered"' in text
+    assert "validated batch-004 bootstrap proof" in text
+
+
 def test_home_is_unified_search_and_upload_entrypoint() -> None:
     text = Path("pages/1_대시보드.py").read_text()
 
