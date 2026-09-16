@@ -14,10 +14,8 @@ from sqlalchemy.orm import sessionmaker
 from purchase_price.config import Settings
 from purchase_price.db import Base
 from purchase_price.models import TrackBDeliveryLine
-from purchase_price.scripts.import_g2b_track_b_r2_to_db import (
-    TRACK_B_PAGE_OPERATION,
-    run as import_r2_pages,
-)
+from purchase_price.scripts.import_g2b_track_b_r2_to_db import TRACK_B_PAGE_OPERATION
+from purchase_price.scripts.import_g2b_track_b_r2_to_db import run as import_r2_pages
 from purchase_price.services.g2b_track_b_normalization import TrackBRawPage
 from purchase_price.services.track_b_db_quote_comparison import ingest_track_b_page
 from purchase_price.services.track_b_pipeline_state import (
@@ -68,7 +66,13 @@ def _raw_object_for_key(reader: R2RawEvidenceReader, key: str) -> R2RawObject:
 
 
 def _sync_exact_keys(*, reader: R2RawEvidenceReader, session_factory, keys: list[str]) -> dict[str, int]:
-    totals = {"objects_scanned": 0, "inserted": 0, "replayed": 0, "invalid_rows": 0, "conflicts": 0}
+    totals = {
+        "objects_scanned": 0,
+        "inserted": 0,
+        "replayed": 0,
+        "invalid_rows": 0,
+        "conflicts": 0,
+    }
     for key in dict.fromkeys(keys):
         obj = _raw_object_for_key(reader, key)
         payload = reader.get_public_json(obj)
@@ -92,7 +96,13 @@ def _sync_exact_keys(*, reader: R2RawEvidenceReader, session_factory, keys: list
 
 
 def _full_bootstrap(*, reader: R2RawEvidenceReader, session_factory, max_objects: int) -> dict[str, int]:
-    totals = {"objects_scanned": 0, "inserted": 0, "replayed": 0, "invalid_rows": 0, "conflicts": 0}
+    totals = {
+        "objects_scanned": 0,
+        "inserted": 0,
+        "replayed": 0,
+        "invalid_rows": 0,
+        "conflicts": 0,
+    }
     cursor: str | None = None
     while totals["objects_scanned"] < max_objects:
         remaining = max_objects - totals["objects_scanned"]
@@ -163,7 +173,9 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
                 }
 
             with session_factory() as session:
-                row_count = int(session.scalar(select(func.count()).select_from(TrackBDeliveryLine)) or 0)
+                row_count = int(
+                    session.scalar(select(func.count()).select_from(TrackBDeliveryLine)) or 0
+                )
             with engine.begin() as connection:
                 connection.exec_driver_sql("PRAGMA optimize")
         finally:
@@ -177,7 +189,10 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
                 **report,
             }
             output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_text(json.dumps(final, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            output.write_text(
+                json.dumps(final, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
             print(json.dumps(final, ensure_ascii=False, sort_keys=True))
             return 0
 
@@ -197,15 +212,18 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             },
         }
         state_store.write_json(SERVING_INDEX_STATE_NAME, pointer_payload)
-        pipeline.mark_pending_indexed(indexed_keys, {**report, "mode": mode, "row_count": row_count})
+        pipeline.mark_pending_indexed(
+            indexed_keys,
+            {**report, "mode": mode, "row_count": row_count},
+        )
         state_store.write_json(STATE_NAME, pipeline.to_payload())
 
         if previous_ref is not None and previous_ref.key != ref.key:
             try:
                 artifact_store.delete(previous_ref.key)
             except Exception:
-                # The new pointer is already committed. A stale rebuildable artifact is preferable
-                # to failing the live serving index because cleanup permissions were narrower.
+                # New pointer is already committed. A stale rebuildable artifact is preferable to
+                # failing the live index because cleanup permissions were narrower.
                 pass
 
         final = {
@@ -219,7 +237,10 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             **report,
         }
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(final, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        output.write_text(
+            json.dumps(final, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
         print(json.dumps(final, ensure_ascii=False, sort_keys=True))
         return 0
 
