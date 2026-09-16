@@ -58,6 +58,14 @@ def _validate_rolling_window(begin: str | None, end: str | None) -> None:
         raise ValueError("Track B rolling window begin date is after end date")
 
 
+def _validate_covered_through(value: str) -> str:
+    covered = date.fromisoformat(value)
+    historical_end = date.fromisoformat(BACKFILL_END_DATE)
+    if covered < historical_end:
+        raise ValueError("Track B rolling covered-through date cannot precede historical backfill")
+    return value
+
+
 @dataclass
 class TrackBPipelineState:
     collection_cursor: CollectionCursor = BOOTSTRAP_CURSOR
@@ -65,6 +73,7 @@ class TrackBPipelineState:
     rolling_cursor: CollectionCursor = ROLLING_BOOTSTRAP_CURSOR
     rolling_window_begin: str | None = None
     rolling_window_end: str | None = None
+    rolling_covered_through: str = BACKFILL_END_DATE
     rolling_cycles_completed: int = 0
     pending_object_keys: list[str] = field(default_factory=list)
     db_bootstrap_complete: bool = False
@@ -104,6 +113,9 @@ class TrackBPipelineState:
             else None
         )
         _validate_rolling_window(rolling_window_begin, rolling_window_end)
+        rolling_covered_through = _validate_covered_through(
+            str(payload.get("rolling_covered_through") or BACKFILL_END_DATE)
+        )
         rolling_cycles_completed = int(payload.get("rolling_cycles_completed") or 0)
         if rolling_cycles_completed < 0:
             raise ValueError("Track B rolling cycle count cannot be negative")
@@ -117,6 +129,7 @@ class TrackBPipelineState:
             rolling_cursor=rolling_cursor,
             rolling_window_begin=rolling_window_begin,
             rolling_window_end=rolling_window_end,
+            rolling_covered_through=rolling_covered_through,
             rolling_cycles_completed=rolling_cycles_completed,
             pending_object_keys=pending,
             db_bootstrap_complete=bool(payload.get("db_bootstrap_complete")),
@@ -166,6 +179,7 @@ class TrackBPipelineState:
             },
             "rolling_window_begin": self.rolling_window_begin,
             "rolling_window_end": self.rolling_window_end,
+            "rolling_covered_through": self.rolling_covered_through,
             "rolling_cycles_completed": self.rolling_cycles_completed,
             "pending_object_keys": list(self.pending_object_keys),
             "db_bootstrap_complete": self.db_bootstrap_complete,
@@ -227,6 +241,9 @@ class TrackBPipelineState:
             raise ValueError("Track B rolling collection cycle is already active")
         if self.rolling_cursor != ROLLING_BOOTSTRAP_CURSOR:
             raise ValueError("Track B rolling cursor must be at cycle start before opening a window")
+        covered_through = date.fromisoformat(self.rolling_covered_through)
+        if end <= covered_through:
+            raise ValueError("rolling collection window must advance the covered-through date")
         self.rolling_window_begin = begin.isoformat()
         self.rolling_window_end = end.isoformat()
         self.updated_at = _now()
@@ -258,6 +275,11 @@ class TrackBPipelineState:
             and summary.next_cursor.page_no == 1
         )
         if cycle_complete:
+            current_covered = date.fromisoformat(self.rolling_covered_through)
+            completed_end = date.fromisoformat(summary.end_date)
+            if completed_end <= current_covered:
+                raise ValueError("completed rolling cycle did not advance coverage")
+            self.rolling_covered_through = summary.end_date
             self.rolling_cursor = ROLLING_BOOTSTRAP_CURSOR
             self.rolling_window_begin = None
             self.rolling_window_end = None
@@ -279,6 +301,7 @@ class TrackBPipelineState:
                 "page_no": summary.next_cursor.page_no,
             },
             "cycle_complete": cycle_complete,
+            "covered_through": self.rolling_covered_through,
             "track_b_requests": summary.track_b_requests,
             "pages_stored": summary.pages_stored,
             "rows_seen": summary.rows_seen,
