@@ -54,6 +54,36 @@ def _kst_today() -> date:
     return datetime.now(KST).date()
 
 
+def _next_rolling_window(
+    state: TrackBPipelineState,
+    *,
+    today: date,
+) -> tuple[date, date, str] | None:
+    """Choose a bounded window without ever creating a date-coverage gap.
+
+    A normal cycle uses a recent seven-day overlap so delayed corrections can be replayed. If the
+    collector has fallen behind far enough that this recent window would skip dates, catch-up starts
+    on the day after the last fully covered endpoint and advances at most seven days. Coverage only
+    moves after all 5,208 target codes finish that locked window.
+    """
+
+    covered_through = date.fromisoformat(state.rolling_covered_through)
+    if today < covered_through:
+        raise RuntimeError(
+            "KST collection date precedes Track B rolling covered-through date; clock/state check required"
+        )
+    if today == covered_through:
+        return None
+
+    recent_begin = today - timedelta(days=ROLLING_WINDOW_DAYS - 1)
+    first_uncovered = covered_through + timedelta(days=1)
+    if recent_begin > first_uncovered:
+        begin = first_uncovered
+        end = min(today, begin + timedelta(days=ROLLING_WINDOW_DAYS - 1))
+        return begin, end, "catch_up"
+    return recent_begin, today, "recent_overlap"
+
+
 def _restore_snapshot(
     *,
     state_store: R2OperationalStateStore,
@@ -139,9 +169,22 @@ def _run_rolling_collection(
     request_budget: int,
     summary_path: Path,
 ) -> int:
+    window_strategy = "resume_locked"
     if state.rolling_window_begin is None:
-        end = _kst_today()
-        begin = end - timedelta(days=ROLLING_WINDOW_DAYS - 1)
+        planned = _next_rolling_window(state, today=_kst_today())
+        if planned is None:
+            report: dict[str, Any] = {
+                "status": "SUCCESS",
+                "mode": "rolling_incremental",
+                "stop_reason": "ROLLING_UP_TO_DATE",
+                "rolling_window_days": ROLLING_WINDOW_DAYS,
+                "rolling_covered_through": state.rolling_covered_through,
+                "rolling_cycles_completed": state.rolling_cycles_completed,
+                "pending_object_count": len(state.pending_object_keys),
+            }
+            _write_summary(summary_path, report)
+            return 0
+        begin, end, window_strategy = planned
         state.begin_rolling_cycle(begin=begin, end=end)
         # Persist the locked window before any remote request. If the runner dies mid-batch,
         # the next attempt must resume the same date range with the same page cursor.
@@ -176,6 +219,8 @@ def _run_rolling_collection(
         **asdict(summary),
         "mode": "rolling_incremental",
         "rolling_window_days": ROLLING_WINDOW_DAYS,
+        "rolling_window_strategy": window_strategy,
+        "rolling_covered_through": state.rolling_covered_through,
         "rolling_cycles_completed": state.rolling_cycles_completed,
         "pending_object_count": len(state.pending_object_keys),
     }
