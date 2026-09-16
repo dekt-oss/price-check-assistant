@@ -10,6 +10,7 @@ from purchase_price.scripts.collect_g2b_track_b_r2 import CollectionCursor, Coll
 STATE_SCHEMA = "track-b-daily-pipeline-state-v1"
 STATE_NAME = "track-b/daily-pipeline"
 SNAPSHOT_STATE_NAME = "track-b/target-code-snapshot-20260913"
+SERVING_INDEX_STATE_NAME = "track-b/serving-index"
 EXPECTED_SNAPSHOT_SHA256 = "0885d82d25beaa60eb740bca538253ce67a51234c20acd7ba05e40da9674b365"
 EXPECTED_TARGET_CODE_COUNT = 5208
 BOOTSTRAP_CURSOR = CollectionCursor(code_index=3196, page_no=1)
@@ -36,6 +37,7 @@ class TrackBPipelineState:
     updated_at: str = field(default_factory=_now)
     last_collection: dict[str, Any] | None = None
     last_db_sync: dict[str, Any] | None = None
+    last_serving_index_sync: dict[str, Any] | None = None
 
     @classmethod
     def bootstrap(cls) -> TrackBPipelineState:
@@ -83,6 +85,11 @@ class TrackBPipelineState:
                 if isinstance(payload.get("last_db_sync"), Mapping)
                 else None
             ),
+            last_serving_index_sync=(
+                dict(payload["last_serving_index_sync"])
+                if isinstance(payload.get("last_serving_index_sync"), Mapping)
+                else None
+            ),
         )
 
     def to_payload(self) -> dict[str, Any]:
@@ -103,6 +110,7 @@ class TrackBPipelineState:
             "updated_at": self.updated_at,
             "last_collection": self.last_collection,
             "last_db_sync": self.last_db_sync,
+            "last_serving_index_sync": self.last_serving_index_sync,
         }
 
     def apply_collection(self, summary: CollectionSummary, *, object_keys: list[str]) -> None:
@@ -154,4 +162,10 @@ class TrackBPipelineState:
         completed = set(object_keys)
         self.pending_object_keys = [k for k in self.pending_object_keys if k not in completed]
         self.last_db_sync = dict(report)
+        self.updated_at = _now()
+
+    def mark_pending_indexed(self, object_keys: list[str], report: Mapping[str, Any]) -> None:
+        completed = set(object_keys)
+        self.pending_object_keys = [k for k in self.pending_object_keys if k not in completed]
+        self.last_serving_index_sync = dict(report)
         self.updated_at = _now()
