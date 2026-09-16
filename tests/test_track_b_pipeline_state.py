@@ -6,6 +6,7 @@ import pytest
 
 from purchase_price.scripts.collect_g2b_track_b_r2 import CollectionCursor, CollectionSummary
 from purchase_price.services.track_b_pipeline_state import (
+    BACKFILL_END_DATE,
     EXPECTED_SNAPSHOT_SHA256,
     EXPECTED_TARGET_CODE_COUNT,
     ROLLING_BOOTSTRAP_CURSOR,
@@ -66,6 +67,7 @@ def test_pipeline_state_round_trip_and_manifest_deduplication() -> None:
     assert restored.pending_object_keys == ["raw/a.json.gz", "raw/b.json.gz"]
     assert restored.backfill_complete is False
     assert restored.rolling_cursor == ROLLING_BOOTSTRAP_CURSOR
+    assert restored.rolling_covered_through == BACKFILL_END_DATE
 
 
 def test_pipeline_marks_backfill_complete_only_at_terminal_cursor() -> None:
@@ -74,6 +76,7 @@ def test_pipeline_marks_backfill_complete_only_at_terminal_cursor() -> None:
 
     assert state.backfill_complete is True
     assert state.collection_cursor == CollectionCursor(EXPECTED_TARGET_CODE_COUNT, 1)
+    assert state.rolling_covered_through == BACKFILL_END_DATE
 
 
 def test_legacy_payload_without_rolling_fields_remains_compatible() -> None:
@@ -83,6 +86,7 @@ def test_legacy_payload_without_rolling_fields_remains_compatible() -> None:
         "rolling_cursor",
         "rolling_window_begin",
         "rolling_window_end",
+        "rolling_covered_through",
         "rolling_cycles_completed",
         "last_rolling_collection",
     ):
@@ -93,6 +97,7 @@ def test_legacy_payload_without_rolling_fields_remains_compatible() -> None:
     assert restored.rolling_cursor == ROLLING_BOOTSTRAP_CURSOR
     assert restored.rolling_window_begin is None
     assert restored.rolling_window_end is None
+    assert restored.rolling_covered_through == BACKFILL_END_DATE
     assert restored.rolling_cycles_completed == 0
 
 
@@ -117,11 +122,12 @@ def test_rolling_cycle_locks_window_and_advances_cursor_without_resetting_backfi
     assert state.rolling_cursor == CollectionCursor(850, 1)
     assert state.rolling_window_begin == "2026-09-10"
     assert state.rolling_window_end == "2026-09-16"
+    assert state.rolling_covered_through == BACKFILL_END_DATE
     assert state.pending_object_keys == ["raw/new.json.gz"]
     assert state.rolling_cycles_completed == 0
 
 
-def test_rolling_cycle_wraps_only_after_full_target_completion() -> None:
+def test_rolling_cycle_advances_coverage_only_after_full_target_completion() -> None:
     state = TrackBPipelineState.bootstrap()
     state.apply_collection(_summary(complete=True), object_keys=[])
     state.begin_rolling_cycle(begin=date(2026, 9, 10), end=date(2026, 9, 16))
@@ -137,9 +143,11 @@ def test_rolling_cycle_wraps_only_after_full_target_completion() -> None:
     assert state.rolling_cursor == ROLLING_BOOTSTRAP_CURSOR
     assert state.rolling_window_begin is None
     assert state.rolling_window_end is None
+    assert state.rolling_covered_through == "2026-09-16"
     assert state.rolling_cycles_completed == 1
     assert state.last_rolling_collection is not None
     assert state.last_rolling_collection["cycle_complete"] is True
+    assert state.last_rolling_collection["covered_through"] == "2026-09-16"
 
 
 def test_rolling_collection_rejects_date_window_drift() -> None:
