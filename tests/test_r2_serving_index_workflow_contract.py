@@ -4,7 +4,7 @@ from pathlib import Path
 def test_r2_serving_index_workflow_runs_after_daily_backfill() -> None:
     text = Path(".github/workflows/track-b-r2-serving-index.yml").read_text()
 
-    assert '"Track B Daily Backfill and PostgreSQL Sync"' in text
+    assert '"Track B Daily Backfill"' in text
     assert "sync_g2b_track_b_r2_index" in text
     assert "R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}" in text
     assert "DATABASE_URL" not in text
