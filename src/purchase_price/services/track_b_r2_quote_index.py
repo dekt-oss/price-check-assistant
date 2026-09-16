@@ -89,11 +89,14 @@ def _local_index_path(settings: Settings) -> Path | None:
 
 
 def lookup_track_b_quote_from_r2(query: ProductQuery, *, quote_unit_price):
-    # Local import avoids a module cycle: the DB comparison module calls this function as its
-    # preferred production lookup, while compare_track_b_quote remains the shared SQL implementation.
+    # Local imports avoid a module cycle: the DB comparison module calls this function as its
+    # preferred production lookup, while compare_track_b_quote remains the shared strict matcher.
     from purchase_price.services.track_b_db_quote_comparison import (
         TrackBQuoteComparison,
         compare_track_b_quote,
+    )
+    from purchase_price.services.track_b_reference_quality import (
+        refine_track_b_reference_quality,
     )
 
     settings = Settings()
@@ -110,7 +113,12 @@ def lookup_track_b_quote_from_r2(query: ProductQuery, *, quote_unit_price):
         session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
         try:
             with session_factory() as session:
-                return compare_track_b_quote(session, query, quote_unit_price=quote_unit_price)
+                result = compare_track_b_quote(
+                    session,
+                    query,
+                    quote_unit_price=quote_unit_price,
+                )
+                return refine_track_b_reference_quality(session, query, result)
         finally:
             engine.dispose()
     except (
