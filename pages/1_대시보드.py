@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from decimal import Decimal, InvalidOperation
 
 import streamlit as st
@@ -102,18 +101,8 @@ if uploaded is not None:
 
 if submitted:
     raw_search = search_text.strip()
-    inferred_model = ""
-    if (
-        raw_search
-        and not model_name.strip()
-        and re.search(r"[A-Za-z]", raw_search)
-        and re.search(r"\d", raw_search)
-        and len(raw_search.split()) <= 2
-    ):
-        inferred_model = raw_search
-
-    resolved_model = model_name.strip() or inferred_model
-    resolved_product = product_name.strip() or ("" if inferred_model else raw_search)
+    resolved_model = model_name.strip()
+    resolved_product = product_name.strip() or raw_search
     if not resolved_product and not resolved_model and not manufacturer.strip() and not specification.strip():
         st.warning("검색어를 입력하거나 상세 검색조건을 하나 이상 입력하세요.")
         st.stop()
@@ -143,8 +132,33 @@ if submitted:
     st.subheader(f"{heading} 검색 결과")
 
     track_b = lookup_track_b_quote_from_r2(query, quote_unit_price=review_input.quote_unit_price)
+    model_probe_used = False
+    if (
+        raw_search
+        and not model_name.strip()
+        and not product_name.strip()
+        and track_b.status == "success_0"
+    ):
+        model_probe_input = build_purchase_review_input(
+            product_name=raw_search,
+            manufacturer=manufacturer,
+            model_name=raw_search,
+            specification=specification,
+            quote_unit_price=quote,
+        )
+        if model_probe_input is not None:
+            model_probe = lookup_track_b_quote_from_r2(
+                model_probe_input.to_product_query(),
+                quote_unit_price=model_probe_input.quote_unit_price,
+            )
+            if model_probe.candidates:
+                track_b = model_probe
+                model_probe_used = True
+
     with st.container(border=True):
         st.markdown("**수집된 나라장터 납품단가**")
+        if model_probe_used:
+            st.caption("통합 검색어가 수집 데이터의 모델명과 일치해 모델 기준 결과를 우선 표시합니다.")
         if track_b.status == "unavailable":
             st.info("R2 가격 검색 인덱스를 불러오지 못했습니다. 외부 나라장터 조사는 계속 진행합니다.")
         elif track_b.status == "not_ingested":
