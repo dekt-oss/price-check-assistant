@@ -19,6 +19,8 @@ from purchase_price.scripts.import_g2b_track_b_r2_to_db import run as import_r2_
 from purchase_price.services.g2b_track_b_normalization import TrackBRawPage
 from purchase_price.services.track_b_db_quote_comparison import ingest_track_b_page
 from purchase_price.services.track_b_pipeline_state import (
+    BOOTSTRAP_LAST_OBJECT_KEY,
+    BOOTSTRAP_MIN_R2_OBJECTS,
     SERVING_INDEX_STATE_NAME,
     STATE_NAME,
     TrackBPipelineState,
@@ -49,6 +51,27 @@ def _ref_from_pointer(payload: Mapping[str, Any]) -> R2ServingIndexRef:
     )
 
 
+def _load_or_bootstrap_pipeline_state(
+    *,
+    state_store: R2OperationalStateStore,
+    reader: R2RawEvidenceReader,
+) -> TrackBPipelineState:
+    payload = state_store.read_json(STATE_NAME)
+    if payload is not None:
+        return TrackBPipelineState.from_payload(payload)
+
+    objects = reader.list_public_json(source_operation=TRACK_B_PAGE_OPERATION)
+    keys = {obj.key for obj in objects}
+    if len(objects) < BOOTSTRAP_MIN_R2_OBJECTS or BOOTSTRAP_LAST_OBJECT_KEY not in keys:
+        raise RuntimeError(
+            "cannot bootstrap Track B serving state: existing R2 evidence does not match "
+            "the audited batch-004 proof"
+        )
+    state = TrackBPipelineState.bootstrap()
+    state_store.write_json(STATE_NAME, state.to_payload())
+    return state
+
+
 def _raw_object_for_key(reader: R2RawEvidenceReader, key: str) -> R2RawObject:
     prefix = f"{reader.raw_prefix}/{TRACK_B_PAGE_OPERATION}/"
     if not key.startswith(prefix) or not key.endswith(".json.gz"):
@@ -65,7 +88,12 @@ def _raw_object_for_key(reader: R2RawEvidenceReader, key: str) -> R2RawObject:
     )
 
 
-def _sync_exact_keys(*, reader: R2RawEvidenceReader, session_factory, keys: list[str]) -> dict[str, int]:
+def _sync_exact_keys(
+    *,
+    reader: R2RawEvidenceReader,
+    session_factory,
+    keys: list[str],
+) -> dict[str, int]:
     totals = {
         "objects_scanned": 0,
         "inserted": 0,
@@ -95,7 +123,12 @@ def _sync_exact_keys(*, reader: R2RawEvidenceReader, session_factory, keys: list
     return totals
 
 
-def _full_bootstrap(*, reader: R2RawEvidenceReader, session_factory, max_objects: int) -> dict[str, int]:
+def _full_bootstrap(
+    *,
+    reader: R2RawEvidenceReader,
+    session_factory,
+    max_objects: int,
+) -> dict[str, int]:
     totals = {
         "objects_scanned": 0,
         "inserted": 0,
@@ -128,12 +161,9 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
         raise RuntimeError("R2 configuration is required for Track B serving-index sync")
 
     state_store = R2OperationalStateStore.from_settings(settings)
-    state_payload = state_store.read_json(STATE_NAME)
-    if state_payload is None:
-        raise RuntimeError("Track B pipeline state is missing; run collection bootstrap first")
-    pipeline = TrackBPipelineState.from_payload(state_payload)
-    pointer = state_store.read_json(SERVING_INDEX_STATE_NAME)
     reader = R2RawEvidenceReader.from_settings(settings)
+    pipeline = _load_or_bootstrap_pipeline_state(state_store=state_store, reader=reader)
+    pointer = state_store.read_json(SERVING_INDEX_STATE_NAME)
     artifact_store = R2ServingIndexStore.from_settings(settings)
 
     with tempfile.TemporaryDirectory(prefix="track-b-r2-index-") as temp_dir:
@@ -246,7 +276,9 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build/update the Track B SQLite serving index in R2")
+    parser = argparse.ArgumentParser(
+        description="Build/update the Track B SQLite serving index in R2"
+    )
     parser.add_argument("--max-bootstrap-objects", type=int, default=100000)
     parser.add_argument(
         "--output",
