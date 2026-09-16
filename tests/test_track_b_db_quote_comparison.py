@@ -31,6 +31,9 @@ def _item(*, change: str = "00", price: str | None = "90", title: str | None = N
         "prdctQty": "1",
         "prdctAmt": price or "90",
         "cntrctDlvrReqDate": "20260901",
+        "corpNm": "공급사A",
+        "dminsttNm": "구매기관B",
+        "prdctUnit": "대",
     }
     if price is not None:
         item["prdctUprc"] = price
@@ -88,6 +91,9 @@ def test_upload_comparison_uses_only_latest_explicit_unit_price(session: Session
     assert result.candidates[0].delta_percent == Decimal("11.1")
     assert result.candidates[0].source_record_id == "delivery:REQ-1|change:01|line:1"
     assert result.candidates[0].raw_object_key.endswith("test.json.gz")
+    assert result.candidates[0].supplier == "공급사A"
+    assert result.candidates[0].demand_institution == "구매기관B"
+    assert result.candidates[0].unit == "대"
     assert len(session.scalars(select(TrackBDeliveryLine)).all()) == 2
 
 
@@ -144,6 +150,9 @@ def test_model_prefix_is_not_promoted_to_price_comparison(session: Session) -> N
 
     assert result.status == "success_0"
     assert result.candidates == ()
+    assert result.reference_candidates
+    assert result.reference_candidates[0].price == Decimal("90")
+    assert not hasattr(result.reference_candidates[0], "delta_percent")
 
 
 def test_one_character_model_typo_is_only_an_identity_suggestion(session: Session) -> None:
