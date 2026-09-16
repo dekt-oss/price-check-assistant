@@ -281,7 +281,7 @@ def _render_transaction_table(rows: list[dict[str, object]]) -> None:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "가격": st.column_config.NumberColumn("가격", format="%,d원"),
+            "가격": st.column_config.NumberColumn("가격", format="%d원"),
         },
     )
 
