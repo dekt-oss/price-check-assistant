@@ -35,7 +35,7 @@ def run(
     if limit < 1:
         raise ValueError("limit must be positive")
     completed_cursor = cursor
-    scanned = inserted = replayed = invalid_rows = 0
+    scanned = inserted = replayed = invalid_rows = conflicts = 0
     has_more = False
     while scanned < limit:
         try:
@@ -66,6 +66,7 @@ def run(
             inserted += result.inserted
             replayed += result.replayed
             invalid_rows += result.invalid_rows
+            conflicts += result.conflicts
             scanned += 1
             completed_cursor = obj.key
         if not has_more:
@@ -78,11 +79,12 @@ def run(
             )
         completed_cursor = page.next_cursor
     return {
-        "status": "PARTIAL" if invalid_rows else "SUCCESS",
+        "status": "PARTIAL" if invalid_rows or conflicts else "SUCCESS",
         "objects_scanned": scanned,
         "inserted": inserted,
         "replayed": replayed,
         "invalid_rows": invalid_rows,
+        "conflicts": conflicts,
         "resume_cursor": completed_cursor,
         "has_more": has_more,
         "public_api_requests": 0,

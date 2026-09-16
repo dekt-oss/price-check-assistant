@@ -33,6 +33,7 @@ class TrackBIngestResult:
     inserted: int
     replayed: int
     invalid_rows: int
+    conflicts: int
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,8 @@ def _line_from_record(record: NormalizedTrackBRecord) -> TrackBDeliveryLine:
         change_order_number=int(change_order),
         product_sequence=record.identity.product_sequence,
         item_sha256=_serving_item_sha256(record),
+        identity_conflict=False,
+        identity_conflict_count=0,
         raw_object_key=record.provenance.raw_object_key,
         raw_payload_sha256=record.provenance.raw_payload_sha256,
         detail_code=record.detail_code,
@@ -161,6 +164,7 @@ def ingest_track_b_page(session: Session, page: TrackBRawPage) -> TrackBIngestRe
         raise TrackBIdentityConflictError("Track B page has divergent stable identity payloads")
     inserted = 0
     replayed = result.duplicate_count
+    conflicts = 0
     delivery_request_numbers = {
         record.identity.delivery_request_number for record in result.records
     }
@@ -191,10 +195,11 @@ def ingest_track_b_page(session: Session, page: TrackBRawPage) -> TrackBIngestRe
         existing = exact_rows.get(exact_key)
         if existing is not None:
             if existing.item_sha256 != _serving_item_sha256(record):
-                raise TrackBIdentityConflictError(
-                    f"stable identity {identity.source_record_id} has divergent payloads"
-                )
-            replayed += 1
+                existing.identity_conflict = True
+                existing.identity_conflict_count += 1
+                conflicts += 1
+            else:
+                replayed += 1
             continue
         numeric_key = (
             identity.delivery_request_number,
@@ -212,7 +217,7 @@ def ingest_track_b_page(session: Session, page: TrackBRawPage) -> TrackBIngestRe
         exact_rows[exact_key] = line
         numeric_rows[numeric_key] = line
         inserted += 1
-    if inserted:
+    if inserted or conflicts:
         session.flush()
     return TrackBIngestResult(
         inserted=inserted,
@@ -220,6 +225,7 @@ def ingest_track_b_page(session: Session, page: TrackBRawPage) -> TrackBIngestRe
         invalid_rows=sum(
             issue.code in {"INVALID_ITEM", "INVALID_IDENTITY"} for issue in result.issues
         ),
+        conflicts=conflicts,
     )
 
 
@@ -262,6 +268,7 @@ def _suggest_similar_identities(
             current_clause,
             TrackBDeliveryLine.class_key == class_key,
             TrackBDeliveryLine.model_key.is_not(None),
+            TrackBDeliveryLine.identity_conflict.is_(False),
         )
         .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
         .limit(200)
@@ -320,7 +327,12 @@ def compare_track_b_quote(
     )
     rows = session.scalars(
         select(TrackBDeliveryLine)
-        .where(current, identity_filter, TrackBDeliveryLine.unit_price > 0)
+        .where(
+            current,
+            identity_filter,
+            TrackBDeliveryLine.unit_price > 0,
+            TrackBDeliveryLine.identity_conflict.is_(False),
+        )
         .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
         .limit(limit + 1)
     ).all()

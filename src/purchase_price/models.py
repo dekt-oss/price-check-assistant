@@ -142,6 +142,8 @@ class TrackBDeliveryLine(Base):
     change_order_number: Mapped[int] = mapped_column(Integer)
     product_sequence: Mapped[str] = mapped_column(String(40))
     item_sha256: Mapped[str] = mapped_column(String(64))
+    identity_conflict: Mapped[bool] = mapped_column(Boolean, default=False)
+    identity_conflict_count: Mapped[int] = mapped_column(Integer, default=0)
     raw_object_key: Mapped[str] = mapped_column(Text)
     raw_payload_sha256: Mapped[str] = mapped_column(String(64))
     detail_code: Mapped[str] = mapped_column(String(10), index=True)

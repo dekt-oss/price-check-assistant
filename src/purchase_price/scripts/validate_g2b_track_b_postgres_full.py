@@ -91,13 +91,14 @@ def run(*, limit: int) -> dict[str, object]:
 
     p95_lookup_ms = quantiles(lookup_times_ms, n=20, method="inclusive")[18]
     return {
-        "status": "SUCCESS",
+        "status": "SUCCESS_WITH_QUARANTINE" if imported["conflicts"] else "SUCCESS",
         "objects_scanned": imported["objects_scanned"],
         "rows_inserted": imported["inserted"],
         "rows_stored": total_rows,
         "positive_unit_price_rows": priced_rows,
         "modeled_rows": modeled_rows,
         "invalid_rows": imported["invalid_rows"],
+        "quarantined_conflicts": imported["conflicts"],
         "has_more": imported["has_more"],
         "import_seconds": import_seconds,
         "rows_per_second": round(total_rows / import_seconds, 2) if import_seconds else None,

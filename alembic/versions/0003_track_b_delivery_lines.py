@@ -25,6 +25,8 @@ def upgrade() -> None:
         sa.Column("change_order_number", sa.Integer(), nullable=False),
         sa.Column("product_sequence", sa.String(40), nullable=False),
         sa.Column("item_sha256", sa.String(64), nullable=False),
+        sa.Column("identity_conflict", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("identity_conflict_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("raw_object_key", sa.Text(), nullable=False),
         sa.Column("raw_payload_sha256", sa.String(64), nullable=False),
         sa.Column("detail_code", sa.String(10), nullable=False),

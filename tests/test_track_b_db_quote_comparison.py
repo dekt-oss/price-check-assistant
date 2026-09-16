@@ -91,15 +91,24 @@ def test_upload_comparison_uses_only_latest_explicit_unit_price(session: Session
     assert len(session.scalars(select(TrackBDeliveryLine)).all()) == 2
 
 
-def test_replay_is_idempotent_and_divergent_identity_fails_closed(session: Session) -> None:
+def test_replay_is_idempotent_and_divergent_identity_is_quarantined(session: Session) -> None:
     first = _page([_item()])
     assert ingest_track_b_page(session, first).inserted == 1
     assert ingest_track_b_page(session, first).replayed == 1
     changed = _item()
     changed["prdctUprc"] = "91"
-    with pytest.raises(TrackBIdentityConflictError):
-        ingest_track_b_page(session, _page([changed]))
+    conflict = ingest_track_b_page(session, _page([changed]))
+    session.commit()
+
+    assert conflict.conflicts == 1
     assert len(session.scalars(select(TrackBDeliveryLine)).all()) == 1
+    stored = session.scalar(select(TrackBDeliveryLine))
+    assert stored is not None
+    assert stored.identity_conflict is True
+    assert stored.identity_conflict_count == 1
+    assert compare_track_b_quote(
+        session, _query(), quote_unit_price=Decimal("100")
+    ).candidates == ()
 
 
 def test_cross_page_non_serving_field_change_is_semantic_replay(session: Session) -> None:
