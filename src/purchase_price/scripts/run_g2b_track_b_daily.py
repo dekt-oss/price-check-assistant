@@ -12,8 +12,8 @@ from purchase_price.clients.data_go_kr import PublicDataPortalClient
 from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL
 from purchase_price.config import get_settings
 from purchase_price.scripts.collect_g2b_track_b_r2 import (
-    TRACK_B_OPERATION,
     TARGET_SEGMENTS,
+    TRACK_B_OPERATION,
     collect_track_b_batch,
 )
 from purchase_price.services.g2b_catalog import G2B_CATALOG_BASE_URL
