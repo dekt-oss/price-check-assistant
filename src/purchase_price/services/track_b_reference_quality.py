@@ -13,6 +13,11 @@ from purchase_price.services.g2b_product_mapping import (
     resolve_verified_g2b_mapping,
 )
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.product_matching import (
+    ManufacturerAliasError,
+    canonical_manufacturer,
+    load_manufacturer_aliases,
+)
 from purchase_price.services.track_b_db_quote_comparison import (
     TrackBQuoteComparison,
     TrackBReferenceCandidate,
@@ -128,6 +133,26 @@ def _to_references(
     return tuple(references)
 
 
+def _manufacturer_preferred_rows(
+    rows: list[TrackBDeliveryLine], query_manufacturer: str | None
+) -> tuple[list[TrackBDeliveryLine], bool]:
+    if not query_manufacturer:
+        return rows, False
+    try:
+        aliases = load_manufacturer_aliases()
+    except ManufacturerAliasError:
+        aliases = {}
+    query_key = canonical_manufacturer(query_manufacturer, aliases)
+    if query_key is None:
+        return rows, False
+    matched = [
+        row
+        for row in rows
+        if canonical_manufacturer(row.manufacturer, aliases) == query_key
+    ]
+    return (matched, True) if matched else (rows, False)
+
+
 def _verified_classification_references(
     session: Session,
     query: ProductQuery,
@@ -146,12 +171,23 @@ def _verified_classification_references(
         _base_query(current_clause).where(
             TrackBDeliveryLine.detail_code == mapping.detail_product_code
         ),
+        scan_limit=500,
     )
     if not rows:
         return ()
+
+    rows, manufacturer_filtered = _manufacturer_preferred_rows(rows, query.manufacturer)
+    # Generic custom-spec rows can have the right classification but are weak price comparables.
+    # If structured model rows exist, prefer them rather than mixing them with model-less lump sums.
+    structured = [row for row in rows if normalize_text(row.model_name)]
+    if structured:
+        rows = structured
+
+    qualifier = " · 제조사 우선" if manufacturer_filtered else ""
     reason = (
         "검증된 나라장터 세부품명코드 참고 · "
         f"{mapping.detail_product_code} · {mapping.detail_product_name or '세부품명 미확인'}"
+        f"{qualifier}"
     )
     return _to_references(rows, reason=reason, limit=limit)
 
@@ -168,11 +204,12 @@ def _strong_model_references(
     if not model_key or len(model_key) < 4:
         return ()
 
+    # Do not use compact substring matching here. FLOW-C -> flowc incorrectly matched
+    # "Flow Cytometer" -> flowcytometer in Production. Exact parsed model or the literal model
+    # string in the delivered-item title is strong enough for Research-only evidence.
     conditions = [TrackBDeliveryLine.model_key == model_key]
     if raw_model:
         conditions.append(TrackBDeliveryLine.product_title.ilike(f"%{raw_model}%"))
-    if len(model_key) >= 5:
-        conditions.append(TrackBDeliveryLine.model_key.like(f"%{model_key}%"))
 
     rows = _recent_rows(
         session,
@@ -238,8 +275,6 @@ def refine_track_b_reference_quality(
         return result
 
     current = _current_clause()
-    # A model string observed in the actual delivered-item title is more useful than a broad
-    # classification basket, but it is still Research-only evidence and never becomes A/B here.
     references = _strong_model_references(
         session,
         query,
