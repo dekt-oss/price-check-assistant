@@ -8,7 +8,12 @@ def test_daily_workflow_keeps_quota_checkpoint_and_db_guards() -> None:
     assert "production secret readiness" in text
     assert "github.event_name == 'pull_request'" in text
     assert "github.event_name != 'pull_request'" in text
-    assert "production_secret_contract=READY" in text
+    assert "production_secret_contract=READY_" in text
+    assert "READY_NO_DATABASE" not in text  # status is composed at runtime, not hard-coded.
+    assert "DATABASE_URL_MISSING" in text
+    assert "SKIP_POSTGRES_SYNC=1" in text
+    assert "collection_continues" in text
+    assert "env.SKIP_POSTGRES_SYNC != '1'" in text
     assert 'cron: "10 18 * * *"' in text
     assert "group: track-b-daily-backfill-postgres" in text
     assert "cancel-in-progress: false" in text
