@@ -15,6 +15,7 @@ from purchase_price.services.quote_extraction import parse_quote_decimal, quote_
 from purchase_price.services.track_b_db_quote_comparison import (
     TrackBIdentitySuggestion,
     TrackBQuoteCandidate,
+    TrackBReferenceCandidate,
     lookup_track_b_quote,
 )
 from purchase_price.ui.market_research import (
@@ -40,27 +41,56 @@ def _money(value) -> str:
     return f"{value:,.0f}원" if value is not None else "미확인"
 
 
+def _quantity_unit(quantity, unit: str | None) -> str:
+    if quantity is None and not unit:
+        return "미확인"
+    quantity_text = "" if quantity is None else f"{quantity:g}"
+    return " ".join(part for part in (quantity_text, unit or "") if part) or "미확인"
+
+
+def _comparison_label(candidate: TrackBQuoteCandidate) -> str:
+    if candidate.match_grade.value in {"A", "B"}:
+        return "동일 모델"
+    return "동일 품목 참고"
+
+
 def _track_b_candidate_rows(
     candidates: tuple[TrackBQuoteCandidate, ...],
-) -> list[dict[str, str]]:
-    amount_check_labels = {
-        "consistent": "일치",
-        "inconsistent": "불일치",
-        "not_checked": "미검증",
-    }
+) -> list[dict[str, object]]:
     return [
         {
-            "수집 품목": candidate.product_title,
-            "납품요구 단가": _money(candidate.price),
+            "가격": float(candidate.price),
+            "판매처": candidate.supplier or "미확인",
+            "구매처": candidate.demand_institution or "미확인",
+            "거래일": candidate.transaction_date or "미확인",
+            "수량/단위": _quantity_unit(candidate.quantity, candidate.unit),
+            "거래기록": candidate.transaction_type,
+            "품목/모델": candidate.product_title,
+            "비교수준": _comparison_label(candidate),
             "견적 대비": (
                 f"{candidate.delta_percent:+.1f}%"
                 if candidate.delta_percent is not None
-                else "비교조건 확인 필요"
+                else "조건 확인"
             ),
-            "식별 등급": candidate.match_grade.value,
+        }
+        for candidate in candidates
+    ]
+
+
+def _track_b_reference_rows(
+    candidates: tuple[TrackBReferenceCandidate, ...],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "가격": float(candidate.price),
+            "판매처": candidate.supplier or "미확인",
+            "구매처": candidate.demand_institution or "미확인",
             "거래일": candidate.transaction_date or "미확인",
-            "금액검산": amount_check_labels.get(candidate.amount_check, candidate.amount_check),
-            "원문 키": candidate.raw_object_key,
+            "수량/단위": _quantity_unit(candidate.quantity, candidate.unit),
+            "거래기록": candidate.transaction_type,
+            "품목/모델": candidate.product_title,
+            "비교수준": candidate.reference_reason,
+            "견적 대비": "참고만",
         }
         for candidate in candidates
     ]
@@ -159,10 +189,9 @@ def _render_inline_manual_item_form(state: QuoteReviewState) -> None:
 def _render_compact_item_editor(state: QuoteReviewState) -> None:
     if not state.items:
         return
-    with st.expander("추출 품목 수정", expanded=False):
+    with st.expander("추출 내용 확인·수정", expanded=False):
         st.caption(
-            "자동 추출이 틀린 경우 핵심 식별정보와 견적 단가만 수정하세요. "
-            "VAT·설치·보증 등 세부조건은 시장검색의 필수조건이 아닙니다."
+            "자동 추출이 틀린 경우 품명·제조사·모델·규격·견적 단가만 수정하세요."
         )
         index = st.selectbox(
             "수정할 품목",
@@ -199,7 +228,7 @@ def _render_compact_item_editor(state: QuoteReviewState) -> None:
                 quantity=parse_quote_decimal(quantity),
             )
             _invalidate_item_review(state, int(index))
-            st.success("품목을 수정했습니다. 기존 식별·비교상태를 초기화하고 시장가격을 다시 조사합니다.")
+            st.success("품목을 수정했습니다. 가격을 다시 검색합니다.")
             st.rerun()
 
 
@@ -220,7 +249,7 @@ def _ensure_market_research(state: QuoteReviewState) -> bool:
     if not missing:
         return False
 
-    progress = st.progress(0, text="견적 품목의 시장가격을 자동 조사하고 있습니다...")
+    progress = st.progress(0, text="추가 공개자료를 조사하고 있습니다...")
     total = len(missing)
     for done, index in enumerate(missing, start=1):
         item = state.items[index]
@@ -242,33 +271,18 @@ def _ensure_market_research(state: QuoteReviewState) -> bool:
         state.search_runs[index] = run
         state.discoveries[index] = discovery
         state.market_bundles[index] = market_bundle
-    progress.progress(1.0, text="시장가격 자동 조사를 완료했습니다.")
+    progress.progress(1.0, text="추가 공개자료 조사를 완료했습니다.")
     return True
 
 
-def _render_overview(state: QuoteReviewState) -> None:
-    direct_evidence_count = sum(len(run.results) for run in state.search_runs.values())
-    procurement_record_count = sum(
-        len(bundle.records) for bundle in state.market_bundles.values() if bundle is not None
-    )
-    discovery_candidate_count = sum(
-        len(discovery.candidates)
-        for discovery in state.discoveries.values()
-        if discovery is not None
-    )
-    unconfirmed_count = sum(
-        not state.item_confirmed.get(index, False) for index in range(len(state.items))
-    )
-
-    st.subheader("검토 요약")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("견적 품목", f"{len(state.items)}건")
-    c2.metric("검증 직접근거", f"{direct_evidence_count}건")
-    c3.metric("조달 Research", f"{procurement_record_count + discovery_candidate_count}건")
-    c4.metric("원문 확인 필요", f"{unconfirmed_count}건")
-    st.caption(
-        "Research는 동일제품 자료가 부족해도 넓게 계속 수행합니다. 조달 Research·쇼핑몰 후보는 "
-        "검증된 동일제품 직접가격과 분리되며 최종 판정에는 자동 투입되지 않습니다."
+def _render_transaction_table(rows: list[dict[str, object]]) -> None:
+    st.dataframe(
+        rows,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "가격": st.column_config.NumberColumn("가격", format="%,d원"),
+        },
     )
 
 
@@ -283,85 +297,87 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
     with st.container(border=True):
         title = item.product_name or item.model_name or f"품목 {index + 1}"
         st.subheader(f"{index + 1}. {title}")
-        st.caption(
-            " · ".join(
-                part for part in (item.manufacturer, item.model_name, item.specification) if part
-            )
-            or "추가 식별정보 없음"
+        identity_text = " · ".join(
+            part for part in (item.manufacturer, item.model_name, item.specification) if part
         )
-        c1, c2, c3 = st.columns(3)
-        c1.metric("견적 단가", _money(item.unit_price))
-        c2.metric("수량", str(item.quantity) if item.quantity is not None else "미확인")
-        c3.metric("단위", item.unit or "미확인")
+        st.caption(identity_text or "추가 식별정보 없음")
 
-        st.markdown("**수집 DB 납품요구 단가 비교 (Research)**")
-        if track_b is None or track_b.status == "unavailable":
-            st.warning("수집 DB에 연결할 수 없거나 테이블이 준비되지 않아 비교를 실행하지 못했습니다.")
+        price_col, info_col = st.columns([1.25, 3.75])
+        price_col.metric("견적 단가", _money(item.unit_price))
+        info_col.caption(
+            "아래 표는 실제 수집된 거래가격을 우선 보여줍니다. 동일성이 충분하지 않은 행은 "
+            "'검색 참고'로 표시하며 견적 적정성 판정에는 자동 사용하지 않습니다."
+        )
+
+        st.markdown("**나라장터 거래가격**")
+        direct_rows = _track_b_candidate_rows(track_b.candidates) if track_b is not None else []
+        reference_rows = (
+            _track_b_reference_rows(track_b.reference_candidates) if track_b is not None else []
+        )
+        rows = direct_rows + reference_rows
+
+        if rows:
+            _render_transaction_table(rows)
+            st.caption(
+                f"동일성 확인 거래 {len(direct_rows)}건 · 검색 참고 {len(reference_rows)}건"
+            )
+            if track_b is not None and any(
+                candidate.amount_check == "inconsistent" for candidate in track_b.candidates
+            ):
+                st.warning("일부 거래는 단가×수량과 총액이 일치하지 않아 원문 조건 확인이 필요합니다.")
+        elif track_b is None or track_b.status == "unavailable":
+            st.warning(
+                "가격 검색 인덱스를 아직 사용할 수 없습니다. 인덱스 준비 후 같은 견적서에서 다시 검색할 수 있습니다."
+            )
         elif track_b.status == "not_ingested":
-            st.warning("DB 조회는 가능하지만 Track B 수집 데이터가 아직 적재되지 않았습니다.")
+            st.info("수집 자료의 빠른 가격 인덱스를 만드는 중입니다.")
         elif track_b.status == "insufficient_identity":
-            st.info("품명 또는 모델명이 없어 수집 DB의 가격 후보를 검색할 수 없습니다.")
-        elif track_b.status == "success_0":
-            st.info("수집 DB 조회는 완료했지만 현재 식별정보로 확인된 단가 후보가 없습니다.")
-            if track_b.suggestions:
-                st.warning(
-                    "모델명 오타 가능성이 있는 식별 후보입니다. 단가 비교에는 사용하지 않았으며 "
-                    "원문 모델명을 확인한 뒤 다시 검색하세요."
-                )
+            st.info("품명 또는 모델명을 확인해 주세요.")
+        else:
+            st.info("현재 수집 범위에서는 이 품목의 거래가격을 찾지 못했습니다.")
+
+        show_details = st.toggle(
+            "상세 조사·근거 보기",
+            value=False,
+            key=f"quote_market_details_{index}",
+        )
+        if show_details:
+            if track_b is not None and track_b.suggestions:
+                st.markdown("**모델명 확인 후보**")
                 st.dataframe(
                     _track_b_suggestion_rows(track_b.suggestions),
                     use_container_width=True,
                     hide_index=True,
                 )
-        else:
-            if track_b.status == "partial":
-                st.warning("후보가 조회 상한을 초과했습니다. 아래 결과는 일부이며 추가 검토가 필요합니다.")
-            if any(candidate.amount_check == "inconsistent" for candidate in track_b.candidates):
-                st.warning(
-                    "단가×수량과 총액이 일치하지 않는 수집 행이 포함되어 있습니다. "
-                    "명시 단가는 Research로만 확인하세요."
-                )
-            st.dataframe(
-                _track_b_candidate_rows(track_b.candidates),
-                use_container_width=True,
-                hide_index=True,
-            )
-            st.caption(
-                "최신 변경차수의 명시된 품목단가만 표시합니다. 동일 모델·규격·VAT·설치 조건을 "
-                "확인하기 전에는 견적 적정성 판정에 자동 반영하지 않습니다."
+
+            render_market_reference_summary(
+                discovery,
+                query=query,
+                quote_unit_price=item.unit_price,
+                include_model_price_summary=False,
+                include_related_candidates=False,
             )
 
-        render_market_reference_summary(
-            discovery,
-            query=query,
-            quote_unit_price=item.unit_price,
-            include_model_price_summary=False,
-            include_related_candidates=False,
-        )
+            if run is not None and run.results:
+                assessment = assess_prices(run.results, item.unit_price)
+                st.markdown("**검증된 동일제품 직접가격 근거**")
+                d1, d2, d3 = st.columns(3)
+                d1.metric("직접근거", f"{assessment.observed_count}건")
+                d2.metric("독립 출처", f"{assessment.source_count}개")
+                d3.metric("신뢰도", assessment.confidence)
+                render_observation_cards(run.results)
+            else:
+                st.caption("추가 공개출처의 동일제품 직접가격은 아직 확인되지 않았습니다.")
 
-        if run is not None and run.results:
-            assessment = assess_prices(run.results, item.unit_price)
-            st.markdown("**검증된 동일제품 직접가격 근거**")
-            d1, d2, d3 = st.columns(3)
-            d1.metric("직접근거", f"{assessment.observed_count}건")
-            d2.metric("독립 출처", f"{assessment.source_count}개")
-            d3.metric("신뢰도", assessment.confidence)
-            render_observation_cards(run.results)
-        else:
-            st.caption("검증된 동일제품 직접가격 근거는 현재 조사 범위에서 확인되지 않았습니다.")
-
-        render_model_price_research_summary(
-            discovery,
-            quote_unit_price=item.unit_price,
-        )
-        render_market_alternative_candidates(discovery, query=query)
-        render_procurement_research(market_bundle)
-        render_external_research_links(query)
-
-        with st.expander("상세 근거·비교조건", expanded=False):
-            st.caption(
-                "VAT·배송·설치·옵션·보증 등은 여기서 확인합니다. 이 정보가 비어 있어도 시장검색 자체는 중단하지 않습니다."
+            render_model_price_research_summary(
+                discovery,
+                quote_unit_price=item.unit_price,
             )
+            render_market_alternative_candidates(discovery, query=query)
+            render_procurement_research(market_bundle)
+            render_external_research_links(query)
+
+            st.markdown("**비교조건·원문 근거**")
             if run is not None:
                 render_source_status(run)
                 if run.results:
@@ -386,9 +402,9 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
 
 
 def render_quote_market_research(state: QuoteReviewState) -> None:
-    st.info(
-        "견적서를 업로드하면 품목을 추출하고 수집 DB 단가를 바로 비교합니다. "
-        "여러 외부 출처의 광범위 시장조사는 DB 비교 결과를 확인한 뒤 별도로 시작할 수 있습니다."
+    st.caption(
+        "견적서 품목별로 가격 · 판매처 · 구매처 · 거래일을 먼저 보여줍니다. "
+        "검증 과정과 세부 근거는 필요할 때만 펼쳐볼 수 있습니다."
     )
 
     uploaded = st.file_uploader(
@@ -402,14 +418,14 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
 
     if state.extraction is None:
         st.caption(
-            "PDF · Excel(.xlsx/.xls) · PNG · JPG/JPEG 견적서를 업로드하면 품목 추출과 시장조사가 한 번에 시작됩니다."
+            "PDF · Excel(.xlsx/.xls) · PNG · JPG/JPEG 견적서를 올리면 품목을 추출하고 거래가격을 검색합니다."
         )
         return
 
-    top1, top2, top3 = st.columns([1.3, 2.2, 1])
+    top1, top2, top3 = st.columns([1, 2.5, 1])
     top1.metric("추출 품목", f"{len(state.items)}건")
-    top2.metric("파일", state.file_name or "-")
-    if top3.button("새 견적서로 초기화"):
+    top2.caption(f"파일: {state.file_name or '-'}")
+    if top3.button("새 견적서"):
         st.session_state.pop("quote_review_state", None)
         st.rerun()
 
@@ -425,20 +441,36 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
         _render_inline_manual_item_form(state)
         return
 
-    st.markdown("**인식된 견적 품목**")
-    rows = [
-        {
-            "품목": index + 1,
-            "품명": item.product_name,
-            "제조사": item.manufacturer,
-            "모델": item.model_name,
-            "규격": item.specification,
-            "견적단가": float(item.unit_price) if item.unit_price is not None else None,
-        }
-        for index, item in enumerate(state.items)
-    ]
-    st.dataframe(rows, use_container_width=True, hide_index=True)
     _render_compact_item_editor(state)
+    _ensure_track_b_comparison(state)
+
+    st.subheader("가격 · 거래 이력")
+    for index in range(len(state.items)):
+        _render_item_result(state, index)
+
+    missing_market = [
+        index for index in range(len(state.items)) if index not in state.search_runs
+    ]
+    if missing_market:
+        zero_trade_items = [
+            index
+            for index in missing_market
+            if (
+                state.track_b_db.get(index) is None
+                or (
+                    not state.track_b_db[index].candidates
+                    and not state.track_b_db[index].reference_candidates
+                )
+            )
+        ]
+        if zero_trade_items and len(state.items) <= 3:
+            st.caption("거래가격이 없는 품목은 입찰·계약·웹 공개자료를 추가로 자동 조사합니다.")
+            if _ensure_market_research(state):
+                st.rerun()
+        else:
+            if st.button("추가 공개자료 더 찾기", key="quote_auto_start_external_research"):
+                if _ensure_market_research(state):
+                    st.rerun()
 
     with st.expander("검색 설정", expanded=False):
         selected_lookback = int(
@@ -458,25 +490,6 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
             state.lookback_days = selected_lookback
             _clear_research(state)
             st.rerun()
-        if st.button("시장가격 다시 조사", key="quote_auto_research_again"):
+        if st.button("가격 다시 검색", key="quote_auto_research_again"):
             _clear_research(state)
             st.rerun()
-
-    _ensure_track_b_comparison(state)
-    _render_overview(state)
-
-    st.subheader("품목별 시장조사")
-    for index in range(len(state.items)):
-        _render_item_result(state, index)
-
-    missing_market = [
-        index for index in range(len(state.items)) if index not in state.search_runs
-    ]
-    if missing_market:
-        st.info(
-            "수집 DB 비교는 완료했습니다. 입찰·낙찰·쇼핑몰 등 외부 출처까지 조사하려면 "
-            "아래 버튼을 누르세요."
-        )
-        if st.button("외부 시장가격 조사 시작", key="quote_auto_start_external_research"):
-            if _ensure_market_research(state):
-                st.rerun()
