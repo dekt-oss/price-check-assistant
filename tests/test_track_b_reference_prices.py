@@ -8,13 +8,12 @@ from purchase_price.db import Base
 from purchase_price.domain import MatchGrade
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.matching import normalize_text
 from purchase_price.services.track_b_db_quote_comparison import compare_track_b_quote
 from purchase_price.services.track_b_reference_prices import add_same_class_reference_prices
 
 
 def _row(*, request: str, product_class: str, model: str, price: str) -> TrackBDeliveryLine:
-    normalized_class = product_class.casefold().replace(" ", "")
-    normalized_model = model.casefold().replace("-", "").replace(" ", "")
     return TrackBDeliveryLine(
         delivery_request_number=request,
         change_order="00",
@@ -29,13 +28,13 @@ def _row(*, request: str, product_class: str, model: str, price: str) -> TrackBD
         product_id=f"P-{request}",
         product_title=f"{product_class}, 나우이엘, {model}, 45L/d",
         product_class=product_class,
-        class_key=normalized_class,
+        class_key=normalize_text(product_class),
         manufacturer="나우이엘",
         manufacturer_qualifier=None,
         model_name=model,
         model_qualifier=None,
         model_qualifier_verified_as_origin=False,
-        model_key=normalized_model,
+        model_key=normalize_text(model),
         specification="45L/d",
         unit_price=Decimal(price),
         quantity=Decimal("1"),
