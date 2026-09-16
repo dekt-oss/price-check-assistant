@@ -189,12 +189,14 @@ if submitted:
             quote_unit_price=quote,
         )
         if model_probe_input is not None:
+            model_probe_query = model_probe_input.to_product_query()
             model_probe = lookup_track_b_quote_from_r2(
-                model_probe_input.to_product_query(),
+                model_probe_query,
                 quote_unit_price=model_probe_input.quote_unit_price,
             )
             if model_probe.candidates or model_probe.reference_candidates:
                 track_b = model_probe
+                query = model_probe_query
                 model_probe_used = True
 
     transaction_rows = _track_b_rows(track_b)
