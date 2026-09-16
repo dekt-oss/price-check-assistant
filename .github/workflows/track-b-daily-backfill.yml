@@ -18,7 +18,9 @@ on:
         default: "900"
 
 concurrency:
-  group: track-b-r2-pipeline
+  # Production collection and serving-index writes must serialize on the shared group. PR checks are
+  # read-only and use a workflow-specific group so they cannot cancel each other while Production runs.
+  group: ${{ github.event_name == 'pull_request' && format('track-b-daily-pr-{0}', github.event.pull_request.number) || 'track-b-r2-pipeline' }}
   cancel-in-progress: false
 
 permissions:
