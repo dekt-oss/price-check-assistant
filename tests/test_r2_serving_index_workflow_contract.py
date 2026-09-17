@@ -64,3 +64,12 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     assert "상세 조사·근거 보기" in page_text
     assert "model_probe_query = model_probe_input.to_product_query()" in page_text
     assert "query = model_probe_query" in page_text
+
+
+def test_r2_serving_index_pr_runs_read_only_historical_audit() -> None:
+    text = Path(".github/workflows/track-b-r2-serving-index.yml").read_text()
+
+    assert "historical-audit:" in text
+    assert "audit_g2b_track_b_historical" in text
+    assert "track-b-historical-audit" in text
+    assert "R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}" in text
