@@ -40,7 +40,17 @@ _PRODUCT_STOP = (
     "제조",
     "수입",
     "업체",
+    "회사",
+    "상호",
+    "대표",
+    "주소",
+    "전화",
+    "팩스",
+    "담당",
+    "tel",
+    "fax",
 )
+_QUOTE_MARKERS = ("견적", "quotation", "estimate")
 
 
 def _normalize_line(value: str) -> str:
@@ -99,6 +109,32 @@ def _repeated_price_line(lines: list[str]) -> tuple[int, Decimal] | None:
     return deduped[0] if len(deduped) == 1 else None
 
 
+def _quantity_from_sparse_line(line: str) -> Decimal | None:
+    """Accept a quantity cell, but never a model/year/specification token."""
+
+    candidate = _normalize_line(line)
+    unit = _known_unit(candidate)
+    if unit:
+        candidate = re.sub(
+            rf"(?<![0-9a-z가-힣]){re.escape(unit)}(?![0-9a-z가-힣])",
+            "",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+    if re.search(r"[A-Za-z가-힣]", candidate):
+        return None
+    match = re.fullmatch(r"[|()\[\]\s]*([0-9]+(?:\.[0-9]+)?)[|()\[\]\s]*", candidate)
+    if match is None:
+        return None
+    try:
+        value = Decimal(match.group(1))
+    except InvalidOperation:
+        return None
+    if value <= 0 or value > 100000:
+        return None
+    return value
+
+
 def _nearby_quantity(lines: list[str], price_index: int) -> Decimal | None:
     values: list[Decimal] = []
     start = max(0, price_index - 4)
@@ -107,16 +143,10 @@ def _nearby_quantity(lines: list[str], price_index: int) -> Decimal | None:
         if index == price_index:
             continue
         line = lines[index]
-        match = re.fullmatch(r"[^0-9]*(\d+(?:\.\d+)?)[^0-9]*", line)
-        if match is None:
-            continue
         if re.search(r"\d\s*(?:부|page|쪽)\b", line, re.IGNORECASE):
             continue
-        try:
-            value = Decimal(match.group(1))
-        except InvalidOperation:
-            continue
-        if 0 < value <= 100000 and value not in values:
+        value = _quantity_from_sparse_line(line)
+        if value is not None and value not in values:
             values.append(value)
     return values[0] if len(values) == 1 else None
 
@@ -128,6 +158,28 @@ def _known_unit(text: str) -> str:
         if re.search(rf"(?<![0-9a-z가-힣]){re.escape(unit)}(?![0-9a-z가-힣])", folded):
             found.append(unit)
     return found[0] if len(found) == 1 else ""
+
+
+def _is_korean_product_candidate(line: str, *, before_price: bool) -> bool:
+    """Recognize a bounded Hangul product label without treating metadata as identity."""
+
+    if not before_price or len(line) > 60:
+        return False
+    hangul_letters = re.findall(r"[가-힣]", line)
+    if len(hangul_letters) < 3:
+        return False
+    ascii_letters = [char for char in line if char.isascii() and char.isalpha()]
+    letter_count = len(hangul_letters) + len(ascii_letters)
+    if letter_count == 0 or len(hangul_letters) / letter_count < 0.55:
+        return False
+    return True
+
+
+def _mixed_line_model_tokens(line: str) -> list[str]:
+    """Keep explicit ASCII model tokens from a Korean product line as specification clues."""
+
+    tokens = re.findall(r"(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9._+/-]{1,30}(?![A-Za-z0-9])", line)
+    return [token for token in tokens if re.search(r"[0-9+/_-]", token)]
 
 
 def _identity_candidates(lines: list[str], price_index: int) -> tuple[str, str]:
@@ -145,28 +197,38 @@ def _identity_candidates(lines: list[str], price_index: int) -> tuple[str, str]:
             continue
         if _AMOUNT_RE.search(line):
             continue
-        if re.fullmatch(r"[^0-9]*(\d+(?:\.\d+)?)[^0-9]*", line):
+        if _quantity_from_sparse_line(line) is not None:
             continue
         if _known_unit(line):
             continue
 
         ascii_letters = [char for char in line if char.isascii() and char.isalpha()]
         hangul_letters = re.findall(r"[가-힣]", line)
-        if len(ascii_letters) < 3:
+        has_model_marker = bool(re.search(r"[+\-/0-9]", line))
+
+        if _is_korean_product_candidate(line, before_price=index < price_index):
+            product_parts.append((index, line))
+            for token in _mixed_line_model_tokens(line):
+                spec_parts.append((index, token))
+            continue
+
+        if not ascii_letters:
             continue
         uppercase_ratio = sum(char.isupper() for char in ascii_letters) / len(ascii_letters)
         ascii_share = len(ascii_letters) / max(1, len(ascii_letters) + len(hangul_letters))
         words = re.findall(r"[A-Za-z]+", line)
-        has_model_marker = bool(re.search(r"[+\-/0-9]", line))
 
-        if uppercase_ratio >= 0.8 and len(words) >= 2 and not has_model_marker:
+        if len(ascii_letters) >= 3 and uppercase_ratio >= 0.8 and len(words) >= 2 and not has_model_marker:
             product_parts.append((index, line))
             continue
         if (
             len(line) <= 60
             and ascii_share >= 0.8
-            and (uppercase_ratio < 0.8 or has_model_marker)
+            and has_model_marker
         ):
+            spec_parts.append((index, line))
+            continue
+        if len(ascii_letters) >= 3 and len(line) <= 60 and ascii_share >= 0.8 and uppercase_ratio < 0.8:
             spec_parts.append((index, line))
 
     def _join(parts: list[tuple[int, str]]) -> str:
@@ -234,9 +296,10 @@ def recover_sparse_single_item_from_text(
 ) -> QuoteItem | None:
     """Recover one ruled-table quote row from sparse OCR reading order.
 
-    This path is deliberately strict: exactly one repeated unit-price/amount line,
-    exactly one nearby quantity, and both product and specification fragments are required.
-    It never creates a quote item from a document-level total alone.
+    The normal path remains deliberately strict: exactly one repeated unit-price/amount line,
+    exactly one nearby quantity, and a bounded product identity are required. Korean product-only
+    rows may omit a separate specification only when a quote marker and a recognized unit are both
+    present. This keeps market-research recall without inventing an exact model or specification.
     """
 
     lines = _lines(sparse_text)
@@ -248,15 +311,21 @@ def recover_sparse_single_item_from_text(
     if quantity is None:
         return None
     product_name, specification = _identity_candidates(lines, price_index)
-    if not product_name or not specification:
+    if not product_name:
         return None
 
     all_context = "\n".join(text for text in (context_text, sparse_text) if text)
+    unit = _known_unit(all_context)
+    if not specification:
+        has_korean_identity = len(re.findall(r"[가-힣]", product_name)) >= 3
+        looks_like_quote = any(marker in all_context.casefold() for marker in _QUOTE_MARKERS)
+        if not (has_korean_identity and unit and looks_like_quote):
+            return None
+
     vat_included = bool(
         re.search(r"부가\s*세\s*포함", all_context, re.IGNORECASE)
         or re.search(r"\bV\.?\s*A\.?\s*T\.?\s*(?:included?|포함)", all_context, re.IGNORECASE)
     )
-    unit = _known_unit(all_context)
 
     return QuoteItem(
         source_sheet=f"PDF {page_number}페이지 OCR ruled-table fallback",
