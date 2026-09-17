@@ -29,8 +29,8 @@ from purchase_price.ui.market_research import (
 )
 from purchase_price.ui.quote_review_contract import build_manual_quote_item
 from purchase_price.ui.quote_review_state import QuoteReviewState
-from purchase_price.ui.quote_review_summary import render_purchase_review_summary
 from purchase_price.ui.quote_review_steps import _store_extraction
+from purchase_price.ui.quote_review_summary import render_purchase_review_summary
 from purchase_price.ui.widgets import (
     render_condition_table,
     render_evidence_table,
