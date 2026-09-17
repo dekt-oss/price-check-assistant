@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/production-browser-smoke.yml"
       - "scripts/production_browser_smoke.py"
+      - "scripts/production_unified_search_smoke.py"
       - "scripts/production_quote_uat_smoke.py"
   push:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - "packages.ocr.txt"
       - ".github/workflows/production-browser-smoke.yml"
       - "scripts/production_browser_smoke.py"
+      - "scripts/production_unified_search_smoke.py"
       - "scripts/production_quote_uat_smoke.py"
   workflow_dispatch:
 
@@ -36,10 +38,10 @@ jobs:
     env:
       PRODUCTION_URL: https://bp-price-research.streamlit.app/
       # PRs run against the currently deployed main, so they must not require features that exist
-      # only on the feature branch. Push/manual runs target deployed main and do require them.
+      # only on the feature branch. Unified-search submission has its own stable Production check.
       EXPECT_QUOTE_UAT: ${{ github.event_name == 'pull_request' && '0' || '1' }}
       EXPECT_QUOTE_IMAGES: ${{ github.event_name == 'pull_request' && '0' || '1' }}
-      EXPECT_UNIFIED_SEARCH: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      EXPECT_UNIFIED_SEARCH: "0"
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +57,10 @@ jobs:
 
       - name: Run production browser smoke
         run: python scripts/production_browser_smoke.py
+
+      - name: Run Production DFM100 unified-search smoke
+        if: github.event_name != 'pull_request'
+        run: python scripts/production_unified_search_smoke.py
 
       - name: Run production quote UAT upload smoke
         run: python scripts/production_quote_uat_smoke.py
