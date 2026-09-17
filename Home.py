@@ -24,6 +24,18 @@ def _admin_mode() -> bool:
     return _truthy(value)
 
 
+def _render_r2_runtime_diagnostic() -> None:
+    if str(st.query_params.get("_r2diag", "")).strip() != "1":
+        return
+    from purchase_price.ui.r2_runtime_diagnostic import diagnose_track_b_r2_runtime
+
+    diagnostic = diagnose_track_b_r2_runtime()
+    detail = f" missing={diagnostic.detail}" if diagnostic.detail else ""
+    st.caption(f"R2_RUNTIME_DIAGNOSTIC code={diagnostic.code}{detail}")
+
+
+_render_r2_runtime_diagnostic()
+
 business_pages = [
     st.Page("pages/1_대시보드.py", title="통합 검색", icon="🔎", default=True),
     st.Page("pages/2_견적_검토.py", title="견적 검토", icon="📋"),
