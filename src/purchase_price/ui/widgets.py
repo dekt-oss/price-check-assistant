@@ -87,9 +87,10 @@ def split_evidence_rows_by_match_grade(
     direct_rows: list[dict[str, object]] = []
     reference_rows: list[dict[str, object]] = []
     for row in rows:
-        if str(row.get("등급") or "").strip().upper() in {"A", "B"}:
+        grade = str(row.get("등급") or "").strip().upper()
+        if grade in {"A", "B"}:
             direct_rows.append(row)
-        else:
+        elif grade in {"C", "D"}:
             reference_rows.append(row)
     return direct_rows, reference_rows
 
