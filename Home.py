@@ -4,6 +4,11 @@ import os
 
 import streamlit as st
 
+from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
+
+
+hydrate_streamlit_runtime_secrets()
+
 
 def _truthy(value: object) -> bool:
     return str(value or "").strip().casefold() in {"1", "true", "yes", "y", "on"}
