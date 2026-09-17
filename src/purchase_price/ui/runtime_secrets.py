@@ -7,14 +7,19 @@ import streamlit as st
 
 from purchase_price.config import get_settings
 
-_R2_SECRET_NAMES = (
-    "R2_ACCOUNT_ID",
-    "R2_BUCKET_NAME",
-    "R2_BUCKET",
-    "R2_ACCESS_KEY_ID",
-    "R2_SECRET_ACCESS_KEY",
-    "R2_ENDPOINT_URL",
-)
+_R2_SECRET_ALIASES: dict[str, tuple[str, ...]] = {
+    "R2_ACCOUNT_ID": ("R2_ACCOUNT_ID", "r2_account_id", "account_id"),
+    "R2_BUCKET_NAME": ("R2_BUCKET_NAME", "r2_bucket_name", "bucket_name"),
+    "R2_BUCKET": ("R2_BUCKET", "r2_bucket", "bucket"),
+    "R2_ACCESS_KEY_ID": ("R2_ACCESS_KEY_ID", "r2_access_key_id", "access_key_id"),
+    "R2_SECRET_ACCESS_KEY": (
+        "R2_SECRET_ACCESS_KEY",
+        "r2_secret_access_key",
+        "secret_access_key",
+    ),
+    "R2_ENDPOINT_URL": ("R2_ENDPOINT_URL", "r2_endpoint_url", "endpoint_url"),
+}
+_R2_SECRET_NAMES = tuple(_R2_SECRET_ALIASES)
 
 
 def _mapping_value(mapping: Mapping[str, object], *keys: str) -> object | None:
@@ -29,8 +34,9 @@ def hydrate_streamlit_runtime_secrets() -> tuple[str, ...]:
     """Expose configured Streamlit R2 secrets to pydantic-settings without leaking values.
 
     Streamlit normally exposes root-level secrets as environment variables. Some deployments keep
-    the same values under an ``[r2]`` table instead. The service layer intentionally knows nothing
-    about Streamlit, so normalize both layouts at the UI boundary before ``Settings`` is resolved.
+    the same values under an ``[r2]`` table instead, commonly with short names such as
+    ``account_id`` and ``access_key_id``. The service layer intentionally knows nothing about
+    Streamlit, so normalize supported layouts at the UI boundary before ``Settings`` is resolved.
     Existing environment variables always win.
     """
 
@@ -48,13 +54,12 @@ def hydrate_streamlit_runtime_secrets() -> tuple[str, ...]:
         nested = candidate
 
     hydrated: list[str] = []
-    for env_name in _R2_SECRET_NAMES:
+    for env_name, aliases in _R2_SECRET_ALIASES.items():
         if os.getenv(env_name, "").strip():
             continue
-        lower_name = env_name.casefold()
-        value = _mapping_value(root, env_name, lower_name)
+        value = _mapping_value(root, *aliases)
         if value is None:
-            value = _mapping_value(nested, env_name, lower_name)
+            value = _mapping_value(nested, *aliases)
         if value is None:
             continue
         os.environ[env_name] = str(value).strip()
