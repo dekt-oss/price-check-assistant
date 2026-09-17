@@ -22,6 +22,11 @@ from purchase_price.ui.quote_review_state import (
     QuoteReviewState,
 )
 from purchase_price.ui.quote_review_steps import _store_extraction
+from purchase_price.ui.track_b_transactions import (
+    candidate_counts,
+    has_transaction_candidates,
+    transaction_rows,
+)
 from purchase_price.ui.widgets import (
     evidence_rows,
     render_evidence_table,
@@ -30,6 +35,10 @@ from purchase_price.ui.widgets import (
 )
 
 st.set_page_config(page_title="구매가격 검색", page_icon="🔎", layout="wide")
+st.markdown(
+    '<span id="unified-search-runtime-v2" style="display:none">unified-search-runtime-v2</span>',
+    unsafe_allow_html=True,
+)
 
 st.markdown(
     """
@@ -45,49 +54,6 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
-
-
-def _quantity_unit(quantity, unit: str | None) -> str:
-    if quantity is None and not unit:
-        return "미확인"
-    quantity_text = "" if quantity is None else f"{quantity:g}"
-    return " ".join(part for part in (quantity_text, unit or "") if part) or "미확인"
-
-
-def _track_b_rows(track_b) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for candidate in track_b.candidates:
-        rows.append(
-            {
-                "가격": float(candidate.price),
-                "판매처": candidate.supplier or "미확인",
-                "구매처": candidate.demand_institution or "미확인",
-                "거래일": candidate.transaction_date or "미확인",
-                "수량/단위": _quantity_unit(candidate.quantity, candidate.unit),
-                "거래기록": candidate.transaction_type,
-                "품목/모델": candidate.product_title,
-                "비교수준": (
-                    "동일 모델"
-                    if candidate.match_grade.value in {"A", "B"}
-                    else "동일 품목 참고"
-                ),
-            }
-        )
-    for candidate in track_b.reference_candidates:
-        rows.append(
-            {
-                "가격": float(candidate.price),
-                "판매처": candidate.supplier or "미확인",
-                "구매처": candidate.demand_institution or "미확인",
-                "거래일": candidate.transaction_date or "미확인",
-                "수량/단위": _quantity_unit(candidate.quantity, candidate.unit),
-                "거래기록": candidate.transaction_type,
-                "품목/모델": candidate.product_title,
-                "비교수준": candidate.reference_reason,
-            }
-        )
-    return rows
-
 
 st.markdown('<div class="home-kicker">공개 조달·시장근거 기반 구매검토</div>', unsafe_allow_html=True)
 st.markdown('<div class="home-title">무엇을 조사할까요?</div>', unsafe_allow_html=True)
@@ -194,26 +160,25 @@ if submitted:
                 model_probe_query,
                 quote_unit_price=model_probe_input.quote_unit_price,
             )
-            if model_probe.candidates or model_probe.reference_candidates:
+            if has_transaction_candidates(model_probe):
                 track_b = model_probe
                 query = model_probe_query
                 model_probe_used = True
 
-    transaction_rows = _track_b_rows(track_b)
+    rows = transaction_rows(track_b)
+    strict_count, reference_count = candidate_counts(track_b)
     with st.container(border=True):
         st.markdown("**나라장터 거래가격**")
         if model_probe_used:
             st.caption("입력어가 모델명과 일치해 모델 기준 결과를 우선 표시합니다.")
-        if transaction_rows:
+        if rows:
             st.dataframe(
-                transaction_rows,
+                rows,
                 use_container_width=True,
                 hide_index=True,
                 column_config={"가격": st.column_config.NumberColumn("가격", format="%d원")},
             )
-            st.caption(
-                f"동일성 확인 {len(track_b.candidates)}건 · 검색 참고 {len(track_b.reference_candidates)}건"
-            )
+            st.caption(f"동일성 확인 {strict_count}건 · 검색 참고 {reference_count}건")
         elif track_b.status == "unavailable":
             st.info("가격 검색 인덱스를 준비 중입니다. 공개 시장자료도 함께 조사합니다.")
         elif track_b.status == "not_ingested":
@@ -233,7 +198,7 @@ if submitted:
         )
         status.update(label="추가 자료 확인 완료", state="complete")
 
-    if not transaction_rows and run.results:
+    if not rows and run.results:
         public_rows = evidence_rows(run.results)
         st.markdown("**공개 시장가격**")
         st.dataframe(

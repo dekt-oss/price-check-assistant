@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -13,12 +14,19 @@ EXPECT_QUOTE_UAT = os.getenv("EXPECT_QUOTE_UAT", "").strip().casefold() in {
     "yes",
     "on",
 }
+EXPECT_UNIFIED_SEARCH = os.getenv("EXPECT_UNIFIED_SEARCH", "").strip().casefold() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 KNOWN_PLATFORM_ERRORS = (
     "Error installing requirements",
     "Error running app",
 )
 APP_IFRAME = 'iframe[title="streamlitApp"]'
+DEPLOYMENT_MARKER = "#unified-search-runtime-v2"
 
 
 def _app_frame(page: Any) -> Any:
@@ -30,9 +38,15 @@ def _wait_heading(context: Any, name: str, *, timeout: int = 30_000) -> None:
 
 
 def _navigate(page: Any, name: str) -> None:
+    """Navigate by sidebar label; destination-specific controls prove page readiness.
+
+    Streamlit navigation titles are allowed to differ from a page's internal H1/page title, so
+    coupling those strings made the smoke test fail on healthy pages. Callers always wait for a
+    destination-specific control immediately after navigation.
+    """
+
     app = _app_frame(page)
     app.get_by_role("link", name=name, exact=True).click()
-    _wait_heading(app, name)
 
 
 def _wait_for_navigation_link(
@@ -172,7 +186,6 @@ def _install_browser_diagnostics(page: Any, report: dict[str, object]) -> None:
 def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
     attempts: list[dict[str, object]] = []
     report["dashboard_attempts"] = attempts
-    expected = "구매가격 검색·검토 보조시스템"
 
     for attempt in range(1, 4):
         response = page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
@@ -197,7 +210,10 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
 
         try:
             app = _app_frame(page)
-            _wait_heading(app, expected, timeout=30_000)
+            app.get_by_label("통합 검색", exact=True).wait_for(state="visible", timeout=30_000)
+            app.get_by_role("button", name="검색", exact=True).wait_for(
+                state="visible", timeout=30_000
+            )
             attempts.append(
                 {
                     "attempt": attempt,
@@ -222,7 +238,95 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
             if attempt < 3:
                 page.wait_for_timeout(10_000)
 
-    raise RuntimeError("Production dashboard did not render after 3 bounded attempts")
+    raise RuntimeError("Production unified-search dashboard did not render after 3 bounded attempts")
+
+
+def _wait_for_hotfix_deployment(
+    page: Any,
+    report: dict[str, object],
+    *,
+    timeout_seconds: float = 240.0,
+) -> None:
+    """Poll until Streamlit is serving the code version that contains this hotfix."""
+
+    attempts: list[dict[str, object]] = []
+    report["hotfix_deployment_attempts"] = attempts
+    deadline = time.monotonic() + timeout_seconds
+    last_error = ""
+    attempt = 0
+
+    while time.monotonic() < deadline:
+        attempt += 1
+        try:
+            response = page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_timeout(3_000)
+            app = _app_frame(page)
+            app.get_by_label("통합 검색", exact=True).wait_for(state="visible", timeout=15_000)
+            marker = app.locator(DEPLOYMENT_MARKER)
+            if marker.count() > 0:
+                marker.first.wait_for(state="attached", timeout=5_000)
+                attempts.append(
+                    {
+                        "attempt": attempt,
+                        "status": "pass",
+                        "root_http_status": response.status if response is not None else None,
+                    }
+                )
+                report["checks"].append("hotfix_deployment_marker_seen")
+                return
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "old_deployment",
+                    "root_http_status": response.status if response is not None else None,
+                }
+            )
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"[:1000]
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "retry",
+                    "error": last_error,
+                }
+            )
+        page.wait_for_timeout(7_000)
+
+    detail = f"; last_error={last_error}" if last_error else ""
+    raise RuntimeError(f"Production did not expose the unified-search hotfix marker{detail}")
+
+
+def _exercise_unified_search(page: Any, report: dict[str, object]) -> None:
+    app = _app_frame(page)
+    app.get_by_label("통합 검색", exact=True).fill("DFM100")
+    app.get_by_role("button", name="검색", exact=True).click()
+    _wait_heading(app, "DFM100 거래가격", timeout=90_000)
+    app.get_by_text("나라장터 거래가격", exact=True).wait_for(state="visible", timeout=90_000)
+    app.locator('[data-testid="stDataFrame"]').first.wait_for(state="visible", timeout=90_000)
+
+    summary_locator = app.get_by_text(
+        re.compile(r"동일성 확인 \d+건 · 검색 참고 \d+건"),
+        exact=False,
+    ).first
+    summary_locator.wait_for(state="visible", timeout=90_000)
+    summary_text = summary_locator.inner_text()
+    count_match = re.search(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건", summary_text)
+    if count_match is None:
+        raise RuntimeError(f"Could not parse DFM100 result counts: {summary_text!r}")
+    strict_count, reference_count = (int(value) for value in count_match.groups())
+    if strict_count + reference_count < 1:
+        raise RuntimeError(f"DFM100 rendered no Track B transactions: {summary_text}")
+
+    body_text = app.locator("body").inner_text(timeout=10_000)
+    if "AttributeError" in body_text or "This app has encountered an error" in body_text:
+        raise RuntimeError("DFM100 unified search rendered a Streamlit exception")
+
+    report["unified_search_counts"] = {
+        "strict": strict_count,
+        "reference": reference_count,
+    }
+    report["checks"].append("unified_search_dfm100_rendered")
+    report["unified_search_snapshot"] = _diagnostic_snapshot(page, label="unified-search-dfm100")
 
 
 def main() -> None:
@@ -233,6 +337,7 @@ def main() -> None:
     report: dict[str, object] = {
         "production_url": PRODUCTION_URL,
         "expect_quote_uat": EXPECT_QUOTE_UAT,
+        "expect_unified_search": EXPECT_UNIFIED_SEARCH,
         "status": "failure",
         "checks": [],
     }
@@ -245,8 +350,13 @@ def main() -> None:
             try:
                 _wake_and_wait_dashboard(page, report)
                 report["checks"].append("dashboard_rendered")
+                report["checks"].append("unified_search_form_rendered")
 
-                _navigate(page, "빠른 검색")
+                if EXPECT_UNIFIED_SEARCH:
+                    _wait_for_hotfix_deployment(page, report)
+                    _exercise_unified_search(page, report)
+
+                _navigate(page, "상세 검색")
                 app = _app_frame(page)
                 app.get_by_label("제품명", exact=True).wait_for(state="visible")
                 app.get_by_label("제조사", exact=True).wait_for(state="visible")
@@ -254,7 +364,7 @@ def main() -> None:
                 app.get_by_role("button", name="시장가격 조사", exact=True).wait_for(
                     state="visible"
                 )
-                report["checks"].append("quick_search_form_rendered")
+                report["checks"].append("detailed_search_form_rendered")
 
                 app.get_by_role("tab", name="나라장터 계약근거", exact=True).click()
                 app.get_by_label("계약 품명", exact=True).wait_for(state="visible")
