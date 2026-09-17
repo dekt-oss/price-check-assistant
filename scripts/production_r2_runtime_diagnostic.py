@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -17,7 +18,26 @@ def _diagnostic_url(base_url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path or "/", urlencode({"_r2diag": "1"}), ""))
 
 
-def main() -> None:
+def _exit_code(report: dict[str, object], *, require_ready: bool) -> int:
+    if report.get("status") != "pass":
+        return 1
+    if require_ready and report.get("code") != "ready":
+        return 2
+    return 0
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Probe the deployed Streamlit R2 runtime safely")
+    parser.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="exit non-zero unless the deployed runtime reports code=ready",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
     production_url = os.environ.get("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
     url = _diagnostic_url(production_url)
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
@@ -59,7 +79,8 @@ def main() -> None:
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    return _exit_code(report, require_ready=args.require_ready)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

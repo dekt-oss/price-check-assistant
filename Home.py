@@ -4,6 +4,7 @@ import os
 
 import streamlit as st
 
+from purchase_price.config import Settings
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 
 hydrate_streamlit_runtime_secrets()
@@ -34,7 +35,17 @@ def _render_r2_runtime_diagnostic() -> None:
     st.caption(f"R2_RUNTIME_DIAGNOSTIC code={diagnostic.code}{detail}")
 
 
+def _render_runtime_readiness_notice() -> None:
+    if Settings().r2_configured:
+        return
+    st.warning(
+        "나라장터 거래가격 인덱스 연결 설정이 없어 현재 거래가격 DB를 사용할 수 없습니다. "
+        "공개 Research 결과는 계속 확인할 수 있지만, 거래가격 기반 비교·건수·가격범위는 운영 설정 복구 전까지 제한됩니다."
+    )
+
+
 _render_r2_runtime_diagnostic()
+_render_runtime_readiness_notice()
 
 business_pages = [
     st.Page("pages/1_대시보드.py", title="통합 검색", icon="🔎", default=True),
