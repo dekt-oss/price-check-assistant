@@ -129,10 +129,17 @@ jobs:
           "boto3>=1.35,<2"
           "httpx>=0.27,<1"
           "tenacity>=9,<10"
+          "sqlalchemy>=2,<3"
       - name: Audit historical R2 corpus and serving index without writes
         run: >-
           python -m purchase_price.scripts.audit_g2b_track_b_historical
           --output artifacts/track-b-audit/historical-audit.json
+      - name: Measure current R2 search recall
+        run: >-
+          python -m purchase_price.scripts.measure_r2_search_recall
+          --manifest data/uat/r2-search-recall-cases.json
+          --output artifacts/track-b-audit/r2-search-recall.json
+          --summary artifacts/track-b-audit/r2-search-recall.md
       - name: Upload historical audit evidence
         if: always()
         uses: actions/upload-artifact@v4
