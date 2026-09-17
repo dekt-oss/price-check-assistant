@@ -33,8 +33,8 @@ from purchase_price.ui.widgets import (
     render_source_status,
 )
 
-st.set_page_config(page_title="빠른 검색", page_icon="🔎", layout="wide")
-st.title("빠른 검색")
+st.set_page_config(page_title="상세 검색", page_icon="🔎", layout="wide")
+st.title("상세 검색")
 st.caption(
     "제품명만으로 나라장터 입찰공고·품목상세·낙찰·사전규격·계약을 먼저 조사하고, "
     "동일제품으로 검증된 직접가격은 별도로 엄격하게 표시합니다."
