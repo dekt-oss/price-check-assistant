@@ -36,9 +36,15 @@ def _wait_heading(context: Any, name: str, *, timeout: int = 30_000) -> None:
 
 
 def _navigate(page: Any, name: str) -> None:
+    """Navigate by sidebar label; destination-specific controls prove page readiness.
+
+    Streamlit navigation titles are allowed to differ from a page's internal H1/page title, so
+    coupling those strings made the smoke test fail on healthy pages. Callers always wait for a
+    destination-specific control immediately after navigation.
+    """
+
     app = _app_frame(page)
     app.get_by_role("link", name=name, exact=True).click()
-    _wait_heading(app, name)
 
 
 def _wait_for_navigation_link(
