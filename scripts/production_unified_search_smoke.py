@@ -10,7 +10,7 @@ from typing import Any
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#unified-search-runtime-v2"
+DEPLOYMENT_MARKER = "#unified-search-runtime-v3"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
 ERROR_TEXTS = (
     "AttributeError",
@@ -40,6 +40,12 @@ def _save_snapshot(page: Any, report: dict[str, object], label: str) -> None:
         report[f"{label}_screenshot_error"] = f"{type(exc).__name__}: {exc}"[:1000]
 
 
+def _assert_no_error_text(body: str) -> None:
+    error_text = next((text for text in ERROR_TEXTS if text in body), "")
+    if error_text:
+        raise RuntimeError(f"Production search rendered error text: {error_text}")
+
+
 def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
     attempts: list[dict[str, object]] = []
     report["deployment_attempts"] = attempts
@@ -65,7 +71,6 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
                         "http_status": response.status if response is not None else None,
                     }
                 )
-                # Give Streamlit Cloud a short quiet period after a rolling reload before submitting.
                 page.wait_for_timeout(4_000)
                 return
             attempts.append(
@@ -85,7 +90,52 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose unified-search-runtime-v2 in time")
+    raise RuntimeError("Production did not expose unified-search-runtime-v3 in time")
+
+
+def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            body = _body_text(page)
+        except Exception:
+            page.wait_for_timeout(1_000)
+            continue
+        _assert_no_error_text(body)
+        match = RESULT_PATTERN.search(body)
+        if match is not None and "DFM100 거래가격" in body and "나라장터 거래가격" in body:
+            strict_count, reference_count = (int(value) for value in match.groups())
+            if strict_count + reference_count < 1:
+                raise RuntimeError(
+                    "DFM100 result summary rendered zero Track B transactions: "
+                    f"strict={strict_count}, reference={reference_count}"
+                )
+            return strict_count, reference_count
+        page.wait_for_timeout(1_000)
+    raise RuntimeError("DFM100 Production unified search did not render a non-zero result summary")
+
+
+def _verify_detail_toggle_persists_result(page: Any, report: dict[str, object]) -> None:
+    app = _app(page)
+    toggle = app.get_by_text("상세 조사·근거 보기", exact=True)
+    toggle.wait_for(state="visible", timeout=20_000)
+    toggle.click()
+
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        body = _body_text(page)
+        _assert_no_error_text(body)
+        if (
+            "DFM100 거래가격" in body
+            and "나라장터 거래가격" in body
+            and RESULT_PATTERN.search(body) is not None
+            and "상세 조사·근거" in body
+        ):
+            report["detail_toggle_persisted"] = True
+            _save_snapshot(page, report, "unified-search-dfm100-details")
+            return
+        page.wait_for_timeout(1_000)
+    raise RuntimeError("Detail toggle cleared DFM100 search results or failed to render details")
 
 
 def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
@@ -99,78 +149,37 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
             search.wait_for(state="visible", timeout=20_000)
             search.fill("DFM100")
             app.get_by_role("button", name="검색", exact=True).click()
-
-            deadline = time.monotonic() + 75
-            last_body = ""
-            saw_heading = False
-            while time.monotonic() < deadline:
-                try:
-                    body = _body_text(page)
-                except Exception:
-                    page.wait_for_timeout(1_000)
-                    continue
-                last_body = body
-
-                error_text = next((text for text in ERROR_TEXTS if text in body), "")
-                if error_text:
-                    raise RuntimeError(f"Production search rendered error text: {error_text}")
-
-                if "DFM100 거래가격" in body and "나라장터 거래가격" in body:
-                    saw_heading = True
-
-                match = RESULT_PATTERN.search(body)
-                if match is not None:
-                    strict_count, reference_count = (int(value) for value in match.groups())
-                    total = strict_count + reference_count
-                    if total < 1:
-                        raise RuntimeError(
-                            "DFM100 result summary rendered zero Track B transactions: "
-                            f"strict={strict_count}, reference={reference_count}"
-                        )
-                    if not saw_heading:
-                        raise RuntimeError("DFM100 result counts appeared without the result section")
-
-                    attempts.append(
-                        {
-                            "attempt": attempt,
-                            "status": "pass",
-                            "strict_count": strict_count,
-                            "reference_count": reference_count,
-                        }
-                    )
-                    report["strict_count"] = strict_count
-                    report["reference_count"] = reference_count
-                    report["total_track_b_results"] = total
-                    _save_snapshot(page, report, "unified-search-dfm100-success")
-                    return
-
-                page.wait_for_timeout(1_000)
-
+            strict_count, reference_count = _wait_for_nonzero_result(page)
             attempts.append(
                 {
                     "attempt": attempt,
-                    "status": "timeout",
-                    "saw_result_heading": saw_heading,
-                    "body_prefix": last_body[:2500],
+                    "status": "pass",
+                    "strict_count": strict_count,
+                    "reference_count": reference_count,
                 }
             )
+            report["strict_count"] = strict_count
+            report["reference_count"] = reference_count
+            report["total_track_b_results"] = strict_count + reference_count
+            _save_snapshot(page, report, "unified-search-dfm100-success")
+            _verify_detail_toggle_persists_result(page, report)
+            return
         except Exception as exc:
             attempts.append(
                 {
                     "attempt": attempt,
                     "status": "error",
                     "error": f"{type(exc).__name__}: {exc}"[:1500],
+                    "body_prefix": _body_text(page)[:2500] if page else "",
                 }
             )
             if any(text in str(exc) for text in ERROR_TEXTS):
                 raise
 
         if attempt < 3:
-            # A Streamlit Cloud rolling reload can clear a submitted form. Re-open the deployed
-            # app and retry rather than mistaking that transient reload for a search failure.
             _wait_for_deployed_app(page, report)
 
-    raise RuntimeError("DFM100 Production unified search did not render a non-zero result summary")
+    raise RuntimeError("DFM100 Production unified search did not pass result + detail-toggle E2E")
 
 
 def main() -> None:
