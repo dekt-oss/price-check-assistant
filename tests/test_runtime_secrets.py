@@ -15,10 +15,10 @@ def test_hydrate_streamlit_runtime_secrets_accepts_nested_r2_table(monkeypatch) 
     fake_streamlit = SimpleNamespace(
         secrets={
             "r2": {
-                "r2_account_id": "account",
-                "r2_bucket": "bucket",
-                "r2_access_key_id": "access",
-                "r2_secret_access_key": "secret",
+                "account_id": "account",
+                "bucket": "bucket",
+                "access_key_id": "access",
+                "secret_access_key": "secret",
             }
         }
     )
