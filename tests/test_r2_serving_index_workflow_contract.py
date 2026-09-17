@@ -72,4 +72,6 @@ def test_r2_serving_index_pr_runs_read_only_historical_audit() -> None:
     assert "historical-audit:" in text
     assert "audit_g2b_track_b_historical" in text
     assert "track-b-historical-audit" in text
+    assert "measure_r2_search_recall" in text
+    assert "r2-search-recall.json" in text
     assert "R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}" in text
