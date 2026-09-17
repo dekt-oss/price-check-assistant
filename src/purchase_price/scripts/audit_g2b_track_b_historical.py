@@ -6,6 +6,7 @@ import math
 import sqlite3
 import tempfile
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
@@ -339,56 +340,60 @@ def _audit_raw_historical(
     policy_violations = 0
     historical_objects = 0
 
-    for obj in objects:
-        payload = reader.get_public_json(obj)
-        if not isinstance(payload, Mapping):
-            audit.invalid_pages += 1
-            continue
-        request = payload.get("request")
-        response = payload.get("response")
-        if not isinstance(request, Mapping) or not isinstance(response, Mapping):
-            audit.invalid_pages += 1
-            continue
-        begin = str(request.get("begin_date") or "")
-        end = str(request.get("end_date") or "")
-        if (begin, end) != (BACKFILL_BEGIN_DATE, BACKFILL_END_DATE):
-            ignored_windows[f"{begin}..{end}"] += 1
-            ignored_stored_bytes += obj.stored_bytes
-            continue
+    # R2 reads are independent and content-address verified. Parallel fetch keeps the read-only
+    # audit bounded in wall-clock time without changing object count or write behavior.
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        payloads = executor.map(reader.get_public_json, objects)
+        object_payloads = zip(objects, payloads, strict=True)
+        for obj, payload in object_payloads:
+            if not isinstance(payload, Mapping):
+                audit.invalid_pages += 1
+                continue
+            request = payload.get("request")
+            response = payload.get("response")
+            if not isinstance(request, Mapping) or not isinstance(response, Mapping):
+                audit.invalid_pages += 1
+                continue
+            begin = str(request.get("begin_date") or "")
+            end = str(request.get("end_date") or "")
+            if (begin, end) != (BACKFILL_BEGIN_DATE, BACKFILL_END_DATE):
+                ignored_windows[f"{begin}..{end}"] += 1
+                ignored_stored_bytes += obj.stored_bytes
+                continue
 
-        historical_objects += 1
-        historical_stored_bytes += obj.stored_bytes
-        code = str(request.get("detail_code") or "").strip()
-        try:
-            page_no = int(request.get("page_no") or 0)
-            page_size = int(request.get("page_size") or 0)
-            total_count = int(response.get("total_count") or 0)
-        except (TypeError, ValueError):
-            audit.invalid_pages += 1
-            continue
-        if request.get("final_change_order_filter") != "OMITTED":
-            policy_violations += 1
-        if code not in target_codes:
-            out_of_target_codes[code or "<missing>"] += 1
-        if page_no < 1 or page_size < 1:
-            audit.invalid_pages += 1
-            continue
-        page_codes.add(code)
-        pages_by_code[code].add(page_no)
-        expected_pages_by_code[code] = max(
-            expected_pages_by_code.get(code, 0),
-            max(1, math.ceil(total_count / page_size)),
-        )
-        try:
-            audit.add_page(
-                TrackBRawPage(
-                    payload=payload,
-                    raw_object_key=obj.key,
-                    raw_payload_sha256=obj.payload_hash,
-                )
+            historical_objects += 1
+            historical_stored_bytes += obj.stored_bytes
+            code = str(request.get("detail_code") or "").strip()
+            try:
+                page_no = int(request.get("page_no") or 0)
+                page_size = int(request.get("page_size") or 0)
+                total_count = int(response.get("total_count") or 0)
+            except (TypeError, ValueError):
+                audit.invalid_pages += 1
+                continue
+            if request.get("final_change_order_filter") != "OMITTED":
+                policy_violations += 1
+            if code not in target_codes:
+                out_of_target_codes[code or "<missing>"] += 1
+            if page_no < 1 or page_size < 1:
+                audit.invalid_pages += 1
+                continue
+            page_codes.add(code)
+            pages_by_code[code].add(page_no)
+            expected_pages_by_code[code] = max(
+                expected_pages_by_code.get(code, 0),
+                max(1, math.ceil(total_count / page_size)),
             )
-        except TrackBNormalizationError:
-            audit.invalid_pages += 1
+            try:
+                audit.add_page(
+                    TrackBRawPage(
+                        payload=payload,
+                        raw_object_key=obj.key,
+                        raw_payload_sha256=obj.payload_hash,
+                    )
+                )
+            except TrackBNormalizationError:
+                audit.invalid_pages += 1
 
     report = audit.as_dict()
     report.update(
