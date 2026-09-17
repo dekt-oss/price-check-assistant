@@ -1,11 +1,13 @@
 from datetime import UTC, datetime
 
 from purchase_price.scripts.audit_g2b_track_b_historical import (
+    HistoricalAuditAccumulator,
     build_segment_coverage,
     completed_code_set,
 )
 from purchase_price.scripts.collect_g2b_track_b_r2 import CollectionCursor
 from purchase_price.services.g2b_target_code_snapshot import TargetCodeSnapshot
+from purchase_price.services.g2b_track_b_normalization import TrackBRawPage
 
 
 def _snapshot() -> TargetCodeSnapshot:
@@ -69,3 +71,52 @@ def test_segment_coverage_separates_query_page_row_price_and_serving_coverage() 
     assert coverage["41"]["target_codes"] == 1
     assert coverage["41"]["query_completed_codes"] == 0
     assert coverage["41"]["codes_with_raw_page"] == 0
+
+
+def _raw_page(product_name: str) -> TrackBRawPage:
+    payload = {
+        "schema": "g2b-track-b-page-v1",
+        "operation": "getSpcifyPrdlstPrcureInfoList",
+        "request": {
+            "detail_code": "4200000001",
+            "begin_date": "2025-09-12",
+            "end_date": "2026-09-11",
+            "page_no": 1,
+            "page_size": 999,
+            "inquiry_div": "1",
+            "product_div": "2",
+            "final_change_order_filter": "OMITTED",
+        },
+        "response": {
+            "total_count": 1,
+            "page_no": 1,
+            "num_of_rows": 999,
+            "items": [
+                {
+                    "cntrctDlvrReqNo": "R26TEST",
+                    "cntrctDlvrReqChgOrd": "00",
+                    "prdctSno": "1",
+                    "cntrctDlvrReqDate": "20260715",
+                    "dtilPrdctClsfcNo": "4200000001",
+                    "prdctIdntNoNm": product_name,
+                    "prdctQty": "1",
+                    "prdctUprc": "1000",
+                    "prdctAmt": "1000",
+                }
+            ],
+        },
+    }
+    return TrackBRawPage(payload=payload)
+
+
+def test_historical_audit_quarantines_cross_page_identity_conflict() -> None:
+    audit = HistoricalAuditAccumulator()
+    audit.add_page(_raw_page("제품 A"))
+    audit.add_page(_raw_page("제품 B"))
+
+    report = audit.as_dict()
+
+    assert report["normalized_records"] == 1
+    assert report["price_candidates"] == 1
+    assert report["identity_counts"]["conflict"] == 1
+    assert report["issue_counts"]["CROSS_PAGE_IDENTITY_CONFLICT"] == 1
