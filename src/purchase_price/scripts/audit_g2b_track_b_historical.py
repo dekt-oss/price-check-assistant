@@ -13,7 +13,10 @@ from typing import Any
 
 from purchase_price.config import Settings
 from purchase_price.scripts.collect_g2b_track_b_r2 import TRACK_B_OPERATION, CollectionCursor
-from purchase_price.services.g2b_target_code_snapshot import TargetCodeSnapshot, load_target_code_snapshot
+from purchase_price.services.g2b_target_code_snapshot import (
+    TargetCodeSnapshot,
+    load_target_code_snapshot,
+)
 from purchase_price.services.g2b_track_b_audit import TrackBAuditAccumulator
 from purchase_price.services.g2b_track_b_normalization import (
     TrackBIdentityConflictError,
