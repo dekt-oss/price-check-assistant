@@ -1,6 +1,7 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
+from purchase_price.domain import MatchGrade
 from purchase_price.ui import quote_review_summary as summary
 from purchase_price.ui.quote_review_state import QuoteReviewState
 
@@ -34,9 +35,10 @@ def test_summary_reports_observed_range_and_median_without_fair_price_verdict() 
     state.track_b_db[0] = SimpleNamespace(
         status="success",
         candidates=(
-            SimpleNamespace(price=Decimal("10000000")),
-            SimpleNamespace(price=Decimal("14000000")),
-            SimpleNamespace(price=Decimal("12000000")),
+            SimpleNamespace(price=Decimal("10000000"), match_grade=MatchGrade.A),
+            SimpleNamespace(price=Decimal("14000000"), match_grade=MatchGrade.B),
+            SimpleNamespace(price=Decimal("12000000"), match_grade=MatchGrade.A),
+            SimpleNamespace(price=Decimal("99000000"), match_grade=MatchGrade.C),
         ),
         reference_candidates=(SimpleNamespace(price=Decimal("9000000")),),
     )
@@ -46,7 +48,7 @@ def test_summary_reports_observed_range_and_median_without_fair_price_verdict() 
     assert len(rows) == 1
     row = rows[0]
     assert row.strict_count == 3
-    assert row.reference_count == 1
+    assert row.reference_count == 2
     assert row.observed_low == Decimal("10000000")
     assert row.observed_median == Decimal("12000000")
     assert row.observed_high == Decimal("14000000")
@@ -77,7 +79,7 @@ def test_summary_counts_only_current_item_pair_approvals(monkeypatch) -> None:
     state.item_confirmed = {0: True}
     state.track_b_db[0] = SimpleNamespace(
         status="success",
-        candidates=(SimpleNamespace(price=Decimal("12000000")),),
+        candidates=(SimpleNamespace(price=Decimal("12000000"), match_grade=MatchGrade.A),),
         reference_candidates=(),
     )
     state.comparability_context[0] = object()
