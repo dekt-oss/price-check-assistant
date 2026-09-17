@@ -10,7 +10,11 @@ import streamlit as st
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.quote_comparable_approval import quote_evidence_pair_key
 from purchase_price.ui.quote_review_state import QuoteReviewState
-from purchase_price.ui.track_b_transactions import comparison_candidates, reference_candidates
+from purchase_price.ui.track_b_transactions import (
+    category_reference_candidates,
+    reference_candidates,
+    strict_comparison_candidates,
+)
 
 
 @dataclass(frozen=True)
@@ -107,8 +111,15 @@ def build_purchase_review_summary_rows(
     rows: list[PurchaseReviewSummaryRow] = []
     for index, item in enumerate(state.items):
         track_b = state.track_b_db.get(index)
-        strict = comparison_candidates(track_b) if track_b is not None else ()
-        references = reference_candidates(track_b) if track_b is not None else ()
+        strict = strict_comparison_candidates(track_b) if track_b is not None else ()
+        references = (
+            (
+                *category_reference_candidates(track_b),
+                *reference_candidates(track_b),
+            )
+            if track_b is not None
+            else ()
+        )
         low, med, high = _observed_range(strict)
         run = state.search_runs.get(index)
         public_direct_count = None
