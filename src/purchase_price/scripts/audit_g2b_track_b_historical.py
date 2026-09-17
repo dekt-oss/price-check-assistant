@@ -6,8 +6,8 @@ import math
 import sqlite3
 import tempfile
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
