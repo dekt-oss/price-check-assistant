@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ KNOWN_PLATFORM_ERRORS = (
     "Error running app",
 )
 APP_IFRAME = 'iframe[title="streamlitApp"]'
+DEPLOYMENT_MARKER = "#unified-search-runtime-v2"
 
 
 def _app_frame(page: Any) -> Any:
@@ -239,6 +241,61 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
     raise RuntimeError("Production unified-search dashboard did not render after 3 bounded attempts")
 
 
+def _wait_for_hotfix_deployment(
+    page: Any,
+    report: dict[str, object],
+    *,
+    timeout_seconds: float = 240.0,
+) -> None:
+    """Poll until Streamlit is serving the code version that contains this hotfix."""
+
+    attempts: list[dict[str, object]] = []
+    report["hotfix_deployment_attempts"] = attempts
+    deadline = time.monotonic() + timeout_seconds
+    last_error = ""
+    attempt = 0
+
+    while time.monotonic() < deadline:
+        attempt += 1
+        try:
+            response = page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_timeout(3_000)
+            app = _app_frame(page)
+            app.get_by_label("통합 검색", exact=True).wait_for(state="visible", timeout=15_000)
+            marker = app.locator(DEPLOYMENT_MARKER)
+            if marker.count() > 0:
+                marker.first.wait_for(state="attached", timeout=5_000)
+                attempts.append(
+                    {
+                        "attempt": attempt,
+                        "status": "pass",
+                        "root_http_status": response.status if response is not None else None,
+                    }
+                )
+                report["checks"].append("hotfix_deployment_marker_seen")
+                return
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "old_deployment",
+                    "root_http_status": response.status if response is not None else None,
+                }
+            )
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"[:1000]
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "retry",
+                    "error": last_error,
+                }
+            )
+        page.wait_for_timeout(7_000)
+
+    detail = f"; last_error={last_error}" if last_error else ""
+    raise RuntimeError(f"Production did not expose the unified-search hotfix marker{detail}")
+
+
 def _exercise_unified_search(page: Any, report: dict[str, object]) -> None:
     app = _app_frame(page)
     app.get_by_label("통합 검색", exact=True).fill("DFM100")
@@ -246,7 +303,28 @@ def _exercise_unified_search(page: Any, report: dict[str, object]) -> None:
     _wait_heading(app, "DFM100 거래가격", timeout=90_000)
     app.get_by_text("나라장터 거래가격", exact=True).wait_for(state="visible", timeout=90_000)
     app.locator('[data-testid="stDataFrame"]').first.wait_for(state="visible", timeout=90_000)
-    app.get_by_text("검색 참고 2건", exact=False).wait_for(state="visible", timeout=90_000)
+
+    summary_locator = app.get_by_text(
+        re.compile(r"동일성 확인 \d+건 · 검색 참고 \d+건"),
+        exact=False,
+    ).first
+    summary_locator.wait_for(state="visible", timeout=90_000)
+    summary_text = summary_locator.inner_text()
+    count_match = re.search(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건", summary_text)
+    if count_match is None:
+        raise RuntimeError(f"Could not parse DFM100 result counts: {summary_text!r}")
+    strict_count, reference_count = (int(value) for value in count_match.groups())
+    if strict_count + reference_count < 1:
+        raise RuntimeError(f"DFM100 rendered no Track B transactions: {summary_text}")
+
+    body_text = app.locator("body").inner_text(timeout=10_000)
+    if "AttributeError" in body_text or "This app has encountered an error" in body_text:
+        raise RuntimeError("DFM100 unified search rendered a Streamlit exception")
+
+    report["unified_search_counts"] = {
+        "strict": strict_count,
+        "reference": reference_count,
+    }
     report["checks"].append("unified_search_dfm100_rendered")
     report["unified_search_snapshot"] = _diagnostic_snapshot(page, label="unified-search-dfm100")
 
@@ -275,6 +353,7 @@ def main() -> None:
                 report["checks"].append("unified_search_form_rendered")
 
                 if EXPECT_UNIFIED_SEARCH:
+                    _wait_for_hotfix_deployment(page, report)
                     _exercise_unified_search(page, report)
 
                 _navigate(page, "상세 검색")
