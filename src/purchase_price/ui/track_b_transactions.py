@@ -4,9 +4,40 @@ from typing import Any
 
 
 def comparison_candidates(track_b: Any) -> tuple[Any, ...]:
-    """Return strict comparison candidates from current or older runtime objects."""
+    """Return graded comparison candidates from current or older runtime objects.
+
+    Current Track B comparison results may contain A/B direct-match candidates and C category
+    references in the same legacy candidates tuple. Callers that need decision-safe counts
+    must use strict_comparison_candidates rather than assuming every row is A/B.
+    """
 
     return tuple(getattr(track_b, "candidates", ()) or ())
+
+
+def _grade_value(candidate: Any) -> str:
+    grade = getattr(candidate, "match_grade", None)
+    value = getattr(grade, "value", grade)
+    return str(value or "").strip().upper()
+
+
+def strict_comparison_candidates(track_b: Any) -> tuple[Any, ...]:
+    """Return only A/B candidates eligible for direct observed-price display."""
+
+    return tuple(
+        candidate
+        for candidate in comparison_candidates(track_b)
+        if _grade_value(candidate) in {"A", "B"}
+    )
+
+
+def category_reference_candidates(track_b: Any) -> tuple[Any, ...]:
+    """Return non-A/B graded candidates as Research/reference evidence."""
+
+    return tuple(
+        candidate
+        for candidate in comparison_candidates(track_b)
+        if _grade_value(candidate) not in {"A", "B"}
+    )
 
 
 def reference_candidates(track_b: Any) -> tuple[Any, ...]:
@@ -14,7 +45,7 @@ def reference_candidates(track_b: Any) -> tuple[Any, ...]:
 
     Streamlit Cloud can briefly serve a newly reloaded page module while an imported service
     module still has the previous TrackBQuoteComparison class in memory. The previous class did
-    not expose ``reference_candidates``. Treating that field as optional keeps the page available
+    not expose reference_candidates. Treating that field as optional keeps the page available
     during rolling deploys; once the service module reloads, the references appear normally.
     """
 
@@ -26,7 +57,11 @@ def has_transaction_candidates(track_b: Any) -> bool:
 
 
 def candidate_counts(track_b: Any) -> tuple[int, int]:
-    return len(comparison_candidates(track_b)), len(reference_candidates(track_b))
+    """Return A/B direct count and all C/Research reference count."""
+
+    direct = strict_comparison_candidates(track_b)
+    references = (*category_reference_candidates(track_b), *reference_candidates(track_b))
+    return len(direct), len(references)
 
 
 def _quantity_unit(quantity: Any, unit: str | None) -> str:
@@ -43,7 +78,7 @@ def _quantity_unit(quantity: Any, unit: str | None) -> str:
 
 
 def transaction_rows(track_b: Any) -> list[dict[str, object]]:
-    """Build the purchase-facing transaction table from strict and Research-only evidence.
+    """Build the purchase-facing transaction table from direct and Research-only evidence.
 
     Optional transaction metadata is accessed defensively so a rolling deploy cannot turn a
     harmless schema difference into a full-page AttributeError.
@@ -51,8 +86,7 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
 
     rows: list[dict[str, object]] = []
     for candidate in comparison_candidates(track_b):
-        grade = getattr(candidate, "match_grade", None)
-        grade_value = getattr(grade, "value", grade)
+        grade_value = _grade_value(candidate)
         rows.append(
             {
                 "가격": float(candidate.price),
