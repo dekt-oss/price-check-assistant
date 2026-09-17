@@ -79,17 +79,48 @@ def evidence_rows(items: Iterable[CollectedPrice]) -> list[dict[str, object]]:
     return rows
 
 
-def render_evidence_table(items: Iterable[CollectedPrice]) -> None:
-    rows = evidence_rows(items)
-    if not rows:
-        st.info("확보된 검증 공개가격 근거가 없습니다.")
-        return
+def split_evidence_rows_by_match_grade(
+    rows: Iterable[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Separate A/B identity evidence from C/D reference evidence for presentation only."""
+
+    direct_rows: list[dict[str, object]] = []
+    reference_rows: list[dict[str, object]] = []
+    for row in rows:
+        if str(row.get("등급") or "").strip().upper() in {"A", "B"}:
+            direct_rows.append(row)
+        else:
+            reference_rows.append(row)
+    return direct_rows, reference_rows
+
+
+def _render_evidence_rows(rows: list[dict[str, object]]) -> None:
     st.dataframe(
         pd.DataFrame(rows),
         use_container_width=True,
         hide_index=True,
         column_config={"단가": st.column_config.NumberColumn(format="%d")},
     )
+
+
+def render_evidence_table(items: Iterable[CollectedPrice]) -> None:
+    rows = evidence_rows(items)
+    if not rows:
+        st.info("확보된 검증 공개가격 근거가 없습니다.")
+        return
+
+    direct_rows, reference_rows = split_evidence_rows_by_match_grade(rows)
+    if direct_rows:
+        st.markdown("**A/B 제품일치 근거**")
+        st.caption(
+            "A/B는 제품 동일성 수준입니다. 견적 판정에는 Evidence Type과 비교범위가 "
+            "직접가격·QUOTE_COMPARABLE 조건까지 충족한 근거만 사용합니다."
+        )
+        _render_evidence_rows(direct_rows)
+    if reference_rows:
+        st.markdown("**C/D 참고자료 · 견적 판정 제외**")
+        st.caption("C/D 근거는 시장 참고용이며 관측 직접가격 범위와 견적 높고 낮음 판정에 포함하지 않습니다.")
+        _render_evidence_rows(reference_rows)
 
 
 def condition_rows(items: Iterable[CollectedPrice]) -> list[dict[str, object]]:
@@ -228,5 +259,8 @@ def render_observation_cards(items: Iterable[CollectedPrice]) -> None:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("근거", f"{group.count}건")
             c2.metric("하단", f"{group.low:,.0f}원" if group.low is not None else "산정불가")
-            c3.metric("중앙", f"{group.median:,.0f}원" if group.median is not None else "산정불가")
+            c3.metric(
+                "중앙값(Median)",
+                f"{group.median:,.0f}원" if group.median is not None else "산정불가",
+            )
             c4.metric("상단", f"{group.high:,.0f}원" if group.high is not None else "산정불가")
