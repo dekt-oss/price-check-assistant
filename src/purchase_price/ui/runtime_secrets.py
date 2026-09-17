@@ -4,6 +4,7 @@ import os
 from collections.abc import Mapping
 
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 
 from purchase_price.config import get_settings
 
@@ -37,19 +38,17 @@ def hydrate_streamlit_runtime_secrets() -> tuple[str, ...]:
     the same values under an ``[r2]`` table instead, commonly with short names such as
     ``account_id`` and ``access_key_id``. The service layer intentionally knows nothing about
     Streamlit, so normalize supported layouts at the UI boundary before ``Settings`` is resolved.
-    Existing environment variables always win.
+    Existing environment variables always win. A deployment/test environment with no secrets file
+    is valid and simply leaves the existing environment untouched.
     """
 
     try:
         root = st.secrets
-    except (FileNotFoundError, KeyError):
+        candidate = root.get("r2")
+    except (FileNotFoundError, KeyError, TypeError, StreamlitSecretNotFoundError):
         return ()
 
     nested: Mapping[str, object] = {}
-    try:
-        candidate = root.get("r2")
-    except (KeyError, TypeError):
-        candidate = None
     if isinstance(candidate, Mapping):
         nested = candidate
 
@@ -57,7 +56,10 @@ def hydrate_streamlit_runtime_secrets() -> tuple[str, ...]:
     for env_name, aliases in _R2_SECRET_ALIASES.items():
         if os.getenv(env_name, "").strip():
             continue
-        value = _mapping_value(root, *aliases)
+        try:
+            value = _mapping_value(root, *aliases)
+        except StreamlitSecretNotFoundError:
+            return ()
         if value is None:
             value = _mapping_value(nested, *aliases)
         if value is None:
