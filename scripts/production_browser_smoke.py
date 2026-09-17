@@ -13,6 +13,12 @@ EXPECT_QUOTE_UAT = os.getenv("EXPECT_QUOTE_UAT", "").strip().casefold() in {
     "yes",
     "on",
 }
+EXPECT_UNIFIED_SEARCH = os.getenv("EXPECT_UNIFIED_SEARCH", "").strip().casefold() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 KNOWN_PLATFORM_ERRORS = (
     "Error installing requirements",
@@ -172,7 +178,6 @@ def _install_browser_diagnostics(page: Any, report: dict[str, object]) -> None:
 def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
     attempts: list[dict[str, object]] = []
     report["dashboard_attempts"] = attempts
-    expected = "구매가격 검색·검토 보조시스템"
 
     for attempt in range(1, 4):
         response = page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
@@ -197,7 +202,10 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
 
         try:
             app = _app_frame(page)
-            _wait_heading(app, expected, timeout=30_000)
+            app.get_by_label("통합 검색", exact=True).wait_for(state="visible", timeout=30_000)
+            app.get_by_role("button", name="검색", exact=True).wait_for(
+                state="visible", timeout=30_000
+            )
             attempts.append(
                 {
                     "attempt": attempt,
@@ -222,7 +230,19 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
             if attempt < 3:
                 page.wait_for_timeout(10_000)
 
-    raise RuntimeError("Production dashboard did not render after 3 bounded attempts")
+    raise RuntimeError("Production unified-search dashboard did not render after 3 bounded attempts")
+
+
+def _exercise_unified_search(page: Any, report: dict[str, object]) -> None:
+    app = _app_frame(page)
+    app.get_by_label("통합 검색", exact=True).fill("DFM100")
+    app.get_by_role("button", name="검색", exact=True).click()
+    _wait_heading(app, "DFM100 거래가격", timeout=90_000)
+    app.get_by_text("나라장터 거래가격", exact=True).wait_for(state="visible", timeout=90_000)
+    app.locator('[data-testid="stDataFrame"]').first.wait_for(state="visible", timeout=90_000)
+    app.get_by_text("검색 참고 2건", exact=False).wait_for(state="visible", timeout=90_000)
+    report["checks"].append("unified_search_dfm100_rendered")
+    report["unified_search_snapshot"] = _diagnostic_snapshot(page, label="unified-search-dfm100")
 
 
 def main() -> None:
@@ -233,6 +253,7 @@ def main() -> None:
     report: dict[str, object] = {
         "production_url": PRODUCTION_URL,
         "expect_quote_uat": EXPECT_QUOTE_UAT,
+        "expect_unified_search": EXPECT_UNIFIED_SEARCH,
         "status": "failure",
         "checks": [],
     }
@@ -245,8 +266,12 @@ def main() -> None:
             try:
                 _wake_and_wait_dashboard(page, report)
                 report["checks"].append("dashboard_rendered")
+                report["checks"].append("unified_search_form_rendered")
 
-                _navigate(page, "빠른 검색")
+                if EXPECT_UNIFIED_SEARCH:
+                    _exercise_unified_search(page, report)
+
+                _navigate(page, "상세 검색")
                 app = _app_frame(page)
                 app.get_by_label("제품명", exact=True).wait_for(state="visible")
                 app.get_by_label("제조사", exact=True).wait_for(state="visible")
@@ -254,7 +279,7 @@ def main() -> None:
                 app.get_by_role("button", name="시장가격 조사", exact=True).wait_for(
                     state="visible"
                 )
-                report["checks"].append("quick_search_form_rendered")
+                report["checks"].append("detailed_search_form_rendered")
 
                 app.get_by_role("tab", name="나라장터 계약근거", exact=True).click()
                 app.get_by_label("계약 품명", exact=True).wait_for(state="visible")
