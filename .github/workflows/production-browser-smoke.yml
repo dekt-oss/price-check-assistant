@@ -39,6 +39,7 @@ jobs:
       # only on the feature branch. Push/manual runs target deployed main and do require them.
       EXPECT_QUOTE_UAT: ${{ github.event_name == 'pull_request' && '0' || '1' }}
       EXPECT_QUOTE_IMAGES: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      EXPECT_UNIFIED_SEARCH: ${{ github.event_name == 'pull_request' && '0' || '1' }}
     steps:
       - uses: actions/checkout@v4
 
