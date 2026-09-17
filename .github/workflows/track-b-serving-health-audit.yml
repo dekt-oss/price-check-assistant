@@ -1,0 +1,144 @@
+name: Track B Serving Health Audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/track-b-serving-health-audit.yml"
+      - "src/purchase_price/services/track_b_r2_quote_index.py"
+      - "src/purchase_price/services/track_b_db_quote_comparison.py"
+      - "src/purchase_price/services/track_b_pipeline_state.py"
+      - "src/purchase_price/storage/r2_serving_index.py"
+      - "data/uat/r2-search-recall-cases.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: track-b-serving-health-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: src
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install read-only audit dependencies
+        run: >-
+          python -m pip install
+          "pydantic>=2.8,<3"
+          "pydantic-settings>=2.4,<3"
+          "boto3>=1.35,<2"
+          "httpx>=0.27,<1"
+          "tenacity>=9,<10"
+          "sqlalchemy>=2,<3"
+      - name: Audit serving index and R2 capacity
+        run: |
+          python - <<'PY'
+          import json
+          from dataclasses import asdict
+          from pathlib import Path
+
+          from purchase_price.config import Settings
+          from purchase_price.scripts.audit_g2b_track_b_historical import (
+              _load_snapshot,
+              _read_serving_index,
+              completed_code_set,
+          )
+          from purchase_price.services.track_b_pipeline_state import STATE_NAME, TrackBPipelineState
+          from purchase_price.storage.r2 import R2RawEvidenceStore
+          from purchase_price.storage.r2_state import R2OperationalStateStore
+
+          settings = Settings()
+          if not settings.r2_configured:
+              raise SystemExit("R2 configuration is incomplete")
+          state_store = R2OperationalStateStore.from_settings(settings)
+          state_payload = state_store.read_json(STATE_NAME)
+          if state_payload is None:
+              raise SystemExit("Track B pipeline state missing")
+          state = TrackBPipelineState.from_payload(state_payload)
+          snapshot = _load_snapshot(state_store)
+          serving, by_code = _read_serving_index(settings=settings, state_store=state_store)
+          completed = completed_code_set(snapshot, state.collection_cursor)
+
+          segments = {}
+          for segment in snapshot.segments:
+              codes = [code for code in snapshot.codes if code.startswith(segment)]
+              code_set = set(codes)
+              served_codes = {
+                  code for code in codes if int(by_code.get(code, {}).get("rows", 0)) > 0
+              }
+              priced_codes = {
+                  code
+                  for code in codes
+                  if int(by_code.get(code, {}).get("positive_price_rows", 0)) > 0
+              }
+              segments[segment] = {
+                  "target_codes": len(codes),
+                  "query_completed_codes": len(code_set & completed),
+                  "codes_with_serving_rows": len(served_codes),
+                  "codes_with_positive_price": len(priced_codes),
+                  "serving_rows": sum(int(by_code.get(code, {}).get("rows", 0)) for code in codes),
+                  "positive_price_rows": sum(
+                      int(by_code.get(code, {}).get("positive_price_rows", 0)) for code in codes
+                  ),
+              }
+
+          usage = R2RawEvidenceStore.from_settings(settings).measure_bucket_usage()
+          report = {
+              "status": serving.get("status"),
+              "snapshot_sha256": snapshot.sha256,
+              "target_code_count": snapshot.code_count,
+              "backfill_complete": state.backfill_complete,
+              "collection_cursor": asdict(state.collection_cursor),
+              "query_completed_codes": len(completed),
+              "remaining_codes": snapshot.code_count - len(completed),
+              "pending_object_count": len(state.pending_object_keys),
+              "segments": segments,
+              "serving_index": serving,
+              "r2_capacity": {
+                  "object_count": usage.object_count,
+                  "stored_bytes": usage.stored_bytes,
+                  "hard_limit_bytes": usage.hard_limit_bytes,
+                  "warn_limit_bytes": usage.warn_limit_bytes,
+                  "remaining_bytes": usage.remaining_bytes,
+                  "hard_limit_utilization_pct": round(
+                      usage.stored_bytes / usage.hard_limit_bytes * 100.0, 4
+                  ),
+                  "warning": usage.warning,
+              },
+              "public_api_requests": 0,
+              "r2_writes": 0,
+              "database_writes": 0,
+          }
+          output = Path("artifacts/track-b-serving-health/serving-health.json")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+          if serving.get("status") != "SUCCESS":
+              raise SystemExit("serving index integrity failed")
+          PY
+      - name: Measure current R2 search recall
+        run: >-
+          python -m purchase_price.scripts.measure_r2_search_recall
+          --manifest data/uat/r2-search-recall-cases.json
+          --output artifacts/track-b-serving-health/r2-search-recall.json
+          --summary artifacts/track-b-serving-health/r2-search-recall.md
+      - name: Upload health audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: track-b-serving-health-audit
+          path: artifacts/track-b-serving-health/
+          if-no-files-found: warn
+          retention-days: 14
