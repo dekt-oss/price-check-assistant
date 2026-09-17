@@ -9,6 +9,8 @@ def test_evidence_rows_split_ab_from_cd_reference() -> None:
         {"등급": "B", "근거ID": "b"},
         {"등급": "C", "근거ID": "c"},
         {"등급": "D", "근거ID": "d"},
+        {"등급": "X", "근거ID": "x"},
+        {"등급": "", "근거ID": "blank"},
     ]
 
     direct, reference = widgets.split_evidence_rows_by_match_grade(rows)
