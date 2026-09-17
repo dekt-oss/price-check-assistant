@@ -106,6 +106,9 @@ jobs:
               "remaining_codes": snapshot.code_count - len(completed),
               "pending_object_count": len(state.pending_object_keys),
               "segments": segments,
+              "serving_by_code_27": {
+                  code: counts for code, counts in sorted(by_code.items()) if code.startswith("27")
+              },
               "serving_index": serving,
               "r2_capacity": {
                   "object_count": usage.object_count,
