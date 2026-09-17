@@ -35,6 +35,10 @@ from purchase_price.ui.widgets import (
 )
 
 st.set_page_config(page_title="구매가격 검색", page_icon="🔎", layout="wide")
+st.markdown(
+    '<span id="unified-search-runtime-v2" style="display:none">unified-search-runtime-v2</span>',
+    unsafe_allow_html=True,
+)
 
 st.markdown(
     """
