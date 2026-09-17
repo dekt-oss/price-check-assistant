@@ -47,17 +47,20 @@ def test_serving_index_bootstrap_can_recover_validated_legacy_state() -> None:
 
 
 def test_home_is_unified_search_and_upload_entrypoint() -> None:
-    text = Path("pages/1_대시보드.py").read_text()
+    page_text = Path("pages/1_대시보드.py").read_text()
+    transaction_text = Path("src/purchase_price/ui/track_b_transactions.py").read_text()
 
-    assert "무엇을 조사할까요?" in text
-    assert "상세 검색조건" in text
-    assert "home_quote_upload" in text
-    assert 'st.switch_page("pages/2_견적_검토.py")' in text
-    assert "lookup_track_b_quote_from_r2" in text
-    assert "나라장터 거래가격" in text
-    assert '"판매처"' in text
-    assert '"구매처"' in text
-    assert '"거래기록"' in text
-    assert "상세 조사·근거 보기" in text
-    assert "model_probe_query = model_probe_input.to_product_query()" in text
-    assert "query = model_probe_query" in text
+    assert "무엇을 조사할까요?" in page_text
+    assert "상세 검색조건" in page_text
+    assert "home_quote_upload" in page_text
+    assert 'st.switch_page("pages/2_견적_검토.py")' in page_text
+    assert "lookup_track_b_quote_from_r2" in page_text
+    assert "나라장터 거래가격" in page_text
+    assert "transaction_rows(track_b)" in page_text
+    assert "candidate_counts(track_b)" in page_text
+    assert '"판매처"' in transaction_text
+    assert '"구매처"' in transaction_text
+    assert '"거래기록"' in transaction_text
+    assert "상세 조사·근거 보기" in page_text
+    assert "model_probe_query = model_probe_input.to_product_query()" in page_text
+    assert "query = model_probe_query" in page_text
