@@ -60,16 +60,16 @@ jobs:
       - name: Run production browser smoke
         run: python scripts/production_browser_smoke.py
 
+      - name: Gate Production R2 runtime readiness
+        if: github.event_name != 'pull_request'
+        run: python scripts/production_r2_runtime_diagnostic.py --require-ready
+
       - name: Run Production DFM100 unified-search smoke
         if: github.event_name != 'pull_request'
         run: python scripts/production_unified_search_smoke.py
 
-      - name: Capture Production R2 runtime diagnostic
-        if: always() && github.event_name != 'pull_request'
-        run: python scripts/production_r2_runtime_diagnostic.py
-
       - name: Run production quote UAT upload smoke
-        if: success()
+        if: always()
         run: python scripts/production_quote_uat_smoke.py
 
       - name: Upload browser evidence
