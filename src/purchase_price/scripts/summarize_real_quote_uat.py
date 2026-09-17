@@ -17,6 +17,7 @@ REQUIRED_COLUMNS = {
     "false_positive_comparison",
     "false_negative_comparison",
     "zero_vs_failure_correct",
+    "direct_evidence_found",
     "source_record_traceable",
     "source_url_traceable",
     "fingerprint_traceable",
