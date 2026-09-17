@@ -7,6 +7,8 @@ from purchase_price.ui import runtime_secrets
 def _clear_r2_env(monkeypatch) -> None:
     for name in runtime_secrets._R2_SECRET_NAMES:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("R2_READ_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("R2_READ_SECRET_ACCESS_KEY", raising=False)
     get_settings.cache_clear()
 
 
@@ -33,6 +35,54 @@ def test_hydrate_streamlit_runtime_secrets_accepts_nested_r2_table(monkeypatch) 
         "R2_SECRET_ACCESS_KEY",
     }
     assert get_settings().r2_configured is True
+
+
+def test_hydrate_streamlit_runtime_secrets_accepts_read_only_aliases(monkeypatch) -> None:
+    _clear_r2_env(monkeypatch)
+    fake_streamlit = SimpleNamespace(
+        secrets={
+            "r2_read": {
+                "account_id": "account",
+                "bucket": "bucket",
+                "R2_READ_ACCESS_KEY_ID": "read-access",
+                "R2_READ_SECRET_ACCESS_KEY": "read-secret",
+            }
+        }
+    )
+    monkeypatch.setattr(runtime_secrets, "st", fake_streamlit)
+
+    hydrated = runtime_secrets.hydrate_streamlit_runtime_secrets()
+
+    assert set(hydrated) == {
+        "R2_ACCOUNT_ID",
+        "R2_BUCKET",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+    }
+    settings = get_settings()
+    assert settings.r2_configured is True
+    assert settings.r2_access_key_id == "read-access"
+    assert settings.r2_secret_access_key == "read-secret"
+
+
+def test_hydrate_streamlit_runtime_secrets_accepts_root_read_only_aliases(monkeypatch) -> None:
+    _clear_r2_env(monkeypatch)
+    fake_streamlit = SimpleNamespace(
+        secrets={
+            "R2_ACCOUNT_ID": "account",
+            "R2_BUCKET": "bucket",
+            "R2_READ_ACCESS_KEY_ID": "read-access",
+            "R2_READ_SECRET_ACCESS_KEY": "read-secret",
+        }
+    )
+    monkeypatch.setattr(runtime_secrets, "st", fake_streamlit)
+
+    runtime_secrets.hydrate_streamlit_runtime_secrets()
+
+    settings = get_settings()
+    assert settings.r2_configured is True
+    assert settings.r2_access_key_id == "read-access"
+    assert settings.r2_secret_access_key == "read-secret"
 
 
 def test_hydrate_streamlit_runtime_secrets_does_not_override_environment(monkeypatch) -> None:
