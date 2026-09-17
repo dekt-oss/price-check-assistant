@@ -158,6 +158,31 @@ def _collection_clients(settings, *, catalog_key: str, shopping_key: str):
     return catalog_client, shopping_client
 
 
+def _exit_code_for_collection(summary: Any) -> int:
+    """Keep persisted progress usable when data.go.kr closes the daily quota early.
+
+    The collector deliberately records a rate-limit response as FAILED so the summary remains
+    truthful. Operationally, however, a run that already advanced the cursor or stored pages has
+    useful durable work that must reach the serving-index workflow. Returning zero only for that
+    narrow case lets the workflow_run chain continue without masking zero-progress or other source
+    failures.
+    """
+
+    if summary.status in {"SUCCESS", "PARTIAL_SUCCESS"}:
+        return 0
+    if summary.stop_reason != "RATE_LIMIT_EXHAUSTED":
+        return 1
+    codes_completed = int(getattr(summary, "codes_completed", 0) or 0)
+    pages_stored = int(getattr(summary, "pages_stored", 0) or 0)
+    if codes_completed <= 0 and pages_stored <= 0:
+        return 1
+    print(
+        "Track B daily quota exhausted after durable progress; "
+        "preserving the cursor and allowing serving-index sync to continue."
+    )
+    return 0
+
+
 def _run_rolling_collection(
     *,
     state: TrackBPipelineState,
@@ -225,7 +250,7 @@ def _run_rolling_collection(
         "pending_object_count": len(state.pending_object_keys),
     }
     _write_summary(summary_path, report)
-    return 0 if summary.status in {"SUCCESS", "PARTIAL_SUCCESS"} else 1
+    return _exit_code_for_collection(summary)
 
 
 def run_daily(
@@ -303,7 +328,7 @@ def run_daily(
         "pending_object_count": len(state.pending_object_keys),
     }
     _write_summary(summary_path, report)
-    return 0 if summary.status in {"SUCCESS", "PARTIAL_SUCCESS"} else 1
+    return _exit_code_for_collection(summary)
 
 
 def _parse_args() -> argparse.Namespace:
