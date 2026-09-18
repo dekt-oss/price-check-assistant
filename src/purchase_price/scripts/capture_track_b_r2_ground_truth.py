@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import exists, or_, select, create_engine
+from sqlalchemy import create_engine, exists, or_, select
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from purchase_price.config import Settings
