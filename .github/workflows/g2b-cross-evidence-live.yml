@@ -1,0 +1,78 @@
+name: G2B Cross Evidence Live UAT
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_names:
+        description: "Comma-separated PPS product names"
+        required: false
+        default: "레이저프린터,인공호흡기,전신가스마취기"
+      lookback_days:
+        description: "Bounded lookback days"
+        required: false
+        default: "365"
+
+permissions:
+  contents: read
+
+jobs:
+  cross-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY }}
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Run bounded two-source UAT
+        run: |
+          python -m purchase_price.scripts.probe_g2b_cross_evidence \
+            --product-names "${{ inputs.product_names }}" \
+            --lookback-days "${{ inputs.lookback_days }}" \
+            --timeout-seconds 15 \
+            --max-retries 1 \
+            --output artifacts/g2b-cross-evidence/report.json
+
+      - name: Print safe summary
+        if: always()
+        run: |
+          if [ -f artifacts/g2b-cross-evidence/report.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/g2b-cross-evidence/report.json").read_text())
+          print("validation_status=", report.get("validation_status"))
+          print("coverage=", report.get("coverage_start"), "~", report.get("coverage_end"))
+          print("case_count=", report.get("case_count"))
+          print("both_sources_success=", report.get("both_sources_success_case_count"))
+          print("source_failure_cases=", report.get("source_failure_case_count"))
+          print("shopping_direct_hit_cases=", report.get("shopping_direct_hit_case_count"))
+          print("contract_hit_cases=", report.get("contract_hit_case_count"))
+          print("cross_evidence_cases=", report.get("cross_evidence_case_count"))
+          print("cross_evidence_rate=", report.get("cross_evidence_rate"))
+          PY
+          fi
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2b-cross-evidence-live
+          path: artifacts/g2b-cross-evidence/report.json
+          if-no-files-found: warn
+          retention-days: 14
