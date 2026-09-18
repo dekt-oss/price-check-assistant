@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/track-b-r2-serving-index.yml"
       - "src/purchase_price/scripts/sync_g2b_track_b_r2_index.py"
+      - "src/purchase_price/scripts/audit_track_b_transition.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
   push:
     branches:
@@ -12,6 +13,7 @@ on:
     paths:
       - ".github/workflows/track-b-r2-serving-index.yml"
       - "src/purchase_price/scripts/sync_g2b_track_b_r2_index.py"
+      - "src/purchase_price/scripts/audit_track_b_transition.py"
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
@@ -194,6 +196,39 @@ jobs:
           if any(item["status"] in blocked for item in payload.values()):
               raise SystemExit("R2 serving index is not consumable after sync")
           PY
+      - name: Audit historical to rolling transition
+        run: >-
+          python -m purchase_price.scripts.audit_track_b_transition
+          --require-serving-synced
+          --output artifacts/track-b-daily/transition-audit.json
+      - name: Print transition acceptance summary
+        if: always()
+        run: |
+          if [ -f artifacts/track-b-daily/transition-audit.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(
+              Path("artifacts/track-b-daily/transition-audit.json").read_text()
+          )
+          print("status=", report.get("status"))
+          print("phase=", report.get("phase"))
+          print("acceptance_status=", report.get("acceptance_status"))
+          print("issue_157_acceptance=", report.get("issue_157_acceptance"))
+          historical = report.get("historical") or {}
+          rolling = report.get("rolling") or {}
+          serving = report.get("serving_index") or {}
+          print("historical_cursor=", historical.get("cursor"))
+          print("historical_remaining_codes=", historical.get("remaining_codes"))
+          print("rolling_window=", rolling.get("window_begin"), "~", rolling.get("window_end"))
+          print("rolling_cursor=", rolling.get("cursor"))
+          print("rolling_covered_through=", rolling.get("covered_through"))
+          print("rolling_cycles_completed=", rolling.get("cycles_completed"))
+          print("serving_pointer_synced=", serving.get("historical_cursor_matches_pointer"))
+          print("pending_object_count=", serving.get("pending_object_count"))
+          PY
+          fi
       - name: Upload sync evidence
         if: always()
         uses: actions/upload-artifact@v4
