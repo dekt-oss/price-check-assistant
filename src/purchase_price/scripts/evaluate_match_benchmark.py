@@ -6,7 +6,9 @@ from pathlib import Path
 
 from purchase_price.services.match_benchmark import (
     run_match_benchmark,
+    summarize_benchmark_coverage,
     write_benchmark_predictions,
+    write_benchmark_summary,
 )
 
 
@@ -31,6 +33,11 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="Write every row's expected/predicted grade and match_note to this CSV.",
     )
+    parser.add_argument(
+        "--summary-output",
+        type=Path,
+        help="Write benchmark metrics and ground-truth coverage limits to this JSON.",
+    )
     return parser
 
 
@@ -45,6 +52,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"direct_recall={_pct(evaluation.direct_recall)}")
     positives = evaluation.direct_true_positive + evaluation.direct_false_negative
     print(f"direct_positive_rows={positives}")
+
+    coverage = summarize_benchmark_coverage(result)
+    print(f"registry_models={coverage.registry_model_count}")
+    print(f"reviewed_models={coverage.reviewed_model_count}")
+    print(f"direct_positive_models={coverage.direct_positive_model_count}")
+    print(
+        "models_without_ground_truth="
+        + (",".join(coverage.models_without_ground_truth) or "-")
+    )
+    print(
+        "reviewed_models_without_direct_positive="
+        + (",".join(coverage.reviewed_models_without_direct_positive) or "-")
+    )
 
     mismatches = [
         row for row in result.predictions if row.expected_grade != row.predicted_grade
@@ -61,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.output is not None:
         write_benchmark_predictions(result, args.output)
         print(f"predictions={args.output}")
+    if args.summary_output is not None:
+        write_benchmark_summary(result, args.summary_output)
+        print(f"summary={args.summary_output}")
 
     if mismatches and args.fail_on_mismatch:
         print(f"benchmark_status=failed mismatches={len(mismatches)}")
