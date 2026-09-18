@@ -38,6 +38,7 @@ jobs:
         run: pytest -q tests/test_p0_golden_uat_contract.py
 
       - name: Run bounded live APC and FLOW probe
+        if: github.event_name == 'workflow_dispatch'
         run: |
           python -m purchase_price.scripts.probe_p0_golden_uat \
             --lookback-days 1095 \
