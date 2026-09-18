@@ -105,6 +105,31 @@ jobs:
                   "missing pipeline state cannot be safely recovered from current R2 evidence"
               )
           PY
+      - name: Read-only transition status audit
+        run: >-
+          python -m purchase_price.scripts.audit_track_b_transition
+          --output artifacts/track-b-transition-pr.json
+      - name: Print read-only transition summary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/track-b-transition-pr.json").read_text())
+          print("phase=", report.get("phase"))
+          print("acceptance_status=", report.get("acceptance_status"))
+          print("issue_157_acceptance=", report.get("issue_157_acceptance"))
+          print("historical=", report.get("historical"))
+          print("rolling=", report.get("rolling"))
+          print("serving_index=", report.get("serving_index"))
+          PY
+      - name: Upload read-only transition audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: track-b-transition-readonly
+          path: artifacts/track-b-transition-pr.json
+          retention-days: 14
+          if-no-files-found: error
 
   sync-index:
     if: >-
