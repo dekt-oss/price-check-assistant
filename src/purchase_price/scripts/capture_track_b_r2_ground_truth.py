@@ -32,7 +32,11 @@ OUTPUT_FIELDS = (
     "candidate_match_basis",
     "parsed_manufacturer",
     "parsed_model_name",
+    "parsed_model_qualifier",
+    "model_qualifier_verified_as_origin",
+    "parsed_manufacturer_qualifier",
     "parsed_product_class",
+    "product_id",
     "detail_code",
     "transaction_date",
     "raw_object_key",
@@ -161,7 +165,15 @@ def capture_candidates(
                     "candidate_match_basis": basis,
                     "parsed_manufacturer": str(row.manufacturer or "").strip(),
                     "parsed_model_name": str(row.model_name or "").strip(),
+                    "parsed_model_qualifier": str(row.model_qualifier or "").strip(),
+                    "model_qualifier_verified_as_origin": (
+                        "true" if row.model_qualifier_verified_as_origin else "false"
+                    ),
+                    "parsed_manufacturer_qualifier": str(
+                        row.manufacturer_qualifier or ""
+                    ).strip(),
                     "parsed_product_class": str(row.product_class or "").strip(),
+                    "product_id": str(row.product_id or "").strip(),
                     "detail_code": str(row.detail_code or "").strip(),
                     "transaction_date": (
                         row.transaction_date.isoformat()
