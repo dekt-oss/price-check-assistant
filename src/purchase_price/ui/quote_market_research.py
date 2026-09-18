@@ -30,6 +30,7 @@ from purchase_price.ui.market_research import (
 from purchase_price.ui.quote_review_contract import build_manual_quote_item
 from purchase_price.ui.quote_review_state import QuoteReviewState
 from purchase_price.ui.quote_review_steps import _store_extraction
+from purchase_price.ui.quote_review_summary import render_purchase_review_summary
 from purchase_price.ui.widgets import (
     render_condition_table,
     render_evidence_table,
@@ -474,6 +475,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
 
     _render_compact_item_editor(state)
     _ensure_track_b_comparison(state)
+    render_purchase_review_summary(state)
 
     st.subheader("가격 · 거래 이력")
     for index in range(len(state.items)):

@@ -67,6 +67,36 @@ def test_reference_candidate_renders_purchase_facing_metadata() -> None:
     assert rows[0]["비교수준"].startswith("모델명 포함 거래 참고")
 
 
+
+def test_c_grade_candidate_counts_as_reference_not_direct() -> None:
+    direct = SimpleNamespace(
+        price=Decimal("12000000"),
+        product_title="가스마취기, Getinge, FLOW-C",
+        match_grade=MatchGrade.A,
+    )
+    category_reference = SimpleNamespace(
+        price=Decimal("45000000"),
+        product_title="가스마취기, 다른 규격",
+        match_grade=MatchGrade.C,
+    )
+    broad_reference = SimpleNamespace(
+        price=Decimal("50000000"),
+        product_title="가스마취기 검색 참고",
+        reference_reason="동일 품목명 참고",
+    )
+    comparison = SimpleNamespace(
+        candidates=(direct, category_reference),
+        reference_candidates=(broad_reference,),
+        status="success",
+    )
+
+    assert candidate_counts(comparison) == (1, 2)
+    rows = transaction_rows(comparison)
+    assert rows[0]["비교수준"] == "동일 모델"
+    assert rows[1]["비교수준"] == "동일 품목 참고"
+    assert rows[2]["비교수준"] == "동일 품목명 참고"
+
+
 def test_empty_legacy_comparison_is_safe() -> None:
     comparison = SimpleNamespace(candidates=(), status="success_0")
 
