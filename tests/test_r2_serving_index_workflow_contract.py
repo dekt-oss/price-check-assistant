@@ -22,6 +22,9 @@ def test_r2_serving_index_pr_gate_is_read_only_recovery_proof() -> None:
     assert "recovery-readiness:" in text
     assert "Verify legacy state recovery proof without writing R2" in text
     assert "legacy_bootstrap_proof=" in text
+    assert "Read-only transition status audit" in text
+    assert "track-b-transition-readonly" in text
+    assert "audit_track_b_transition" in text
     assert "state_store.write_json" not in text
 
 
