@@ -54,7 +54,8 @@ jobs:
         run: |
           python -m purchase_price.scripts.evaluate_match_benchmark \
             --fail-on-mismatch \
-            --output artifacts/match-benchmark-predictions.csv
+            --output artifacts/match-benchmark-predictions.csv \
+            --summary-output artifacts/match-benchmark-summary.json
 
       - name: Phase 0 offline integration check
         run: |
@@ -75,7 +76,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: match-benchmark-predictions
-          path: artifacts/match-benchmark-predictions.csv
+          path: |
+            artifacts/match-benchmark-predictions.csv
+            artifacts/match-benchmark-summary.json
           retention-days: 14
           if-no-files-found: ignore
 

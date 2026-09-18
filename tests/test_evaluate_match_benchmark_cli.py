@@ -1,4 +1,5 @@
 import csv
+import json
 from pathlib import Path
 
 from purchase_price.scripts import evaluate_match_benchmark
@@ -9,9 +10,18 @@ DIRECT_GRADES = {"A", "B"}
 
 def test_cli_reports_and_writes_predictions(tmp_path: Path, capsys) -> None:
     output = tmp_path / "predictions.csv"
+    summary_output = tmp_path / "summary.json"
     expected = run_match_benchmark()
 
-    code = evaluate_match_benchmark.main(["--fail-on-mismatch", "--output", str(output)])
+    code = evaluate_match_benchmark.main(
+        [
+            "--fail-on-mismatch",
+            "--output",
+            str(output),
+            "--summary-output",
+            str(summary_output),
+        ]
+    )
 
     out = capsys.readouterr().out
     assert code == 0
@@ -20,6 +30,11 @@ def test_cli_reports_and_writes_predictions(tmp_path: Path, capsys) -> None:
     )
     assert f"rows={len(expected.predictions)}" in out
     assert f"direct_positive_rows={positives}" in out
+    assert "registry_models=" in out
+    assert "reviewed_models=" in out
+    assert "direct_positive_models=" in out
+    assert "models_without_ground_truth=" in out
+    assert "reviewed_models_without_direct_positive=" in out
     assert "benchmark_status=ok" in out
 
     # Precision/recall must read N/A exactly while no A/B positive exists to measure, and must
@@ -36,6 +51,13 @@ def test_cli_reports_and_writes_predictions(tmp_path: Path, capsys) -> None:
     assert len(rows) == len(expected.predictions)
     assert all(row["expected_grade"] == row["predicted_grade"] for row in rows)
     assert all(row["match_note"].startswith("grade=") for row in rows)
+
+    summary = json.loads(summary_output.read_text(encoding="utf-8"))
+    assert summary["rows"] == len(expected.predictions)
+    assert summary["direct_positive_row_count"] == positives
+    assert summary["registry_model_count"] >= summary["reviewed_model_count"]
+    assert "models_without_ground_truth" in summary
+    assert "reviewed_models_without_direct_positive" in summary
 
 
 def test_cli_fails_when_strict_and_prediction_mismatches(monkeypatch, capsys) -> None:
