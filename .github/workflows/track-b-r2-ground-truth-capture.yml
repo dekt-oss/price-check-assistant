@@ -85,9 +85,18 @@ jobs:
               print(f"MODEL {model} candidates={len(grouped[model])}")
               for row in grouped[model][:3]:
                   print(
-                      "  - basis={basis} source={source} title={title}".format(
+                      (
+                          "  - basis={basis} source={source} product_id={product_id} "
+                          "model={model} qualifier={qualifier} origin_verified={origin_verified} "
+                          "manufacturer={manufacturer} title={title}"
+                      ).format(
                           basis=row["candidate_match_basis"],
                           source=row["source_record_id"],
+                          product_id=row["product_id"],
+                          model=row["parsed_model_name"],
+                          qualifier=row["parsed_model_qualifier"] or "-",
+                          origin_verified=row["model_qualifier_verified_as_origin"],
+                          manufacturer=row["parsed_manufacturer"],
                           title=row["candidate_title"][:240],
                       )
                   )
