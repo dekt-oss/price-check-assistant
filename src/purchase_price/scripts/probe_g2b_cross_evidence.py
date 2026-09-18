@@ -10,9 +10,9 @@ from typing import Any
 
 from purchase_price.clients.data_go_kr import PublicDataPortalClient
 from purchase_price.collectors.g2b_shopping import (
-    G2B_SHOPPING_BASE_URL,
     G2BShoppingCollector,
     G2BShoppingOperation,
+    G2B_SHOPPING_BASE_URL,
 )
 from purchase_price.config import get_settings
 from purchase_price.services.g2b_contract_evidence import G2B_CONTRACT_BASE_URL
