@@ -8,7 +8,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-REQUIRED_COLUMNS = {
+REAL_UAT_COLUMNS = (
     "case_id",
     "sample_class",
     "approved_public_sample",
@@ -26,7 +26,8 @@ REQUIRED_COLUMNS = {
     "time_saved_minutes",
     "reuse_value_1_to_5",
     "reviewer_notes",
-}
+)
+REQUIRED_COLUMNS = set(REAL_UAT_COLUMNS)
 
 
 def _bool(value: object) -> bool | None:
