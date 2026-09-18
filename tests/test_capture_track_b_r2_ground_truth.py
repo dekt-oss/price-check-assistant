@@ -161,6 +161,9 @@ def test_capture_uses_current_nonconflict_rows_and_excludes_existing_ground_trut
     assert len(sophie) == 1
     assert sophie[0]["source_record_id"] == "delivery:D-NEW|change:0|line:1"
     assert sophie[0]["candidate_match_basis"] == "parsed_model_exact"
+    assert sophie[0]["product_id"] == "P-D-NEW-1"
+    assert sophie[0]["parsed_model_qualifier"] == ""
+    assert sophie[0]["model_qualifier_verified_as_origin"] == "false"
     assert sophie[0]["expected_grade"] == ""
     assert sophie[0]["review_note"] == ""
 
