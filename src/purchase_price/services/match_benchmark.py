@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +34,18 @@ class BenchmarkPrediction:
 class MatchBenchmarkResult:
     predictions: tuple[BenchmarkPrediction, ...]
     evaluation: MatchEvaluation
+    registry_models: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class BenchmarkCoverage:
+    registry_model_count: int
+    reviewed_model_count: int
+    direct_positive_row_count: int
+    direct_positive_model_count: int
+    models_without_ground_truth: tuple[str, ...]
+    reviewed_models_without_direct_positive: tuple[str, ...]
+    grade_counts: tuple[tuple[str, int], ...]
 
 
 def load_phase0_product_queries(path: Path = DEFAULT_PRODUCTS_PATH) -> dict[str, ProductQuery]:
@@ -121,6 +134,74 @@ def run_match_benchmark(
     return MatchBenchmarkResult(
         predictions=tuple(predictions),
         evaluation=evaluate_match_grades(expected, predicted),
+        registry_models=tuple(query.model_name for query in queries.values()),
+    )
+
+
+def summarize_benchmark_coverage(result: MatchBenchmarkResult) -> BenchmarkCoverage:
+    """Describe what the reviewed ground truth actually covers without inventing confidence."""
+
+    reviewed_models = tuple(
+        dict.fromkeys(row.benchmark_model for row in result.predictions)
+    )
+    direct_positive_models = {
+        row.benchmark_model
+        for row in result.predictions
+        if row.expected_grade in {MatchGrade.A, MatchGrade.B}
+    }
+    registry_models = result.registry_models or reviewed_models
+    reviewed_set = set(reviewed_models)
+
+    grade_counts = tuple(
+        (
+            grade.value,
+            sum(1 for row in result.predictions if row.expected_grade == grade),
+        )
+        for grade in MatchGrade
+    )
+    return BenchmarkCoverage(
+        registry_model_count=len(registry_models),
+        reviewed_model_count=len(reviewed_models),
+        direct_positive_row_count=sum(
+            1
+            for row in result.predictions
+            if row.expected_grade in {MatchGrade.A, MatchGrade.B}
+        ),
+        direct_positive_model_count=len(direct_positive_models),
+        models_without_ground_truth=tuple(
+            model for model in registry_models if model not in reviewed_set
+        ),
+        reviewed_models_without_direct_positive=tuple(
+            model for model in reviewed_models if model not in direct_positive_models
+        ),
+        grade_counts=grade_counts,
+    )
+
+
+def write_benchmark_summary(result: MatchBenchmarkResult, path: Path) -> None:
+    """Write auditable benchmark metrics and factual coverage limits as JSON."""
+
+    coverage = summarize_benchmark_coverage(result)
+    evaluation = result.evaluation
+    payload = {
+        "rows": evaluation.total,
+        "exact_grade_accuracy": evaluation.exact_grade_accuracy,
+        "direct_precision": evaluation.direct_precision,
+        "direct_recall": evaluation.direct_recall,
+        "registry_model_count": coverage.registry_model_count,
+        "reviewed_model_count": coverage.reviewed_model_count,
+        "direct_positive_row_count": coverage.direct_positive_row_count,
+        "direct_positive_model_count": coverage.direct_positive_model_count,
+        "models_without_ground_truth": list(coverage.models_without_ground_truth),
+        "reviewed_models_without_direct_positive": list(
+            coverage.reviewed_models_without_direct_positive
+        ),
+        "grade_counts": dict(coverage.grade_counts),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
     )
 
 
