@@ -60,7 +60,13 @@ validation_pages = [
         title="견적추출 UAT",
         icon="🧪",
         url_path="quote-extraction-uat",
-    )
+    ),
+    st.Page(
+        "pages/15_전체구매검토_UAT.py",
+        title="전체 구매검토 UAT",
+        icon="📊",
+        url_path="purchase-review-uat",
+    ),
 ]
 
 navigation: dict[str, list[st.Page]] = {
