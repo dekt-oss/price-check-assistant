@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL
 from purchase_price.config import get_settings
 from purchase_price.scripts.collect_g2b_track_b_r2 import (
     TARGET_SEGMENTS,
@@ -19,7 +20,6 @@ from purchase_price.scripts.run_g2b_track_b_daily import (
     _exit_code_for_collection,
 )
 from purchase_price.services.g2b_catalog import G2B_CATALOG_BASE_URL
-from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL
 from purchase_price.services.g2b_product_mapping import load_g2b_product_mappings
 from purchase_price.services.track_b_pipeline_state import (
     BACKFILL_BEGIN_DATE,
