@@ -25,6 +25,13 @@ class ObservationGroup:
     high: Decimal | None
 
 
+def _format_krw_display(value: object) -> str:
+    try:
+        return f"{Decimal(str(value)):,.0f}원"
+    except (ArithmeticError, ValueError):
+        return str(value)
+
+
 def source_status_rows(run: SearchRun) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for status in run.source_statuses:
@@ -95,11 +102,13 @@ def split_evidence_rows_by_match_grade(
 
 
 def _render_evidence_rows(rows: list[dict[str, object]]) -> None:
+    frame = pd.DataFrame(rows)
+    if "단가" in frame.columns:
+        frame["단가"] = frame["단가"].map(_format_krw_display)
     st.dataframe(
-        pd.DataFrame(rows),
+        frame,
         use_container_width=True,
         hide_index=True,
-        column_config={"단가": st.column_config.NumberColumn(format="%d")},
     )
 
 
@@ -208,13 +217,14 @@ def render_discovery_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
         st.info("선택 기간과 연구용 탐색어에서 나라장터 후보를 찾지 못했습니다.")
         return
     with st.expander("미검증 Research 후보 보기", expanded=True):
+        frame = pd.DataFrame(rows)
+        frame["표기 금액 (미검증)"] = frame["표기 금액 (미검증)"].map(_format_krw_display)
         st.dataframe(
-            pd.DataFrame(rows),
+            frame,
             use_container_width=True,
             hide_index=True,
             column_config={
                 "점수": st.column_config.NumberColumn(format="%d"),
-                "표기 금액 (미검증)": st.column_config.NumberColumn(format="%d"),
             },
         )
         st.warning(
