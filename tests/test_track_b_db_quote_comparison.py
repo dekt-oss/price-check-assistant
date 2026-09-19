@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from purchase_price.db import Base
+from purchase_price.domain import MatchGrade
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
 from purchase_price.scripts.validate_g2b_track_b_db_live import _find_comparison_case
@@ -242,6 +243,34 @@ def test_verified_origin_qualifier_remains_eligible(session: Session) -> None:
     result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
     assert len(result.candidates) == 1
     assert result.candidates[0].delta_percent == Decimal("11.1")
+
+
+
+
+def test_verified_ft10_alias_reaches_matcher_through_db_prefilter(session: Session) -> None:
+    ingest_track_b_page(
+        session,
+        _page([_item(title="전기수술기, Covidien, (US)VLFT10GEN, 범용")]),
+    )
+    session.commit()
+
+    result = compare_track_b_quote(
+        session,
+        ProductQuery(
+            product_name="전기수술기(소작기)",
+            manufacturer="Medtronic",
+            model_name="FT10",
+            specification="FT10",
+        ),
+        quote_unit_price=Decimal("20000000"),
+    )
+
+    assert result.status == "success"
+    assert len(result.candidates) == 1
+    assert result.candidates[0].match_grade == MatchGrade.B
+    assert result.candidates[0].price == Decimal("90")
+    assert "model=verified_alias_with_verified_origin" in result.candidates[0].match_note
+    assert "manufacturer=verified_product_alias" in result.candidates[0].match_note
 
 
 def test_live_validation_selects_searchable_current_row_not_superseded_row(
