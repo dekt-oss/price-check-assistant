@@ -1,3 +1,4 @@
+from datetime import date
 from types import SimpleNamespace
 
 from purchase_price.scripts.collect_g2b_track_b_r2 import CollectionCursor
@@ -79,8 +80,8 @@ def test_rolling_completion_advances_independent_coverage() -> None:
     state = TrackBSupplementalState(historical_completed_codes=["4511181101"])
     state.begin_rolling(
         ("4511181101",),
-        begin=__import__("datetime").date(2026, 9, 12),
-        end=__import__("datetime").date(2026, 9, 18),
+        begin=date(2026, 9, 12),
+        end=date(2026, 9, 18),
     )
 
     summary = _summary()
@@ -114,3 +115,23 @@ def test_state_payload_round_trip_preserves_separate_cursor() -> None:
     assert restored.active_mode == "historical"
     assert restored.active_codes == ["4511181101"]
     assert restored.cursor == CollectionCursor(0, 3)
+
+
+def test_new_historical_code_resets_rolling_coverage_to_avoid_gap() -> None:
+    state = TrackBSupplementalState(
+        historical_completed_codes=["4511181101"],
+        rolling_covered_through="2026-09-18",
+        rolling_cycles_completed=1,
+    )
+    state.begin_historical(("4511181102",))
+
+    state.apply_collection(
+        _summary(
+            next_cursor=CollectionCursor(1, 1),
+            target_segments=("45",),
+        ),
+        object_keys=[],
+    )
+
+    assert state.historical_completed_codes == ["4511181101", "4511181102"]
+    assert state.rolling_covered_through == "2026-09-11"
