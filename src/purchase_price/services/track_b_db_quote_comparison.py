@@ -24,6 +24,7 @@ from purchase_price.services.matching import normalize_text
 from purchase_price.services.product_matching import (
     ProductIdentity,
     grade_product_identity,
+    is_verified_g2b_origin_qualifier,
     parse_g2b_identity,
     verified_model_lookup_keys,
 )
@@ -493,7 +494,10 @@ def compare_track_b_quote(
             manufacturer_qualifier=row.manufacturer_qualifier,
             model_name=row.model_name,
             model_qualifier=row.model_qualifier,
-            model_qualifier_verified_as_origin=row.model_qualifier_verified_as_origin,
+            model_qualifier_verified_as_origin=(
+                row.model_qualifier_verified_as_origin
+                or is_verified_g2b_origin_qualifier(row.model_qualifier)
+            ),
             specification=row.specification,
             source_title=row.product_title,
         )
