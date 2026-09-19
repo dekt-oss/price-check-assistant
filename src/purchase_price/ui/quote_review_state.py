@@ -56,7 +56,7 @@ class QuoteReviewState:
     discoveries: dict[int, G2BUnmappedDiscoveryResult | None] = field(default_factory=dict)
     market_bundles: dict[int, MarketResearchBundle | None] = field(default_factory=dict)
     track_b_db: dict[int, TrackBQuoteComparison] = field(default_factory=dict)
-    lookback_days: int = 365
+    lookback_days: int = 1095
     comparability_context: dict[int, QuoteComparabilityContext] = field(default_factory=dict)
     approvals: dict[str, QuoteComparableApproval] = field(default_factory=dict)
     reviewer: str = ""
