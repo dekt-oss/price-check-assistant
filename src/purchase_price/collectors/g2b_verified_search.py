@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from purchase_price.clients.data_go_kr import PublicDataPortalClient
 from purchase_price.schemas import CollectedPrice, ProductQuery
 from purchase_price.services.g2b_adaptive_search import search_mapped_g2b_candidates_adaptive
+from purchase_price.services.g2b_search_policy import G2B_DEFAULT_LOOKBACK_DAYS
 from purchase_price.services.g2b_product_mapping import (
     G2BProductMapping,
     resolve_verified_g2b_mapping,
@@ -37,7 +38,7 @@ class VerifiedG2BShoppingSearchCollector(PriceCollector):
         *,
         collector: G2BShoppingCollector | None = None,
         mappings: tuple[G2BProductMapping, ...] | None = None,
-        lookback_days: int = 365,
+        lookback_days: int = G2B_DEFAULT_LOOKBACK_DAYS,
         end_date: date | None = None,
         base_url: str = G2B_SHOPPING_BASE_URL,
         timeout_seconds: float = 20.0,
