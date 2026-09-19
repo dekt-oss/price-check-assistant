@@ -23,6 +23,7 @@ from purchase_price.services.g2b_track_b_normalization import (
 from purchase_price.services.matching import normalize_text
 from purchase_price.services.product_matching import (
     ProductIdentity,
+    equivalent_model_keys,
     grade_product_identity,
     parse_g2b_identity,
 )
@@ -456,6 +457,7 @@ def compare_track_b_quote(
     if limit < 1 or limit > 500:
         raise ValueError("limit must be between 1 and 500")
     model_key = normalize_text(query.model_name)
+    model_keys = equivalent_model_keys(query.model_name)
     class_key = normalize_text(query.product_name)
     if not model_key and not class_key:
         return TrackBQuoteComparison("insufficient_identity", (), 0)
@@ -468,8 +470,8 @@ def compare_track_b_quote(
         )
     )
     identity_filter = (
-        TrackBDeliveryLine.model_key == model_key
-        if model_key
+        TrackBDeliveryLine.model_key.in_(model_keys)
+        if model_keys
         else TrackBDeliveryLine.class_key == class_key
     )
     rows = session.scalars(
