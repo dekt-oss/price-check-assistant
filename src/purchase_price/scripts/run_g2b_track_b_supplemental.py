@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL
 from purchase_price.config import get_settings
 from purchase_price.scripts.collect_g2b_track_b_r2 import collect_track_b_batch
 from purchase_price.scripts.run_g2b_track_b_daily import (
@@ -16,6 +17,7 @@ from purchase_price.scripts.run_g2b_track_b_daily import (
     _kst_today,
     _next_rolling_window,
 )
+from purchase_price.services.g2b_catalog import G2B_CATALOG_BASE_URL
 from purchase_price.services.track_b_pipeline_state import (
     BACKFILL_BEGIN_DATE,
     BACKFILL_END_DATE,
@@ -161,8 +163,8 @@ def run_supplemental(*, request_budget: int, summary_path: Path) -> int:
         catalog_client=catalog_client,
         shopping_client=shopping_client,
         store=manifesting_store,
-        catalog_base_url=settings.g2b_catalog_base_url,
-        shopping_base_url=settings.g2b_shopping_base_url,
+        catalog_base_url=settings.g2b_catalog_base_url or G2B_CATALOG_BASE_URL,
+        shopping_base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
         begin=begin,
         end=end,
         start_cursor=state.cursor,
