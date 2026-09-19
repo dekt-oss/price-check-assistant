@@ -22,6 +22,9 @@ def test_r2_serving_index_pr_gate_is_read_only_recovery_proof() -> None:
     assert "recovery-readiness:" in text
     assert "Verify legacy state recovery proof without writing R2" in text
     assert "legacy_bootstrap_proof=" in text
+    assert "Read-only transition status audit" in text
+    assert "track-b-transition-readonly" in text
+    assert "audit_track_b_transition" in text
     assert "state_store.write_json" not in text
 
 
@@ -64,3 +67,16 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     assert "상세 조사·근거 보기" in page_text
     assert "model_probe_query = model_probe_input.to_product_query()" in page_text
     assert "query = model_probe_query" in page_text
+
+
+def test_r2_serving_index_run_audits_historical_to_rolling_transition() -> None:
+    text = Path(".github/workflows/track-b-r2-serving-index.yml").read_text()
+
+    assert "Audit historical to rolling transition" in text
+    assert "audit_track_b_transition" in text
+    assert "--require-serving-synced" in text
+    assert "transition-audit.json" in text
+    assert "acceptance_status=" in text
+    assert "issue_157_acceptance=" in text
+    assert "historical_remaining_codes=" in text
+    assert "rolling_cycles_completed=" in text
