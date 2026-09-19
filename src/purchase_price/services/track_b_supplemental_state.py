@@ -96,7 +96,6 @@ class TrackBSupplementalState:
         cycles = int(payload.get("rolling_cycles_completed") or 0)
         if cycles < 0:
             raise ValueError("Track B supplemental rolling cycle count cannot be negative")
-        pending = _canonical_codes(payload.get("pending_object_keys"), label="pending_object_keys") if False else None
         pending_raw = payload.get("pending_object_keys") or []
         if not isinstance(pending_raw, list) or not all(isinstance(v, str) for v in pending_raw):
             raise ValueError("Track B supplemental pending_object_keys must be a string list")
@@ -189,6 +188,7 @@ class TrackBSupplementalState:
             if key not in self.pending_object_keys:
                 self.pending_object_keys.append(key)
 
+        target_codes = list(self.active_codes)
         cycle_complete = (
             summary.status == "SUCCESS"
             and summary.next_cursor.code_index >= len(self.active_codes)
@@ -225,7 +225,7 @@ class TrackBSupplementalState:
                 "code_index": summary.next_cursor.code_index,
                 "page_no": summary.next_cursor.page_no,
             },
-            "target_codes": list(self.active_codes) if not cycle_complete else [],
+            "target_codes": target_codes,
             "cycle_complete": cycle_complete,
             "track_b_requests": summary.track_b_requests,
             "pages_stored": summary.pages_stored,
