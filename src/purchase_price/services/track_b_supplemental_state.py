@@ -196,9 +196,16 @@ class TrackBSupplementalState:
         mode = self.active_mode
         if cycle_complete:
             if mode == "historical":
+                previously_completed = set(self.historical_completed_codes)
+                newly_completed = set(self.active_codes).difference(previously_completed)
                 self.historical_completed_codes = sorted(
-                    set(self.historical_completed_codes).union(self.active_codes)
+                    previously_completed.union(self.active_codes)
                 )
+                if newly_completed and self.rolling_covered_through != BACKFILL_END_DATE:
+                    # A newly introduced supplemental code has no rolling coverage yet. Reset the
+                    # small supplemental lane to the historical boundary so the next rolling
+                    # cycles replay all verified supplemental codes without creating a date gap.
+                    self.rolling_covered_through = BACKFILL_END_DATE
             else:
                 assert self.rolling_window_end is not None
                 self.rolling_covered_through = self.rolling_window_end
