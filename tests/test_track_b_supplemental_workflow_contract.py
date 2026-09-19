@@ -35,3 +35,14 @@ def test_serving_index_consumes_base_and_supplemental_pending_keys() -> None:
     assert "[*base_indexed_keys, *supplemental_indexed_keys]" in text
     assert "supplemental.mark_pending_indexed" in text
     assert '"Track B Supplemental Collection"' in workflow
+
+
+def test_serving_index_has_supplemental_cx30n_acceptance_smoke() -> None:
+    workflow = Path(".github/workflows/track-b-r2-serving-index.yml").read_text()
+
+    assert "Verify supplemental CX30N serving acceptance" in workflow
+    assert 'target_code = "4511181101"' in workflow
+    assert 'model_name="CX30N"' in workflow
+    assert 'manufacturer="WIDE"' in workflow
+    assert '"unavailable", "not_ingested"' in workflow
+    assert "cx30n-supplemental-serving-smoke.json" in workflow
