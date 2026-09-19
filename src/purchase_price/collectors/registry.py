@@ -1,4 +1,5 @@
 from purchase_price.config import get_settings
+from purchase_price.services.g2b_search_policy import G2B_DEFAULT_LOOKBACK_DAYS
 
 from .base import PriceCollector
 from .g2b_shopping import G2B_SHOPPING_BASE_URL
@@ -12,7 +13,7 @@ def build_collectors(
     include_mock: bool = False,
     include_manufacturer_public: bool = True,
     include_g2b: bool = True,
-    g2b_lookback_days: int = 365,
+    g2b_lookback_days: int = G2B_DEFAULT_LOOKBACK_DAYS,
 ) -> list[PriceCollector]:
     """Build the user-facing collector set.
 
