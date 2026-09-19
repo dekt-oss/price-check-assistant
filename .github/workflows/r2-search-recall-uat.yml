@@ -10,9 +10,12 @@ on:
       - "data/model_aliases.csv"
       - "src/purchase_price/services/product_matching.py"
       - "src/purchase_price/scripts/measure_r2_search_recall.py"
+      - "src/purchase_price/scripts/diagnose_r2_zero_recall.py"
+      - "data/g2b_product_mappings.csv"
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
       - "tests/test_measure_r2_search_recall.py"
+      - "tests/test_diagnose_r2_zero_recall.py"
 
 permissions:
   contents: read
@@ -37,18 +40,30 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
       - name: Run deterministic recall unit tests
-        run: pytest -q tests/test_measure_r2_search_recall.py
+        run: >-
+          pytest -q
+          tests/test_measure_r2_search_recall.py
+          tests/test_diagnose_r2_zero_recall.py
       - name: Measure Production R2 recall without writes
         run: >-
           python -m purchase_price.scripts.measure_r2_search_recall
           --manifest data/uat/r2-search-recall-cases.json
           --output artifacts/r2-search-recall/report.json
           --summary artifacts/r2-search-recall/summary.md
-      - name: Print recall summary
+      - name: Diagnose Production R2 ZERO causes
+        run: >-
+          python -m purchase_price.scripts.diagnose_r2_zero_recall
+          --recall-report artifacts/r2-search-recall/report.json
+          --output artifacts/r2-search-recall/zero-diagnostic.json
+          --summary artifacts/r2-search-recall/zero-diagnostic.md
+      - name: Print recall and ZERO diagnostic summaries
         if: always()
         run: |
           if [ -f artifacts/r2-search-recall/summary.md ]; then
             cat artifacts/r2-search-recall/summary.md
+          fi
+          if [ -f artifacts/r2-search-recall/zero-diagnostic.md ]; then
+            cat artifacts/r2-search-recall/zero-diagnostic.md
           fi
       - name: Upload recall evidence
         if: always()
