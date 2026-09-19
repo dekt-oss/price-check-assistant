@@ -7,6 +7,7 @@ on:
       - "src/purchase_price/scripts/sync_g2b_track_b_r2_index.py"
       - "src/purchase_price/scripts/audit_track_b_transition.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
+      - "src/purchase_price/services/track_b_supplemental_state.py"
   push:
     branches:
       - main
@@ -21,6 +22,7 @@ on:
   workflow_run:
     workflows:
       - "Track B Daily Backfill"
+      - "Track B Supplemental Collection"
     types:
       - completed
     branches:
