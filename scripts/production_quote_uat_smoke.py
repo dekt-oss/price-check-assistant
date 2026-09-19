@@ -19,6 +19,8 @@ EXPECT_QUOTE_IMAGES = os.getenv("EXPECT_QUOTE_IMAGES", "").strip().casefold() in
 }
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
+STREAMLIT_SLEEP_MARKER = "This app has gone to sleep due to inactivity."
+STREAMLIT_WAKE_TEXT = "Yes, get this app back up!"
 COMMERCIAL_GUIDANCE_PATTERN = re.compile(
     r"배송·설치·옵션·보증·유지보수·기타조건도\s+원문에\s+명시된\s+경우"
 )
@@ -26,6 +28,21 @@ COMMERCIAL_GUIDANCE_PATTERN = re.compile(
 
 def _app_frame(page: Any) -> Any:
     return page.frame_locator(APP_IFRAME)
+
+
+def _wake_streamlit_cloud_if_sleeping(page: Any, *, timeout: int = 60_000) -> bool:
+    try:
+        outer_body = page.locator("body").inner_text(timeout=5_000)
+    except Exception:
+        return False
+    if STREAMLIT_SLEEP_MARKER not in outer_body:
+        return False
+    wake = page.get_by_text(STREAMLIT_WAKE_TEXT, exact=True)
+    if wake.count() < 1:
+        raise RuntimeError("Streamlit Cloud sleep screen rendered without its wake control")
+    wake.first.click(timeout=10_000)
+    page.locator(APP_IFRAME).wait_for(state="attached", timeout=timeout)
+    return True
 
 
 def _build_synthetic_quote(path: Path) -> None:
@@ -116,6 +133,7 @@ def _build_synthetic_quote_image(path: Path) -> None:
 
 def _open_uat(page: Any) -> Any:
     page.goto(UAT_URL, wait_until="domcontentloaded", timeout=60_000)
+    _wake_streamlit_cloud_if_sleeping(page)
     app = _app_frame(page)
     app.get_by_role("heading", name="견적추출 UAT", exact=True).wait_for(
         state="visible", timeout=60_000
