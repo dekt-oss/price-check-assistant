@@ -1,6 +1,11 @@
 name: Track B R2 Ground Truth Capture
 
 on:
+  # Temporary one-shot trigger for read-only Ground Truth candidate refresh.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/track-b-r2-ground-truth-capture.yml"
   pull_request:
     paths:
       - ".github/workflows/track-b-r2-ground-truth-capture.yml"
