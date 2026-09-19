@@ -15,6 +15,10 @@ from purchase_price.services.pricing import assess_prices
 from purchase_price.services.search import SearchRun
 
 
+def _money_text(value: Decimal | float | int) -> str:
+    return f"{value:,.0f}원"
+
+
 @dataclass(frozen=True)
 class ObservationGroup:
     source_name: str
@@ -59,7 +63,7 @@ def evidence_rows(items: Iterable[CollectedPrice]) -> list[dict[str, object]]:
         rows.append(
             {
                 "출처": item.source_name,
-                "단가": float(item.price),
+                "단가": _money_text(item.price),
                 "통화": item.currency,
                 "등급": item.match_grade.value,
                 "Evidence Type": item.evidence_type.value,
@@ -99,7 +103,6 @@ def _render_evidence_rows(rows: list[dict[str, object]]) -> None:
         pd.DataFrame(rows),
         use_container_width=True,
         hide_index=True,
-        column_config={"단가": st.column_config.NumberColumn(format="%d")},
     )
 
 
@@ -164,7 +167,7 @@ def discovery_candidate_rows(discovery: G2BUnmappedDiscoveryResult) -> list[dict
             "세부품명코드": candidate.classification_code,
             "탐색어": candidate.search_term,
             "관련 근거": candidate.match_reason,
-            "표기 금액 (미검증)": float(candidate.price),
+            "표기 금액 (미검증)": _money_text(candidate.price),
             "근거ID": candidate.source_record_id,
         }
         for candidate in discovery.candidates
@@ -214,7 +217,6 @@ def render_discovery_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
             hide_index=True,
             column_config={
                 "점수": st.column_config.NumberColumn(format="%d"),
-                "표기 금액 (미검증)": st.column_config.NumberColumn(format="%d"),
             },
         )
         st.warning(

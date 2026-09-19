@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from purchase_price.services.g2b_search_policy import G2B_DEFAULT_LOOKBACK_DAYS
 from purchase_price.services.quote_comparability import evaluate_quote_comparability_candidate
 
 if TYPE_CHECKING:
@@ -56,7 +57,7 @@ class QuoteReviewState:
     discoveries: dict[int, G2BUnmappedDiscoveryResult | None] = field(default_factory=dict)
     market_bundles: dict[int, MarketResearchBundle | None] = field(default_factory=dict)
     track_b_db: dict[int, TrackBQuoteComparison] = field(default_factory=dict)
-    lookback_days: int = 365
+    lookback_days: int = G2B_DEFAULT_LOOKBACK_DAYS
     comparability_context: dict[int, QuoteComparabilityContext] = field(default_factory=dict)
     approvals: dict[str, QuoteComparableApproval] = field(default_factory=dict)
     reviewer: str = ""
