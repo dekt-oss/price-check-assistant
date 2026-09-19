@@ -272,6 +272,52 @@ def _verified_product_model_alias(
     return False
 
 
+def verified_model_lookup_keys(
+    query: ProductQuery,
+    *,
+    manufacturer_aliases: dict[str, str] | None = None,
+    verified_model_aliases: tuple[VerifiedModelAlias, ...] | None = None,
+) -> tuple[str, ...]:
+    """Return exact + explicitly verified alias model keys for the DB prefilter.
+
+    This function deliberately does not relax manufacturer checks in SQL. Alias rows are merely
+    admitted to the candidate set; grade_product_identity still requires the registry exact
+    product-scoped manufacturer pair before an alias can become A/B evidence.
+    """
+
+    query_model = normalize_text(query.model_name)
+    if not query_model:
+        return ()
+    aliases = (
+        manufacturer_aliases
+        if manufacturer_aliases is not None
+        else load_manufacturer_aliases()
+    )
+    model_aliases = (
+        verified_model_aliases
+        if verified_model_aliases is not None
+        else load_verified_model_aliases()
+    )
+    query_manufacturer = canonical_manufacturer(query.manufacturer, aliases)
+    keys = [query_model]
+    if query_manufacturer is None:
+        return tuple(keys)
+
+    for relation in model_aliases:
+        canonical_model = normalize_text(relation.canonical_model)
+        alias_model = normalize_text(relation.alias_model)
+        relation_query_manufacturer = canonical_manufacturer(
+            relation.query_manufacturer, aliases
+        )
+        relation_candidate_manufacturer = canonical_manufacturer(
+            relation.candidate_manufacturer, aliases
+        )
+        if query_model == canonical_model and query_manufacturer == relation_query_manufacturer:
+            keys.append(alias_model)
+        elif query_model == alias_model and query_manufacturer == relation_candidate_manufacturer:
+            keys.append(canonical_model)
+    return tuple(dict.fromkeys(keys))
+
 def _spec_tokens(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
