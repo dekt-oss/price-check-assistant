@@ -409,3 +409,66 @@ def test_oxford_nanopore_alias_is_recognized_but_unverified_gb_qualifier_stays_x
     assert decision.model_state == "exact_with_unverified_qualifier"
     assert decision.manufacturer_state == "exact_or_alias"
     assert "model_qualifier=GB" in decision.note
+
+
+def test_verified_ft10_order_code_alias_recovers_direct_b() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="전기수술기(소작기)",
+            manufacturer="Medtronic",
+            model_name="FT10",
+            specification="FT10",
+        ),
+        parse_g2b_identity(
+            "전기수술기, Covidien, (US)VLFT10GEN, 범용"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.B
+    assert decision.model_state == "verified_alias_with_verified_origin"
+    assert decision.manufacturer_state == "verified_product_alias"
+    assert decision.specification_state == "not_provided"
+    assert "model_qualifier=US" in decision.note
+
+
+def test_ft10_order_code_alias_requires_the_registered_manufacturer_pair() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="전기수술기(소작기)",
+            manufacturer="Medtronic",
+            model_name="FT10",
+        ),
+        parse_g2b_identity(
+            "전기수술기, Other Medical, (US)VLFT10GEN, 범용"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert decision.model_state == "conflict"
+    assert decision.manufacturer_state == "conflict"
+
+
+def test_unrelated_3m_ft10_literal_model_stays_x() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="전기수술기(소작기)",
+            manufacturer="Medtronic",
+            model_name="FT10",
+        ),
+        parse_g2b_identity(
+            "방독면누출시험기, 3M, FT-10, 호흡보호구 fit test 기기"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert decision.model_state == "exact"
+    assert decision.manufacturer_state == "conflict"
+
+
+def test_us_g2b_qualifier_is_verified_origin_metadata() -> None:
+    identity = parse_g2b_identity(
+        "모의태양장치, Innovations In Optics, (US)LED-50-4-4-N2V-C-25, 650×250×550mm"
+    )
+
+    assert identity.model_qualifier == "US"
+    assert identity.model_qualifier_verified_as_origin is True
