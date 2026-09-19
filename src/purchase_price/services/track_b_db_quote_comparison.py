@@ -22,7 +22,6 @@ from purchase_price.services.g2b_track_b_normalization import (
 )
 from purchase_price.services.matching import normalize_text
 from purchase_price.services.product_matching import (
-    ProductIdentity,
     equivalent_model_keys,
     grade_product_identity,
     parse_g2b_identity,
