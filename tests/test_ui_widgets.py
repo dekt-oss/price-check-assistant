@@ -7,7 +7,7 @@ from purchase_price.services.g2b_unmapped_discovery import (
     G2BDiscoveryCandidate,
     G2BUnmappedDiscoveryResult,
 )
-from purchase_price.ui.widgets import build_observation_groups, discovery_candidate_rows
+from purchase_price.ui.widgets import build_observation_groups, discovery_candidate_rows, evidence_rows
 
 
 def _evidence(source: str, vat: str, price: str) -> CollectedPrice:
@@ -63,6 +63,12 @@ def test_discovery_candidate_amount_is_explicitly_unverified() -> None:
         records_seen=1,
     )
     rows = discovery_candidate_rows(discovery)
-    assert "표기 금액 (미검증)" in rows[0]
+    assert rows[0]["표기 금액 (미검증)"] == "100원"
     assert "등급" not in rows[0]
     assert "단가" not in rows[0]
+
+
+def test_evidence_price_is_comma_formatted() -> None:
+    rows = evidence_rows([_evidence("source-a", "포함", "2981000")])
+
+    assert rows[0]["단가"] == "2,981,000원"
