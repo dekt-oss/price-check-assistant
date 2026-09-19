@@ -18,6 +18,7 @@ on:
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
+      - "src/purchase_price/services/track_b_supplemental_state.py"
       - "src/purchase_price/storage/r2_serving_index.py"
   workflow_run:
     workflows:
