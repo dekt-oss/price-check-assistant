@@ -298,6 +298,7 @@ def collect_track_b_batch(
     last_pagination_event: str | None = None
     planned_code_index: int | None = None
     planned_total_pages: int | None = None
+    reconciled_code_index: int | None = None
 
     try:
         while cursor.code_index < len(codes):
@@ -336,6 +337,12 @@ def collect_track_b_batch(
                 and reported_total_pages != planned_total_pages
             )
             if needs_reconciliation:
+                if reconciled_code_index == cursor.code_index:
+                    raise RuntimeError(
+                        "G2B pagination changed again after page-1 reconciliation: "
+                        f"code={code} page={page_no} reported={reported_total_pages} "
+                        f"planned={planned_total_pages}"
+                    )
                 if remaining <= 0:
                     stop_reason = "REQUEST_BUDGET_EXHAUSTED"
                     status = "PARTIAL_SUCCESS"
@@ -343,6 +350,7 @@ def collect_track_b_batch(
 
                 previous_horizon = planned_total_pages
                 pagination_reconciliations += 1
+                reconciled_code_index = cursor.code_index
                 remaining -= 1
                 track_b_requests += 1
                 probe_params = _track_b_params(
@@ -398,10 +406,18 @@ def collect_track_b_batch(
                         f"code={code} page={page_no} reported={reported_total_pages} "
                         f"reconciled={reconciled_total_pages} prior={previous_horizon}"
                     )
-                    codes_completed += 1
-                    cursor = CollectionCursor(code_index=cursor.code_index + 1, page_no=1)
-                    planned_code_index = None
-                    planned_total_pages = None
+                    if reconciled_total_pages == 1:
+                        codes_completed += 1
+                        cursor = CollectionCursor(code_index=cursor.code_index + 1, page_no=1)
+                        planned_code_index = None
+                        planned_total_pages = None
+                        reconciled_code_index = None
+                    else:
+                        # Page membership may have shifted when totalCount contracted. Page 1 was
+                        # just re-probed and persisted, so replay the remaining current pages from
+                        # page 2 rather than skipping the code or trusting stale page boundaries.
+                        planned_total_pages = reconciled_total_pages
+                        cursor = CollectionCursor(code_index=cursor.code_index, page_no=2)
                     continue
 
                 pagination_inconsistencies += 1
@@ -448,6 +464,7 @@ def collect_track_b_batch(
                 cursor = CollectionCursor(code_index=cursor.code_index + 1, page_no=1)
                 planned_code_index = None
                 planned_total_pages = None
+                reconciled_code_index = None
             else:
                 cursor = CollectionCursor(code_index=cursor.code_index, page_no=page_no + 1)
     except Exception as exc:
