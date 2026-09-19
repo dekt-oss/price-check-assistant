@@ -7,6 +7,8 @@ on:
       - ".github/workflows/r2-search-recall-uat.yml"
       - "data/uat/r2-search-recall-cases.json"
       - "data/manufacturer_aliases.csv"
+      - "data/model_aliases.csv"
+      - "src/purchase_price/services/product_matching.py"
       - "src/purchase_price/scripts/measure_r2_search_recall.py"
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
