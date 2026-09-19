@@ -1,7 +1,20 @@
 from __future__ import annotations
 
-from scripts import production_browser_smoke as browser_smoke
-from scripts import production_quote_uat_smoke as quote_smoke
+import importlib.util
+from pathlib import Path
+
+
+def _load_script(name: str, filename: str):
+    path = Path(__file__).resolve().parents[1] / "scripts" / filename
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+browser_smoke = _load_script("production_browser_smoke", "production_browser_smoke.py")
+quote_smoke = _load_script("production_quote_uat_smoke", "production_quote_uat_smoke.py")
 
 
 class FakeLocator:
