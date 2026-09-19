@@ -64,9 +64,30 @@ A new versioned SQLite object is uploaded before the pointer is changed. After t
 
 `state/v1/track-b/serving-index.json` points to the currently published SQLite serving index and records its hash, size, row count and build time.
 
+## Pagination reconciliation
+
+Track B does not assume that every page in one API traversal reports an identical `totalCount`.
+If a later page reports a pagination horizon that conflicts with the current traversal, or a
+resume cursor is beyond the reported horizon, the collector uses one bounded page-1 re-probe
+for the same detail code and fixed date window.
+
+- If page 1 confirms that the current page no longer exists, the event is recorded as
+  `PAGINATION_CONTRACTED`. The fresh page-1 response is stored as immutable evidence. A
+  one-page contracted result can then complete the code; if multiple pages still exist, the
+  collector replays pages 2..N under the reconciled horizon before advancing so shifted page
+  membership cannot hide records. Previously collected raw pages are never deleted.
+- If page 1 still confirms the current page exists, the event is recorded as
+  `PAGINATION_RECONCILED` and the reconciled page-1 horizon governs the rest of that code.
+- A missing `totalCount`, response page-number mismatch, empty page inside a reconciled
+  horizon, or a second horizon change after the one page-1 reconciliation still fails closed.
+- Reconciliation requests count against the same 900-request hard budget; no unbounded retry
+  loop is permitted.
+
 ## Failure behavior
 
 - Collection persists its next cursor and pending object manifest before returning a failed status.
+- The serving-index workflow also runs after a completed failed collection so any safely persisted
+  pending raw objects can be indexed; it remains fail-closed if state/evidence is invalid.
 - A serving-index failure never deletes or mutates raw evidence.
 - Pending object keys are cleared only after a new index is uploaded and its pointer is committed.
 - Replayed raw pages are safe because Track B stable identities are idempotent/conflict-aware.

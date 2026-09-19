@@ -229,6 +229,10 @@ class TrackBPipelineState:
             "stop_reason": summary.stop_reason,
             "error_type": summary.error_type,
             "error_message": summary.error_message,
+            "pagination_reconciliations": summary.pagination_reconciliations,
+            "pagination_contractions": summary.pagination_contractions,
+            "pagination_inconsistencies": summary.pagination_inconsistencies,
+            "last_pagination_event": summary.last_pagination_event,
         }
         self.updated_at = _now()
 
@@ -310,6 +314,10 @@ class TrackBPipelineState:
             "stop_reason": summary.stop_reason,
             "error_type": summary.error_type,
             "error_message": summary.error_message,
+            "pagination_reconciliations": summary.pagination_reconciliations,
+            "pagination_contractions": summary.pagination_contractions,
+            "pagination_inconsistencies": summary.pagination_inconsistencies,
+            "last_pagination_event": summary.last_pagination_event,
         }
         self.updated_at = _now()
 

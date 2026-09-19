@@ -13,6 +13,8 @@ def test_r2_serving_index_workflow_runs_after_daily_backfill() -> None:
     assert "push:" in text
     assert "branches:" in text
     assert "- main" in text
+    assert "github.event.workflow_run.conclusion == 'success'" in text
+    assert "github.event.workflow_run.conclusion == 'failure'" in text
 
 
 def test_r2_serving_index_pr_gate_is_read_only_recovery_proof() -> None:
