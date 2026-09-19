@@ -326,6 +326,7 @@ def verified_model_lookup_keys(
             keys.append(canonical_model)
     return tuple(dict.fromkeys(keys))
 
+
 def _spec_tokens(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
