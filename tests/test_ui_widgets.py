@@ -7,7 +7,11 @@ from purchase_price.services.g2b_unmapped_discovery import (
     G2BDiscoveryCandidate,
     G2BUnmappedDiscoveryResult,
 )
-from purchase_price.ui.widgets import build_observation_groups, discovery_candidate_rows
+from purchase_price.ui.widgets import (
+    _format_krw_display,
+    build_observation_groups,
+    discovery_candidate_rows,
+)
 
 
 def _evidence(source: str, vat: str, price: str) -> CollectedPrice:
@@ -66,3 +70,8 @@ def test_discovery_candidate_amount_is_explicitly_unverified() -> None:
     assert "표기 금액 (미검증)" in rows[0]
     assert "등급" not in rows[0]
     assert "단가" not in rows[0]
+
+
+def test_krw_display_uses_thousands_separator() -> None:
+    assert _format_krw_display(18900000) == "18,900,000원"
+    assert _format_krw_display(Decimal("2981000")) == "2,981,000원"

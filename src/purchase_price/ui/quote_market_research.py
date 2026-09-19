@@ -67,7 +67,7 @@ def _track_b_candidate_rows(
 ) -> list[dict[str, object]]:
     return [
         {
-            "가격": float(candidate.price),
+            "가격": _money(candidate.price),
             "판매처": candidate.supplier or "미확인",
             "구매처": candidate.demand_institution or "미확인",
             "거래일": candidate.transaction_date or "미확인",
@@ -90,7 +90,7 @@ def _track_b_reference_rows(
 ) -> list[dict[str, object]]:
     return [
         {
-            "가격": float(candidate.price),
+            "가격": _money(candidate.price),
             "판매처": candidate.supplier or "미확인",
             "구매처": candidate.demand_institution or "미확인",
             "거래일": candidate.transaction_date or "미확인",
@@ -174,7 +174,7 @@ def _render_inline_manual_item_form(state: QuoteReviewState) -> None:
         specification = c2.text_input("규격", placeholder="선택")
         quantity = c1.text_input("수량", placeholder="예: 1")
         unit = c2.text_input("단위", placeholder="예: SET")
-        unit_price = c1.text_input("견적 단가", placeholder="예: 66000000")
+        unit_price = c1.text_input("견적 단가", placeholder="예: 66,000,000")
         total_amount = c2.text_input("총액", placeholder="선택")
         vat = c1.text_input("VAT", placeholder="포함/별도/면세 등 선택")
         installation = c2.text_input("설치", placeholder="선택")
@@ -242,7 +242,7 @@ def _render_compact_item_editor(state: QuoteReviewState) -> None:
             specification = c2.text_input("규격", value=item.specification)
             unit_price = c1.text_input(
                 "견적 단가",
-                value="" if item.unit_price is None else format(item.unit_price, "f"),
+                value="" if item.unit_price is None else f"{item.unit_price:,.0f}",
             )
             quantity = c2.text_input(
                 "수량",
@@ -312,9 +312,6 @@ def _render_transaction_table(rows: list[dict[str, object]]) -> None:
         rows,
         use_container_width=True,
         hide_index=True,
-        column_config={
-            "가격": st.column_config.NumberColumn("가격", format="%d원"),
-        },
     )
 
 

@@ -16,10 +16,11 @@ class NeverCalledG2BCollector:
         raise AssertionError(f"unexpected live G2B call: {kwargs}")
 
 
-def test_g2b_period_policy_defaults_to_one_year_and_supports_five_years() -> None:
-    assert G2B_DEFAULT_LOOKBACK_DAYS == 365
+def test_g2b_period_policy_defaults_to_three_years_and_supports_five_years() -> None:
+    assert G2B_DEFAULT_LOOKBACK_DAYS == 1095
     assert G2B_LOOKBACK_OPTIONS == (365, 730, 1095, 1825)
-    assert g2b_lookback_label(365) == "최근 1년 (기본)"
+    assert g2b_lookback_label(365) == "최근 1년"
+    assert g2b_lookback_label(1095) == "최근 3년 (기본)"
     assert g2b_lookback_label(1825) == "최근 5년"
 
 
@@ -64,7 +65,7 @@ def test_verified_collector_raises_skip_before_any_api_call_for_unmapped_model()
         raise AssertionError("CollectorSkipped was not raised")
 
 
-def test_registry_default_g2b_window_is_one_year(monkeypatch) -> None:
+def test_registry_default_g2b_window_is_three_years(monkeypatch) -> None:
     monkeypatch.setenv("G2B_SERVICE_KEY", "g2b-test-service-key")
     monkeypatch.setenv("DATA_GO_KR_MARKET_SERVICE_KEY", "")
     monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "")
@@ -76,6 +77,6 @@ def test_registry_default_g2b_window_is_one_year(monkeypatch) -> None:
             for collector in collectors
             if isinstance(collector, VerifiedG2BShoppingSearchCollector)
         )
-        assert g2b.lookback_days == 365
+        assert g2b.lookback_days == 1095
     finally:
         get_settings.cache_clear()

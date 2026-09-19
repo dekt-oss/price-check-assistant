@@ -53,7 +53,7 @@ def test_track_b_table_exposes_purchase_transaction_context() -> None:
 
     rows = quote_market_research._track_b_candidate_rows((candidate,))
 
-    assert rows[0]["가격"] == 90.0
+    assert rows[0]["가격"] == "90원"
     assert rows[0]["판매처"] == "공급사A"
     assert rows[0]["구매처"] == "구매기관B"
     assert rows[0]["거래일"] == "2026-09-01"
@@ -79,7 +79,7 @@ def test_reference_rows_expose_price_but_make_reference_scope_explicit() -> None
 
     rows = quote_market_research._track_b_reference_rows((candidate,))
 
-    assert rows[0]["가격"] == 60000000.0
+    assert rows[0]["가격"] == "60,000,000원"
     assert rows[0]["판매처"] == "공급사C"
     assert rows[0]["구매처"] == "병원D"
     assert rows[0]["비교수준"] == "품명 키워드 참고 · 마취기"
@@ -100,3 +100,7 @@ def test_similar_identity_rows_never_expose_price() -> None:
     assert rows[0]["모델명"] == "MA-045DT"
     assert "가격" not in rows[0]
     assert "견적 대비" not in rows[0]
+
+
+def test_money_display_uses_thousands_separator() -> None:
+    assert quote_market_research._money(Decimal("18900000")) == "18,900,000원"
