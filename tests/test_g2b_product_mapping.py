@@ -64,15 +64,19 @@ class StubCollector:
 def test_default_registry_contains_all_phase0_rows_and_verified_rows_resolve() -> None:
     mappings = load_g2b_product_mappings()
 
-    assert len(mappings) == 20
+    assert len(mappings) == 21
     verified_models = {mapping.model_name for mapping in mappings if mapping.verified}
     assert {
         "Sophie",
         "NT960XJG-K72AG",
         "ApeosPrint C5570 GK",
         "ThinkStation P2 Tower",
+        "TN500",
+        "MAC5",
+        "ROTAPRO",
+        "APC-30D",
+        "CX30N",
     } <= verified_models
-    assert "TN500" not in verified_models
 
     sophie = resolve_verified_g2b_mapping(ProductQuery(model_name="Sophie"), mappings)
     galaxy = resolve_verified_g2b_mapping(
@@ -98,7 +102,9 @@ def test_default_registry_contains_all_phase0_rows_and_verified_rows_resolve() -
     assert workstation is not None
     assert workstation.detail_product_name == "워크스테이션"
     assert workstation.detail_product_code == "4321151501"
-    assert tn500 is None
+    assert tn500 is not None
+    assert tn500.detail_product_name == "보육기"
+    assert tn500.detail_product_code == "4227171401"
 
 
 def test_model_token_candidate_filter_ignores_punctuation_and_rejects_other_models() -> None:
@@ -377,3 +383,19 @@ def test_every_verified_registry_row_carries_an_enforceable_code() -> None:
     for mapping in load_g2b_product_mappings():
         if mapping.verified:
             assert mapping.detail_product_code, mapping.model_name
+
+
+def test_new_zero_case_mappings_resolve_with_enforceable_codes() -> None:
+    mappings = load_g2b_product_mappings()
+    expected = {
+        "APC-30D": ("이산화탄소배양기", "4110449801"),
+        "MAC5": ("심전계", "4218170101"),
+        "TN500": ("보육기", "4227171401"),
+        "ROTAPRO": ("혈관강박리카테터장치", "4220341801"),
+        "CX30N": ("영상모니터", "4511181101"),
+    }
+
+    for model, identity in expected.items():
+        mapping = resolve_verified_g2b_mapping(ProductQuery(model_name=model), mappings)
+        assert mapping is not None
+        assert (mapping.detail_product_name, mapping.detail_product_code) == identity
