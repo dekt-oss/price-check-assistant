@@ -409,3 +409,40 @@ def test_oxford_nanopore_alias_is_recognized_but_unverified_gb_qualifier_stays_x
     assert decision.model_state == "exact_with_unverified_qualifier"
     assert decision.manufacturer_state == "exact_or_alias"
     assert "model_qualifier=GB" in decision.note
+
+
+def test_verified_us_origin_and_ft10_order_code_alias_produce_direct_b() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="전기수술기(소작기)",
+            manufacturer="Medtronic",
+            model_name="FT10",
+            specification="FT10",
+        ),
+        parse_g2b_identity(
+            "전기수술기, Covidien, (US)VLFT10GEN, 범용"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.B
+    assert decision.model_state == "verified_alias_with_verified_origin"
+    assert decision.manufacturer_state == "exact_or_alias"
+    assert decision.specification_state == "not_provided"
+    assert "model_qualifier=US" in decision.note
+
+
+def test_ft10_literal_collision_from_3m_still_fails_closed_on_manufacturer() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="전기수술기(소작기)",
+            manufacturer="Medtronic",
+            model_name="FT10",
+        ),
+        parse_g2b_identity(
+            "방독면누출시험기, 3M, FT-10, 호흡보호구 fit test 기기"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert decision.model_state == "exact"
+    assert decision.manufacturer_state == "conflict"
