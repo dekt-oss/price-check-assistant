@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 from purchase_price.config import get_settings
 from purchase_price.scripts.collect_g2b_track_b_r2 import (
     TARGET_SEGMENTS,
-    CollectionCursor,
     collect_track_b_batch,
 )
 from purchase_price.scripts.run_g2b_track_b_daily import (
