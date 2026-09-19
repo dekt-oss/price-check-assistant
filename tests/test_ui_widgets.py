@@ -7,7 +7,11 @@ from purchase_price.services.g2b_unmapped_discovery import (
     G2BDiscoveryCandidate,
     G2BUnmappedDiscoveryResult,
 )
-from purchase_price.ui.widgets import build_observation_groups, discovery_candidate_rows, evidence_rows
+from purchase_price.ui.widgets import (
+    build_observation_groups,
+    discovery_candidate_rows,
+    evidence_rows,
+)
 
 
 def _evidence(source: str, vat: str, price: str) -> CollectedPrice:
