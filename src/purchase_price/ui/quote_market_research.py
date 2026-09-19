@@ -90,7 +90,7 @@ def _track_b_reference_rows(
 ) -> list[dict[str, object]]:
     return [
         {
-            "가격": float(candidate.price),
+            "가격": _money(candidate.price),
             "판매처": candidate.supplier or "미확인",
             "구매처": candidate.demand_institution or "미확인",
             "거래일": candidate.transaction_date or "미확인",
