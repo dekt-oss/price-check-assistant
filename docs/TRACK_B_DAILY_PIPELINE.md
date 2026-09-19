@@ -72,12 +72,14 @@ resume cursor is beyond the reported horizon, the collector uses one bounded pag
 for the same detail code and fixed date window.
 
 - If page 1 confirms that the current page no longer exists, the event is recorded as
-  `PAGINATION_CONTRACTED`. The fresh page-1 response is stored as immutable evidence and the
-  code advances without deleting previously collected pages.
+  `PAGINATION_CONTRACTED`. The fresh page-1 response is stored as immutable evidence. A
+  one-page contracted result can then complete the code; if multiple pages still exist, the
+  collector replays pages 2..N under the reconciled horizon before advancing so shifted page
+  membership cannot hide records. Previously collected raw pages are never deleted.
 - If page 1 still confirms the current page exists, the event is recorded as
   `PAGINATION_RECONCILED` and the reconciled page-1 horizon governs the rest of that code.
-- A missing `totalCount`, response page-number mismatch, or empty page inside a reconciled
-  horizon still fails closed.
+- A missing `totalCount`, response page-number mismatch, empty page inside a reconciled
+  horizon, or a second horizon change after the one page-1 reconciliation still fails closed.
 - Reconciliation requests count against the same 900-request hard budget; no unbounded retry
   loop is permitted.
 
