@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from purchase_price.scripts.collect_g2b_track_b_r2 import CollectionCursor, CollectionSummary
 from purchase_price.scripts.run_g2b_track_b_supplemental import verified_supplemental_codes
 from purchase_price.services.track_b_pipeline_state import BACKFILL_END_DATE
@@ -93,8 +95,8 @@ def test_supplemental_rolling_cycle_advances_only_after_all_explicit_codes_compl
         _summary(target_count=1, next_cursor=CollectionCursor(1, 1))
     )
     state.begin_rolling_cycle(
-        begin=__import__("datetime").date(2026, 9, 12),
-        end=__import__("datetime").date(2026, 9, 18),
+        begin=date(2026, 9, 12),
+        end=date(2026, 9, 18),
     )
 
     state.apply_rolling_collection(
