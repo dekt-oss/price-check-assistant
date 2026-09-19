@@ -24,9 +24,9 @@ from purchase_price.services.g2b_product_mapping import load_g2b_product_mapping
 from purchase_price.services.track_b_pipeline_state import (
     BACKFILL_BEGIN_DATE,
     BACKFILL_END_DATE,
-    STATE_NAME as BASE_STATE_NAME,
     TrackBPipelineState,
 )
+from purchase_price.services.track_b_pipeline_state import STATE_NAME as BASE_STATE_NAME
 from purchase_price.services.track_b_supplemental_state import (
     STATE_NAME,
     TrackBSupplementalState,
