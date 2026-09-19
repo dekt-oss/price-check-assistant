@@ -628,3 +628,82 @@ def test_verified_contraction_advances_to_next_code_without_restart_loop(
     assert summary.codes_completed == 2
     assert summary.next_cursor == CollectionCursor(2, 1)
     assert [params["pageNo"] for _, params in shopping.calls] == [7, 1, 1]
+
+
+
+def test_contracted_multi_page_horizon_replays_current_pages_before_advancing(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient(
+        [
+            _response([], total=2, page=7, rows=2),
+            _response([{"row": 1}, {"row": 2}], total=6, page=1, rows=2),
+            _response([{"row": 3}, {"row": 4}], total=6, page=2, rows=2),
+            _response([{"row": 5}, {"row": 6}], total=6, page=3, rows=2),
+        ]
+    )
+    store = FakeStore()
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=store,
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 7),
+        request_budget=4,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "SUCCESS"
+    assert summary.pagination_contractions == 1
+    assert summary.pagination_reconciliations == 1
+    assert summary.codes_completed == 1
+    assert summary.pages_stored == 3
+    assert summary.rows_seen == 6
+    assert summary.next_cursor == CollectionCursor(1, 1)
+    assert [params["pageNo"] for _, params in shopping.calls] == [7, 1, 2, 3]
+
+
+def test_second_horizon_change_after_reconciliation_fails_closed_without_loop(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient(
+        [
+            _response([], total=2, page=7, rows=2),
+            _response([{"row": 1}, {"row": 2}], total=6, page=1, rows=2),
+            _response([{"row": 3}, {"row": 4}], total=4, page=2, rows=2),
+        ]
+    )
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 7),
+        request_budget=20,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "FAILED"
+    assert summary.stop_reason == "SOURCE_OR_STORAGE_ERROR"
+    assert summary.pagination_reconciliations == 1
+    assert summary.track_b_requests == 3
+    assert summary.pages_stored == 1
+    assert summary.next_cursor == CollectionCursor(0, 2)
+    assert "changed again after page-1 reconciliation" in (summary.error_message or "")
+    assert [params["pageNo"] for _, params in shopping.calls] == [7, 1, 2]
