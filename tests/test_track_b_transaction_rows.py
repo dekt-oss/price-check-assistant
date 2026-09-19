@@ -25,7 +25,7 @@ def test_legacy_comparison_without_reference_candidates_does_not_crash() -> None
     assert has_transaction_candidates(legacy_comparison) is True
     assert rows == [
         {
-            "가격": 2981000.0,
+            "가격": "2,981,000원",
             "판매처": "미확인",
             "구매처": "미확인",
             "거래일": "미확인",
@@ -59,7 +59,7 @@ def test_reference_candidate_renders_purchase_facing_metadata() -> None:
 
     assert candidate_counts(comparison) == (0, 1)
     assert has_transaction_candidates(comparison) is True
-    assert rows[0]["가격"] == 9900000.0
+    assert rows[0]["가격"] == "9,900,000원"
     assert rows[0]["판매처"] == "테스트공급사"
     assert rows[0]["구매처"] == "테스트병원"
     assert rows[0]["거래일"] == "2026-08-01"
@@ -103,3 +103,14 @@ def test_empty_legacy_comparison_is_safe() -> None:
     assert transaction_rows(comparison) == []
     assert candidate_counts(comparison) == (0, 0)
     assert has_transaction_candidates(comparison) is False
+
+
+def test_transaction_prices_are_comma_formatted() -> None:
+    candidate = SimpleNamespace(
+        price=Decimal("18900000"),
+        product_title="전기수술기, Covidien, VLFT10GEN",
+        match_grade=MatchGrade.B,
+    )
+    comparison = SimpleNamespace(candidates=(candidate,), reference_candidates=(), status="success")
+
+    assert transaction_rows(comparison)[0]["가격"] == "18,900,000원"
