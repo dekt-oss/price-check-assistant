@@ -13,12 +13,15 @@ from purchase_price.services.matching import normalize_text
 DEFAULT_MANUFACTURER_ALIAS_PATH = (
     Path(__file__).resolve().parents[3] / "data" / "manufacturer_aliases.csv"
 )
+DEFAULT_VERIFIED_MODEL_ALIAS_PATH = (
+    Path(__file__).resolve().parents[3] / "data" / "verified_model_aliases.csv"
+)
 
-# G2B 목록정보 공식 품목 상세에서 상품원산지국가명 중국(CN)/베트남(VN)이
-# 품목명의 모델 앞에 `(CN)`/`(VN)`으로 반복 표기되는 것을 검증했다. 이 두 값만
-# G2B parser가 원산지 메타데이터로 확인한다. Generic ProductIdentity의 qualifier 문자열만으로
-# 신뢰하지 않으며, 다른 qualifier는 계속 fail-closed한다.
-VERIFIED_G2B_ORIGIN_QUALIFIERS = frozenset({"CN", "VN"})
+# G2B 목록정보 공식 품목 상세에서 상품원산지국가명 중국(CN)/베트남(VN)/미국(US)이
+# 품목명의 모델 앞에 같은 국가코드로 반복 표기되는 것을 검증했다. 이 값만 G2B parser가
+# 원산지 메타데이터로 확인한다. Generic ProductIdentity의 qualifier 문자열만으로 신뢰하지
+# 않으며, 아직 검증하지 않은 qualifier는 계속 fail-closed한다.
+VERIFIED_G2B_ORIGIN_QUALIFIERS = frozenset({"CN", "VN", "US"})
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,20 @@ class ManufacturerAliasError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class VerifiedModelAlias:
+    canonical_model: str
+    alias_model: str
+    query_manufacturer: str
+    candidate_manufacturer: str
+    evidence_url: str
+    evidence_note: str
+
+
+class VerifiedModelAliasError(RuntimeError):
+    pass
+
+
 def load_manufacturer_aliases(
     path: Path = DEFAULT_MANUFACTURER_ALIAS_PATH,
 ) -> dict[str, str]:
@@ -104,6 +121,54 @@ def load_manufacturer_aliases(
     return aliases
 
 
+def load_verified_model_aliases(
+    path: Path = DEFAULT_VERIFIED_MODEL_ALIAS_PATH,
+) -> tuple[VerifiedModelAlias, ...]:
+    if not path.exists():
+        raise VerifiedModelAliasError(f"verified model alias registry not found: {path}")
+
+    required = {
+        "canonical_model",
+        "alias_model",
+        "query_manufacturer",
+        "candidate_manufacturer",
+        "evidence_url",
+        "evidence_note",
+    }
+    rows: list[VerifiedModelAlias] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+            raise VerifiedModelAliasError("verified model alias registry is missing required columns")
+        for row in reader:
+            values = {name: (row.get(name) or "").strip() for name in required}
+            if not all(values.values()):
+                raise VerifiedModelAliasError("verified model alias registry contains an incomplete row")
+            key = (
+                normalize_text(values["canonical_model"]),
+                normalize_text(values["alias_model"]),
+                normalize_text(values["query_manufacturer"]),
+                normalize_text(values["candidate_manufacturer"]),
+            )
+            if not all(key):
+                raise VerifiedModelAliasError("verified model alias registry contains an invalid key")
+            if key in seen:
+                raise VerifiedModelAliasError("verified model alias registry contains a duplicate relation")
+            seen.add(key)
+            rows.append(
+                VerifiedModelAlias(
+                    canonical_model=values["canonical_model"],
+                    alias_model=values["alias_model"],
+                    query_manufacturer=values["query_manufacturer"],
+                    candidate_manufacturer=values["candidate_manufacturer"],
+                    evidence_url=values["evidence_url"],
+                    evidence_note=values["evidence_note"],
+                )
+            )
+    return tuple(rows)
+
+
 def canonical_manufacturer(
     value: str | None,
     aliases: dict[str, str] | None = None,
@@ -121,6 +186,7 @@ def _model_state(
     candidate_qualifier: str | None = None,
     *,
     candidate_qualifier_verified_as_origin: bool = False,
+    verified_model_alias: bool = False,
 ) -> str:
     query_key = normalize_text(query_model)
     candidate_key = normalize_text(candidate_model)
@@ -134,6 +200,12 @@ def _model_state(
                 return "exact_with_verified_origin"
             return "exact_with_unverified_qualifier"
         return "exact"
+    if verified_model_alias:
+        if candidate_qualifier:
+            if candidate_qualifier_verified_as_origin:
+                return "verified_alias_with_verified_origin"
+            return "verified_alias_with_unverified_qualifier"
+        return "verified_alias"
     return "conflict"
 
 
@@ -142,6 +214,8 @@ def _manufacturer_state(
     candidate_manufacturer: str | None,
     aliases: dict[str, str],
     candidate_qualifier: str | None = None,
+    *,
+    verified_product_alias: bool = False,
 ) -> str:
     query_key = canonical_manufacturer(query_manufacturer, aliases)
     candidate_key = canonical_manufacturer(candidate_manufacturer, aliases)
@@ -153,7 +227,49 @@ def _manufacturer_state(
         if candidate_qualifier:
             return "alias_with_unverified_qualifier"
         return "exact_or_alias"
+    if verified_product_alias:
+        return "verified_product_alias"
     return "conflict"
+
+
+def _verified_product_model_alias(
+    query: ProductQuery,
+    candidate: ProductIdentity,
+    *,
+    manufacturer_aliases: dict[str, str],
+    model_aliases: tuple[VerifiedModelAlias, ...],
+) -> bool:
+    query_model = normalize_text(query.model_name)
+    candidate_model = normalize_text(candidate.model_name)
+    query_manufacturer = canonical_manufacturer(query.manufacturer, manufacturer_aliases)
+    candidate_manufacturer = canonical_manufacturer(candidate.manufacturer, manufacturer_aliases)
+    if not all((query_model, candidate_model, query_manufacturer, candidate_manufacturer)):
+        return False
+
+    for relation in model_aliases:
+        canonical_model = normalize_text(relation.canonical_model)
+        alias_model = normalize_text(relation.alias_model)
+        relation_query_manufacturer = canonical_manufacturer(
+            relation.query_manufacturer, manufacturer_aliases
+        )
+        relation_candidate_manufacturer = canonical_manufacturer(
+            relation.candidate_manufacturer, manufacturer_aliases
+        )
+        direct = (
+            query_model == canonical_model
+            and candidate_model == alias_model
+            and query_manufacturer == relation_query_manufacturer
+            and candidate_manufacturer == relation_candidate_manufacturer
+        )
+        reverse = (
+            query_model == alias_model
+            and candidate_model == canonical_model
+            and query_manufacturer == relation_candidate_manufacturer
+            and candidate_manufacturer == relation_query_manufacturer
+        )
+        if direct or reverse:
+            return True
+    return False
 
 
 def _spec_tokens(value: str | None) -> tuple[str, ...]:
@@ -292,11 +408,13 @@ def grade_product_identity(
     candidate: ProductIdentity,
     *,
     manufacturer_aliases: dict[str, str] | None = None,
+    verified_model_aliases: tuple[VerifiedModelAlias, ...] | None = None,
     functional_alternative: bool = False,
 ) -> MatchDecision:
     """Assign A/B/C/D/X conservatively.
 
-    A/B require an exact normalized model match. A additionally requires verified manufacturer
+    A/B require an exact normalized model match or a product-scoped model/order-code relation
+    explicitly recorded in the verified model-alias registry. A additionally requires verified manufacturer
     compatibility and informative specification evidence from the query to be present in the
     candidate. Missing or merely incomplete specification evidence downgrades the same model to B,
     but an explicit numeric/unit specification contradiction fails closed to X because B evidence
@@ -308,7 +426,7 @@ def grade_product_identity(
 
     A model token that matches only after removing an unverified leading qualifier stays X. The
     qualifier is surfaced for human review instead of being reported as a model conflict. The G2B
-    parser can mark `(CN)` and `(VN)` as verified origin-country metadata after official evidence;
+    parser can mark `(CN)`, `(VN)`, and `(US)` as verified origin-country metadata after official evidence;
     only that parser-derived flag preserves model identity. A generic qualifier string alone cannot
     unlock A/B. A manufacturer that matches only after removing a qualifier such as
     `(주문자상표부착)` counts as incomplete manufacturer evidence and caps the grade at B.
@@ -319,17 +437,30 @@ def grade_product_identity(
         if manufacturer_aliases is not None
         else load_manufacturer_aliases()
     )
+    model_aliases = (
+        verified_model_aliases
+        if verified_model_aliases is not None
+        else load_verified_model_aliases()
+    )
+    verified_product_alias = _verified_product_model_alias(
+        query,
+        candidate,
+        manufacturer_aliases=aliases,
+        model_aliases=model_aliases,
+    )
     model_state = _model_state(
         query.model_name,
         candidate.model_name,
         candidate.model_qualifier,
         candidate_qualifier_verified_as_origin=candidate.model_qualifier_verified_as_origin,
+        verified_model_alias=verified_product_alias,
     )
     manufacturer_state = _manufacturer_state(
         query.manufacturer,
         candidate.manufacturer,
         aliases,
         candidate.manufacturer_qualifier,
+        verified_product_alias=verified_product_alias,
     )
     specification_state = _specification_state(query, candidate)
     product_state = _product_class_state(query.product_name, candidate.product_name)
@@ -340,10 +471,21 @@ def grade_product_identity(
         or specification_state == "explicit_conflict"
     ):
         grade = MatchGrade.X
-    elif model_state == "exact_with_unverified_qualifier":
+    elif model_state in {
+        "exact_with_unverified_qualifier",
+        "verified_alias_with_unverified_qualifier",
+    }:
         grade = MatchGrade.X
-    elif model_state in {"exact", "exact_with_verified_origin"}:
-        if manufacturer_state == "exact_or_alias" and specification_state == "compatible":
+    elif model_state in {
+        "exact",
+        "exact_with_verified_origin",
+        "verified_alias",
+        "verified_alias_with_verified_origin",
+    }:
+        if (
+            manufacturer_state in {"exact_or_alias", "verified_product_alias"}
+            and specification_state == "compatible"
+        ):
             grade = MatchGrade.A
         else:
             grade = MatchGrade.B
