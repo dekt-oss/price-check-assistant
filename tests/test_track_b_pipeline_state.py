@@ -21,6 +21,10 @@ def _summary(
     end_date: str = "2026-09-11",
     start_cursor: CollectionCursor = CollectionCursor(3196, 1),
     next_cursor: CollectionCursor | None = None,
+    pagination_reconciliations: int = 0,
+    pagination_contractions: int = 0,
+    pagination_inconsistencies: int = 0,
+    last_pagination_event: str | None = None,
 ) -> CollectionSummary:
     resolved_next = next_cursor or (
         CollectionCursor(EXPECTED_TARGET_CODE_COUNT, 1)
@@ -52,6 +56,10 @@ def _summary(
         first_object_key="raw/v1/op/aa/bb/a.json.gz",
         last_object_key="raw/v1/op/cc/dd/c.json.gz",
         stop_reason="TARGET_COMPLETE" if complete else "REQUEST_BUDGET_EXHAUSTED",
+        pagination_reconciliations=pagination_reconciliations,
+        pagination_contractions=pagination_contractions,
+        pagination_inconsistencies=pagination_inconsistencies,
+        last_pagination_event=last_pagination_event,
     )
 
 
@@ -174,3 +182,33 @@ def test_db_bootstrap_completion_clears_manifest_covered_by_full_scan() -> None:
 
     assert state.db_bootstrap_complete is True
     assert state.pending_object_keys == []
+
+
+
+def test_rolling_state_preserves_pagination_reconciliation_metrics() -> None:
+    state = TrackBPipelineState.bootstrap()
+    state.apply_collection(_summary(complete=True), object_keys=[])
+    state.begin_rolling_cycle(begin=date(2026, 9, 10), end=date(2026, 9, 16))
+    rolling_summary = _summary(
+        begin_date="2026-09-10",
+        end_date="2026-09-16",
+        start_cursor=ROLLING_BOOTSTRAP_CURSOR,
+        next_cursor=CollectionCursor(850, 1),
+        pagination_reconciliations=1,
+        pagination_contractions=1,
+        last_pagination_event=(
+            "PAGINATION_CONTRACTED code=3911160501 page=7 "
+            "reported=1 reconciled=1 prior=7"
+        ),
+    )
+
+    state.apply_rolling_collection(rolling_summary, object_keys=["raw/reprobe.json.gz"])
+
+    assert state.rolling_cursor == CollectionCursor(850, 1)
+    assert state.pending_object_keys == ["raw/reprobe.json.gz"]
+    assert state.last_rolling_collection is not None
+    assert state.last_rolling_collection["pagination_reconciliations"] == 1
+    assert state.last_rolling_collection["pagination_contractions"] == 1
+    assert str(state.last_rolling_collection["last_pagination_event"]).startswith(
+        "PAGINATION_CONTRACTED"
+    )
