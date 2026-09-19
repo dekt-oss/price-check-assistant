@@ -252,6 +252,11 @@ def test_verified_ft10_alias_reaches_matcher_through_db_prefilter(session: Sessi
         session,
         _page([_item(title="전기수술기, Covidien, (US)VLFT10GEN, 범용")]),
     )
+    stored = session.scalar(select(TrackBDeliveryLine))
+    assert stored is not None
+    # Simulate an existing serving index built before US was added to the verified G2B
+    # origin-code registry. Read-time G2B verification must recover without raw reingestion.
+    stored.model_qualifier_verified_as_origin = False
     session.commit()
 
     result = compare_track_b_quote(
