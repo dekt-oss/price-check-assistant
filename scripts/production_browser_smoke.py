@@ -26,11 +26,31 @@ KNOWN_PLATFORM_ERRORS = (
     "Error running app",
 )
 APP_IFRAME = 'iframe[title="streamlitApp"]'
+STREAMLIT_SLEEP_MARKER = "This app has gone to sleep due to inactivity."
+STREAMLIT_WAKE_TEXT = "Yes, get this app back up!"
 DEPLOYMENT_MARKER = "#unified-search-runtime-v2"
 
 
 def _app_frame(page: Any) -> Any:
     return page.frame_locator(APP_IFRAME)
+
+
+def _wake_streamlit_cloud_if_sleeping(page: Any, *, timeout: int = 60_000) -> bool:
+    """Wake a sleeping Streamlit Community Cloud app before probing its iframe."""
+
+    try:
+        outer_body = page.locator("body").inner_text(timeout=5_000)
+    except Exception:
+        return False
+    if STREAMLIT_SLEEP_MARKER not in outer_body:
+        return False
+
+    wake = page.get_by_text(STREAMLIT_WAKE_TEXT, exact=True)
+    if wake.count() < 1:
+        raise RuntimeError("Streamlit Cloud sleep screen rendered without its wake control")
+    wake.first.click(timeout=10_000)
+    page.locator(APP_IFRAME).wait_for(state="attached", timeout=timeout)
+    return True
 
 
 def _wait_heading(context: Any, name: str, *, timeout: int = 30_000) -> None:
@@ -190,6 +210,9 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
     for attempt in range(1, 4):
         response = page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
         page.wait_for_timeout(3_000)
+        woke_from_sleep = _wake_streamlit_cloud_if_sleeping(page)
+        if woke_from_sleep:
+            page.wait_for_timeout(3_000)
         outer_body = page.locator("body").inner_text(timeout=5_000)
         platform_error = next((text for text in KNOWN_PLATFORM_ERRORS if text in outer_body), "")
         if platform_error:
@@ -200,6 +223,7 @@ def _wake_and_wait_dashboard(page: Any, report: dict[str, object]) -> None:
                     "status": "platform_error",
                     "platform_error": platform_error,
                     "root_http_status": response.status if response is not None else None,
+                    "woke_from_sleep": woke_from_sleep,
                 }
             )
             attempts.append(snapshot)
