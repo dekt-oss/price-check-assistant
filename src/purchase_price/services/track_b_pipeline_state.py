@@ -198,6 +198,11 @@ class TrackBPipelineState:
                 self.pending_object_keys.append(key)
                 seen.add(key)
 
+    def enqueue_pending_object_keys(self, object_keys: list[str]) -> None:
+        """Queue externally collected Track B raw pages for the shared serving-index sync."""
+        self._append_pending_keys(object_keys)
+        self.updated_at = _now()
+
     def apply_collection(self, summary: CollectionSummary, *, object_keys: list[str]) -> None:
         if summary.target_code_snapshot_sha256 != EXPECTED_SNAPSHOT_SHA256:
             raise ValueError("collector used an unexpected target-code snapshot")

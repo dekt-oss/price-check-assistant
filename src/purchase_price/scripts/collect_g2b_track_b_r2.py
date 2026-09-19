@@ -253,6 +253,7 @@ def collect_track_b_batch(
     page_size: int = PAGE_SIZE,
     target_code_snapshot_path: Path | None = None,
     refresh_target_code_snapshot: bool = False,
+    explicit_target_codes: tuple[str, ...] | None = None,
 ) -> CollectionSummary:
     if request_budget < 1 or request_budget > MAX_REQUEST_BUDGET:
         raise ValueError(f"request_budget must be between 1 and {MAX_REQUEST_BUDGET}")
@@ -262,14 +263,36 @@ def collect_track_b_batch(
         raise ValueError("invalid start cursor")
 
     started = datetime.now(UTC)
-    codes, dictionary_requests, target_code_source, snapshot_sha256 = _resolve_target_codes(
-        catalog_client=catalog_client,
-        catalog_base_url=catalog_base_url,
-        segments=segments,
-        page_size=page_size,
-        snapshot_path=target_code_snapshot_path,
-        refresh_snapshot=refresh_target_code_snapshot,
-    )
+    if explicit_target_codes is not None:
+        if target_code_snapshot_path is not None or refresh_target_code_snapshot:
+            raise ValueError(
+                "explicit_target_codes cannot be combined with target-code snapshot options"
+            )
+        codes = list(explicit_target_codes)
+        if not codes:
+            raise ValueError("explicit_target_codes must not be empty")
+        if len(codes) != len(set(codes)):
+            raise ValueError("explicit_target_codes contains duplicates")
+        allowed_segments = set(segments)
+        for code in codes:
+            if len(code) != 10 or not code.isdigit():
+                raise ValueError(f"invalid explicit 10-digit target code: {code!r}")
+            if code[:2] not in allowed_segments:
+                raise ValueError(
+                    f"explicit target code {code} is outside configured segments {segments!r}"
+                )
+        dictionary_requests = 0
+        target_code_source = "EXPLICIT_CODES"
+        snapshot_sha256 = None
+    else:
+        codes, dictionary_requests, target_code_source, snapshot_sha256 = _resolve_target_codes(
+            catalog_client=catalog_client,
+            catalog_base_url=catalog_base_url,
+            segments=segments,
+            page_size=page_size,
+            snapshot_path=target_code_snapshot_path,
+            refresh_snapshot=refresh_target_code_snapshot,
+        )
     if start_cursor.code_index > len(codes):
         raise ValueError("start cursor is past the target code list")
     if dictionary_requests >= request_budget:

@@ -212,3 +212,13 @@ def test_rolling_state_preserves_pagination_reconciliation_metrics() -> None:
     assert str(state.last_rolling_collection["last_pagination_event"]).startswith(
         "PAGINATION_CONTRACTED"
     )
+
+
+def test_external_track_b_pages_can_join_shared_serving_pending_queue() -> None:
+    state = TrackBPipelineState.bootstrap()
+
+    state.enqueue_pending_object_keys(
+        ["raw/supplemental-a.json.gz", "raw/supplemental-a.json.gz"]
+    )
+
+    assert state.pending_object_keys == ["raw/supplemental-a.json.gz"]
