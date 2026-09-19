@@ -9,6 +9,10 @@ BUSINESS_PAGES = (
     "pages/3_빠른_검색.py",
     "pages/4_의료기기_조회.py",
 )
+VALIDATION_PAGES = (
+    "pages/13_견적추출_UAT.py",
+    "pages/15_전체구매검토_UAT.py",
+)
 ADMIN_PAGE = "pages/9_관리.py"
 REMOVED_PAGES = (
     "pages/1_통합검색.py",
@@ -25,6 +29,9 @@ def test_home_registers_four_business_pages_and_admin_page() -> None:
     text = (ROOT / "Home.py").read_text(encoding="utf-8")
     assert "st.navigation" in text
     for path in BUSINESS_PAGES:
+        assert path in text
+        assert (ROOT / path).exists()
+    for path in VALIDATION_PAGES:
         assert path in text
         assert (ROOT / path).exists()
     assert ADMIN_PAGE in text
