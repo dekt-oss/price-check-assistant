@@ -373,3 +373,39 @@ def test_exact_model_grade_is_unaffected_by_differing_product_class_labels() -> 
 
     assert decision.grade == MatchGrade.A
     assert "product_class=related_unverified" in decision.note
+
+
+def test_philips_goldway_dfm100_alias_recovers_direct_b_without_relaxing_model_match() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="심장 충격기",
+            manufacturer="필립스",
+            model_name="Efficia DFM100",
+        ),
+        parse_g2b_identity(
+            "저출력심장충격기, Philips goldway, (CN)Efficia DFM100, 200J"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.B
+    assert decision.model_state == "exact_with_verified_origin"
+    assert decision.manufacturer_state == "exact_or_alias"
+    assert decision.specification_state == "not_provided"
+
+
+def test_oxford_nanopore_alias_is_recognized_but_unverified_gb_qualifier_stays_x() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="염기서열분석기",
+            manufacturer="Oxford Nanopore",
+            model_name="MinION Mk1D",
+        ),
+        parse_g2b_identity(
+            "DNA서열분석기, Oxford nanopore technologies, (GB)MinION MK1D"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.X
+    assert decision.model_state == "exact_with_unverified_qualifier"
+    assert decision.manufacturer_state == "exact_or_alias"
+    assert "model_qualifier=GB" in decision.note
