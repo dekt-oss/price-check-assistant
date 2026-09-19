@@ -100,3 +100,8 @@ def test_similar_identity_rows_never_expose_price() -> None:
     assert rows[0]["모델명"] == "MA-045DT"
     assert "가격" not in rows[0]
     assert "견적 대비" not in rows[0]
+
+
+def test_money_input_uses_comma_separators() -> None:
+    assert quote_market_research._money_input(Decimal("66000000")) == "66,000,000"
+    assert quote_market_research._money_input(None) == ""
