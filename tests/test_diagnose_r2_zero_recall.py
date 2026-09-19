@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 from purchase_price.services.g2b_product_mapping import G2BProductMapping
 from purchase_price.scripts.diagnose_r2_zero_recall import (
     _target_code_status,
