@@ -5,12 +5,12 @@ from datetime import date, timedelta
 
 from purchase_price.clients.data_go_kr import PublicDataPortalClient
 from purchase_price.schemas import CollectedPrice, ProductQuery
-from purchase_price.services.g2b_search_policy import G2B_DEFAULT_LOOKBACK_DAYS
 from purchase_price.services.g2b_adaptive_search import search_mapped_g2b_candidates_adaptive
 from purchase_price.services.g2b_product_mapping import (
     G2BProductMapping,
     resolve_verified_g2b_mapping,
 )
+from purchase_price.services.g2b_search_policy import G2B_DEFAULT_LOOKBACK_DAYS
 
 from .base import CollectorSkipped, PriceCollector
 from .g2b_shopping import G2B_SHOPPING_BASE_URL, SOURCE_NAME, G2BShoppingCollector
