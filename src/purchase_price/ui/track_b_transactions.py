@@ -114,7 +114,7 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
     for candidate in reference_candidates(track_b):
         rows.append(
             {
-                "가격": float(candidate.price),
+                "가격": _money_text(candidate.price),
                 "판매처": getattr(candidate, "supplier", None) or "미확인",
                 "구매처": getattr(candidate, "demand_institution", None) or "미확인",
                 "거래일": getattr(candidate, "transaction_date", None) or "미확인",
