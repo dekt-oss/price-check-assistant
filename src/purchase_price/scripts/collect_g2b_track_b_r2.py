@@ -105,6 +105,33 @@ def _fetch_dictionary(
     return items, page_count
 
 
+def _validate_explicit_target_codes(
+    codes: tuple[str, ...],
+    *,
+    segments: tuple[str, ...],
+) -> list[str]:
+    if not codes:
+        raise ValueError("explicit target codes must not be empty")
+    if len(codes) != len(set(codes)):
+        raise ValueError("explicit target codes must not contain duplicates")
+    priority = {segment: index for index, segment in enumerate(segments)}
+    previous: tuple[int, str] | None = None
+    normalized: list[str] = []
+    for raw_code in codes:
+        code = str(raw_code).strip()
+        if len(code) != 10 or not code.isdigit():
+            raise ValueError(f"invalid explicit 10-digit target code: {raw_code!r}")
+        segment = code[:2]
+        if segment not in priority:
+            raise ValueError(f"explicit target code is outside configured segments: {code}")
+        current = (priority[segment], code)
+        if previous is not None and current <= previous:
+            raise ValueError("explicit target codes must use canonical segment/code order")
+        normalized.append(code)
+        previous = current
+    return normalized
+
+
 def _resolve_target_codes(
     *,
     catalog_client: JsonClient,
@@ -113,7 +140,19 @@ def _resolve_target_codes(
     page_size: int,
     snapshot_path: Path | None,
     refresh_snapshot: bool,
+    explicit_target_codes: tuple[str, ...] | None,
 ) -> tuple[list[str], int, str, str | None]:
+    if explicit_target_codes is not None:
+        if snapshot_path is not None or refresh_snapshot:
+            raise ValueError(
+                "explicit target codes cannot be combined with a target-code snapshot or refresh"
+            )
+        return (
+            _validate_explicit_target_codes(explicit_target_codes, segments=segments),
+            0,
+            "EXPLICIT_VERIFIED_CODES",
+            None,
+        )
     if refresh_snapshot and snapshot_path is None:
         raise ValueError("refresh_target_code_snapshot requires target_code_snapshot_path")
 
@@ -253,6 +292,7 @@ def collect_track_b_batch(
     page_size: int = PAGE_SIZE,
     target_code_snapshot_path: Path | None = None,
     refresh_target_code_snapshot: bool = False,
+    explicit_target_codes: tuple[str, ...] | None = None,
 ) -> CollectionSummary:
     if request_budget < 1 or request_budget > MAX_REQUEST_BUDGET:
         raise ValueError(f"request_budget must be between 1 and {MAX_REQUEST_BUDGET}")
@@ -269,6 +309,7 @@ def collect_track_b_batch(
         page_size=page_size,
         snapshot_path=target_code_snapshot_path,
         refresh_snapshot=refresh_target_code_snapshot,
+        explicit_target_codes=explicit_target_codes,
     )
     if start_cursor.code_index > len(codes):
         raise ValueError("start cursor is past the target code list")

@@ -7,6 +7,7 @@ on:
       - "src/purchase_price/scripts/sync_g2b_track_b_r2_index.py"
       - "src/purchase_price/scripts/audit_track_b_transition.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
+      - "src/purchase_price/services/track_b_supplemental_state.py"
   push:
     branches:
       - main
@@ -17,10 +18,12 @@ on:
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
+      - "src/purchase_price/services/track_b_supplemental_state.py"
       - "src/purchase_price/storage/r2_serving_index.py"
   workflow_run:
     workflows:
       - "Track B Daily Backfill"
+      - "Track B Supplemental Collection"
     types:
       - completed
     branches:
@@ -222,6 +225,66 @@ jobs:
           blocked = {"unavailable", "not_ingested"}
           if any(item["status"] in blocked for item in payload.values()):
               raise SystemExit("R2 serving index is not consumable after sync")
+          PY
+      - name: Verify supplemental CX30N serving acceptance
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from purchase_price.config import Settings
+          from purchase_price.schemas import ProductQuery
+          from purchase_price.services.track_b_r2_quote_index import lookup_track_b_quote_from_r2
+          from purchase_price.services.track_b_supplemental_state import (
+              SUPPLEMENTAL_STATE_NAME,
+              TrackBSupplementalState,
+          )
+          from purchase_price.storage.r2_state import R2OperationalStateStore
+
+          target_code = "4511181101"
+          settings = Settings()
+          state_store = R2OperationalStateStore.from_settings(settings)
+          payload = state_store.read_json(SUPPLEMENTAL_STATE_NAME)
+          report = {
+              "status": "NOT_READY",
+              "target_code": target_code,
+              "model_name": "CX30N",
+          }
+
+          if payload is not None:
+              state = TrackBSupplementalState.from_payload(payload)
+              report["historical_completed_codes"] = list(state.historical_completed_codes)
+              report["pending_object_count"] = len(state.pending_object_keys)
+              if target_code in state.historical_completed_codes:
+                  result = lookup_track_b_quote_from_r2(
+                      ProductQuery(
+                          product_name="영상 판독용 모니터",
+                          manufacturer="WIDE",
+                          model_name="CX30N",
+                      )
+                  )
+                  report.update(
+                      {
+                          "status": "READY",
+                          "lookup_status": result.status,
+                          "examined": result.examined,
+                          "candidate_count": len(result.candidates),
+                          "reference_count": len(result.reference_candidates),
+                          "suggestion_count": len(result.suggestions),
+                      }
+                  )
+                  if result.status in {"unavailable", "not_ingested"}:
+                      raise SystemExit(
+                          "supplemental CX30N historical collection completed but serving index is not consumable"
+                      )
+
+          output = Path("artifacts/track-b-daily/cx30n-supplemental-serving-smoke.json")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          output.write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(report, ensure_ascii=False, sort_keys=True))
           PY
       - name: Audit historical to rolling transition
         run: >-
