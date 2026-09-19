@@ -49,6 +49,10 @@ def _money(value) -> str:
     return f"{value:,.0f}원" if value is not None else "미확인"
 
 
+def _money_input(value) -> str:
+    return "" if value is None else f"{value:,.0f}"
+
+
 def _quantity_unit(quantity, unit: str | None) -> str:
     if quantity is None and not unit:
         return "미확인"
@@ -174,7 +178,7 @@ def _render_inline_manual_item_form(state: QuoteReviewState) -> None:
         specification = c2.text_input("규격", placeholder="선택")
         quantity = c1.text_input("수량", placeholder="예: 1")
         unit = c2.text_input("단위", placeholder="예: SET")
-        unit_price = c1.text_input("견적 단가", placeholder="예: 66000000")
+        unit_price = c1.text_input("견적 단가", placeholder="예: 66,000,000")
         total_amount = c2.text_input("총액", placeholder="선택")
         vat = c1.text_input("VAT", placeholder="포함/별도/면세 등 선택")
         installation = c2.text_input("설치", placeholder="선택")
@@ -242,7 +246,7 @@ def _render_compact_item_editor(state: QuoteReviewState) -> None:
             specification = c2.text_input("규격", value=item.specification)
             unit_price = c1.text_input(
                 "견적 단가",
-                value="" if item.unit_price is None else format(item.unit_price, "f"),
+                value=_money_input(item.unit_price),
             )
             quantity = c2.text_input(
                 "수량",
