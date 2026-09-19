@@ -5,7 +5,8 @@ def test_supplemental_workflow_is_bounded_and_serialized_with_base_pipeline() ->
     text = Path(".github/workflows/track-b-supplemental-collection.yml").read_text()
 
     assert "name: Track B Supplemental Collection" in text
-    assert 'cron: "55 17 * * *"' in text
+    assert "Base Track B starts at 03:10 KST and has priority" in text
+    assert 'cron: "40 19 * * *"' in text
     assert "'track-b-r2-pipeline'" in text
     assert "--request-budget" in text
     assert "inputs.request_budget || '25'" in text
