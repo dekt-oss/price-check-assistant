@@ -18,6 +18,7 @@ from purchase_price.services.match_benchmark import (
     load_phase0_product_queries,
 )
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.product_matching import is_verified_g2b_origin_qualifier
 from purchase_price.services.track_b_r2_quote_index import _local_index_path
 
 SOURCE_NAME = "조달청_나라장터쇼핑몰 Track B R2 serving index"
@@ -167,7 +168,12 @@ def capture_candidates(
                     "parsed_model_name": str(row.model_name or "").strip(),
                     "parsed_model_qualifier": str(row.model_qualifier or "").strip(),
                     "model_qualifier_verified_as_origin": (
-                        "true" if row.model_qualifier_verified_as_origin else "false"
+                        "true"
+                        if (
+                            row.model_qualifier_verified_as_origin
+                            or is_verified_g2b_origin_qualifier(row.model_qualifier)
+                        )
+                        else "false"
                     ),
                     "parsed_manufacturer_qualifier": str(
                         row.manufacturer_qualifier or ""
