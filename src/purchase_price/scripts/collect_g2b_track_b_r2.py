@@ -75,6 +75,10 @@ class CollectionSummary:
     stop_reason: str
     error_type: str | None = None
     error_message: str | None = None
+    pagination_reconciliations: int = 0
+    pagination_contractions: int = 0
+    pagination_inconsistencies: int = 0
+    last_pagination_event: str | None = None
 
 
 def _fetch_dictionary(
@@ -209,6 +213,31 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     )
 
 
+def _validated_total_pages(
+    page: Any,
+    *,
+    requested_page_no: int,
+    page_size: int,
+    detail_code: str,
+) -> int:
+    if page.page_no is not None and page.page_no != requested_page_no:
+        raise RuntimeError(
+            "G2B response page mismatch: "
+            f"requested={requested_page_no} returned={page.page_no} for {detail_code}"
+        )
+    if page.total_count is None:
+        raise RuntimeError(
+            f"G2B response missing totalCount for {detail_code} page {requested_page_no}"
+        )
+    total_count = int(page.total_count)
+    if total_count < 0:
+        raise RuntimeError(
+            f"G2B response has negative totalCount={total_count} for {detail_code} "
+            f"page {requested_page_no}"
+        )
+    return max(1, math.ceil(total_count / page_size))
+
+
 def collect_track_b_batch(
     *,
     catalog_client: JsonClient,
@@ -263,11 +292,20 @@ def collect_track_b_batch(
     status = "SUCCESS"
     error_type: str | None = None
     error_message: str | None = None
+    pagination_reconciliations = 0
+    pagination_contractions = 0
+    pagination_inconsistencies = 0
+    last_pagination_event: str | None = None
+    planned_code_index: int | None = None
+    planned_total_pages: int | None = None
 
     try:
         while cursor.code_index < len(codes):
             code = codes[cursor.code_index]
             page_no = cursor.page_no
+            if planned_code_index != cursor.code_index:
+                planned_code_index = cursor.code_index
+                planned_total_pages = None
             if remaining <= 0:
                 stop_reason = "REQUEST_BUDGET_EXHAUSTED"
                 status = "PARTIAL_SUCCESS"
@@ -286,12 +324,100 @@ def collect_track_b_batch(
             track_b_requests += 1
             payload = shopping_client.get_json(shopping_base_url, TRACK_B_OPERATION, **params)
             page = unwrap_g2b_page(payload)
-            total_count = int(page.total_count or 0)
-            total_pages = max(1, math.ceil(total_count / page_size))
-            if page_no > total_pages:
-                raise RuntimeError(
-                    f"cursor page {page_no} exceeds total pages {total_pages} for {code}"
+            reported_total_pages = _validated_total_pages(
+                page,
+                requested_page_no=page_no,
+                page_size=page_size,
+                detail_code=code,
+            )
+
+            needs_reconciliation = page_no > reported_total_pages or (
+                planned_total_pages is not None
+                and reported_total_pages != planned_total_pages
+            )
+            if needs_reconciliation:
+                if remaining <= 0:
+                    stop_reason = "REQUEST_BUDGET_EXHAUSTED"
+                    status = "PARTIAL_SUCCESS"
+                    break
+
+                previous_horizon = planned_total_pages
+                pagination_reconciliations += 1
+                remaining -= 1
+                track_b_requests += 1
+                probe_params = _track_b_params(
+                    detail_code=code,
+                    begin=begin,
+                    end=end,
+                    page_no=1,
+                    page_size=page_size,
                 )
+                probe_payload = shopping_client.get_json(
+                    shopping_base_url,
+                    TRACK_B_OPERATION,
+                    **probe_params,
+                )
+                probe_page = unwrap_g2b_page(probe_payload)
+                reconciled_total_pages = _validated_total_pages(
+                    probe_page,
+                    requested_page_no=1,
+                    page_size=page_size,
+                    detail_code=code,
+                )
+
+                # Persist the authoritative page-1 re-probe as public evidence. Content-addressed
+                # storage makes an unchanged replay a reuse, while a changed page is retained
+                # without deleting any older historical evidence.
+                probe_raw_payload = _page_payload(
+                    detail_code=code,
+                    begin=begin,
+                    end=end,
+                    page_no=1,
+                    page_size=page_size,
+                    total_count=probe_page.total_count,
+                    items=probe_page.items,
+                )
+                probe_ref = store.put_public_json(
+                    source_operation=f"{TRACK_B_OPERATION}-page",
+                    payload=probe_raw_payload,
+                )
+                pages_stored += 1
+                rows_seen += len(probe_page.items)
+                first_key = first_key or probe_ref.key
+                last_key = probe_ref.key
+                if probe_ref.created:
+                    created += 1
+                    created_bytes += probe_ref.stored_bytes
+                else:
+                    reused += 1
+
+                if page_no > reconciled_total_pages:
+                    pagination_contractions += 1
+                    last_pagination_event = (
+                        "PAGINATION_CONTRACTED "
+                        f"code={code} page={page_no} reported={reported_total_pages} "
+                        f"reconciled={reconciled_total_pages} prior={previous_horizon}"
+                    )
+                    codes_completed += 1
+                    cursor = CollectionCursor(code_index=cursor.code_index + 1, page_no=1)
+                    planned_code_index = None
+                    planned_total_pages = None
+                    continue
+
+                pagination_inconsistencies += 1
+                last_pagination_event = (
+                    "PAGINATION_RECONCILED "
+                    f"code={code} page={page_no} reported={reported_total_pages} "
+                    f"reconciled={reconciled_total_pages} prior={previous_horizon}"
+                )
+                planned_total_pages = reconciled_total_pages
+                if page_no > 1 and not page.items:
+                    raise RuntimeError(
+                        "G2B pagination inconsistency: empty page inside reconciled horizon "
+                        f"for {code} page {page_no}/{reconciled_total_pages}"
+                    )
+            elif planned_total_pages is None:
+                planned_total_pages = reported_total_pages
 
             raw_payload = _page_payload(
                 detail_code=code,
@@ -316,9 +442,12 @@ def collect_track_b_batch(
             else:
                 reused += 1
 
+            total_pages = planned_total_pages or reported_total_pages
             if page_no >= total_pages:
                 codes_completed += 1
                 cursor = CollectionCursor(code_index=cursor.code_index + 1, page_no=1)
+                planned_code_index = None
+                planned_total_pages = None
             else:
                 cursor = CollectionCursor(code_index=cursor.code_index, page_no=page_no + 1)
     except Exception as exc:
@@ -357,6 +486,10 @@ def collect_track_b_batch(
         stop_reason=stop_reason,
         error_type=error_type,
         error_message=error_message,
+        pagination_reconciliations=pagination_reconciliations,
+        pagination_contractions=pagination_contractions,
+        pagination_inconsistencies=pagination_inconsistencies,
+        last_pagination_event=last_pagination_event,
     )
 
 
