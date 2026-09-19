@@ -64,6 +64,13 @@ def candidate_counts(track_b: Any) -> tuple[int, int]:
     return len(direct), len(references)
 
 
+def _money_text(value: Any) -> str:
+    try:
+        return f"{value:,.0f}원"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _quantity_unit(quantity: Any, unit: str | None) -> str:
     if quantity is None and not unit:
         return "미확인"
@@ -89,7 +96,7 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
         grade_value = _grade_value(candidate)
         rows.append(
             {
-                "가격": float(candidate.price),
+                "가격": _money_text(candidate.price),
                 "판매처": getattr(candidate, "supplier", None) or "미확인",
                 "구매처": getattr(candidate, "demand_institution", None) or "미확인",
                 "거래일": getattr(candidate, "transaction_date", None) or "미확인",
