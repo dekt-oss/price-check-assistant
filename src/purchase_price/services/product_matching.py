@@ -23,6 +23,14 @@ DEFAULT_VERIFIED_MODEL_ALIAS_PATH = (
 # 않으며, 아직 검증하지 않은 qualifier는 계속 fail-closed한다.
 VERIFIED_G2B_ORIGIN_QUALIFIERS = frozenset({"CN", "VN", "US"})
 
+def is_verified_g2b_origin_qualifier(value: str | None) -> bool:
+    """Return true only for country qualifiers independently verified from G2B item detail."""
+
+    return bool(
+        value
+        and value.strip().upper() in VERIFIED_G2B_ORIGIN_QUALIFIERS
+    )
+
 
 @dataclass(frozen=True)
 class ProductIdentity:
@@ -586,10 +594,7 @@ def parse_g2b_identity(title: str | None) -> ProductIdentity:
     model_qualifier, model_name = (
         split_leading_qualifier(parts[2]) if len(parts) >= 3 else (None, None)
     )
-    verified_origin = bool(
-        model_qualifier
-        and model_qualifier.strip().upper() in VERIFIED_G2B_ORIGIN_QUALIFIERS
-    )
+    verified_origin = is_verified_g2b_origin_qualifier(model_qualifier)
     specification = ", ".join(parts[3:]) if len(parts) >= 4 else None
     return ProductIdentity(
         product_name=product_name,
