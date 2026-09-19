@@ -13,12 +13,13 @@ from purchase_price.services.matching import normalize_text
 DEFAULT_MANUFACTURER_ALIAS_PATH = (
     Path(__file__).resolve().parents[3] / "data" / "manufacturer_aliases.csv"
 )
+DEFAULT_MODEL_ALIAS_PATH = Path(__file__).resolve().parents[3] / "data" / "model_aliases.csv"
 
 # G2B 목록정보 공식 품목 상세에서 상품원산지국가명 중국(CN)/베트남(VN)이
 # 품목명의 모델 앞에 `(CN)`/`(VN)`으로 반복 표기되는 것을 검증했다. 이 두 값만
 # G2B parser가 원산지 메타데이터로 확인한다. Generic ProductIdentity의 qualifier 문자열만으로
 # 신뢰하지 않으며, 다른 qualifier는 계속 fail-closed한다.
-VERIFIED_G2B_ORIGIN_QUALIFIERS = frozenset({"CN", "VN"})
+VERIFIED_G2B_ORIGIN_QUALIFIERS = frozenset({"CN", "VN", "US"})
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,10 @@ class ManufacturerAliasError(RuntimeError):
     pass
 
 
+class ModelAliasError(RuntimeError):
+    pass
+
+
 def load_manufacturer_aliases(
     path: Path = DEFAULT_MANUFACTURER_ALIAS_PATH,
 ) -> dict[str, str]:
@@ -115,12 +120,61 @@ def canonical_manufacturer(
     return registry.get(key, key)
 
 
+def load_model_aliases(
+    path: Path = DEFAULT_MODEL_ALIAS_PATH,
+) -> dict[str, str]:
+    if not path.exists():
+        raise ModelAliasError(f"model alias registry not found: {path}")
+
+    aliases: dict[str, str] = {}
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None or not {"canonical_model", "alias"}.issubset(reader.fieldnames):
+            raise ModelAliasError("model alias registry is missing required columns")
+
+        for row in reader:
+            canonical = normalize_text((row.get("canonical_model") or "").strip())
+            alias = normalize_text((row.get("alias") or "").strip())
+            if not canonical or not alias:
+                continue
+            existing = aliases.get(alias)
+            if existing is not None and existing != canonical:
+                raise ModelAliasError(f"model alias maps to multiple canonical models: {alias!r}")
+            aliases[alias] = canonical
+            aliases.setdefault(canonical, canonical)
+    return aliases
+
+
+def canonical_model(
+    value: str | None,
+    aliases: dict[str, str] | None = None,
+) -> str | None:
+    key = normalize_text(value)
+    if not key:
+        return None
+    registry = aliases if aliases is not None else load_model_aliases()
+    return registry.get(key, key)
+
+
+def equivalent_model_keys(
+    value: str | None,
+    aliases: dict[str, str] | None = None,
+) -> tuple[str, ...]:
+    key = normalize_text(value)
+    if not key:
+        return ()
+    registry = aliases if aliases is not None else load_model_aliases()
+    canonical = registry.get(key, key)
+    return tuple(sorted({key, canonical, *(alias for alias, target in registry.items() if target == canonical)}))
+
+
 def _model_state(
     query_model: str | None,
     candidate_model: str | None,
     candidate_qualifier: str | None = None,
     *,
     candidate_qualifier_verified_as_origin: bool = False,
+    aliases: dict[str, str] | None = None,
 ) -> str:
     query_key = normalize_text(query_model)
     candidate_key = normalize_text(candidate_model)
@@ -128,12 +182,16 @@ def _model_state(
         return "not_requested"
     if not candidate_key:
         return "missing"
-    if query_key == candidate_key:
+
+    same_literal = query_key == candidate_key
+    same_verified_alias = canonical_model(query_model, aliases) == canonical_model(candidate_model, aliases)
+    if same_literal or same_verified_alias:
+        base = "exact" if same_literal else "verified_alias"
         if candidate_qualifier:
             if candidate_qualifier_verified_as_origin:
-                return "exact_with_verified_origin"
-            return "exact_with_unverified_qualifier"
-        return "exact"
+                return f"{base}_with_verified_origin"
+            return f"{base}_with_unverified_qualifier"
+        return base
     return "conflict"
 
 
@@ -292,6 +350,7 @@ def grade_product_identity(
     candidate: ProductIdentity,
     *,
     manufacturer_aliases: dict[str, str] | None = None,
+    model_aliases: dict[str, str] | None = None,
     functional_alternative: bool = False,
 ) -> MatchDecision:
     """Assign A/B/C/D/X conservatively.
@@ -324,6 +383,7 @@ def grade_product_identity(
         candidate.model_name,
         candidate.model_qualifier,
         candidate_qualifier_verified_as_origin=candidate.model_qualifier_verified_as_origin,
+        aliases=model_aliases,
     )
     manufacturer_state = _manufacturer_state(
         query.manufacturer,
@@ -340,9 +400,14 @@ def grade_product_identity(
         or specification_state == "explicit_conflict"
     ):
         grade = MatchGrade.X
-    elif model_state == "exact_with_unverified_qualifier":
+    elif model_state in {"exact_with_unverified_qualifier", "verified_alias_with_unverified_qualifier"}:
         grade = MatchGrade.X
-    elif model_state in {"exact", "exact_with_verified_origin"}:
+    elif model_state in {
+        "exact",
+        "exact_with_verified_origin",
+        "verified_alias",
+        "verified_alias_with_verified_origin",
+    }:
         if manufacturer_state == "exact_or_alias" and specification_state == "compatible":
             grade = MatchGrade.A
         else:

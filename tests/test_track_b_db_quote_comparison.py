@@ -258,3 +258,44 @@ def test_live_validation_selects_searchable_current_row_not_superseded_row(
     sample, _, comparison = _find_comparison_case(session)
     assert sample.model_name == "NEW-MODEL"
     assert comparison.candidates
+
+
+def test_verified_ft10_order_code_alias_is_retrieved_as_direct_b(session: Session) -> None:
+    ingest_track_b_page(
+        session,
+        _page(
+            [
+                _item(
+                    price="18900000",
+                    title="전기수술기, Covidien, (US)VLFT10GEN, 범용",
+                ),
+                {
+                    **_item(
+                        change="01",
+                        price="33250",
+                        title="방독면누출시험기, 3M, FT-10, 호흡보호구 fit test 기기",
+                    ),
+                    "prdctSno": "2",
+                },
+            ]
+        ),
+    )
+    session.commit()
+
+    result = compare_track_b_quote(
+        session,
+        ProductQuery(
+            product_name="전기수술기(소작기)",
+            manufacturer="Medtronic",
+            model_name="FT10",
+            specification="FT10",
+        ),
+        quote_unit_price=None,
+    )
+
+    assert result.status == "success"
+    assert len(result.candidates) == 1
+    assert result.candidates[0].price == Decimal("18900000")
+    assert result.candidates[0].match_grade.value == "B"
+    assert "verified_alias_with_verified_origin" in result.candidates[0].match_note
+    assert "Covidien" in result.candidates[0].product_title
