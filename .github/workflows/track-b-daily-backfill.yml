@@ -1,13 +1,6 @@
 name: Track B Daily Backfill
 
 on:
-  # Temporary one-shot trigger for immediate post-fix Production resume.
-  # Remove after the run started by this workflow-file commit is verified.
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/track-b-daily-backfill.yml"
   pull_request:
     paths:
       - ".github/workflows/track-b-daily-backfill.yml"
