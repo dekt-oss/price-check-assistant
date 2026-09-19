@@ -279,3 +279,352 @@ def test_source_error_after_partial_write_is_not_reported_as_success(tmp_path: P
     assert summary.stop_reason == "SOURCE_OR_STORAGE_ERROR"
     assert summary.track_b_requests == 2
     assert summary.next_cursor == CollectionCursor(0, 2)
+
+
+class ContentAddressedFakeStore:
+    def __init__(self) -> None:
+        self.keys: set[str] = set()
+
+    def put_public_json(self, *, source_operation: str, payload: object) -> RawObjectRef:
+        digest, canonical = payload_sha256(payload)
+        key = f"raw/v1/{source_operation}/{digest}.json.gz"
+        created = key not in self.keys
+        self.keys.add(key)
+        return RawObjectRef(
+            bucket="price-check-raw",
+            key=key,
+            payload_hash=digest,
+            uncompressed_bytes=len(canonical),
+            stored_bytes=max(1, len(canonical) // 2),
+            created=created,
+        )
+
+
+def test_resume_page_within_reported_horizon_continues_without_reconciliation(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient(
+        [
+            _response([{"row": 3}, {"row": 4}], total=6, page=2, rows=2),
+            _response([{"row": 5}, {"row": 6}], total=6, page=3, rows=2),
+        ]
+    )
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 2),
+        request_budget=2,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "SUCCESS"
+    assert summary.next_cursor == CollectionCursor(1, 1)
+    assert summary.pagination_reconciliations == 0
+    assert [params["pageNo"] for _, params in shopping.calls] == [2, 3]
+
+
+def test_resume_on_last_page_completes_code(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient([_response([{"row": 3}, {"row": 4}], total=4, page=2, rows=2)])
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 2),
+        request_budget=1,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "SUCCESS"
+    assert summary.codes_completed == 1
+    assert summary.next_cursor == CollectionCursor(1, 1)
+
+
+def test_resume_page_beyond_current_horizon_reconciles_verified_contraction(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient(
+        [
+            _response([], total=1, page=7, rows=2),
+            _response([{"row": 1}], total=1, page=1, rows=2),
+        ]
+    )
+    store = FakeStore()
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=store,
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 7),
+        request_budget=2,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "SUCCESS"
+    assert summary.pagination_reconciliations == 1
+    assert summary.pagination_contractions == 1
+    assert summary.pagination_inconsistencies == 0
+    assert summary.track_b_requests == 2
+    assert summary.pages_stored == 1
+    assert summary.next_cursor == CollectionCursor(1, 1)
+    assert summary.last_pagination_event is not None
+    assert summary.last_pagination_event.startswith("PAGINATION_CONTRACTED")
+    assert len(store.payloads) == 1
+    assert [params["pageNo"] for _, params in shopping.calls] == [7, 1]
+
+
+def test_intra_run_total_count_drop_reprobes_page_one_before_advancing(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient(
+        [
+            _response([{"row": 1}, {"row": 2}], total=6, page=1, rows=2),
+            _response([], total=1, page=2, rows=2),
+            _response([{"row": 1}], total=1, page=1, rows=2),
+        ]
+    )
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 1),
+        request_budget=3,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "SUCCESS"
+    assert summary.pagination_reconciliations == 1
+    assert summary.pagination_contractions == 1
+    assert summary.pages_stored == 2
+    assert summary.rows_seen == 3
+    assert summary.next_cursor == CollectionCursor(1, 1)
+
+
+def test_page_local_total_count_glitch_uses_reconciled_page_one_horizon(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient(
+        [
+            _response([{"row": 1}, {"row": 2}], total=6, page=1, rows=2),
+            _response([{"row": 3}, {"row": 4}], total=1, page=2, rows=2),
+            _response([{"row": 1}, {"row": 2}], total=6, page=1, rows=2),
+            _response([{"row": 5}, {"row": 6}], total=6, page=3, rows=2),
+        ]
+    )
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 1),
+        request_budget=4,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "SUCCESS"
+    assert summary.pagination_reconciliations == 1
+    assert summary.pagination_contractions == 0
+    assert summary.pagination_inconsistencies == 1
+    assert summary.next_cursor == CollectionCursor(1, 1)
+    assert [params["pageNo"] for _, params in shopping.calls] == [1, 2, 1, 3]
+
+
+def test_reconciliation_respects_request_budget_without_advancing_cursor(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient([_response([], total=1, page=7, rows=2)])
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 7),
+        request_budget=1,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "PARTIAL_SUCCESS"
+    assert summary.stop_reason == "REQUEST_BUDGET_EXHAUSTED"
+    assert summary.track_b_requests == 1
+    assert summary.total_requests == 1
+    assert summary.pages_stored == 0
+    assert summary.next_cursor == CollectionCursor(0, 7)
+
+
+def test_response_page_number_mismatch_fails_closed(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient([_response([{"row": 1}], total=10, page=1, rows=2)])
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 2),
+        request_budget=1,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "FAILED"
+    assert summary.stop_reason == "SOURCE_OR_STORAGE_ERROR"
+    assert summary.pages_stored == 0
+    assert summary.next_cursor == CollectionCursor(0, 2)
+    assert "response page mismatch" in (summary.error_message or "")
+
+
+def test_missing_total_count_fails_closed(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    shopping = FakeClient([_response([{"row": 1}], total=None, page=1, rows=2)])
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 1),
+        request_budget=1,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "FAILED"
+    assert summary.stop_reason == "SOURCE_OR_STORAGE_ERROR"
+    assert summary.next_cursor == CollectionCursor(0, 1)
+    assert "missing totalCount" in (summary.error_message or "")
+
+
+def test_content_addressed_replay_reuses_identical_contraction_probe(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(snapshot_path, segments=("42",), codes=["4200000001"])
+    store = ContentAddressedFakeStore()
+
+    def run_once():
+        return collect_track_b_batch(
+            catalog_client=FakeClient([]),
+            shopping_client=FakeClient(
+                [
+                    _response([], total=1, page=7, rows=2),
+                    _response([{"row": 1}], total=1, page=1, rows=2),
+                ]
+            ),
+            store=store,
+            catalog_base_url="https://catalog",
+            shopping_base_url="https://shopping",
+            begin=date(2025, 9, 12),
+            end=date(2026, 9, 11),
+            start_cursor=CollectionCursor(0, 7),
+            request_budget=2,
+            segments=("42",),
+            page_size=2,
+            target_code_snapshot_path=snapshot_path,
+        )
+
+    first = run_once()
+    second = run_once()
+
+    assert first.r2_objects_created == 1
+    assert first.r2_objects_reused == 0
+    assert second.r2_objects_created == 0
+    assert second.r2_objects_reused == 1
+    assert len(store.keys) == 1
+
+
+def test_verified_contraction_advances_to_next_code_without_restart_loop(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "target-codes.json"
+    _write_snapshot(
+        snapshot_path,
+        segments=("42",),
+        codes=["4200000001", "4200000002"],
+    )
+    shopping = FakeClient(
+        [
+            _response([], total=1, page=7, rows=2),
+            _response([{"row": 1}], total=1, page=1, rows=2),
+            _response([], total=0, page=1, rows=2),
+        ]
+    )
+
+    summary = collect_track_b_batch(
+        catalog_client=FakeClient([]),
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="https://catalog",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 7),
+        request_budget=3,
+        segments=("42",),
+        page_size=2,
+        target_code_snapshot_path=snapshot_path,
+    )
+
+    assert summary.status == "SUCCESS"
+    assert summary.pagination_contractions == 1
+    assert summary.codes_completed == 2
+    assert summary.next_cursor == CollectionCursor(2, 1)
+    assert [params["pageNo"] for _, params in shopping.calls] == [7, 1, 1]
