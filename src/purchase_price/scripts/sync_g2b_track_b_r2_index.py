@@ -25,6 +25,10 @@ from purchase_price.services.track_b_pipeline_state import (
     STATE_NAME,
     TrackBPipelineState,
 )
+from purchase_price.services.track_b_supplemental_state import (
+    SUPPLEMENTAL_STATE_NAME,
+    TrackBSupplementalState,
+)
 from purchase_price.storage.r2_reader import R2RawEvidenceReader, R2RawObject
 from purchase_price.storage.r2_serving_index import R2ServingIndexRef, R2ServingIndexStore
 from purchase_price.storage.r2_state import R2OperationalStateStore
@@ -167,6 +171,12 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
         state_store=state_store,
         reader=reader,
     )
+    supplemental_payload = state_store.read_json(SUPPLEMENTAL_STATE_NAME)
+    supplemental = (
+        TrackBSupplementalState.from_payload(supplemental_payload)
+        if supplemental_payload is not None
+        else None
+    )
     pointer = state_store.read_json(SERVING_INDEX_STATE_NAME)
     artifact_store = R2ServingIndexStore.from_settings(settings)
 
@@ -174,7 +184,11 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
         db_path = Path(temp_dir) / "track-b-serving.sqlite"
         previous_ref: R2ServingIndexRef | None = None
         mode = "full-bootstrap"
-        indexed_keys = list(pipeline.pending_object_keys)
+        base_indexed_keys = list(pipeline.pending_object_keys)
+        supplemental_indexed_keys = (
+            list(supplemental.pending_object_keys) if supplemental is not None else []
+        )
+        indexed_keys = list(dict.fromkeys([*base_indexed_keys, *supplemental_indexed_keys]))
 
         if pointer is not None:
             previous_ref = _ref_from_pointer(pointer)
@@ -252,13 +266,23 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
                 "code_index": pipeline.collection_cursor.code_index,
                 "page_no": pipeline.collection_cursor.page_no,
             },
+            "supplemental": {
+                "state_present": supplemental is not None,
+                "indexed_object_count": len(supplemental_indexed_keys),
+            },
         }
         state_store.write_json(SERVING_INDEX_STATE_NAME, pointer_payload)
-        pipeline.mark_pending_indexed(
-            indexed_keys,
-            {**report, "mode": mode, "state_recovered": state_recovered, "row_count": row_count},
-        )
+        sync_report = {
+            **report,
+            "mode": mode,
+            "state_recovered": state_recovered,
+            "row_count": row_count,
+        }
+        pipeline.mark_pending_indexed(base_indexed_keys, sync_report)
         state_store.write_json(STATE_NAME, pipeline.to_payload())
+        if supplemental is not None:
+            supplemental.mark_pending_indexed(supplemental_indexed_keys, sync_report)
+            state_store.write_json(SUPPLEMENTAL_STATE_NAME, supplemental.to_payload())
 
         if previous_ref is not None and previous_ref.key != ref.key:
             try:
@@ -277,6 +301,8 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             "index_sha256": ref.sha256,
             "stored_bytes": ref.stored_bytes,
             "uncompressed_bytes": ref.uncompressed_bytes,
+            "base_pending_indexed": len(base_indexed_keys),
+            "supplemental_pending_indexed": len(supplemental_indexed_keys),
             **report,
         }
         output.parent.mkdir(parents=True, exist_ok=True)
