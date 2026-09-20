@@ -2,6 +2,9 @@ name: R2 Search Recall UAT
 
 on:
   workflow_dispatch:
+  schedule:
+    # 20:30 UTC Sunday = 05:30 KST Monday, after base + supplemental serving sync.
+    - cron: "30 20 * * 0"
   pull_request:
     paths:
       - ".github/workflows/r2-search-recall-uat.yml"
