@@ -15,12 +15,14 @@ on:
       - "src/purchase_price/scripts/measure_r2_search_recall.py"
       - "src/purchase_price/scripts/diagnose_r2_zero_recall.py"
       - "src/purchase_price/scripts/inspect_r2_promotion_sources.py"
+      - "src/purchase_price/scripts/probe_g2b_promotion_catalog.py"
       - "data/g2b_product_mappings.csv"
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
       - "tests/test_measure_r2_search_recall.py"
       - "tests/test_diagnose_r2_zero_recall.py"
       - "tests/test_inspect_r2_promotion_sources.py"
+      - "tests/test_probe_g2b_promotion_catalog.py"
 
 permissions:
   contents: read
@@ -36,6 +38,9 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,6 +55,7 @@ jobs:
           tests/test_measure_r2_search_recall.py
           tests/test_diagnose_r2_zero_recall.py
           tests/test_inspect_r2_promotion_sources.py
+          tests/test_probe_g2b_promotion_catalog.py
       - name: Measure Production R2 recall without writes
         run: >-
           python -m purchase_price.scripts.measure_r2_search_recall
@@ -62,6 +68,12 @@ jobs:
           --recall-report artifacts/r2-search-recall/report.json
           --output artifacts/r2-search-recall/promotion-source-inspection.json
           --summary artifacts/r2-search-recall/promotion-source-inspection.md
+      - name: Probe official G2B catalog for promotion candidate IDs
+        run: >-
+          python -m purchase_price.scripts.probe_g2b_promotion_catalog
+          --inspection artifacts/r2-search-recall/promotion-source-inspection.json
+          --output artifacts/r2-search-recall/promotion-catalog-probe.json
+          --summary artifacts/r2-search-recall/promotion-catalog-probe.md
       - name: Diagnose Production R2 ZERO causes
         run: >-
           python -m purchase_price.scripts.diagnose_r2_zero_recall
@@ -76,6 +88,9 @@ jobs:
           fi
           if [ -f artifacts/r2-search-recall/promotion-source-inspection.md ]; then
             cat artifacts/r2-search-recall/promotion-source-inspection.md
+          fi
+          if [ -f artifacts/r2-search-recall/promotion-catalog-probe.md ]; then
+            cat artifacts/r2-search-recall/promotion-catalog-probe.md
           fi
           if [ -f artifacts/r2-search-recall/zero-diagnostic.md ]; then
             cat artifacts/r2-search-recall/zero-diagnostic.md
