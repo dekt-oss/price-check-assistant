@@ -172,6 +172,8 @@ def test_reference_diagnostic_flags_unverified_origin_qualifier_for_review() -> 
         source_record_id="minion-1",
         product_title="DNA서열분석기, Oxford nanopore technologies, (GB)MinION MK1D",
         price=13310000,
+        product_id="12345678",
+        detail_code="4111549901",
     )
 
     diagnostic = _reference_diagnostic(query, reference)
@@ -180,6 +182,10 @@ def test_reference_diagnostic_flags_unverified_origin_qualifier_for_review() -> 
     assert diagnostic["promotion_candidate"] is True
     assert diagnostic["parsed_model_name"] == "MinION MK1D"
     assert diagnostic["model_qualifier"] == "GB"
+    assert diagnostic["catalog_url"] == (
+        "https://goods.g2b.go.kr/search/productSearchView.do?"
+        "goodsClsfcNo=4111549901&goodsIdntfcNo=12345678"
+    )
 
 
 def test_reference_diagnostic_does_not_promote_different_model_reference() -> None:
