@@ -121,6 +121,7 @@ def _reference_diagnostic(query: ProductQuery, candidate: Any) -> dict[str, Any]
     )
     return {
         "source_record_id": candidate.source_record_id,
+        "raw_object_key": getattr(candidate, "raw_object_key", None),
         "product_title": candidate.product_title,
         "price": _price_text(candidate.price),
         "parsed_manufacturer": identity.manufacturer,
