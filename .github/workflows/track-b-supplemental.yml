@@ -10,8 +10,8 @@ on:
       - "src/purchase_price/services/track_b_supplemental_targets.py"
       - "src/purchase_price/scripts/sync_g2b_track_b_r2_index.py"
   schedule:
-    # 17:55 UTC = 02:55 KST. Run before the 03:10 base Track B cycle.
-    - cron: "55 17 * * *"
+    # 19:40 UTC = 04:40 KST. Run after the 03:10 base Track B cycle and its serving sync.
+    - cron: "40 19 * * *"
   workflow_dispatch:
     inputs:
       request_budget:
