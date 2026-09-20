@@ -8,8 +8,8 @@ on:
       - "src/purchase_price/services/track_b_pipeline_state.py"
       - "src/purchase_price/storage/r2_state.py"
   schedule:
-    # GitHub cron is UTC. 18:10 UTC = 03:10 KST next day.
-    - cron: "10 18 * * *"
+    # 18:10 UTC Sun/Tue/Thu = 03:10 KST Mon/Wed/Fri. Six capped runs cover one 5,208-code cycle in about two weeks.
+    - cron: "10 18 * * 0,2,4"
   workflow_dispatch:
     inputs:
       request_budget:
