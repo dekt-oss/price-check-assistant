@@ -14,11 +14,13 @@ on:
       - "src/purchase_price/services/product_matching.py"
       - "src/purchase_price/scripts/measure_r2_search_recall.py"
       - "src/purchase_price/scripts/diagnose_r2_zero_recall.py"
+      - "src/purchase_price/scripts/inspect_r2_promotion_sources.py"
       - "data/g2b_product_mappings.csv"
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
       - "tests/test_measure_r2_search_recall.py"
       - "tests/test_diagnose_r2_zero_recall.py"
+      - "tests/test_inspect_r2_promotion_sources.py"
 
 permissions:
   contents: read
@@ -47,12 +49,19 @@ jobs:
           pytest -q
           tests/test_measure_r2_search_recall.py
           tests/test_diagnose_r2_zero_recall.py
+          tests/test_inspect_r2_promotion_sources.py
       - name: Measure Production R2 recall without writes
         run: >-
           python -m purchase_price.scripts.measure_r2_search_recall
           --manifest data/uat/r2-search-recall-cases.json
           --output artifacts/r2-search-recall/report.json
           --summary artifacts/r2-search-recall/summary.md
+      - name: Inspect raw R2 promotion-candidate sources
+        run: >-
+          python -m purchase_price.scripts.inspect_r2_promotion_sources
+          --recall-report artifacts/r2-search-recall/report.json
+          --output artifacts/r2-search-recall/promotion-source-inspection.json
+          --summary artifacts/r2-search-recall/promotion-source-inspection.md
       - name: Diagnose Production R2 ZERO causes
         run: >-
           python -m purchase_price.scripts.diagnose_r2_zero_recall
@@ -64,6 +73,9 @@ jobs:
         run: |
           if [ -f artifacts/r2-search-recall/summary.md ]; then
             cat artifacts/r2-search-recall/summary.md
+          fi
+          if [ -f artifacts/r2-search-recall/promotion-source-inspection.md ]; then
+            cat artifacts/r2-search-recall/promotion-source-inspection.md
           fi
           if [ -f artifacts/r2-search-recall/zero-diagnostic.md ]; then
             cat artifacts/r2-search-recall/zero-diagnostic.md
