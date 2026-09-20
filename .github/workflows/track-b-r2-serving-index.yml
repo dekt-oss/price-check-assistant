@@ -245,8 +245,10 @@ jobs:
           print("phase=", report.get("phase"))
           print("acceptance_status=", report.get("acceptance_status"))
           print("issue_157_acceptance=", report.get("issue_157_acceptance"))
+          print("operational_acceptance=", report.get("operational_acceptance"))
           historical = report.get("historical") or {}
           rolling = report.get("rolling") or {}
+          supplemental = report.get("supplemental") or {}
           serving = report.get("serving_index") or {}
           print("historical_cursor=", historical.get("cursor"))
           print("historical_remaining_codes=", historical.get("remaining_codes"))
@@ -254,6 +256,11 @@ jobs:
           print("rolling_cursor=", rolling.get("cursor"))
           print("rolling_covered_through=", rolling.get("covered_through"))
           print("rolling_cycles_completed=", rolling.get("cycles_completed"))
+          print("supplemental_phase=", supplemental.get("phase"))
+          print("supplemental_target_count=", supplemental.get("target_count"))
+          print("supplemental_backfill_complete=", supplemental.get("backfill_complete"))
+          print("supplemental_pending_object_count=", supplemental.get("pending_object_count"))
+          print("supplemental_serving_ready=", supplemental.get("serving_ready"))
           print("serving_pointer_synced=", serving.get("historical_cursor_matches_pointer"))
           print("pending_object_count=", serving.get("pending_object_count"))
           PY

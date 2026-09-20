@@ -16,6 +16,10 @@ from purchase_price.services.track_b_pipeline_state import (
     STATE_NAME,
     TrackBPipelineState,
 )
+from purchase_price.services.track_b_supplemental_state import (
+    SUPPLEMENTAL_STATE_NAME,
+    SupplementalTrackBState,
+)
 from purchase_price.storage.r2_state import R2OperationalStateStore
 
 KST = ZoneInfo("Asia/Seoul")
@@ -37,12 +41,108 @@ def _pointer_cursor(pointer: Mapping[str, Any] | None) -> tuple[int, int] | None
         return None
 
 
+def _audit_supplemental(
+    state: SupplementalTrackBState | None,
+    *,
+    serving_pointer: Mapping[str, Any] | None,
+    require_serving_synced: bool,
+) -> tuple[dict[str, Any], bool, list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    pointer_target_count = None
+    if isinstance(serving_pointer, Mapping):
+        raw_count = serving_pointer.get("supplemental_target_count")
+        try:
+            pointer_target_count = int(raw_count) if raw_count is not None else None
+        except (TypeError, ValueError):
+            pointer_target_count = None
+
+    if state is None:
+        return (
+            {
+                "present": False,
+                "phase": "not_started",
+                "target_count": 0,
+                "backfill_complete": False,
+                "rolling_active_window": False,
+                "rolling_cycles_completed": 0,
+                "pending_object_count": 0,
+                "pointer_target_count": pointer_target_count,
+            },
+            False,
+            errors,
+            warnings,
+        )
+
+    active_window = state.rolling_window_begin is not None and state.rolling_window_end is not None
+    if active_window and not state.backfill_complete:
+        errors.append("supplemental rolling window is active before historical backfill completion")
+
+    pending_count = len(state.pending_object_keys)
+    if require_serving_synced:
+        if pending_count:
+            errors.append("supplemental pending raw objects remain after serving-index sync")
+        if state.backfill_complete and pointer_target_count != len(state.target_codes):
+            errors.append("serving-index pointer supplemental target count is stale")
+    elif pending_count:
+        warnings.append(
+            f"{pending_count} supplemental raw objects await serving-index sync"
+        )
+
+    if not state.backfill_complete:
+        phase = "historical_progress"
+    elif active_window:
+        phase = "rolling_in_progress"
+    elif state.rolling_cycles_completed > 0:
+        phase = "rolling_operational"
+    else:
+        phase = "historical_complete_waiting_rolling"
+
+    serving_ready = (
+        pending_count == 0
+        and (
+            not require_serving_synced
+            or pointer_target_count == len(state.target_codes)
+        )
+    )
+    ready = state.backfill_complete and serving_ready
+
+    last_collection = state.last_collection or {}
+    return (
+        {
+            "present": True,
+            "phase": phase,
+            "target_count": len(state.target_codes),
+            "target_codes": list(state.target_codes),
+            "backfill_complete": state.backfill_complete,
+            "collection_cursor": _cursor_payload(
+                state.collection_cursor.code_index,
+                state.collection_cursor.page_no,
+            ),
+            "rolling_active_window": active_window,
+            "rolling_window_begin": state.rolling_window_begin,
+            "rolling_window_end": state.rolling_window_end,
+            "rolling_covered_through": state.rolling_covered_through,
+            "rolling_cycles_completed": state.rolling_cycles_completed,
+            "pending_object_count": pending_count,
+            "pointer_target_count": pointer_target_count,
+            "last_stop_reason": last_collection.get("stop_reason"),
+            "last_finished_at": last_collection.get("finished_at"),
+            "serving_ready": serving_ready,
+        },
+        ready,
+        errors,
+        warnings,
+    )
+
+
 def audit_transition(
     state: TrackBPipelineState,
     *,
     serving_pointer: Mapping[str, Any] | None,
     today: date,
     require_serving_synced: bool = False,
+    supplemental_state: SupplementalTrackBState | None = None,
 ) -> dict[str, Any]:
     """Summarize historical -> rolling state without treating expected progress as a failure."""
 
@@ -97,6 +197,14 @@ def audit_transition(
             f"{len(state.pending_object_keys)} pending raw objects await serving-index sync"
         )
 
+    supplemental, supplemental_ready, supplemental_errors, supplemental_warnings = _audit_supplemental(
+        supplemental_state,
+        serving_pointer=serving_pointer,
+        require_serving_synced=require_serving_synced,
+    )
+    errors.extend(supplemental_errors)
+    warnings.extend(supplemental_warnings)
+
     if not state.backfill_complete:
         phase = "historical_progress"
         acceptance_status = "HISTORICAL_IN_PROGRESS"
@@ -120,11 +228,14 @@ def audit_transition(
     last_rolling = state.last_rolling_collection or {}
     last_serving = state.last_serving_index_sync or {}
 
+    base_rolling_accepted = acceptance_status == "ROLLING_ACCEPTED"
+
     return {
         "status": "fail" if errors else "pass",
         "phase": phase,
         "acceptance_status": acceptance_status,
-        "issue_157_acceptance": acceptance_status == "ROLLING_ACCEPTED",
+        "issue_157_acceptance": base_rolling_accepted,
+        "operational_acceptance": base_rolling_accepted and supplemental_ready,
         "checked_at_kst": datetime.now(KST).isoformat(),
         "checked_date_kst": today.isoformat(),
         "historical": {
@@ -153,6 +264,7 @@ def audit_transition(
             "last_stop_reason": last_rolling.get("stop_reason"),
             "last_finished_at": last_rolling.get("finished_at"),
         },
+        "supplemental": supplemental,
         "serving_index": {
             "pointer_present": pointer_present,
             "pointer_collection_cursor": (
@@ -209,12 +321,29 @@ def build_live_report(*, require_serving_synced: bool) -> dict[str, Any]:
             "warnings": [],
         }
 
+    supplemental_payload = state_store.read_json(SUPPLEMENTAL_STATE_NAME)
+    supplemental_state = None
+    if supplemental_payload is not None:
+        try:
+            supplemental_state = SupplementalTrackBState.from_payload(supplemental_payload)
+        except (TypeError, ValueError) as exc:
+            return {
+                "status": "fail",
+                "phase": "supplemental_state_invalid",
+                "acceptance_status": "SUPPLEMENTAL_STATE_INVALID",
+                "issue_157_acceptance": False,
+                "operational_acceptance": False,
+                "errors": [str(exc)],
+                "warnings": [],
+            }
+
     serving_pointer = state_store.read_json(SERVING_INDEX_STATE_NAME)
     return audit_transition(
         state,
         serving_pointer=serving_pointer,
         today=datetime.now(KST).date(),
         require_serving_synced=require_serving_synced,
+        supplemental_state=supplemental_state,
     )
 
 

@@ -8,12 +8,19 @@ from purchase_price.services.track_b_pipeline_state import (
     EXPECTED_TARGET_CODE_COUNT,
     TrackBPipelineState,
 )
+from purchase_price.services.track_b_supplemental_state import SupplementalTrackBState
 
 
-def _pointer(code_index: int, page_no: int = 1, row_count: int = 100) -> dict:
+def _pointer(
+    code_index: int,
+    page_no: int = 1,
+    row_count: int = 100,
+    supplemental_target_count: int = 0,
+) -> dict:
     return {
         "collection_cursor": {"code_index": code_index, "page_no": page_no},
         "row_count": row_count,
+        "supplemental_target_count": supplemental_target_count,
     }
 
 
@@ -151,3 +158,97 @@ def test_pending_objects_are_warning_before_serving_sync() -> None:
 
     assert report["status"] == "pass"
     assert report["warnings"]
+
+
+def _accepted_base_state() -> TrackBPipelineState:
+    state = TrackBPipelineState.bootstrap()
+    state.collection_cursor = CollectionCursor(EXPECTED_TARGET_CODE_COUNT, 1)
+    state.backfill_complete = True
+    state.rolling_cycles_completed = 1
+    state.rolling_covered_through = "2026-09-18"
+    state.last_rolling_collection = {
+        "cycle_complete": True,
+        "stop_reason": "TARGET_COMPLETE",
+        "finished_at": "2026-09-18T03:00:00+00:00",
+    }
+    return state
+
+
+def _completed_supplemental_state() -> SupplementalTrackBState:
+    state = SupplementalTrackBState.bootstrap(("4511181101",))
+    state.collection_cursor = CollectionCursor(1, 1)
+    state.backfill_complete = True
+    return state
+
+
+def test_operational_acceptance_waits_for_supplemental_lane() -> None:
+    report = audit_transition(
+        _accepted_base_state(),
+        serving_pointer=_pointer(EXPECTED_TARGET_CODE_COUNT),
+        today=date(2026, 9, 18),
+        require_serving_synced=True,
+    )
+
+    assert report["status"] == "pass"
+    assert report["issue_157_acceptance"] is True
+    assert report["operational_acceptance"] is False
+    assert report["supplemental"]["phase"] == "not_started"
+
+
+def test_operational_acceptance_requires_supplemental_serving_sync() -> None:
+    supplemental = _completed_supplemental_state()
+    supplemental.pending_object_keys = ["raw/v1/supplemental.json.gz"]
+
+    report = audit_transition(
+        _accepted_base_state(),
+        serving_pointer=_pointer(
+            EXPECTED_TARGET_CODE_COUNT,
+            supplemental_target_count=1,
+        ),
+        today=date(2026, 9, 18),
+        require_serving_synced=True,
+        supplemental_state=supplemental,
+    )
+
+    assert report["status"] == "fail"
+    assert report["operational_acceptance"] is False
+    assert report["supplemental"]["pending_object_count"] == 1
+    assert any("supplemental pending raw objects" in error for error in report["errors"])
+
+
+def test_operational_acceptance_passes_after_supplemental_index_sync() -> None:
+    supplemental = _completed_supplemental_state()
+
+    report = audit_transition(
+        _accepted_base_state(),
+        serving_pointer=_pointer(
+            EXPECTED_TARGET_CODE_COUNT,
+            supplemental_target_count=1,
+        ),
+        today=date(2026, 9, 18),
+        require_serving_synced=True,
+        supplemental_state=supplemental,
+    )
+
+    assert report["status"] == "pass"
+    assert report["issue_157_acceptance"] is True
+    assert report["operational_acceptance"] is True
+    assert report["supplemental"]["backfill_complete"] is True
+    assert report["supplemental"]["serving_ready"] is True
+
+
+def test_supplemental_pointer_target_count_mismatch_fails_closed() -> None:
+    report = audit_transition(
+        _accepted_base_state(),
+        serving_pointer=_pointer(
+            EXPECTED_TARGET_CODE_COUNT,
+            supplemental_target_count=0,
+        ),
+        today=date(2026, 9, 18),
+        require_serving_synced=True,
+        supplemental_state=_completed_supplemental_state(),
+    )
+
+    assert report["status"] == "fail"
+    assert report["operational_acceptance"] is False
+    assert any("supplemental target count" in error for error in report["errors"])
