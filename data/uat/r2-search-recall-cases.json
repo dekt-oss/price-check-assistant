@@ -111,7 +111,8 @@
       "product_name": "엑소아틀레트 - II",
       "manufacturer": "",
       "model_name": "",
-      "specification": ""
+      "specification": "",
+      "expected_negative": true
     }
   ]
 }
