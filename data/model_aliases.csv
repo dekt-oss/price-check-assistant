@@ -1,3 +1,5 @@
 canonical_model,alias,evidence_note,evidence_url
 FT10,FT10,Canonical product model,https://www.medtronic.com/en-us/healthcare-professionals/products/surgical-energy/electrosurgical-hardware/electrosurgical-generators-monitors/valleylab-ft10-energy-platform.html
 FT10,VLFT10GEN,Medtronic official order code for Valleylab FT10 Energy Platform,https://www.medtronic.com/en-us/healthcare-professionals/products/surgical-energy/electrosurgical-hardware/electrosurgical-generators-monitors/valleylab-ft10-energy-platform.html
+ThinkStation P2 Tower,ThinkStation P2 Tower,Lenovo official product family name,https://www.lenovo.com/kr/ko/p/workstations/thinkstation-p-series/lenovo-thinkstation-p2-tower-workstation/len102s0018/
+ThinkStation P2 Tower,ThinkStation P2 Tower Workstation,Lenovo official page identifies the product as ThinkStation P2 Tower Workstation,https://www.lenovo.com/kr/ko/p/workstations/thinkstation-p-series/lenovo-thinkstation-p2-tower-workstation/len102s0018/

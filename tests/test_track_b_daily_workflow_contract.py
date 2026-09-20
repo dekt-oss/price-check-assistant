@@ -10,7 +10,7 @@ def test_daily_workflow_keeps_quota_and_r2_guards() -> None:
     assert "github.event_name == 'pull_request'" in text
     assert "github.event_name != 'pull_request'" in text
     assert "production_collection_contract=READY_R2" in text
-    assert 'cron: "10 18 * * *"' in text
+    assert 'cron: "10 18 * * 0,2,4"' in text
     assert "track-b-r2-pipeline" in text
     assert "track-b-daily-pr-{0}" in text
     assert "cancel-in-progress: false" in text

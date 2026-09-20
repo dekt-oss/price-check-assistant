@@ -17,7 +17,7 @@ TIERS = ("DIRECT_AB", "CLASS_C", "BROAD_REFERENCE", "ZERO")
 INDEX_ERROR_STATUSES = {"unavailable", "not_ingested"}
 
 
-def _load_manifest(path: Path) -> list[dict[str, str]]:
+def _load_manifest(path: Path) -> list[dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or payload.get("schema") != MANIFEST_SCHEMA:
         raise ValueError("R2 search recall manifest schema mismatch")
@@ -25,7 +25,7 @@ def _load_manifest(path: Path) -> list[dict[str, str]]:
     if not isinstance(cases, list) or not cases:
         raise ValueError("R2 search recall manifest must contain at least one case")
 
-    normalized: list[dict[str, str]] = []
+    normalized: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for raw in cases:
         if not isinstance(raw, dict):
@@ -39,6 +39,7 @@ def _load_manifest(path: Path) -> list[dict[str, str]]:
             "manufacturer": str(raw.get("manufacturer") or "").strip(),
             "model_name": str(raw.get("model_name") or "").strip(),
             "specification": str(raw.get("specification") or "").strip(),
+            "expected_negative": bool(raw.get("expected_negative", False)),
         }
         if not query["product_name"] and not query["model_name"]:
             raise ValueError(f"case {case_id} needs product_name or model_name")
@@ -86,7 +87,7 @@ def _candidate_row(candidate: Any, *, reference: bool) -> dict[str, Any]:
 
 
 def _evaluate_case(
-    case: dict[str, str],
+    case: dict[str, Any],
     *,
     lookup: Callable[..., Any] = lookup_track_b_quote_from_r2,
 ) -> dict[str, Any]:
@@ -146,6 +147,7 @@ def _evaluate_case(
             round(demand_present / observation_count, 4) if observation_count else None
         ),
         "external_research_rescue": "NOT_RUN",
+        "expected_negative": bool(case.get("expected_negative", False)),
         "sample_rows": [
             _candidate_row(row, reference=tier == "BROAD_REFERENCE")
             for row in observations[:5]
@@ -171,6 +173,21 @@ def build_report(
         count = counts[tier]
         summary[f"{tier.lower()}_count"] = count
         summary[f"{tier.lower()}_rate"] = round(count / usable, 4) if usable else None
+
+    expected_negative_zeros = [
+        row for row in results if row["tier"] == "ZERO" and row.get("expected_negative")
+    ]
+    unexpected_zeros = [
+        row for row in results if row["tier"] == "ZERO" and not row.get("expected_negative")
+    ]
+    positive_queries = [row for row in results if not row.get("expected_negative")]
+    summary["expected_negative_zero_count"] = len(expected_negative_zeros)
+    summary["unexpected_zero_count"] = len(unexpected_zeros)
+    summary["unexpected_zero_rate"] = (
+        round(len(unexpected_zeros) / len(positive_queries), 4)
+        if positive_queries
+        else None
+    )
 
     observations = [row for row in results if row["observation_count"]]
     total_observations = sum(int(row["observation_count"]) for row in observations)
@@ -204,6 +221,9 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         f"- total queries: **{summary['total_queries']}**",
         f"- usable queries: **{summary['usable_queries']}**",
         f"- index errors: **{summary['index_error_count']}**",
+        f"- expected negative ZERO: **{summary['expected_negative_zero_count']}**",
+        f"- unexpected ZERO: **{summary['unexpected_zero_count']}**",
+        f"- unexpected ZERO rate (positive cases): **{summary['unexpected_zero_rate']}**",
         "",
         "| Query | Tier | Status | Candidates | References | Price range |",
         "|---|---|---|---:|---:|---:|",

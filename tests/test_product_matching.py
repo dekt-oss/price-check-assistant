@@ -446,3 +446,21 @@ def test_ft10_literal_collision_from_3m_still_fails_closed_on_manufacturer() -> 
     assert decision.grade == MatchGrade.X
     assert decision.model_state == "exact"
     assert decision.manufacturer_state == "conflict"
+
+
+def test_lenovo_thinkstation_p2_workstation_suffix_is_verified_model_alias() -> None:
+    decision = grade_product_identity(
+        ProductQuery(
+            product_name="워크스테이션",
+            manufacturer="Lenovo",
+            model_name="ThinkStation P2 Tower",
+        ),
+        parse_g2b_identity(
+            "컴퓨터서버, lenovo, (CN)ThinkStation P2 Tower Workstation, "
+            "14th Generation Intel Core i5-14500 vPro(5.00GHz)"
+        ),
+    )
+
+    assert decision.grade == MatchGrade.B
+    assert decision.model_state == "verified_alias_with_verified_origin"
+    assert decision.manufacturer_state == "exact_or_alias"

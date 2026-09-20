@@ -47,6 +47,8 @@ def test_manifest_keeps_initial_real_uat_cases_when_matrix_expands() -> None:
     flow = next(case for case in cases if case["case_id"] == "flow_c")
     assert flow["manufacturer"] == "Maquet"
     assert flow["model_name"] == "FLOW-C"
+    negative = next(case for case in cases if case["case_id"] == "exoatlet_negative_control")
+    assert negative["expected_negative"] is True
 
 
 def test_report_counts_recall_tiers_without_promoting_reference() -> None:
@@ -119,3 +121,40 @@ def test_report_counts_recall_tiers_without_promoting_reference() -> None:
     assert report["summary"]["class_c_count"] == 0
     assert report["cases"][1]["tier"] == "BROAD_REFERENCE"
     assert report["cases"][1]["external_research_rescue"] == "NOT_RUN"
+
+
+def test_report_separates_expected_negative_from_unexpected_zero() -> None:
+    cases = [
+        {
+            "case_id": "missing_positive",
+            "product_name": "A",
+            "manufacturer": "",
+            "model_name": "M1",
+            "specification": "",
+            "expected_negative": False,
+        },
+        {
+            "case_id": "negative_control",
+            "product_name": "B",
+            "manufacturer": "",
+            "model_name": "",
+            "specification": "",
+            "expected_negative": True,
+        },
+    ]
+
+    def lookup(query, *, quote_unit_price):
+        del query, quote_unit_price
+        return SimpleNamespace(
+            status="success_0",
+            candidates=(),
+            reference_candidates=(),
+            examined=0,
+        )
+
+    report = build_report(cases, lookup=lookup)
+
+    assert report["summary"]["zero_count"] == 2
+    assert report["summary"]["expected_negative_zero_count"] == 1
+    assert report["summary"]["unexpected_zero_count"] == 1
+    assert report["summary"]["unexpected_zero_rate"] == 1.0
