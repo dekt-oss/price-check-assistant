@@ -58,7 +58,7 @@ class SupplementalTrackBState:
         return cls(target_codes=target_codes)
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, Any]) -> "SupplementalTrackBState":
+    def from_payload(cls, payload: Mapping[str, Any]) -> SupplementalTrackBState:
         if payload.get("schema") != SUPPLEMENTAL_STATE_SCHEMA:
             raise ValueError("supplemental state schema mismatch")
         raw_codes = payload.get("target_codes")
