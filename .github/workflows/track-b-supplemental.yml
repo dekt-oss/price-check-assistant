@@ -46,6 +46,7 @@ jobs:
           "tenacity>=9,<10"
           "pydantic>=2.8,<3"
           "pydantic-settings>=2.4,<3"
+          "boto3>=1.35,<2"
       - name: Verify supplemental target and state contracts
         run: >-
           pytest -q
