@@ -111,6 +111,14 @@ def _reference_diagnostic(query: ProductQuery, candidate: Any) -> dict[str, Any]
         "UNVERIFIED_MODEL_QUALIFIER",
         "MODEL_VARIANT_CANDIDATE",
     }
+    product_id = getattr(candidate, "product_id", None)
+    detail_code = getattr(candidate, "detail_code", None)
+    catalog_url = (
+        f"https://goods.g2b.go.kr/search/productSearchView.do?"
+        f"goodsClsfcNo={detail_code}&goodsIdntfcNo={product_id}"
+        if product_id and detail_code
+        else None
+    )
     return {
         "source_record_id": candidate.source_record_id,
         "product_title": candidate.product_title,
@@ -118,6 +126,9 @@ def _reference_diagnostic(query: ProductQuery, candidate: Any) -> dict[str, Any]
         "parsed_manufacturer": identity.manufacturer,
         "parsed_model_name": identity.model_name,
         "model_qualifier": identity.model_qualifier,
+        "product_id": product_id,
+        "detail_code": detail_code,
+        "catalog_url": catalog_url,
         "blocker": blocker,
         "promotion_candidate": promotion_candidate,
         "match_note": decision.note,
@@ -364,15 +375,17 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
     else:
         lines.extend(
             [
-                "| Query | Blocker | Parsed model | Manufacturer | Price | Title |",
-                "|---|---|---|---|---:|---|",
+                "| Query | Blocker | Product ID | Detail code | Parsed model | Manufacturer | Price | Title |",
+                "|---|---|---|---|---|---|---:|---|",
             ]
         )
         for case_id, candidate in promotion_rows:
             lines.append(
-                "| {case_id} | {blocker} | {model} | {manufacturer} | {price} | {title} |".format(
+                "| {case_id} | {blocker} | {product_id} | {detail_code} | {model} | {manufacturer} | {price} | {title} |".format(
                     case_id=case_id,
                     blocker=_md_text(candidate.get("blocker")),
+                    product_id=_md_text(candidate.get("product_id")),
+                    detail_code=_md_text(candidate.get("detail_code")),
                     model=_md_text(candidate.get("parsed_model_name")),
                     manufacturer=_md_text(candidate.get("parsed_manufacturer")),
                     price=_md_text(candidate.get("price")),
