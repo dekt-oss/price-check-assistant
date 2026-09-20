@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from dataclasses import asdict, dataclass
@@ -113,7 +114,27 @@ def _resolve_target_codes(
     page_size: int,
     snapshot_path: Path | None,
     refresh_snapshot: bool,
+    explicit_target_codes: tuple[str, ...] | None = None,
 ) -> tuple[list[str], int, str, str | None]:
+    if explicit_target_codes is not None:
+        if snapshot_path is not None or refresh_snapshot:
+            raise ValueError("explicit_target_codes cannot be combined with target-code snapshots")
+        codes = tuple(explicit_target_codes)
+        if not codes:
+            raise ValueError("explicit_target_codes must not be empty")
+        if len(codes) != len(set(codes)):
+            raise ValueError("explicit_target_codes contains duplicates")
+        if any(len(code) != 10 or not code.isdigit() for code in codes):
+            raise ValueError("explicit_target_codes must contain 10-digit codes")
+        if any(code[:2] not in segments for code in codes):
+            raise ValueError("explicit_target_codes contains a code outside configured segments")
+        if tuple(sorted(codes)) != codes:
+            raise ValueError("explicit_target_codes must be sorted")
+        digest = hashlib.sha256(
+            json.dumps(codes, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return list(codes), 0, "EXPLICIT_VERIFIED", digest
+
     if refresh_snapshot and snapshot_path is None:
         raise ValueError("refresh_target_code_snapshot requires target_code_snapshot_path")
 
@@ -253,6 +274,7 @@ def collect_track_b_batch(
     page_size: int = PAGE_SIZE,
     target_code_snapshot_path: Path | None = None,
     refresh_target_code_snapshot: bool = False,
+    explicit_target_codes: tuple[str, ...] | None = None,
 ) -> CollectionSummary:
     if request_budget < 1 or request_budget > MAX_REQUEST_BUDGET:
         raise ValueError(f"request_budget must be between 1 and {MAX_REQUEST_BUDGET}")
@@ -269,6 +291,7 @@ def collect_track_b_batch(
         page_size=page_size,
         snapshot_path=target_code_snapshot_path,
         refresh_snapshot=refresh_target_code_snapshot,
+        explicit_target_codes=explicit_target_codes,
     )
     if start_cursor.code_index > len(codes):
         raise ValueError("start cursor is past the target code list")
