@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from purchase_price.config import Settings
-from purchase_price.services.g2b_catalog import G2BCatalogClient
+from purchase_price.services.g2b_catalog import G2B_CATALOG_BASE_URL, G2BCatalogClient
 
 INSPECTION_SCHEMA = "r2-promotion-source-inspection-v1"
 OUTPUT_SCHEMA = "g2b-promotion-catalog-probe-v1"
@@ -151,7 +151,7 @@ def main() -> int:
 
     client = G2BCatalogClient(
         service_key,
-        base_url=settings.g2b_catalog_base_url,
+        base_url=settings.g2b_catalog_base_url or G2B_CATALOG_BASE_URL,
         timeout_seconds=settings.g2b_request_timeout_seconds,
         max_retries=settings.g2b_max_retries,
     )
