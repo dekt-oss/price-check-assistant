@@ -52,7 +52,7 @@ class SupplementalTrackBState:
     last_collection: dict[str, Any] | None = None
 
     @classmethod
-    def bootstrap(cls, target_codes: tuple[str, ...]) -> "SupplementalTrackBState":
+    def bootstrap(cls, target_codes: tuple[str, ...]) -> SupplementalTrackBState:
         if not target_codes:
             raise ValueError("supplemental target set must not be empty")
         return cls(target_codes=target_codes)
