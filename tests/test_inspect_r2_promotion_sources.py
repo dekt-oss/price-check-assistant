@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from purchase_price.scripts.inspect_r2_promotion_sources import (
     build_inspection,
     inspect_payload,
