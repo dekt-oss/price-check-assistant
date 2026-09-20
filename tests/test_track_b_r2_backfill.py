@@ -707,3 +707,57 @@ def test_second_horizon_change_after_reconciliation_fails_closed_without_loop(
     assert summary.next_cursor == CollectionCursor(0, 2)
     assert "changed again after page-1 reconciliation" in (summary.error_message or "")
     assert [params["pageNo"] for _, params in shopping.calls] == [7, 1, 2]
+
+
+def test_explicit_verified_targets_skip_dictionary_and_use_stable_fingerprint() -> None:
+    catalog = FakeClient([])
+    shopping = FakeClient([_response([], total=0, page=1, rows=999)])
+
+    summary = collect_track_b_batch(
+        catalog_client=catalog,
+        shopping_client=shopping,
+        store=FakeStore(),
+        catalog_base_url="unused",
+        shopping_base_url="https://shopping",
+        begin=date(2025, 9, 12),
+        end=date(2026, 9, 11),
+        start_cursor=CollectionCursor(0, 1),
+        request_budget=1,
+        segments=("45",),
+        explicit_target_codes=("4511181101",),
+    )
+
+    assert summary.status == "SUCCESS"
+    assert summary.target_code_source == "EXPLICIT_VERIFIED"
+    assert summary.target_code_count == 1
+    assert summary.dictionary_requests == 0
+    assert summary.track_b_requests == 1
+    assert summary.target_code_snapshot_sha256 is not None
+    assert len(summary.target_code_snapshot_sha256) == 64
+    assert catalog.calls == []
+    assert shopping.calls[0][1]["dtilPrdctClsfcNo"] == "4511181101"
+
+
+def test_explicit_verified_targets_fail_closed_on_unsorted_or_out_of_segment_codes() -> None:
+    for codes, segments in [
+        (("4511181102", "4511181101"), ("45",)),
+        (("4511181101",), ("42",)),
+    ]:
+        try:
+            collect_track_b_batch(
+                catalog_client=FakeClient([]),
+                shopping_client=FakeClient([]),
+                store=FakeStore(),
+                catalog_base_url="unused",
+                shopping_base_url="https://shopping",
+                begin=date(2025, 9, 12),
+                end=date(2026, 9, 11),
+                start_cursor=CollectionCursor(0, 1),
+                request_budget=1,
+                segments=segments,
+                explicit_target_codes=codes,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid explicit target contract must fail closed")
