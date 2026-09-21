@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,7 +34,8 @@ _GENERIC_MODELS = {
     "none",
     "n/a",
 }
-_GENERIC_MANUFACTURERS = {"기타물품포함", "기타", "해당없음", "없음"}
+_GENERIC_MANUFACTURERS = {"기타물품포함", "기타", "해당없음", "없음", "등"}
+_TARGET_DETAIL_PREFIXES = ("41", "42", "43", "44", "27")
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,10 @@ def _eligible_identity(row: TrackBDeliveryLine) -> bool:
     }:
         return False
     if row.model_qualifier and not row.model_qualifier_verified_as_origin:
+        return False
+    # For the auto-sampled regression set, prefer identifier-like model strings over
+    # prose/specification fragments accidentally parsed as models.
+    if not re.search(r"\d", model):
         return False
     return True
 
@@ -128,7 +134,11 @@ def select_observed_cases(
     )
     # Hash-order avoids lexical clustering while remaining deterministic across runs.
     detail_codes = sorted(
-        {str(code) for code in detail_codes if code},
+        {
+            str(code)
+            for code in detail_codes
+            if code and str(code).startswith(_TARGET_DETAIL_PREFIXES)
+        },
         key=lambda code: hashlib.sha256(code.encode("utf-8")).hexdigest(),
     )
 
