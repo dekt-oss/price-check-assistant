@@ -248,3 +248,27 @@ def test_report_counts_broad_reference_promotion_candidates() -> None:
         "UNVERIFIED_MODEL_QUALIFIER": 1
     }
     assert report["cases"][0]["promotion_candidates"][0]["promotion_candidate"] is True
+
+
+def test_reference_diagnostic_preserves_catalog_identity_for_review() -> None:
+    query = ProductQuery(
+        product_name="염기서열분석기",
+        manufacturer="Oxford Nanopore",
+        model_name="MinION Mk1D",
+        specification="MinION Mk1D",
+    )
+    reference = SimpleNamespace(
+        source_record_id="minion-1",
+        raw_object_key="raw/v1/example.json.gz",
+        product_title="DNA서열분석기, Oxford nanopore technologies, (GB)MinION MK1D",
+        price=13310000,
+        product_id="25900137",
+        detail_code="4110530101",
+    )
+
+    diagnostic = _reference_diagnostic(query, reference)
+
+    assert diagnostic["product_id"] == "25900137"
+    assert diagnostic["detail_code"] == "4110530101"
+    assert diagnostic["raw_object_key"] == "raw/v1/example.json.gz"
+    assert "goodsIdntfcNo=25900137" in diagnostic["catalog_url"]
