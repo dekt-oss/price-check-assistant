@@ -83,6 +83,7 @@ def test_report_counts_recall_tiers_without_promoting_reference() -> None:
         quantity=None,
         unit=None,
         transaction_type="나라장터 납품요구",
+        reference_scope="SAME_CLASS",
     )
     reference_candidate = SimpleNamespace(
         source_record_id="2",
@@ -272,3 +273,48 @@ def test_reference_diagnostic_preserves_catalog_identity_for_review() -> None:
     assert diagnostic["detail_code"] == "4110530101"
     assert diagnostic["raw_object_key"] == "raw/v1/example.json.gz"
     assert "goodsIdntfcNo=25900137" in diagnostic["catalog_url"]
+
+
+def test_report_summarizes_best_broad_reference_scope() -> None:
+    cases = [
+        {
+            "case_id": "reference",
+            "product_name": "A",
+            "manufacturer": "Maker",
+            "model_name": "M1",
+            "specification": "",
+        }
+    ]
+    reference = SimpleNamespace(
+        source_record_id="r1",
+        product_title="A, Maker, M2",
+        price=100,
+        reference_reason="동일 제조사·동일 세부품명 참고",
+        reference_scope="SAME_MANUFACTURER_CLASS",
+        raw_object_key="raw/r1",
+        transaction_date="2026-01-01",
+        supplier="seller",
+        demand_institution="buyer",
+        quantity=1,
+        unit="EA",
+        model_name="M2",
+        product_id=None,
+        detail_code="123",
+        transaction_type="나라장터 납품요구",
+    )
+
+    def lookup(query, *, quote_unit_price):
+        del query, quote_unit_price
+        return SimpleNamespace(
+            status="success_0",
+            candidates=(),
+            reference_candidates=(reference,),
+            examined=0,
+        )
+
+    report = build_report(cases, lookup=lookup)
+
+    assert report["cases"][0]["best_reference_scope"] == "SAME_MANUFACTURER_CLASS"
+    assert report["summary"]["broad_reference_scope_case_counts"][
+        "SAME_MANUFACTURER_CLASS"
+    ] == 1

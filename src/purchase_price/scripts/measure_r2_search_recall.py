@@ -17,6 +17,12 @@ from purchase_price.services.track_b_r2_quote_index import lookup_track_b_quote_
 MANIFEST_SCHEMA = "r2-search-recall-uat-v1"
 TIERS = ("DIRECT_AB", "CLASS_C", "BROAD_REFERENCE", "ZERO")
 INDEX_ERROR_STATUSES = {"unavailable", "not_ingested"}
+REFERENCE_SCOPE_ORDER = (
+    "SAME_MODEL_UNVERIFIED",
+    "SAME_MANUFACTURER_CLASS",
+    "SAME_CLASS",
+    "KEYWORD",
+)
 
 
 def _load_manifest(path: Path) -> list[dict[str, Any]]:
@@ -151,6 +157,7 @@ def _candidate_row(candidate: Any, *, reference: bool) -> dict[str, Any]:
     if reference:
         row["reason"] = candidate.reference_reason
         row["model_name"] = candidate.model_name
+        row["reference_scope"] = getattr(candidate, "reference_scope", "KEYWORD")
     else:
         row["match_grade"] = candidate.match_grade.value
         row["match_note"] = candidate.match_note
@@ -201,6 +208,13 @@ def _evaluate_case(
         row for row in reference_diagnostics if row["promotion_candidate"]
     ]
     promotion_blockers = Counter(str(row["blocker"]) for row in promotion_candidates)
+    reference_scope_counts = Counter(
+        str(getattr(row, "reference_scope", "KEYWORD")) for row in reference_rows
+    )
+    best_reference_scope = next(
+        (scope for scope in REFERENCE_SCOPE_ORDER if reference_scope_counts[scope]),
+        None,
+    )
 
     return {
         "case_id": case["case_id"],
@@ -231,6 +245,8 @@ def _evaluate_case(
         "promotion_candidate_count": len(promotion_candidates),
         "promotion_blocker_counts": dict(sorted(promotion_blockers.items())),
         "promotion_candidates": promotion_candidates[:5],
+        "reference_scope_counts": dict(sorted(reference_scope_counts.items())),
+        "best_reference_scope": best_reference_scope,
         "sample_rows": [
             _candidate_row(row, reference=tier == "BROAD_REFERENCE")
             for row in observations[:5]
@@ -285,6 +301,16 @@ def build_report(
     )
     summary["promotion_blocker_counts"] = dict(sorted(promotion_blockers.items()))
 
+    broad_reference_scope_cases = Counter(
+        str(row["best_reference_scope"])
+        for row in results
+        if row["tier"] == "BROAD_REFERENCE" and row.get("best_reference_scope")
+    )
+    summary["broad_reference_scope_case_counts"] = {
+        scope: broad_reference_scope_cases.get(scope, 0)
+        for scope in REFERENCE_SCOPE_ORDER
+    }
+
     observations = [row for row in results if row["observation_count"]]
     total_observations = sum(int(row["observation_count"]) for row in observations)
     total_supplier = sum(int(row["supplier_present_count"]) for row in observations)
@@ -323,17 +349,18 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         f"- promotion-candidate cases: **{summary['promotion_candidate_case_count']}**",
         f"- promotion-candidate rows: **{summary['promotion_candidate_count']}**",
         "",
-        "| Query | Tier | Status | Candidates | References | Price range |",
-        "|---|---|---|---:|---:|---:|",
+        "| Query | Tier | Reference scope | Status | Candidates | References | Price range |",
+        "|---|---|---|---|---:|---:|---:|",
     ]
     for row in report["cases"]:
         price_range = "-"
         if row["price_min"] is not None:
             price_range = f"{row['price_min']} ~ {row['price_max']}"
         lines.append(
-            "| {case_id} | {tier} | {status} | {candidates} | {references} | {price_range} |".format(
+            "| {case_id} | {tier} | {scope} | {status} | {candidates} | {references} | {price_range} |".format(
                 case_id=row["case_id"],
                 tier=row["tier"],
+                scope=row.get("best_reference_scope") or "-",
                 status=row["lookup_status"],
                 candidates=row["candidate_count"],
                 references=row["reference_count"],
@@ -393,6 +420,12 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
                     title=_md_text(candidate.get("product_title")),
                 )
             )
+
+    lines.extend(["", "## Broad reference scope summary", ""])
+    for scope in REFERENCE_SCOPE_ORDER:
+        lines.append(
+            f"- {scope}: {summary['broad_reference_scope_case_counts'].get(scope, 0)} cases"
+        )
 
     lines.extend(["", "## Tier summary", ""])
     for tier in TIERS:

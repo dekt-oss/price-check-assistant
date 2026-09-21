@@ -100,6 +100,7 @@ def _to_references(
     rows: Iterable[TrackBDeliveryLine],
     *,
     reason: str,
+    scope: str,
     limit: int,
 ) -> tuple[TrackBReferenceCandidate, ...]:
     references: list[TrackBReferenceCandidate] = []
@@ -126,6 +127,9 @@ def _to_references(
                 quantity=row.quantity,
                 unit=row.unit,
                 model_name=row.model_name,
+                product_id=row.product_id,
+                detail_code=row.detail_code,
+                reference_scope=scope,
             )
         )
         if len(references) >= limit:
@@ -183,13 +187,13 @@ def _verified_classification_references(
     if structured:
         rows = structured
 
-    qualifier = " · 제조사 우선" if manufacturer_filtered else ""
+    scope = "SAME_MANUFACTURER_CLASS" if manufacturer_filtered else "SAME_CLASS"
+    label = "동일 제조사·동일 세부품명 참고" if manufacturer_filtered else "동일 세부품명 참고"
     reason = (
-        "검증된 나라장터 세부품명코드 참고 · "
-        f"{mapping.detail_product_code} · {mapping.detail_product_name or '세부품명 미확인'}"
-        f"{qualifier}"
+        f"{label} · {mapping.detail_product_code} · "
+        f"{mapping.detail_product_name or '세부품명 미확인'}"
     )
-    return _to_references(rows, reason=reason, limit=limit)
+    return _to_references(rows, reason=reason, scope=scope, limit=limit)
 
 
 def _strong_model_references(
@@ -219,7 +223,8 @@ def _strong_model_references(
         return ()
     return _to_references(
         rows,
-        reason="모델명 포함 거래 참고 · 제조사/규격 직접 동일성 미검증",
+        reason="동일 모델명 참고 · 제조사/규격 직접 동일성 미검증",
+        scope="SAME_MODEL_UNVERIFIED",
         limit=limit,
     )
 
@@ -238,7 +243,12 @@ def _strict_product_references(
             _base_query(current_clause).where(TrackBDeliveryLine.class_key == class_key),
         )
         if exact_rows:
-            return _to_references(exact_rows, reason="동일 품목명 참고", limit=limit)
+            return _to_references(
+                exact_rows,
+                reason="동일 품목명 참고",
+                scope="SAME_CLASS",
+                limit=limit,
+            )
 
     tokens = _strict_product_tokens(query.product_name)
     if not tokens:
@@ -255,6 +265,7 @@ def _strict_product_references(
     return _to_references(
         rows,
         reason="품명 강일치 참고 · " + " + ".join(tokens),
+        scope="KEYWORD",
         limit=limit,
     )
 
