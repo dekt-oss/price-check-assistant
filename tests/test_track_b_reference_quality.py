@@ -21,6 +21,7 @@ def _line(
     product_class: str,
     title: str,
     model: str | None = None,
+    manufacturer: str | None = None,
     price: str = "1000000",
 ) -> TrackBDeliveryLine:
     return TrackBDeliveryLine(
@@ -38,7 +39,7 @@ def _line(
         product_title=title,
         product_class=product_class,
         class_key=normalize_text(product_class),
-        manufacturer=None,
+        manufacturer=manufacturer,
         manufacturer_qualifier=None,
         model_name=model,
         model_qualifier=None,
@@ -105,7 +106,8 @@ def test_verified_detail_code_is_preferred_for_category_reference() -> None:
     reference = refined.reference_candidates[0]
     assert reference.price == Decimal("8200000.00")
     assert "4110630701" in reference.reference_reason
-    assert "검증된 나라장터 세부품명코드" in reference.reference_reason
+    assert "동일 세부품명 참고" in reference.reference_reason
+    assert reference.reference_scope == "SAME_CLASS"
 
 
 def test_weak_roman_token_does_not_create_exoatlet_false_positive() -> None:
@@ -180,3 +182,101 @@ def test_existing_strict_candidate_result_is_never_rewritten() -> None:
         )
     engine.dispose()
     assert refined is original
+
+
+def test_verified_class_prefers_same_manufacturer_scope() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add_all(
+            [
+                _line(
+                    request="REQ-M1",
+                    detail_code="4110630701",
+                    product_class="유전자증폭기",
+                    title="유전자증폭기, Thermo fisher scientific, QuantStudio 5",
+                    model="QuantStudio 5",
+                    manufacturer="Thermo fisher scientific",
+                    price="15000000",
+                ),
+                _line(
+                    request="REQ-M2",
+                    detail_code="4110630701",
+                    product_class="유전자증폭기",
+                    title="유전자증폭기, Bio-rad, CFX Opus 96",
+                    model="CFX Opus 96",
+                    manufacturer="Bio-rad",
+                    price="12000000",
+                ),
+            ]
+        )
+        session.commit()
+        refined = refine_track_b_reference_quality(
+            session,
+            ProductQuery(
+                product_name="핵산증폭기",
+                manufacturer="Thermo Fisher Scientific",
+                model_name="Veriti Pro Dx",
+            ),
+            _zero_result(),
+        )
+
+    engine.dispose()
+    assert len(refined.reference_candidates) == 1
+    reference = refined.reference_candidates[0]
+    assert reference.reference_scope == "SAME_MANUFACTURER_CLASS"
+    assert "동일 제조사·동일 세부품명 참고" in reference.reference_reason
+
+
+def test_strong_model_reference_has_unverified_same_model_scope() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            _line(
+                request="REQ-SM",
+                detail_code="4111581101",
+                product_class="DNA서열분석기",
+                title="DNA서열분석기, Oxford nanopore technologies, (GB)MinION MK1D",
+                model="MinION Mk1D",
+                manufacturer="Oxford nanopore technologies",
+                price="13310000",
+            )
+        )
+        session.commit()
+        refined = refine_track_b_reference_quality(
+            session,
+            ProductQuery(
+                product_name="염기서열분석기",
+                manufacturer="Oxford Nanopore",
+                model_name="MinION Mk1D",
+            ),
+            _zero_result(),
+        )
+
+    engine.dispose()
+    assert refined.reference_candidates[0].reference_scope == "SAME_MODEL_UNVERIFIED"
+
+
+def test_keyword_fallback_is_labeled_keyword_scope() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            _line(
+                request="REQ-KW",
+                detail_code="4219000001",
+                product_class="의료영상표시장치",
+                title="영상 판독용 의료 모니터",
+                price="8500000",
+            )
+        )
+        session.commit()
+        refined = refine_track_b_reference_quality(
+            session,
+            ProductQuery(product_name="영상 판독용 모니터", model_name="CX30N"),
+            _zero_result(),
+        )
+
+    engine.dispose()
+    assert refined.reference_candidates[0].reference_scope == "KEYWORD"
