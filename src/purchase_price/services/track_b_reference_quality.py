@@ -187,12 +187,11 @@ def _verified_classification_references(
     if structured:
         rows = structured
 
-    qualifier = " · 제조사 우선" if manufacturer_filtered else ""
     scope = "SAME_MANUFACTURER_CLASS" if manufacturer_filtered else "SAME_CLASS"
+    label = "동일 제조사·동일 세부품명 참고" if manufacturer_filtered else "동일 세부품명 참고"
     reason = (
-        "검증된 나라장터 세부품명코드 참고 · "
-        f"{mapping.detail_product_code} · {mapping.detail_product_name or '세부품명 미확인'}"
-        f"{qualifier}"
+        f"{label} · {mapping.detail_product_code} · "
+        f"{mapping.detail_product_name or '세부품명 미확인'}"
     )
     return _to_references(rows, reason=reason, scope=scope, limit=limit)
 
