@@ -16,6 +16,7 @@ on:
       - "src/purchase_price/scripts/diagnose_r2_zero_recall.py"
       - "src/purchase_price/scripts/inspect_r2_promotion_sources.py"
       - "src/purchase_price/scripts/probe_g2b_promotion_catalog.py"
+      - "src/purchase_price/scripts/audit_r2_broad_reference_composition.py"
       - "data/g2b_product_mappings.csv"
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
@@ -23,6 +24,7 @@ on:
       - "tests/test_diagnose_r2_zero_recall.py"
       - "tests/test_inspect_r2_promotion_sources.py"
       - "tests/test_probe_g2b_promotion_catalog.py"
+      - "tests/test_audit_r2_broad_reference_composition.py"
 
 permissions:
   contents: read
@@ -58,6 +60,7 @@ jobs:
           tests/test_diagnose_r2_zero_recall.py
           tests/test_inspect_r2_promotion_sources.py
           tests/test_probe_g2b_promotion_catalog.py
+          tests/test_audit_r2_broad_reference_composition.py
       - name: Measure Production R2 recall without writes
         run: >-
           python -m purchase_price.scripts.measure_r2_search_recall
@@ -76,6 +79,12 @@ jobs:
           --inspection artifacts/r2-search-recall/promotion-source-inspection.json
           --output artifacts/r2-search-recall/promotion-catalog-probe.json
           --summary artifacts/r2-search-recall/promotion-catalog-probe.md
+      - name: Audit broad-reference class composition
+        run: >-
+          python -m purchase_price.scripts.audit_r2_broad_reference_composition
+          --recall-report artifacts/r2-search-recall/report.json
+          --output artifacts/r2-search-recall/broad-reference-composition.json
+          --summary artifacts/r2-search-recall/broad-reference-composition.md
       - name: Diagnose Production R2 ZERO causes
         run: >-
           python -m purchase_price.scripts.diagnose_r2_zero_recall
@@ -93,6 +102,9 @@ jobs:
           fi
           if [ -f artifacts/r2-search-recall/promotion-catalog-probe.md ]; then
             cat artifacts/r2-search-recall/promotion-catalog-probe.md
+          fi
+          if [ -f artifacts/r2-search-recall/broad-reference-composition.md ]; then
+            cat artifacts/r2-search-recall/broad-reference-composition.md
           fi
           if [ -f artifacts/r2-search-recall/zero-diagnostic.md ]; then
             cat artifacts/r2-search-recall/zero-diagnostic.md
