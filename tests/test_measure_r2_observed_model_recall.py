@@ -73,40 +73,40 @@ def test_select_observed_cases_is_diverse_and_fail_closed() -> None:
             [
                 _line(
                     request="REQ-A",
-                    detail_code="1000000001",
+                    detail_code="4110000001",
                     product_class="장비A",
                     manufacturer="Maker A",
-                    model="Model A",
+                    model="Model A1",
                 ),
                 _line(
                     request="REQ-B",
-                    detail_code="1000000002",
+                    detail_code="4210000002",
                     product_class="장비B",
                     manufacturer="Maker B",
-                    model="Model B",
+                    model="Model B2",
                 ),
                 _line(
                     request="REQ-C",
-                    detail_code="1000000003",
+                    detail_code="4310000003",
                     product_class="장비C",
                     manufacturer="Maker C",
                     model="수요기관규격",
                 ),
                 _line(
                     request="REQ-D",
-                    detail_code="1000000004",
+                    detail_code="4410000004",
                     product_class="장비D",
                     manufacturer="Maker D",
-                    model="Model D",
+                    model="Model D4",
                     qualifier="XX",
                     qualifier_verified=False,
                 ),
                 _line(
                     request="REQ-E",
-                    detail_code="1000000005",
+                    detail_code="2710000005",
                     product_class="장비E",
                     manufacturer="Maker E",
-                    model="Model E",
+                    model="Model E5",
                 ),
             ]
         )
@@ -114,13 +114,13 @@ def test_select_observed_cases_is_diverse_and_fail_closed() -> None:
         cases = select_observed_cases(
             session,
             target_count=2,
-            excluded_models={normalize_text("Model E")},
+            excluded_models={normalize_text("Model E5")},
         )
 
     engine.dispose()
     assert len(cases) == 2
     assert len({case.detail_code for case in cases}) == 2
-    assert all(case.model_name not in {"수요기관규격", "Model D", "Model E"} for case in cases)
+    assert all(case.model_name not in {"수요기관규격", "Model D4", "Model E5"} for case in cases)
 
 
 def test_build_report_requires_every_observed_case_to_recover_source() -> None:
@@ -128,20 +128,20 @@ def test_build_report_requires_every_observed_case_to_recover_source() -> None:
         ObservedCase(
             case_id="observed_01",
             source_record_id="delivery:REQ-A|change:00|line:1",
-            detail_code="1000000001",
+            detail_code="4110000001",
             product_name="장비A",
             manufacturer="Maker A",
-            model_name="Model A",
+            model_name="Model A1",
             transaction_date="2026-09-01",
             unit_price="1000000.00",
         ),
         ObservedCase(
             case_id="observed_02",
             source_record_id="delivery:REQ-B|change:00|line:1",
-            detail_code="1000000002",
+            detail_code="4210000002",
             product_name="장비B",
             manufacturer="Maker B",
-            model_name="Model B",
+            model_name="Model B2",
             transaction_date="2026-09-01",
             unit_price="1000000.00",
         ),
@@ -149,7 +149,7 @@ def test_build_report_requires_every_observed_case_to_recover_source() -> None:
 
     def lookup(query, *, quote_unit_price):
         del quote_unit_price
-        request = "REQ-A" if query.model_name == "Model A" else "REQ-B"
+        request = "REQ-A" if query.model_name == "Model A1" else "REQ-B"
         candidate = TrackBQuoteCandidate(
             source_record_id=f"delivery:{request}|change:00|line:1",
             product_title=f"{query.product_name}, {query.manufacturer}, {query.model_name}",
@@ -184,10 +184,10 @@ def test_build_report_fails_when_source_row_is_not_recovered() -> None:
     case = ObservedCase(
         case_id="observed_01",
         source_record_id="delivery:REQ-A|change:00|line:1",
-        detail_code="1000000001",
+        detail_code="4110000001",
         product_name="장비A",
         manufacturer="Maker A",
-        model_name="Model A",
+        model_name="Model A1",
         transaction_date="2026-09-01",
         unit_price="1000000.00",
     )
@@ -196,7 +196,7 @@ def test_build_report_fails_when_source_row_is_not_recovered() -> None:
         del query, quote_unit_price
         candidate = TrackBQuoteCandidate(
             source_record_id="delivery:OTHER|change:00|line:1",
-            product_title="장비A, Maker A, Model A",
+            product_title="장비A, Maker A, Model A1",
             price=Decimal("1000000"),
             match_grade=MatchGrade.B,
             match_note="alias",
