@@ -10,6 +10,8 @@ from typing import Any
 
 from purchase_price.domain import MatchGrade
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.matching import normalize_text
+from purchase_price.services.product_matching import grade_product_identity, parse_g2b_identity
 from purchase_price.services.track_b_r2_quote_index import lookup_track_b_quote_from_r2
 
 MANIFEST_SCHEMA = "r2-search-recall-uat-v1"
@@ -63,6 +65,75 @@ def _tier_for_result(result: Any) -> str:
 
 def _price_text(value: Decimal | None) -> str | None:
     return str(value) if value is not None else None
+
+
+def _reference_diagnostic(query: ProductQuery, candidate: Any) -> dict[str, Any]:
+    identity = parse_g2b_identity(candidate.product_title)
+    decision = grade_product_identity(query, identity)
+    query_model = normalize_text(query.model_name)
+    candidate_model = normalize_text(identity.model_name)
+    model_variant = bool(
+        query_model
+        and candidate_model
+        and query_model != candidate_model
+        and (query_model in candidate_model or candidate_model in query_model)
+    )
+
+    if decision.grade in {MatchGrade.A, MatchGrade.B}:
+        blocker = "STRICT_LOOKUP_GAP"
+    elif (
+        decision.model_state
+        in {"exact_with_unverified_qualifier", "verified_alias_with_unverified_qualifier"}
+        and decision.manufacturer_state == "exact_or_alias"
+    ):
+        blocker = "UNVERIFIED_MODEL_QUALIFIER"
+    elif (
+        decision.model_state == "conflict"
+        and model_variant
+        and decision.manufacturer_state == "exact_or_alias"
+    ):
+        blocker = "MODEL_VARIANT_CANDIDATE"
+    elif decision.specification_state == "explicit_conflict":
+        blocker = "SPEC_CONFLICT"
+    elif (
+        decision.model_state
+        in {"exact", "exact_with_verified_origin", "verified_alias", "verified_alias_with_verified_origin"}
+        and decision.manufacturer_state == "conflict"
+    ):
+        blocker = "MANUFACTURER_CONFLICT"
+    elif decision.model_state == "missing":
+        blocker = "MODEL_NOT_OBSERVED"
+    else:
+        blocker = "REFERENCE_ONLY"
+
+    promotion_candidate = blocker in {
+        "STRICT_LOOKUP_GAP",
+        "UNVERIFIED_MODEL_QUALIFIER",
+        "MODEL_VARIANT_CANDIDATE",
+    }
+    product_id = getattr(candidate, "product_id", None)
+    detail_code = getattr(candidate, "detail_code", None)
+    catalog_url = (
+        f"https://goods.g2b.go.kr/search/productSearchView.do?"
+        f"goodsClsfcNo={detail_code}&goodsIdntfcNo={product_id}"
+        if product_id and detail_code
+        else None
+    )
+    return {
+        "source_record_id": candidate.source_record_id,
+        "raw_object_key": getattr(candidate, "raw_object_key", None),
+        "product_title": candidate.product_title,
+        "price": _price_text(candidate.price),
+        "parsed_manufacturer": identity.manufacturer,
+        "parsed_model_name": identity.model_name,
+        "model_qualifier": identity.model_qualifier,
+        "product_id": product_id,
+        "detail_code": detail_code,
+        "catalog_url": catalog_url,
+        "blocker": blocker,
+        "promotion_candidate": promotion_candidate,
+        "match_note": decision.note,
+    }
 
 
 def _candidate_row(candidate: Any, *, reference: bool) -> dict[str, Any]:
@@ -121,6 +192,15 @@ def _evaluate_case(
     supplier_present = sum(bool(row.supplier) for row in observations)
     demand_present = sum(bool(row.demand_institution) for row in observations)
     observation_count = len(observations)
+    reference_diagnostics = (
+        [_reference_diagnostic(query, row) for row in reference_rows]
+        if tier == "BROAD_REFERENCE"
+        else []
+    )
+    promotion_candidates = [
+        row for row in reference_diagnostics if row["promotion_candidate"]
+    ]
+    promotion_blockers = Counter(str(row["blocker"]) for row in promotion_candidates)
 
     return {
         "case_id": case["case_id"],
@@ -148,6 +228,9 @@ def _evaluate_case(
         ),
         "external_research_rescue": "NOT_RUN",
         "expected_negative": bool(case.get("expected_negative", False)),
+        "promotion_candidate_count": len(promotion_candidates),
+        "promotion_blocker_counts": dict(sorted(promotion_blockers.items())),
+        "promotion_candidates": promotion_candidates[:5],
         "sample_rows": [
             _candidate_row(row, reference=tier == "BROAD_REFERENCE")
             for row in observations[:5]
@@ -189,6 +272,19 @@ def build_report(
         else None
     )
 
+    promotion_cases = [row for row in results if row["promotion_candidate_count"]]
+    promotion_blockers = Counter(
+        blocker
+        for row in promotion_cases
+        for blocker, count in row["promotion_blocker_counts"].items()
+        for _ in range(int(count))
+    )
+    summary["promotion_candidate_case_count"] = len(promotion_cases)
+    summary["promotion_candidate_count"] = sum(
+        int(row["promotion_candidate_count"]) for row in promotion_cases
+    )
+    summary["promotion_blocker_counts"] = dict(sorted(promotion_blockers.items()))
+
     observations = [row for row in results if row["observation_count"]]
     total_observations = sum(int(row["observation_count"]) for row in observations)
     total_supplier = sum(int(row["supplier_present_count"]) for row in observations)
@@ -224,6 +320,8 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         f"- expected negative ZERO: **{summary['expected_negative_zero_count']}**",
         f"- unexpected ZERO: **{summary['unexpected_zero_count']}**",
         f"- unexpected ZERO rate (positive cases): **{summary['unexpected_zero_rate']}**",
+        f"- promotion-candidate cases: **{summary['promotion_candidate_case_count']}**",
+        f"- promotion-candidate rows: **{summary['promotion_candidate_count']}**",
         "",
         "| Query | Tier | Status | Candidates | References | Price range |",
         "|---|---|---|---:|---:|---:|",
@@ -267,6 +365,35 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
                 )
             )
         lines.append("")
+    lines.extend(["", "## Promotion candidates", ""])
+    promotion_rows = [
+        (row["case_id"], candidate)
+        for row in report["cases"]
+        for candidate in row.get("promotion_candidates", [])
+    ]
+    if not promotion_rows:
+        lines.append("- none")
+    else:
+        lines.extend(
+            [
+                "| Query | Blocker | Product ID | Detail code | Parsed model | Manufacturer | Price | Title |",
+                "|---|---|---|---|---|---|---:|---|",
+            ]
+        )
+        for case_id, candidate in promotion_rows:
+            lines.append(
+                "| {case_id} | {blocker} | {product_id} | {detail_code} | {model} | {manufacturer} | {price} | {title} |".format(
+                    case_id=case_id,
+                    blocker=_md_text(candidate.get("blocker")),
+                    product_id=_md_text(candidate.get("product_id")),
+                    detail_code=_md_text(candidate.get("detail_code")),
+                    model=_md_text(candidate.get("parsed_model_name")),
+                    manufacturer=_md_text(candidate.get("parsed_manufacturer")),
+                    price=_md_text(candidate.get("price")),
+                    title=_md_text(candidate.get("product_title")),
+                )
+            )
+
     lines.extend(["", "## Tier summary", ""])
     for tier in TIERS:
         key = tier.lower()

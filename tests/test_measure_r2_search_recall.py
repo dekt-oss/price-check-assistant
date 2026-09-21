@@ -4,8 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from purchase_price.domain import MatchGrade
+from purchase_price.schemas import ProductQuery
 from purchase_price.scripts.measure_r2_search_recall import (
     _load_manifest,
+    _reference_diagnostic,
     _tier_for_result,
     build_report,
 )
@@ -158,3 +160,115 @@ def test_report_separates_expected_negative_from_unexpected_zero() -> None:
     assert report["summary"]["expected_negative_zero_count"] == 1
     assert report["summary"]["unexpected_zero_count"] == 1
     assert report["summary"]["unexpected_zero_rate"] == 1.0
+
+def test_reference_diagnostic_flags_unverified_origin_qualifier_for_review() -> None:
+    query = ProductQuery(
+        product_name="염기서열분석기",
+        manufacturer="Oxford Nanopore",
+        model_name="MinION Mk1D",
+        specification="MinION Mk1D",
+    )
+    reference = SimpleNamespace(
+        source_record_id="minion-1",
+        product_title="DNA서열분석기, Oxford nanopore technologies, (GB)MinION MK1D",
+        price=13310000,
+        product_id="12345678",
+        detail_code="4111549901",
+    )
+
+    diagnostic = _reference_diagnostic(query, reference)
+
+    assert diagnostic["blocker"] == "UNVERIFIED_MODEL_QUALIFIER"
+    assert diagnostic["promotion_candidate"] is True
+    assert diagnostic["parsed_model_name"] == "MinION MK1D"
+    assert diagnostic["model_qualifier"] == "GB"
+    assert diagnostic["catalog_url"] == (
+        "https://goods.g2b.go.kr/search/productSearchView.do?"
+        "goodsClsfcNo=4111549901&goodsIdntfcNo=12345678"
+    )
+
+
+def test_reference_diagnostic_does_not_promote_different_model_reference() -> None:
+    query = ProductQuery(
+        product_name="이산화탄소배양기",
+        manufacturer="ASTEC",
+        model_name="APC-30D",
+    )
+    reference = SimpleNamespace(
+        source_record_id="incubator-1",
+        product_title="이산화탄소배양기, Thermo fisher scientific, (US)Forma 4111, 184L",
+        price=10120000,
+    )
+
+    diagnostic = _reference_diagnostic(query, reference)
+
+    assert diagnostic["promotion_candidate"] is False
+    assert diagnostic["blocker"] == "REFERENCE_ONLY"
+
+
+def test_report_counts_broad_reference_promotion_candidates() -> None:
+    cases = [
+        {
+            "case_id": "minion",
+            "product_name": "염기서열분석기",
+            "manufacturer": "Oxford Nanopore",
+            "model_name": "MinION Mk1D",
+            "specification": "MinION Mk1D",
+        }
+    ]
+    reference = SimpleNamespace(
+        source_record_id="minion-1",
+        product_title="DNA서열분석기, Oxford nanopore technologies, (GB)MinION MK1D",
+        price=13310000,
+        reference_reason="모델명 포함 거래 참고",
+        raw_object_key="raw/minion",
+        transaction_date="2026-09-01",
+        supplier="seller",
+        demand_institution="buyer",
+        quantity=1,
+        unit="대",
+        model_name="MinION MK1D",
+        transaction_type="나라장터 납품요구",
+    )
+
+    def lookup(query, *, quote_unit_price):
+        del query, quote_unit_price
+        return SimpleNamespace(
+            status="success_0",
+            candidates=(),
+            reference_candidates=(reference,),
+            examined=0,
+        )
+
+    report = build_report(cases, lookup=lookup)
+
+    assert report["summary"]["promotion_candidate_case_count"] == 1
+    assert report["summary"]["promotion_candidate_count"] == 1
+    assert report["summary"]["promotion_blocker_counts"] == {
+        "UNVERIFIED_MODEL_QUALIFIER": 1
+    }
+    assert report["cases"][0]["promotion_candidates"][0]["promotion_candidate"] is True
+
+
+def test_reference_diagnostic_preserves_catalog_identity_for_review() -> None:
+    query = ProductQuery(
+        product_name="염기서열분석기",
+        manufacturer="Oxford Nanopore",
+        model_name="MinION Mk1D",
+        specification="MinION Mk1D",
+    )
+    reference = SimpleNamespace(
+        source_record_id="minion-1",
+        raw_object_key="raw/v1/example.json.gz",
+        product_title="DNA서열분석기, Oxford nanopore technologies, (GB)MinION MK1D",
+        price=13310000,
+        product_id="25900137",
+        detail_code="4110530101",
+    )
+
+    diagnostic = _reference_diagnostic(query, reference)
+
+    assert diagnostic["product_id"] == "25900137"
+    assert diagnostic["detail_code"] == "4110530101"
+    assert diagnostic["raw_object_key"] == "raw/v1/example.json.gz"
+    assert "goodsIdntfcNo=25900137" in diagnostic["catalog_url"]

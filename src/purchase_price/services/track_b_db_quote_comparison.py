@@ -67,6 +67,8 @@ class TrackBReferenceCandidate:
     quantity: Decimal | None = None
     unit: str | None = None
     model_name: str | None = None
+    product_id: str | None = None
+    detail_code: str | None = None
     transaction_type: str = "나라장터 납품요구"
 
 
@@ -438,6 +440,8 @@ def _find_reference_candidates(
                 quantity=row.quantity,
                 unit=row.unit,
                 model_name=row.model_name,
+                product_id=row.product_id,
+                detail_code=row.detail_code,
             )
         )
         if len(references) >= limit:
