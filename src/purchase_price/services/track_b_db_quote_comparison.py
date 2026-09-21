@@ -69,6 +69,7 @@ class TrackBReferenceCandidate:
     model_name: str | None = None
     product_id: str | None = None
     detail_code: str | None = None
+    reference_scope: str = "KEYWORD"
     transaction_type: str = "나라장터 납품요구"
 
 
