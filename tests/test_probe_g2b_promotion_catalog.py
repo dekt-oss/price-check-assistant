@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from purchase_price.clients.data_go_kr import PublicDataTransportError
 from purchase_price.scripts.probe_g2b_promotion_catalog import build_probe
 from purchase_price.services.g2b_catalog import G2BCatalogResult, G2BProductAttribute
 
@@ -42,6 +43,32 @@ def test_build_probe_uses_exact_product_id_from_raw_inspection() -> None:
 
     assert client.calls == ["25900137"]
     assert report["status"] == "SUCCESS"
+    assert report["requested_product_count"] == 1
     assert report["product_count"] == 1
+    assert report["unavailable_count"] == 0
     assert report["products"][0]["detail_product_codes"] == ["4111581101"]
     assert report["products"][0]["attributes"][0]["value"] == "MinION MK1D"
+
+
+def test_build_probe_marks_transport_outage_partial() -> None:
+    inspection = {
+        "schema": "r2-promotion-source-inspection-v1",
+        "sources": [
+            {
+                "case_id": "minion_mk1d",
+                "records": [{"prdctIdntNo": "25900137"}],
+            }
+        ],
+    }
+
+    class TimeoutClient:
+        def fetch_attributes(self, *, product_id: str):
+            raise PublicDataTransportError(f"timeout for {product_id}")
+
+    report = build_probe(inspection, client=TimeoutClient())
+
+    assert report["status"] == "PARTIAL"
+    assert report["requested_product_count"] == 1
+    assert report["product_count"] == 0
+    assert report["unavailable_count"] == 1
+    assert report["unavailable"][0]["product_id"] == "25900137"
