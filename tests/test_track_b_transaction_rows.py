@@ -26,6 +26,13 @@ def test_legacy_comparison_without_reference_candidates_does_not_crash() -> None
     assert rows == [
         {
             "가격": "2,981,000원",
+            "총액": "미확인",
+            "금액검증": "미확인",
+            "제조사": "미확인",
+            "모델": "미확인",
+            "규격": "미확인",
+            "품목식별번호": "미확인",
+            "세부품명번호": "미확인",
             "판매처": "미확인",
             "구매처": "미확인",
             "거래일": "미확인",
@@ -114,3 +121,36 @@ def test_transaction_prices_are_comma_formatted() -> None:
     comparison = SimpleNamespace(candidates=(candidate,), reference_candidates=(), status="success")
 
     assert transaction_rows(comparison)[0]["가격"] == "18,900,000원"
+
+
+def test_transaction_row_exposes_unit_price_total_and_identity_details() -> None:
+    candidate = SimpleNamespace(
+        price=Decimal("13200000"),
+        total_amount=Decimal("26400000"),
+        amount_check="consistent",
+        manufacturer="Philips goldway",
+        model_name="Efficia DFM100",
+        specification="200J",
+        product_id="12345678",
+        detail_code="4217210101",
+        product_title="저출력심장충격기, Philips goldway, Efficia DFM100, 200J",
+        match_grade=MatchGrade.B,
+        supplier="공급사",
+        demand_institution="병원",
+        transaction_date="2026-08-02",
+        quantity=Decimal("2"),
+        unit="대",
+    )
+    comparison = SimpleNamespace(candidates=(candidate,), reference_candidates=(), status="success")
+
+    row = transaction_rows(comparison)[0]
+
+    assert row["가격"] == "13,200,000원"
+    assert row["총액"] == "26,400,000원"
+    assert row["금액검증"] == "consistent"
+    assert row["수량/단위"] == "2 대"
+    assert row["제조사"] == "Philips goldway"
+    assert row["모델"] == "Efficia DFM100"
+    assert row["규격"] == "200J"
+    assert row["품목식별번호"] == "12345678"
+    assert row["세부품명번호"] == "4217210101"
