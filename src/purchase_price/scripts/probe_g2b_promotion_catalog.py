@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from purchase_price.clients.data_go_kr import PublicDataTransportError
 from purchase_price.config import Settings
 from purchase_price.services.g2b_catalog import G2B_CATALOG_BASE_URL, G2BCatalogClient
 
@@ -42,6 +43,7 @@ def build_probe(
     client: G2BCatalogClient,
 ) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
+    unavailable: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     for source in inspection["sources"]:
@@ -52,7 +54,18 @@ def build_probe(
             if product_id in seen:
                 continue
             seen.add(product_id)
-            result = client.fetch_attributes(product_id=product_id)
+            try:
+                result = client.fetch_attributes(product_id=product_id)
+            except PublicDataTransportError as exc:
+                unavailable.append(
+                    {
+                        "case_id": case_id,
+                        "product_id": product_id,
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc)[:500],
+                    }
+                )
+                continue
             results.append(
                 {
                     "case_id": case_id,
@@ -77,8 +90,11 @@ def build_probe(
 
     return {
         "schema": OUTPUT_SCHEMA,
-        "status": "SUCCESS",
+        "status": "PARTIAL" if unavailable else "SUCCESS",
+        "requested_product_count": len(seen),
         "product_count": len(results),
+        "unavailable_count": len(unavailable),
+        "unavailable": unavailable,
         "products": results,
     }
 
@@ -87,9 +103,24 @@ def _write_summary(report: dict[str, Any], path: Path) -> None:
     lines = [
         "# G2B Promotion Catalog Probe",
         "",
+        f"- status: `{report['status']}`",
+        f"- exact product IDs requested: **{report['requested_product_count']}**",
         f"- exact product IDs checked: **{report['product_count']}**",
+        f"- upstream-unavailable IDs: **{report['unavailable_count']}**",
         "",
     ]
+    for item in report.get("unavailable", []):
+        lines.append(
+            "- upstream warning: {case} / {product} · {etype} · {message}".format(
+                case=item["case_id"],
+                product=item["product_id"],
+                etype=item["error_type"],
+                message=item["error_message"].replace("|", "/"),
+            )
+        )
+    if report.get("unavailable"):
+        lines.append("")
+
     for product in report["products"]:
         lines.extend(
             [
@@ -163,7 +194,17 @@ def main() -> int:
         encoding="utf-8",
     )
     _write_summary(report, args.summary)
-    print(json.dumps({"product_count": report["product_count"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "requested_product_count": report["requested_product_count"],
+                "product_count": report["product_count"],
+                "unavailable_count": report["unavailable_count"],
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 
