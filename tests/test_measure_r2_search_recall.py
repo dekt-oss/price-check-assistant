@@ -318,3 +318,50 @@ def test_report_summarizes_best_broad_reference_scope() -> None:
     assert report["summary"]["broad_reference_scope_case_counts"][
         "SAME_MANUFACTURER_CLASS"
     ] == 1
+
+
+def test_manifest_has_30_curated_cases_and_external_research_surface() -> None:
+    cases = _load_manifest(Path("data/uat/r2-search-recall-cases.json"))
+
+    assert len(cases) == 30
+    rotapro = next(case for case in cases if case["case_id"] == "rotapro")
+    assert rotapro["expected_surface"] == "external_research"
+    assert rotapro["expected_negative"] is False
+    assert sum(case["case_group"] == "curated_operational" for case in cases) == 14
+
+
+def test_external_research_zero_is_not_counted_as_delivery_index_regression() -> None:
+    cases = [
+        {
+            "case_id": "research_only",
+            "product_name": "A",
+            "manufacturer": "",
+            "model_name": "M1",
+            "specification": "",
+            "expected_surface": "external_research",
+        },
+        {
+            "case_id": "delivery_missing",
+            "product_name": "B",
+            "manufacturer": "",
+            "model_name": "M2",
+            "specification": "",
+            "expected_surface": "delivery_index",
+        },
+    ]
+
+    def lookup(query, *, quote_unit_price):
+        del query, quote_unit_price
+        return SimpleNamespace(
+            status="success_0",
+            candidates=(),
+            reference_candidates=(),
+            examined=0,
+        )
+
+    report = build_report(cases, lookup=lookup)
+
+    assert report["summary"]["zero_count"] == 2
+    assert report["summary"]["external_research_zero_count"] == 1
+    assert report["summary"]["unexpected_zero_count"] == 1
+    assert report["summary"]["unexpected_zero_rate"] == 1.0
