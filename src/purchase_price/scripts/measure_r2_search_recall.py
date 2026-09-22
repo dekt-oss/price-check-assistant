@@ -41,13 +41,22 @@ def _load_manifest(path: Path) -> list[dict[str, Any]]:
         case_id = str(raw.get("case_id") or "").strip()
         if not case_id or case_id in seen_ids:
             raise ValueError("R2 search recall case_id must be unique and non-empty")
+        expected_negative = bool(raw.get("expected_negative", False))
+        expected_surface = str(
+            raw.get("expected_surface")
+            or ("negative" if expected_negative else "delivery_index")
+        ).strip()
+        if expected_surface not in {"delivery_index", "external_research", "negative"}:
+            raise ValueError(f"case {case_id} has invalid expected_surface")
         query = {
             "case_id": case_id,
             "product_name": str(raw.get("product_name") or "").strip(),
             "manufacturer": str(raw.get("manufacturer") or "").strip(),
             "model_name": str(raw.get("model_name") or "").strip(),
             "specification": str(raw.get("specification") or "").strip(),
-            "expected_negative": bool(raw.get("expected_negative", False)),
+            "expected_negative": expected_negative,
+            "expected_surface": expected_surface,
+            "case_group": str(raw.get("case_group") or "curated_core").strip(),
         }
         if not query["product_name"] and not query["model_name"]:
             raise ValueError(f"case {case_id} needs product_name or model_name")
@@ -242,6 +251,8 @@ def _evaluate_case(
         ),
         "external_research_rescue": "NOT_RUN",
         "expected_negative": bool(case.get("expected_negative", False)),
+        "expected_surface": str(case.get("expected_surface") or "delivery_index"),
+        "case_group": str(case.get("case_group") or "curated_core"),
         "promotion_candidate_count": len(promotion_candidates),
         "promotion_blocker_counts": dict(sorted(promotion_blockers.items())),
         "promotion_candidates": promotion_candidates[:5],
@@ -276,15 +287,30 @@ def build_report(
     expected_negative_zeros = [
         row for row in results if row["tier"] == "ZERO" and row.get("expected_negative")
     ]
-    unexpected_zeros = [
-        row for row in results if row["tier"] == "ZERO" and not row.get("expected_negative")
+    external_research_zeros = [
+        row
+        for row in results
+        if row["tier"] == "ZERO" and row.get("expected_surface") == "external_research"
     ]
-    positive_queries = [row for row in results if not row.get("expected_negative")]
+    unexpected_zeros = [
+        row
+        for row in results
+        if row["tier"] == "ZERO"
+        and not row.get("expected_negative")
+        and row.get("expected_surface") == "delivery_index"
+    ]
+    positive_delivery_queries = [
+        row
+        for row in results
+        if not row.get("expected_negative")
+        and row.get("expected_surface") == "delivery_index"
+    ]
     summary["expected_negative_zero_count"] = len(expected_negative_zeros)
+    summary["external_research_zero_count"] = len(external_research_zeros)
     summary["unexpected_zero_count"] = len(unexpected_zeros)
     summary["unexpected_zero_rate"] = (
-        round(len(unexpected_zeros) / len(positive_queries), 4)
-        if positive_queries
+        round(len(unexpected_zeros) / len(positive_delivery_queries), 4)
+        if positive_delivery_queries
         else None
     )
 
@@ -344,7 +370,8 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         f"- usable queries: **{summary['usable_queries']}**",
         f"- index errors: **{summary['index_error_count']}**",
         f"- expected negative ZERO: **{summary['expected_negative_zero_count']}**",
-        f"- unexpected ZERO: **{summary['unexpected_zero_count']}**",
+        f"- external-Research ZERO: **{summary['external_research_zero_count']}**",
+        f"- unexpected delivery-index ZERO: **{summary['unexpected_zero_count']}**",
         f"- unexpected ZERO rate (positive cases): **{summary['unexpected_zero_rate']}**",
         f"- promotion-candidate cases: **{summary['promotion_candidate_case_count']}**",
         f"- promotion-candidate rows: **{summary['promotion_candidate_count']}**",
