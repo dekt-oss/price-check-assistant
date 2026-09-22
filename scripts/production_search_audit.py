@@ -109,13 +109,17 @@ def _run_query(page: Any, query: str) -> dict[str, Any]:
         if error_text:
             raise RuntimeError(f"rendered error: {error_text}")
         changed = body != before
+        loading = "가격·거래근거를 조사하고 있습니다" in body
         has_result_signal = (
             RESULT_PATTERN.search(body) is not None
-            or "거래가격" in body
             or "추가 자료 확인 완료" in body
             or "유의미한 Research 결과가 0건" in body
+            or "검색 결과가 없습니다" in body
+            or "조회 결과가 없습니다" in body
         )
-        if changed and has_result_signal:
+        if changed and not loading and has_result_signal:
+            page.wait_for_timeout(2_000)
+            body = _body(page)
             break
     else:
         raise RuntimeError(f"query did not render a result signal: {query}")
