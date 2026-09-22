@@ -49,6 +49,7 @@ def test_external_research_rescues_delivery_index_zero() -> None:
     def research(query, **kwargs):
         assert query.model_name == "ROTAPRO"
         assert kwargs["lookback_days"] == 90
+        assert kwargs["max_retries"] == 2
         return bundle
 
     report = build_report(
@@ -94,3 +95,68 @@ def test_external_research_is_not_required_after_delivery_index_recovers() -> No
 
     assert report["status"] == "SUCCESS"
     assert report["cases"][0]["status"] == "DELIVERY_INDEX_RECOVERED"
+
+
+def test_upstream_transport_outage_is_inconclusive_not_definitive_miss() -> None:
+    recall = {
+        "schema": "r2-search-recall-report-v1",
+        "cases": [
+            {
+                "case_id": "rotapro",
+                "tier": "ZERO",
+                "expected_surface": "external_research",
+                "query": {
+                    "product_name": "혈관박리카테터장치",
+                    "manufacturer": "Boston Scientific",
+                    "model_name": "ROTAPRO",
+                    "specification": "ROTAPRO",
+                },
+            }
+        ],
+    }
+    mapping = SimpleNamespace(
+        model_name="ROTAPRO",
+        detail_product_code="4220341801",
+    )
+    bundle = SimpleNamespace(
+        sources=(
+            SimpleNamespace(
+                source="bid_notice",
+                status="failure",
+                records=(),
+                error_type="PublicDataTransportError",
+                error_message="ConnectTimeout",
+            ),
+            SimpleNamespace(
+                source="award",
+                status="failure",
+                records=(),
+                error_type="PublicDataTransportError",
+                error_message="circuit open",
+            ),
+            SimpleNamespace(
+                source="prespec",
+                status="failure",
+                records=(),
+                error_type="PublicDataTransportError",
+                error_message="circuit open",
+            ),
+        ),
+        records=(),
+    )
+
+    def research(query, **kwargs):
+        del query, kwargs
+        return bundle
+
+    report = build_report(
+        recall,
+        mappings=(mapping,),
+        service_key="test-key",
+        research=research,
+    )
+
+    assert report["status"] == "PARTIAL"
+    assert report["inconclusive_case_count"] == 1
+    assert report["definitive_miss_count"] == 0
+    assert report["cases"][0]["status"] == "UPSTREAM_UNAVAILABLE"
