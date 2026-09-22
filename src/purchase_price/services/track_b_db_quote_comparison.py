@@ -51,6 +51,12 @@ class TrackBQuoteCandidate:
     demand_institution: str | None = None
     quantity: Decimal | None = None
     unit: str | None = None
+    total_amount: Decimal | None = None
+    manufacturer: str | None = None
+    model_name: str | None = None
+    specification: str | None = None
+    product_id: str | None = None
+    detail_code: str | None = None
     transaction_type: str = "나라장터 납품요구"
 
 
@@ -69,6 +75,9 @@ class TrackBReferenceCandidate:
     model_name: str | None = None
     product_id: str | None = None
     detail_code: str | None = None
+    total_amount: Decimal | None = None
+    manufacturer: str | None = None
+    specification: str | None = None
     reference_scope: str = "KEYWORD"
     transaction_type: str = "나라장터 납품요구"
 
@@ -443,6 +452,9 @@ def _find_reference_candidates(
                 model_name=row.model_name,
                 product_id=row.product_id,
                 detail_code=row.detail_code,
+                total_amount=row.total_amount,
+                manufacturer=row.manufacturer,
+                specification=row.specification,
             )
         )
         if len(references) >= limit:
@@ -530,6 +542,12 @@ def compare_track_b_quote(
                 demand_institution=row.demand_institution,
                 quantity=row.quantity,
                 unit=row.unit,
+                total_amount=row.total_amount,
+                manufacturer=row.manufacturer,
+                model_name=row.model_name,
+                specification=row.specification,
+                product_id=row.product_id,
+                detail_code=row.detail_code,
             )
         )
     status = "partial" if len(rows) > limit else "success" if candidates else "success_0"
