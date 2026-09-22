@@ -6,6 +6,7 @@ on:
       - ".github/workflows/production-browser-smoke.yml"
       - "scripts/production_browser_smoke.py"
       - "scripts/production_unified_search_smoke.py"
+      - "scripts/production_search_audit.py"
       - "scripts/production_r2_runtime_diagnostic.py"
       - "scripts/production_quote_uat_smoke.py"
   push:
@@ -68,6 +69,10 @@ jobs:
         if: github.event_name != 'pull_request'
         run: python scripts/production_unified_search_smoke.py
 
+      - name: Run temporary Production multi-query search audit
+        if: github.event_name == 'pull_request'
+        run: python scripts/production_search_audit.py
+
       - name: Run production quote UAT upload smoke
         if: always()
         run: python scripts/production_quote_uat_smoke.py
@@ -77,6 +82,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: production-browser-smoke
-          path: artifacts/production-browser-smoke/
+          path: |
+            artifacts/production-browser-smoke/
+            artifacts/production-search-audit/
           if-no-files-found: warn
           retention-days: 14
