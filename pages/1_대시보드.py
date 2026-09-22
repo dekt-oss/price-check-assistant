@@ -31,6 +31,7 @@ from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
     has_transaction_candidates,
+    model_price_group_rows,
     transaction_rows,
 )
 from purchase_price.ui.widgets import (
@@ -221,9 +222,24 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 rows,
                 use_container_width=True,
                 hide_index=True,
-                column_config={"가격": st.column_config.TextColumn("가격")},
+                column_config={
+                    "가격": st.column_config.TextColumn("대당단가"),
+                    "총액": st.column_config.TextColumn("거래총액"),
+                    "금액검증": st.column_config.TextColumn("단가×수량 검증"),
+                },
             )
             st.caption(f"동일성 확인 {strict_count}건 · 검색 참고 {reference_count}건")
+            grouped_rows = model_price_group_rows(track_b)
+            if grouped_rows:
+                with st.expander("모델·규격별 직접가격 요약", expanded=True):
+                    st.dataframe(
+                        grouped_rows,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    st.caption(
+                        "A/B 직접근거만 집계합니다. 검색 참고·Research 가격은 이 범위에 합산하지 않습니다."
+                    )
         elif track_b.status == "unavailable":
             st.info("가격 검색 인덱스에 연결하지 못했습니다. 공개 시장자료도 함께 조사합니다.")
         elif track_b.status == "not_ingested":
