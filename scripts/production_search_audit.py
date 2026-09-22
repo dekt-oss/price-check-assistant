@@ -18,13 +18,20 @@ ERROR_TEXTS = (
     "Error running app",
 )
 
-QUERIES = (
-    "DFM100",
-    "필립스 Efficia DFM100 심장 충격기",
-    "ApeosPrint C5570 GK",
-    "CX30N",
-    "ROTAPRO",
-    "MinION Mk1D",
+QUERIES: tuple[str, ...] = ()
+STRUCTURED_CASES = (
+    {
+        "case_id": "dfm100_structured",
+        "product_name": "심장 충격기",
+        "manufacturer": "필립스",
+        "model_name": "Efficia DFM100",
+    },
+    {
+        "case_id": "rotapro_structured",
+        "product_name": "혈관박리카테터장치",
+        "manufacturer": "Boston Scientific",
+        "model_name": "ROTAPRO",
+    },
 )
 
 KEYWORDS = (
@@ -154,6 +161,68 @@ def _run_query(page: Any, query: str) -> dict[str, Any]:
     }
 
 
+
+def _run_structured_case(page: Any, case: dict[str, str]) -> dict[str, Any]:
+    _wait_ready(page)
+    app = _app(page)
+    details = app.get_by_text("상세 검색조건", exact=True)
+    details.click()
+    app.get_by_label("품명", exact=True).fill(case["product_name"])
+    app.get_by_label("제조사", exact=True).fill(case["manufacturer"])
+    app.get_by_label("모델명", exact=True).fill(case["model_name"])
+    before = _body(page)
+    app.get_by_role("button", name="검색", exact=True).click()
+
+    deadline = time.monotonic() + 120
+    body = before
+    while time.monotonic() < deadline:
+        page.wait_for_timeout(1_000)
+        body = _body(page)
+        error_text = next((text for text in ERROR_TEXTS if text in body), None)
+        if error_text:
+            raise RuntimeError(f"rendered error: {error_text}")
+        loading = "가격·거래근거를 조사하고 있습니다" in body
+        changed = body != before
+        has_result = (
+            RESULT_PATTERN.search(body) is not None
+            or "현재 수집 범위에서 거래가격을 찾지 못했습니다" in body
+        )
+        if changed and not loading and has_result:
+            page.wait_for_timeout(2_000)
+            body = _body(page)
+            break
+    else:
+        raise RuntimeError(f"structured query did not finish: {case['case_id']}")
+
+    match = RESULT_PATTERN.search(body)
+    strict_count = int(match.group(1)) if match else None
+    reference_count = int(match.group(2)) if match else None
+
+    details_clicked = False
+    try:
+        toggle = app.get_by_text("상세 조사·근거 보기", exact=True)
+        if toggle.count() > 0 and toggle.first.is_visible():
+            toggle.first.click()
+            page.wait_for_timeout(10_000)
+            details_clicked = True
+            body = _body(page)
+    except Exception:
+        pass
+
+    screenshot = ARTIFACT_DIR / f"{case['case_id']}.png"
+    page.screenshot(path=str(screenshot), full_page=True)
+    return {
+        **case,
+        "status": "pass",
+        "strict_count": strict_count,
+        "reference_count": reference_count,
+        "details_clicked": details_clicked,
+        "interesting_lines": _interesting_lines(body),
+        "body_prefix": body[:14000],
+        "screenshot": str(screenshot),
+    }
+
+
 def main() -> None:
     from playwright.sync_api import sync_playwright
 
@@ -161,8 +230,10 @@ def main() -> None:
     report: dict[str, Any] = {
         "production_url": PRODUCTION_URL,
         "queries": list(QUERIES),
+        "structured_cases": list(STRUCTURED_CASES),
         "status": "pass",
         "results": [],
+        "structured_results": [],
     }
 
     with sync_playwright() as playwright:
@@ -180,6 +251,17 @@ def main() -> None:
                     }
                     report["status"] = "partial"
                 report["results"].append(result)
+            for case in STRUCTURED_CASES:
+                try:
+                    result = _run_structured_case(page, case)
+                except Exception as exc:
+                    result = {
+                        **case,
+                        "status": "error",
+                        "error": f"{type(exc).__name__}: {exc}"[:2000],
+                    }
+                    report["status"] = "partial"
+                report["structured_results"].append(result)
         finally:
             browser.close()
 
