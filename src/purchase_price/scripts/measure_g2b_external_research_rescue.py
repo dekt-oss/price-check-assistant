@@ -1,0 +1,324 @@
+from __future__ import annotations
+
+import argparse
+import json
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from purchase_price.config import Settings
+from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_product_mapping import (
+    G2BProductMapping,
+    load_g2b_product_mappings,
+)
+from purchase_price.services.market_research import research_g2b_market
+from purchase_price.services.matching import normalize_text
+
+REPORT_SCHEMA = "r2-search-recall-report-v1"
+OUTPUT_SCHEMA = "g2b-external-research-rescue-v1"
+
+
+def _enum_text(value: Any) -> str:
+    raw = getattr(value, "value", value)
+    return str(raw or "")
+
+
+def _mapping_for_model(
+    model_name: str,
+    mappings: tuple[G2BProductMapping, ...],
+) -> G2BProductMapping | None:
+    key = normalize_text(model_name)
+    matches = [row for row in mappings if normalize_text(row.model_name) == key]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _record_matches(
+    record: Any,
+    *,
+    query: ProductQuery,
+    mapping: G2BProductMapping | None,
+) -> bool:
+    detail_code = str(getattr(record, "detail_product_code", None) or "").strip()
+    if (
+        mapping is not None
+        and mapping.detail_product_code
+        and detail_code == mapping.detail_product_code
+    ):
+        return True
+
+    searchable = " ".join(
+        str(value)
+        for value in (
+            getattr(record, "title", None),
+            getattr(record, "product_name", None),
+            getattr(record, "model_name", None),
+            getattr(record, "original_specification", None),
+        )
+        if value
+    )
+    searchable_key = normalize_text(searchable)
+    if not searchable_key:
+        return False
+
+    model_key = normalize_text(query.model_name)
+    product_key = normalize_text(query.product_name)
+    return bool(
+        (model_key and model_key in searchable_key)
+        or (product_key and product_key in searchable_key)
+    )
+
+
+def build_report(
+    recall_report: dict[str, Any],
+    *,
+    mappings: tuple[G2BProductMapping, ...],
+    service_key: str | None,
+    research: Callable[..., Any] = research_g2b_market,
+    timeout_seconds: float = 20.0,
+    max_retries: int = 2,
+) -> dict[str, Any]:
+    if recall_report.get("schema") != REPORT_SCHEMA:
+        raise ValueError("R2 recall report schema mismatch")
+
+    target_rows = [
+        row
+        for row in recall_report.get("cases", [])
+        if row.get("expected_surface") == "external_research"
+    ]
+    cases: list[dict[str, Any]] = []
+
+    for row in target_rows:
+        query_payload = row.get("query") or {}
+        query = ProductQuery(
+            product_name=str(query_payload.get("product_name") or ""),
+            manufacturer=str(query_payload.get("manufacturer") or ""),
+            model_name=str(query_payload.get("model_name") or ""),
+            specification=str(query_payload.get("specification") or ""),
+        )
+        mapping = _mapping_for_model(query.model_name, mappings)
+
+        if row.get("tier") != "ZERO":
+            cases.append(
+                {
+                    "case_id": row.get("case_id"),
+                    "r2_tier": row.get("tier"),
+                    "status": "DELIVERY_INDEX_RECOVERED",
+                    "rescued": True,
+                    "inconclusive": False,
+                    "matching_record_count": 0,
+                    "source_statuses": {},
+                    "source_errors": {},
+                    "samples": [],
+                }
+            )
+            continue
+
+        bundle = research(
+            query,
+            service_key=service_key,
+            lookback_days=90,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+            max_terms=4,
+            max_pages_per_window=1,
+        )
+        matches = [
+            record
+            for record in bundle.records
+            if _record_matches(record, query=query, mapping=mapping)
+        ]
+        source_statuses = {
+            _enum_text(source.source): _enum_text(source.status)
+            for source in bundle.sources
+        }
+        source_errors = {
+            _enum_text(source.source): {
+                "error_type": getattr(source, "error_type", None),
+                "error_message": getattr(source, "error_message", None),
+            }
+            for source in bundle.sources
+            if getattr(source, "error_type", None) or getattr(source, "error_message", None)
+        }
+        samples = [
+            {
+                "source_type": _enum_text(getattr(record, "source_type", "")),
+                "source_record_id": getattr(record, "source_record_id", None),
+                "title": getattr(record, "title", None),
+                "product_name": getattr(record, "product_name", None),
+                "detail_product_code": getattr(record, "detail_product_code", None),
+                "published_date": (
+                    getattr(record, "published_date", None).isoformat()
+                    if getattr(record, "published_date", None) is not None
+                    else None
+                ),
+                "amount": (
+                    str(getattr(record, "amount", None))
+                    if getattr(record, "amount", None) is not None
+                    else None
+                ),
+                "source_url": getattr(record, "source_url", None),
+            }
+            for record in matches[:5]
+        ]
+        successful_source_statuses = {"success", "success_0", "partial"}
+        any_source_responded = any(
+            status in successful_source_statuses for status in source_statuses.values()
+        )
+        if matches:
+            case_status = "RESEARCH_RESCUED"
+            rescued = True
+            inconclusive = False
+        elif not any_source_responded:
+            case_status = "UPSTREAM_UNAVAILABLE"
+            rescued = False
+            inconclusive = True
+        else:
+            case_status = "RESEARCH_NOT_FOUND"
+            rescued = False
+            inconclusive = False
+
+        cases.append(
+            {
+                "case_id": row.get("case_id"),
+                "r2_tier": row.get("tier"),
+                "status": case_status,
+                "rescued": rescued,
+                "inconclusive": inconclusive,
+                "matching_record_count": len(matches),
+                "source_statuses": source_statuses,
+                "source_errors": source_errors,
+                "mapping_detail_code": (
+                    mapping.detail_product_code if mapping is not None else None
+                ),
+                "samples": samples,
+            }
+        )
+
+    rescued_count = sum(bool(row["rescued"]) for row in cases)
+    inconclusive_count = sum(bool(row.get("inconclusive")) for row in cases)
+    definitive_miss_count = sum(
+        row["status"] == "RESEARCH_NOT_FOUND" for row in cases
+    )
+    if definitive_miss_count:
+        status = "ERROR"
+    elif inconclusive_count:
+        status = "PARTIAL"
+    else:
+        status = "SUCCESS"
+    return {
+        "schema": OUTPUT_SCHEMA,
+        "status": status,
+        "expected_external_research_case_count": len(cases),
+        "rescued_case_count": rescued_count,
+        "inconclusive_case_count": inconclusive_count,
+        "definitive_miss_count": definitive_miss_count,
+        "cases": cases,
+    }
+
+
+def _write_summary(report: dict[str, Any], path: Path) -> None:
+    lines = [
+        "# G2B External Research Rescue UAT",
+        "",
+        f"- status: `{report['status']}`",
+        (
+            "- expected external-Research cases: "
+            f"**{report['expected_external_research_case_count']}**"
+        ),
+        f"- rescued cases: **{report['rescued_case_count']}**",
+        f"- upstream-inconclusive cases: **{report['inconclusive_case_count']}**",
+        f"- definitive Research misses: **{report['definitive_miss_count']}**",
+        "",
+        "| Case | R2 tier | Rescue | Matching records | Source statuses |",
+        "|---|---|---|---:|---|",
+    ]
+    for row in report["cases"]:
+        statuses = ", ".join(
+            f"{name}={status}" for name, status in row["source_statuses"].items()
+        ) or "-"
+        lines.append(
+            "| {case} | {tier} | {status} | {count} | {statuses} |".format(
+                case=row["case_id"],
+                tier=row["r2_tier"],
+                status=row["status"],
+                count=row["matching_record_count"],
+                statuses=statuses.replace("|", "/"),
+            )
+        )
+        for source_name, error in row.get("source_errors", {}).items():
+            lines.append(
+                "  - source warning: {source} · {etype} · {message}".format(
+                    source=source_name,
+                    etype=error.get("error_type") or "-",
+                    message=str(error.get("error_message") or "-").replace("|", "/"),
+                )
+            )
+        for sample in row["samples"][:3]:
+            lines.append(
+                "  - {source}: {title} · {date} · {code}".format(
+                    source=sample["source_type"] or "-",
+                    title=(sample["title"] or sample["product_name"] or "-").replace("|", "/"),
+                    date=sample["published_date"] or "-",
+                    code=sample["detail_product_code"] or "-",
+                )
+            )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Verify G2B Research rescue for curated R2 delivery-index ZERO cases"
+    )
+    parser.add_argument(
+        "--recall-report",
+        type=Path,
+        default=Path("artifacts/r2-search-recall/report.json"),
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("artifacts/r2-search-recall/external-research-rescue.json"),
+    )
+    parser.add_argument(
+        "--summary",
+        type=Path,
+        default=Path("artifacts/r2-search-recall/external-research-rescue.md"),
+    )
+    args = parser.parse_args()
+
+    payload = json.loads(args.recall_report.read_text(encoding="utf-8"))
+    settings = Settings()
+    report = build_report(
+        payload,
+        mappings=load_g2b_product_mappings(),
+        service_key=settings.resolved_g2b_research_service_key,
+        timeout_seconds=settings.g2b_request_timeout_seconds,
+        max_retries=min(settings.g2b_max_retries, 2),
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    _write_summary(report, args.summary)
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "expected_external_research_case_count": report[
+                    "expected_external_research_case_count"
+                ],
+                "rescued_case_count": report["rescued_case_count"],
+                "inconclusive_case_count": report["inconclusive_case_count"],
+                "definitive_miss_count": report["definitive_miss_count"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 1 if report["status"] == "ERROR" else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

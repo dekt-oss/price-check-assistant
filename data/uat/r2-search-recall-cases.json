@@ -6,105 +6,261 @@
       "product_name": "가스 마취기",
       "manufacturer": "Maquet",
       "model_name": "FLOW-C",
-      "specification": ""
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "apc30d",
       "product_name": "CO₂ Incubator(Water Jacket)",
       "manufacturer": "ASTEC",
       "model_name": "APC-30D",
-      "specification": ""
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "sophie",
       "product_name": "인공호흡기",
       "manufacturer": "Stephan",
       "model_name": "Sophie",
-      "specification": "Sophie"
+      "specification": "Sophie",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "veriti_pro_dx",
       "product_name": "핵산증폭기",
       "manufacturer": "Thermo Fisher Scientific",
       "model_name": "Veriti Pro Dx",
-      "specification": "Veriti Pro Dx"
+      "specification": "Veriti Pro Dx",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "apeos_c5570",
       "product_name": "컬러 레이저프린터",
       "manufacturer": "FUJIFILM Business Innovation",
       "model_name": "ApeosPrint C5570 GK",
-      "specification": "A3, 55PPM"
+      "specification": "A3, 55PPM",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "galaxybook6_pro",
       "product_name": "노트북컴퓨터",
       "manufacturer": "삼성전자",
       "model_name": "NT960XJG-K72AG",
-      "specification": ""
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "thinkstation_p2",
       "product_name": "워크스테이션",
       "manufacturer": "Lenovo",
       "model_name": "ThinkStation P2 Tower",
-      "specification": ""
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "gmsr182",
       "product_name": "약품냉장고",
       "manufacturer": "GMS",
       "model_name": "GMSR-182",
-      "specification": "182L"
+      "specification": "182L",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "dfm100",
       "product_name": "심장 충격기",
       "manufacturer": "필립스",
       "model_name": "Efficia DFM100",
-      "specification": ""
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "mac5",
       "product_name": "심전도기",
       "manufacturer": "GE HealthCare",
       "model_name": "MAC5",
-      "specification": ""
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "tn500",
       "product_name": "인큐베이터(인공보육기)",
       "manufacturer": "Draeger",
       "model_name": "TN500",
-      "specification": "TN500"
+      "specification": "TN500",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "cx30n",
       "product_name": "영상 판독용 모니터",
       "manufacturer": "WIDE",
       "model_name": "CX30N",
-      "specification": ""
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "ft10",
       "product_name": "전기수술기",
       "manufacturer": "Medtronic",
       "model_name": "FT10",
-      "specification": "FT10"
+      "specification": "FT10",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "minion_mk1d",
       "product_name": "염기서열분석기",
       "manufacturer": "Oxford Nanopore",
       "model_name": "MinION Mk1D",
-      "specification": "MinION Mk1D"
+      "specification": "MinION Mk1D",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_core"
     },
     {
       "case_id": "rotapro",
       "product_name": "혈관박리카테터장치",
       "manufacturer": "Boston Scientific",
       "model_name": "ROTAPRO",
-      "specification": "ROTAPRO"
+      "specification": "ROTAPRO",
+      "expected_surface": "external_research",
+      "case_group": "curated_core"
+    },
+    {
+      "case_id": "microstim3",
+      "product_name": "의료용전기자극기",
+      "manufacturer": "세진엠티",
+      "model_name": "Microstim3",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "centrifuge_1730mr",
+      "product_name": "미량냉장원심분리기",
+      "manufacturer": "자이로젠",
+      "model_name": "1730MR",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "we_conference_v3",
+      "product_name": "네트워크회의용소프트웨어",
+      "manufacturer": "티노",
+      "model_name": "We-Conference v3.0(위-컨퍼런스 v3.0)",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "kss_650d",
+      "product_name": "유화혼합기",
+      "manufacturer": "한국코프로텍",
+      "model_name": "KSS-650D",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "is_2000l",
+      "product_name": "증명발급기",
+      "manufacturer": "에니텍시스",
+      "model_name": "IS-2000L",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "hb_700",
+      "product_name": "장애인용목욕리프트또는액세서리",
+      "manufacturer": "해피베드",
+      "model_name": "HB-700",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "sk_r039a",
+      "product_name": "피펫세척기",
+      "manufacturer": "쓰리샤인",
+      "model_name": "SK-R039A",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "fc_840",
+      "product_name": "실험실용일반냉동고",
+      "manufacturer": "제이오텍",
+      "model_name": "FC-840",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "esfm_exd_1000a",
+      "product_name": "정전기측정기",
+      "manufacturer": "이에스지케이",
+      "model_name": "ESFM-Exd-1000A",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "hp_20d_set",
+      "product_name": "실험실용열판",
+      "manufacturer": "대한과학",
+      "model_name": "HP-20D-Set",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "js_005",
+      "product_name": "산부인과용진료대",
+      "manufacturer": "진솔의료기",
+      "model_name": "JS-005",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "tr_kv320a",
+      "product_name": "컴퓨터망전환장치",
+      "manufacturer": "테트라",
+      "model_name": "TR-KV320A",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "orm_2000",
+      "product_name": "의료용순환침대",
+      "manufacturer": "선우메디칼",
+      "model_name": "ORM-2000",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
+    },
+    {
+      "case_id": "al_edt_d4",
+      "product_name": "동물해부용부검대",
+      "manufacturer": "코트모",
+      "model_name": "AL-EDT-D4",
+      "specification": "",
+      "expected_surface": "delivery_index",
+      "case_group": "curated_operational"
     },
     {
       "case_id": "exoatlet_negative_control",
@@ -112,7 +268,9 @@
       "manufacturer": "",
       "model_name": "",
       "specification": "",
-      "expected_negative": true
+      "expected_negative": true,
+      "expected_surface": "negative",
+      "case_group": "curated_core"
     }
   ]
 }

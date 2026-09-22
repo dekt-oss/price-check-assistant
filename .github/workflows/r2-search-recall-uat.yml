@@ -18,6 +18,7 @@ on:
       - "src/purchase_price/scripts/probe_g2b_promotion_catalog.py"
       - "src/purchase_price/scripts/audit_r2_broad_reference_composition.py"
       - "src/purchase_price/scripts/measure_r2_observed_model_recall.py"
+      - "src/purchase_price/scripts/measure_g2b_external_research_rescue.py"
       - "data/g2b_product_mappings.csv"
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
@@ -27,6 +28,7 @@ on:
       - "tests/test_probe_g2b_promotion_catalog.py"
       - "tests/test_audit_r2_broad_reference_composition.py"
       - "tests/test_measure_r2_observed_model_recall.py"
+      - "tests/test_measure_g2b_external_research_rescue.py"
 
 permissions:
   contents: read
@@ -64,12 +66,19 @@ jobs:
           tests/test_probe_g2b_promotion_catalog.py
           tests/test_audit_r2_broad_reference_composition.py
           tests/test_measure_r2_observed_model_recall.py
+          tests/test_measure_g2b_external_research_rescue.py
       - name: Measure Production R2 recall without writes
         run: >-
           python -m purchase_price.scripts.measure_r2_search_recall
           --manifest data/uat/r2-search-recall-cases.json
           --output artifacts/r2-search-recall/report.json
           --summary artifacts/r2-search-recall/summary.md
+      - name: Verify external G2B Research rescue
+        run: >-
+          python -m purchase_price.scripts.measure_g2b_external_research_rescue
+          --recall-report artifacts/r2-search-recall/report.json
+          --output artifacts/r2-search-recall/external-research-rescue.json
+          --summary artifacts/r2-search-recall/external-research-rescue.md
       - name: Measure 24 observed-model Production R2 cases
         run: >-
           python -m purchase_price.scripts.measure_r2_observed_model_recall
@@ -106,6 +115,9 @@ jobs:
         run: |
           if [ -f artifacts/r2-search-recall/summary.md ]; then
             cat artifacts/r2-search-recall/summary.md
+          fi
+          if [ -f artifacts/r2-search-recall/external-research-rescue.md ]; then
+            cat artifacts/r2-search-recall/external-research-rescue.md
           fi
           if [ -f artifacts/r2-search-recall/observed-model-summary.md ]; then
             cat artifacts/r2-search-recall/observed-model-summary.md
