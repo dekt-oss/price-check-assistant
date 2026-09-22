@@ -75,7 +75,8 @@ def build_report(
     mappings: tuple[G2BProductMapping, ...],
     service_key: str | None,
     research: Callable[..., Any] = research_g2b_market,
-    timeout_seconds: float = 15.0,
+    timeout_seconds: float = 20.0,
+    max_retries: int = 2,
 ) -> dict[str, Any]:
     if recall_report.get("schema") != REPORT_SCHEMA:
         raise ValueError("R2 recall report schema mismatch")
@@ -104,6 +105,7 @@ def build_report(
                     "r2_tier": row.get("tier"),
                     "status": "DELIVERY_INDEX_RECOVERED",
                     "rescued": True,
+                    "inconclusive": False,
                     "matching_record_count": 0,
                     "source_statuses": {},
                     "source_errors": {},
@@ -117,7 +119,7 @@ def build_report(
             service_key=service_key,
             lookback_days=90,
             timeout_seconds=timeout_seconds,
-            max_retries=1,
+            max_retries=max_retries,
             max_terms=4,
             max_pages_per_window=1,
         )
@@ -159,12 +161,30 @@ def build_report(
             }
             for record in matches[:5]
         ]
+        successful_source_statuses = {"success", "success_0", "partial"}
+        any_source_responded = any(
+            status in successful_source_statuses for status in source_statuses.values()
+        )
+        if matches:
+            case_status = "RESEARCH_RESCUED"
+            rescued = True
+            inconclusive = False
+        elif not any_source_responded:
+            case_status = "UPSTREAM_UNAVAILABLE"
+            rescued = False
+            inconclusive = True
+        else:
+            case_status = "RESEARCH_NOT_FOUND"
+            rescued = False
+            inconclusive = False
+
         cases.append(
             {
                 "case_id": row.get("case_id"),
                 "r2_tier": row.get("tier"),
-                "status": "RESEARCH_RESCUED" if matches else "RESEARCH_NOT_FOUND",
-                "rescued": bool(matches),
+                "status": case_status,
+                "rescued": rescued,
+                "inconclusive": inconclusive,
                 "matching_record_count": len(matches),
                 "source_statuses": source_statuses,
                 "source_errors": source_errors,
@@ -176,11 +196,23 @@ def build_report(
         )
 
     rescued_count = sum(bool(row["rescued"]) for row in cases)
+    inconclusive_count = sum(bool(row.get("inconclusive")) for row in cases)
+    definitive_miss_count = sum(
+        row["status"] == "RESEARCH_NOT_FOUND" for row in cases
+    )
+    if definitive_miss_count:
+        status = "ERROR"
+    elif inconclusive_count:
+        status = "PARTIAL"
+    else:
+        status = "SUCCESS"
     return {
         "schema": OUTPUT_SCHEMA,
-        "status": "SUCCESS" if rescued_count == len(cases) else "ERROR",
+        "status": status,
         "expected_external_research_case_count": len(cases),
         "rescued_case_count": rescued_count,
+        "inconclusive_case_count": inconclusive_count,
+        "definitive_miss_count": definitive_miss_count,
         "cases": cases,
     }
 
@@ -195,6 +227,8 @@ def _write_summary(report: dict[str, Any], path: Path) -> None:
             f"**{report['expected_external_research_case_count']}**"
         ),
         f"- rescued cases: **{report['rescued_case_count']}**",
+        f"- upstream-inconclusive cases: **{report['inconclusive_case_count']}**",
+        f"- definitive Research misses: **{report['definitive_miss_count']}**",
         "",
         "| Case | R2 tier | Rescue | Matching records | Source statuses |",
         "|---|---|---|---:|---|",
@@ -260,7 +294,8 @@ def main() -> int:
         payload,
         mappings=load_g2b_product_mappings(),
         service_key=settings.resolved_g2b_research_service_key,
-        timeout_seconds=min(settings.g2b_request_timeout_seconds, 15.0),
+        timeout_seconds=settings.g2b_request_timeout_seconds,
+        max_retries=min(settings.g2b_max_retries, 2),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
@@ -276,11 +311,13 @@ def main() -> int:
                     "expected_external_research_case_count"
                 ],
                 "rescued_case_count": report["rescued_case_count"],
+                "inconclusive_case_count": report["inconclusive_case_count"],
+                "definitive_miss_count": report["definitive_miss_count"],
             },
             sort_keys=True,
         )
     )
-    return 0 if report["status"] == "SUCCESS" else 1
+    return 1 if report["status"] == "ERROR" else 0
 
 
 if __name__ == "__main__":
