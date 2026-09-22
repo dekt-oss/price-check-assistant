@@ -17,6 +17,7 @@ on:
       - "src/purchase_price/scripts/inspect_r2_promotion_sources.py"
       - "src/purchase_price/scripts/probe_g2b_promotion_catalog.py"
       - "src/purchase_price/scripts/audit_r2_broad_reference_composition.py"
+      - "src/purchase_price/scripts/measure_r2_observed_model_recall.py"
       - "data/g2b_product_mappings.csv"
       - "src/purchase_price/services/track_b_r2_quote_index.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
@@ -25,6 +26,7 @@ on:
       - "tests/test_inspect_r2_promotion_sources.py"
       - "tests/test_probe_g2b_promotion_catalog.py"
       - "tests/test_audit_r2_broad_reference_composition.py"
+      - "tests/test_measure_r2_observed_model_recall.py"
 
 permissions:
   contents: read
@@ -61,12 +63,20 @@ jobs:
           tests/test_inspect_r2_promotion_sources.py
           tests/test_probe_g2b_promotion_catalog.py
           tests/test_audit_r2_broad_reference_composition.py
+          tests/test_measure_r2_observed_model_recall.py
       - name: Measure Production R2 recall without writes
         run: >-
           python -m purchase_price.scripts.measure_r2_search_recall
           --manifest data/uat/r2-search-recall-cases.json
           --output artifacts/r2-search-recall/report.json
           --summary artifacts/r2-search-recall/summary.md
+      - name: Measure 24 observed-model Production R2 cases
+        run: >-
+          python -m purchase_price.scripts.measure_r2_observed_model_recall
+          --target-count 24
+          --exclude-manifest data/uat/r2-search-recall-cases.json
+          --output artifacts/r2-search-recall/observed-model-report.json
+          --summary artifacts/r2-search-recall/observed-model-summary.md
       - name: Inspect raw R2 promotion-candidate sources
         run: >-
           python -m purchase_price.scripts.inspect_r2_promotion_sources
@@ -96,6 +106,9 @@ jobs:
         run: |
           if [ -f artifacts/r2-search-recall/summary.md ]; then
             cat artifacts/r2-search-recall/summary.md
+          fi
+          if [ -f artifacts/r2-search-recall/observed-model-summary.md ]; then
+            cat artifacts/r2-search-recall/observed-model-summary.md
           fi
           if [ -f artifacts/r2-search-recall/promotion-source-inspection.md ]; then
             cat artifacts/r2-search-recall/promotion-source-inspection.md
