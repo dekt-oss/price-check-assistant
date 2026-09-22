@@ -277,7 +277,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
 hydrate_streamlit_runtime_secrets()
 st.set_page_config(page_title="구매가격 검색", page_icon="🔎", layout="wide")
 st.markdown(
-    '<span id="unified-search-runtime-v3" style="display:none">unified-search-runtime-v3</span>',
+    '<span id="unified-search-runtime-v3" style="display:none">unified-search-runtime-v3</span>'
+    '<span id="unified-search-runtime-v4" style="display:none">unified-search-runtime-v4</span>',
     unsafe_allow_html=True,
 )
 
