@@ -106,6 +106,7 @@ def build_report(
                     "rescued": True,
                     "matching_record_count": 0,
                     "source_statuses": {},
+                    "source_errors": {},
                     "samples": [],
                 }
             )
@@ -128,6 +129,14 @@ def build_report(
         source_statuses = {
             _enum_text(source.source): _enum_text(source.status)
             for source in bundle.sources
+        }
+        source_errors = {
+            _enum_text(source.source): {
+                "error_type": getattr(source, "error_type", None),
+                "error_message": getattr(source, "error_message", None),
+            }
+            for source in bundle.sources
+            if getattr(source, "error_type", None) or getattr(source, "error_message", None)
         }
         samples = [
             {
@@ -158,6 +167,7 @@ def build_report(
                 "rescued": bool(matches),
                 "matching_record_count": len(matches),
                 "source_statuses": source_statuses,
+                "source_errors": source_errors,
                 "mapping_detail_code": (
                     mapping.detail_product_code if mapping is not None else None
                 ),
@@ -202,6 +212,14 @@ def _write_summary(report: dict[str, Any], path: Path) -> None:
                 statuses=statuses.replace("|", "/"),
             )
         )
+        for source_name, error in row.get("source_errors", {}).items():
+            lines.append(
+                "  - source warning: {source} · {etype} · {message}".format(
+                    source=source_name,
+                    etype=error.get("error_type") or "-",
+                    message=str(error.get("error_message") or "-").replace("|", "/"),
+                )
+            )
         for sample in row["samples"][:3]:
             lines.append(
                 "  - {source}: {title} · {date} · {code}".format(
