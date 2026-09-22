@@ -12,3 +12,6 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert 'st.toggle("상세 조사·근거 보기"' in source
     assert 'st.markdown("#### 상세 조사·근거")' in source
     assert 'id="unified-search-runtime-v3"' in source
+    assert 'id="unified-search-runtime-v4"' in source
+    assert "interpret_unified_search" in source
+    assert "_render_search_interpretation" in source
