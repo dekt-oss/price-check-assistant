@@ -97,6 +97,15 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
         rows.append(
             {
                 "가격": _money_text(candidate.price),
+                "총액": _money_text(getattr(candidate, "total_amount", None))
+                if getattr(candidate, "total_amount", None) is not None
+                else "미확인",
+                "금액검증": getattr(candidate, "amount_check", None) or "미확인",
+                "제조사": getattr(candidate, "manufacturer", None) or "미확인",
+                "모델": getattr(candidate, "model_name", None) or "미확인",
+                "규격": getattr(candidate, "specification", None) or "미확인",
+                "품목식별번호": getattr(candidate, "product_id", None) or "미확인",
+                "세부품명번호": getattr(candidate, "detail_code", None) or "미확인",
                 "판매처": getattr(candidate, "supplier", None) or "미확인",
                 "구매처": getattr(candidate, "demand_institution", None) or "미확인",
                 "거래일": getattr(candidate, "transaction_date", None) or "미확인",
@@ -115,6 +124,15 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
         rows.append(
             {
                 "가격": _money_text(candidate.price),
+                "총액": _money_text(getattr(candidate, "total_amount", None))
+                if getattr(candidate, "total_amount", None) is not None
+                else "미확인",
+                "금액검증": getattr(candidate, "amount_check", None) or "미확인",
+                "제조사": getattr(candidate, "manufacturer", None) or "미확인",
+                "모델": getattr(candidate, "model_name", None) or "미확인",
+                "규격": getattr(candidate, "specification", None) or "미확인",
+                "품목식별번호": getattr(candidate, "product_id", None) or "미확인",
+                "세부품명번호": getattr(candidate, "detail_code", None) or "미확인",
                 "판매처": getattr(candidate, "supplier", None) or "미확인",
                 "구매처": getattr(candidate, "demand_institution", None) or "미확인",
                 "거래일": getattr(candidate, "transaction_date", None) or "미확인",
