@@ -48,7 +48,7 @@ def test_external_research_rescues_delivery_index_zero() -> None:
 
     def research(query, **kwargs):
         assert query.model_name == "ROTAPRO"
-        assert kwargs["lookback_days"] == 365
+        assert kwargs["lookback_days"] == 90
         return bundle
 
     report = build_report(
