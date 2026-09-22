@@ -115,7 +115,7 @@ def build_report(
         bundle = research(
             query,
             service_key=service_key,
-            lookback_days=365,
+            lookback_days=90,
             timeout_seconds=timeout_seconds,
             max_retries=1,
             max_terms=4,
