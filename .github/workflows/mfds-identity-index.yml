@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - ".github/workflows/mfds-identity-index.yml"
+      - "src/purchase_price/config.py"
       - "src/purchase_price/services/mfds_identity_index.py"
       - "src/purchase_price/services/mfds_identity_r2.py"
       - "src/purchase_price/storage/r2_mfds_identity_index.py"
       - "src/purchase_price/scripts/sync_mfds_identity_index.py"
       - "pages/1_대시보드.py"
       - "tests/test_mfds_identity_index.py"
+      - "tests/test_unified_search_state_contract.py"
   push:
     branches:
       - main
