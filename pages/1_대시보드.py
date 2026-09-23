@@ -10,6 +10,10 @@ from purchase_price.services.g2b_search_policy import (
     G2B_LOOKBACK_OPTIONS,
     g2b_lookback_label,
 )
+from purchase_price.services.mfds_workspace import (
+    MfdsWorkspaceResult,
+    research_mfds_for_workspace,
+)
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.track_b_r2_quote_index import lookup_track_b_quote_from_r2
@@ -126,6 +130,8 @@ def _execute_search(
                 query = model_probe_query
                 model_probe_used = True
 
+    mfds = research_mfds_for_workspace(query, track_b)
+
     run, discovery, market_bundle = run_market_research(
         query,
         lookback_days=int(lookback_days),
@@ -148,6 +154,7 @@ def _execute_search(
         "run": run,
         "discovery": discovery,
         "market_bundle": market_bundle,
+        "mfds": mfds,
     }
 
 
@@ -194,6 +201,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     run = state["run"]
     discovery = state["discovery"]
     market_bundle = state["market_bundle"]
+    mfds = state.get("mfds")
     interpretation = state.get("interpretation")
     stats = build_purchase_workspace_stats(
         track_b=track_b,
