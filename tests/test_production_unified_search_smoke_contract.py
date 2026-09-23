@@ -12,7 +12,7 @@ def test_production_unified_search_smoke_uses_user_visible_result_contract() -> 
     assert "strict_count < 1" in script
     assert "DFM100 one-line search did not recover direct A/B evidence" in script
     assert 'get_by_role("tab", name="Research·근거")' in script
-    assert 'get_by_role("tab", name="식약처·업체")' in script
+    assert 'get_by_role("tab", name="식약처·허가")' in script
     assert 'report["mfds_tab_rendered"] = True' in script
     assert 'get_by_role("tab", name="거래가격")' in script
     assert 'report["workspace_tabs_persisted"] = True' in script
