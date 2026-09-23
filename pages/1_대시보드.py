@@ -95,6 +95,8 @@ def _identity_hydration(
     identity = lookup_mfds_identity_from_r2(raw_search)
     if identity.status != "success" or not identity.records:
         return product_name, manufacturer, model_name, specification, identity
+    if identity.match_type not in {"permit", "udi", "model"}:
+        return product_name, manufacturer, model_name, specification, identity
 
     products = identity.product_names
     models = identity.model_names
