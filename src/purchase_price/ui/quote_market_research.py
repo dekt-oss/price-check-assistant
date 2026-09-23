@@ -11,6 +11,10 @@ from purchase_price.services.g2b_search_policy import (
     g2b_lookback_label,
 )
 from purchase_price.services.price_conditions import build_price_condition_profile
+from purchase_price.services.purchase_workspace_handoff import (
+    PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
+    build_purchase_workspace_handoff,
+)
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
 from purchase_price.services.track_b_db_quote_comparison import (
@@ -341,6 +345,23 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             "아래 표는 실제 수집된 거래가격을 우선 보여줍니다. 동일성이 충분하지 않은 행은 "
             "'검색 참고'로 표시하며 견적 적정성 판정에는 자동 사용하지 않습니다."
         )
+
+        handoff = build_purchase_workspace_handoff(
+            product_name=item.product_name,
+            manufacturer=item.manufacturer,
+            model_name=item.model_name,
+            specification=item.specification,
+            quote_unit_price=item.unit_price,
+        )
+        if handoff is not None and st.button(
+            "통합 구매조사 열기",
+            key=f"quote_open_purchase_workspace_{index}",
+            use_container_width=True,
+        ):
+            st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = (
+                handoff.to_session_payload()
+            )
+            st.switch_page("pages/1_대시보드.py")
 
         st.markdown("**나라장터 거래가격**")
         direct_rows = _track_b_candidate_rows(track_b.candidates) if track_b is not None else []
