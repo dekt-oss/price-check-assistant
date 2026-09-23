@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, inspect, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
@@ -57,6 +57,9 @@ class TrackBQuoteCandidate:
     specification: str | None = None
     product_id: str | None = None
     detail_code: str | None = None
+    contract_delivery_type: str | None = None
+    contract_type: str | None = None
+    delivery_condition: str | None = None
     transaction_type: str = "나라장터 납품요구"
 
 
@@ -78,6 +81,9 @@ class TrackBReferenceCandidate:
     total_amount: Decimal | None = None
     manufacturer: str | None = None
     specification: str | None = None
+    contract_delivery_type: str | None = None
+    contract_type: str | None = None
+    delivery_condition: str | None = None
     reference_scope: str = "KEYWORD"
     transaction_type: str = "나라장터 납품요구"
 
@@ -159,6 +165,9 @@ def _line_from_record(record: NormalizedTrackBRecord) -> TrackBDeliveryLine:
         transaction_date=record.transaction_date,
         supplier=record.supplier,
         demand_institution=record.demand_institution,
+        contract_delivery_type=record.contract_delivery_type,
+        contract_type=record.contract_type,
+        delivery_condition=record.delivery_condition,
         api_params_json=json.dumps(dict(record.provenance.api_params), sort_keys=True),
     )
 
@@ -339,6 +348,36 @@ def _suggest_similar_identities(
     return tuple(suggestions)
 
 
+
+_CONDITION_COLUMNS = {
+    "contract_delivery_type",
+    "contract_type",
+    "delivery_condition",
+}
+
+
+def _condition_columns_available(session: Session) -> bool:
+    """Return whether the current serving index exposes condition schema v2.
+
+    The fields are deferred on the ORM model, so a freshly deployed app can still read
+    the previous v1 SQLite index while the main-branch serving rebuild is running.
+    """
+
+    try:
+        columns = {
+            str(column["name"])
+            for column in inspect(session.get_bind()).get_columns("track_b_delivery_lines")
+        }
+    except Exception:
+        return False
+    return _CONDITION_COLUMNS.issubset(columns)
+
+
+def _row_conditions(row: TrackBDeliveryLine, *, available: bool) -> tuple[str | None, str | None, str | None]:
+    if not available:
+        return None, None, None
+    return row.contract_delivery_type, row.contract_type, row.delivery_condition
+
 def _reference_tokens(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
@@ -421,6 +460,7 @@ def _find_reference_candidates(
             -row.id,
         ),
     )
+    condition_columns_available = _condition_columns_available(session)
     references: list[TrackBReferenceCandidate] = []
     seen: set[str] = set()
     for row in ranked:
@@ -433,6 +473,10 @@ def _find_reference_candidates(
         if source_record_id in seen:
             continue
         seen.add(source_record_id)
+        contract_delivery_type, contract_type, delivery_condition = _row_conditions(
+            row,
+            available=condition_columns_available,
+        )
         references.append(
             TrackBReferenceCandidate(
                 source_record_id=source_record_id,
@@ -455,6 +499,9 @@ def _find_reference_candidates(
                 total_amount=row.total_amount,
                 manufacturer=row.manufacturer,
                 specification=row.specification,
+                contract_delivery_type=contract_delivery_type,
+                contract_type=contract_type,
+                delivery_condition=delivery_condition,
             )
         )
         if len(references) >= limit:
@@ -501,6 +548,7 @@ def compare_track_b_quote(
         .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
         .limit(limit + 1)
     ).all()
+    condition_columns_available = _condition_columns_available(session)
     candidates: list[TrackBQuoteCandidate] = []
     for row in rows[:limit]:
         # Re-parse the immutable G2B source title with the current verified parser at read time.
@@ -522,6 +570,10 @@ def compare_track_b_quote(
             delta = ((quote_unit_price - row.unit_price) / row.unit_price * 100).quantize(
                 Decimal("0.1")
             )
+        contract_delivery_type, contract_type, delivery_condition = _row_conditions(
+            row,
+            available=condition_columns_available,
+        )
         candidates.append(
             TrackBQuoteCandidate(
                 source_record_id=(
@@ -548,6 +600,9 @@ def compare_track_b_quote(
                 specification=row.specification,
                 product_id=row.product_id,
                 detail_code=row.detail_code,
+                contract_delivery_type=contract_delivery_type,
+                contract_type=contract_type,
+                delivery_condition=delivery_condition,
             )
         )
     status = "partial" if len(rows) > limit else "success" if candidates else "success_0"
