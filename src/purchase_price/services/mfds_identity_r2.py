@@ -4,7 +4,8 @@ import hashlib
 import sqlite3
 import tempfile
 from pathlib import Path
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
