@@ -12,6 +12,7 @@ ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
 DEPLOYMENT_MARKER = "#purchase-workspace-quote-v1"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
+WORKSPACE_DIRECT_PATTERN = re.compile(r"동일제품 거래\s*(\d+)건")
 ERROR_TEXTS = (
     "AttributeError",
     "This app has encountered an error",
