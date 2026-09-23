@@ -143,13 +143,13 @@ def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) 
     else:
         raise RuntimeError("Research workspace tab did not preserve DFM100 search result")
 
-    mfds_tab = app.get_by_role("tab", name="식약처·업체")
+    mfds_tab = app.get_by_role("tab", name="식약처·허가")
     mfds_tab.click()
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
-        if "식약처 등록정보" in body:
+        if "식약처 허가·등록정보" in body:
             report["mfds_tab_rendered"] = True
             break
         page.wait_for_timeout(1_000)
@@ -162,7 +162,7 @@ def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) 
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
-        if "나라장터 실제 거래" in body and WORKSPACE_DIRECT_PATTERN.search(body) is not None:
+        if "나라장터 동일제품 직접거래" in body and WORKSPACE_DIRECT_PATTERN.search(body) is not None:
             report["workspace_tabs_persisted"] = True
             _save_snapshot(page, report, "unified-search-dfm100-workspace")
             return
