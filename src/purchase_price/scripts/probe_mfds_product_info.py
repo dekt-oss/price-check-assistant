@@ -7,12 +7,17 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
-from purchase_price.clients.data_go_kr import PublicDataPortalClient
+from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
 from purchase_price.services.mfds_device_intelligence import unwrap_mfds_page
 
 MFDS_PRODUCT_INFO_BASE_URL = "https://apis.data.go.kr/1471000/MdeqStdCdPrdtInfoService03"
 MFDS_PRODUCT_INFO_OPERATION = "getMdeqStdCdPrdtInfoInq03"
 _MODEL_FILTER = "FOML_INFO"
+_SOURCE_NOT_AUTHORIZED_MARKERS = (
+    "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+    "code=30",
+    "등록되지 않은 서비스키",
+)
 
 _SAFE_FIELDS = (
     "UDIDI_CD",
@@ -39,6 +44,26 @@ def _safe_record(item: Mapping[str, Any]) -> dict[str, str | None]:
     return {
         key: str(item.get(key)).strip() if item.get(key) not in (None, "") else None
         for key in _SAFE_FIELDS
+    }
+
+
+def _is_source_not_authorized(error: PublicDataClientError) -> bool:
+    message = str(error)
+    return any(marker in message for marker in _SOURCE_NOT_AUTHORIZED_MARKERS)
+
+
+def _source_not_authorized_report(*, model_name: str) -> dict[str, Any]:
+    return {
+        "status": "SOURCE_NOT_AUTHORIZED",
+        "source": "MFDS medical-device UDI product information",
+        "base_url": MFDS_PRODUCT_INFO_BASE_URL,
+        "operation": MFDS_PRODUCT_INFO_OPERATION,
+        "request_filter": _MODEL_FILTER,
+        "query_model": model_name.strip(),
+        "reason": "configured service key is not registered for this official operation",
+        "exact_model_count": None,
+        "records": [],
+        "writes_performed": 0,
     }
 
 
@@ -96,8 +121,13 @@ def main() -> int:
     if not service_key:
         raise SystemExit("MFDS service key is not configured")
 
-    with PublicDataPortalClient(service_key, timeout_seconds=20.0, max_retries=3) as client:
-        report = probe_product_info(client, model_name=args.model_name)
+    try:
+        with PublicDataPortalClient(service_key, timeout_seconds=20.0, max_retries=3) as client:
+            report = probe_product_info(client, model_name=args.model_name)
+    except PublicDataClientError as exc:
+        if not _is_source_not_authorized(exc):
+            raise
+        report = _source_not_authorized_report(model_name=args.model_name)
 
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -106,6 +136,8 @@ def main() -> int:
             encoding="utf-8",
         )
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    if report["status"] == "SOURCE_NOT_AUTHORIZED":
+        return 0
     if args.expect_hit and not report["exact_model_count"]:
         return 3
     return 0
