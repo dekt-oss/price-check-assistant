@@ -42,8 +42,10 @@ from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
+    direct_transaction_rows,
     has_transaction_candidates,
     model_price_group_rows,
+    reference_transaction_rows,
     transaction_rows,
 )
 from purchase_price.ui.widgets import (
@@ -144,6 +146,8 @@ def _execute_search(
         procurement_detail_limit=4,
     )
     rows = transaction_rows(track_b)
+    direct_rows = direct_transaction_rows(track_b)
+    reference_rows = reference_transaction_rows(track_b)
     strict_count, reference_count = candidate_counts(track_b)
     return {
         "heading": resolved_model or resolved_product or raw_search,
@@ -151,6 +155,8 @@ def _execute_search(
         "query": query,
         "track_b": track_b,
         "rows": rows,
+        "direct_rows": direct_rows,
+        "reference_rows": reference_rows,
         "strict_count": strict_count,
         "reference_count": reference_count,
         "model_probe_used": model_probe_used,
@@ -199,9 +205,14 @@ def _render_search_result(state: dict[str, Any]) -> None:
     review_input = state["review_input"]
     query = state["query"]
     track_b = state["track_b"]
-    rows = state["rows"]
-    strict_count = state["strict_count"]
-    reference_count = state["reference_count"]
+    direct_rows = state.get("direct_rows")
+    if not isinstance(direct_rows, list):
+        direct_rows = direct_transaction_rows(track_b)
+    reference_rows = state.get("reference_rows")
+    if not isinstance(reference_rows, list):
+        reference_rows = reference_transaction_rows(track_b)
+    strict_count = len(direct_rows)
+    reference_count = len(reference_rows)
     run = state["run"]
     discovery = state["discovery"]
     market_bundle = state["market_bundle"]
@@ -227,14 +238,18 @@ def _render_search_result(state: dict[str, Any]) -> None:
     if isinstance(interpretation, UnifiedSearchInterpretation):
         _render_search_interpretation(interpretation)
 
+    st.markdown("**구매조사 메뉴**")
+    st.caption(
+        "직접가격과 참고거래를 분리해서 표시합니다. 식약처 허가정보와 공급근거도 같은 제품 identity에서 확인합니다."
+    )
     summary_tab, price_tab, mfds_tab, supplier_tab, competitor_tab, research_tab = st.tabs(
         [
-            "요약",
-            "거래가격",
-            "식약처·업체",
-            "공급사",
-            "경쟁장비",
-            "Research·근거",
+            "📌 요약",
+            "💰 거래가격",
+            "🏥 식약처·허가",
+            "🏢 공급사",
+            "🔁 경쟁장비",
+            "📚 Research·근거",
         ]
     )
 
@@ -265,6 +280,34 @@ def _render_search_result(state: dict[str, Any]) -> None:
             mfds_metric = "대상 아님"
         c4.metric("식약처 등록", mfds_metric)
         c5.metric("공개조달 Research", f"{stats.research_count}건")
+
+        if isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_records:
+            with st.container(border=True):
+                st.markdown("**식약처 허가 identity**")
+                i1, i2, i3 = st.columns(3)
+                i1.caption("품목 / 모델")
+                i1.write(
+                    " / ".join(
+                        part
+                        for part in (
+                            mfds.exact_records[0].product_name,
+                            mfds.exact_records[0].model_name,
+                        )
+                        if part
+                    )
+                    or "미확인"
+                )
+                i2.caption("허가번호")
+                i2.write(" / ".join(mfds.permit_numbers) or "미확인")
+                permit_dates = sorted(
+                    {
+                        item.permit_date.isoformat()
+                        for item in mfds.exact_records
+                        if item.permit_date is not None
+                    }
+                )
+                i3.caption("허가일")
+                i3.write(" / ".join(permit_dates) or "미확인")
 
         if stats.median_price is not None:
             q1, q2, q3 = st.columns(3)
@@ -301,12 +344,13 @@ def _render_search_result(state: dict[str, Any]) -> None:
             st.caption(f"A/B 직접거래 수요기관 {stats.demand_institution_count}개 확인")
 
     with price_tab:
-        st.markdown("#### 나라장터 실제 거래")
+        st.markdown("#### 나라장터 동일제품 직접거래")
         if state["model_probe_used"]:
             st.caption("입력어가 모델명과 일치해 모델 기준 결과를 우선 표시합니다.")
-        if rows:
+
+        if direct_rows:
             st.dataframe(
-                rows,
+                direct_rows,
                 use_container_width=True,
                 hide_index=True,
                 column_config={
@@ -315,42 +359,65 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     "금액검증": st.column_config.TextColumn("단가×수량 검증"),
                 },
             )
-            st.caption(f"동일성 확인 {strict_count}건 · 검색 참고 {reference_count}건")
+            st.success(f"요약과 동일한 A/B 직접거래 {strict_count}건입니다.")
             grouped_rows = model_price_group_rows(track_b)
             if grouped_rows:
                 st.markdown("#### 모델·규격·조건별 직접가격")
                 st.dataframe(grouped_rows, use_container_width=True, hide_index=True)
                 st.caption(
-                    "A/B 직접근거만 집계합니다. C/Research 참고가격은 가격범위에 합산하지 않습니다."
+                    "A/B 직접근거만 집계합니다. C/Research 참고가격은 직접가격 범위에 합산하지 않습니다."
                 )
         elif track_b.status == "unavailable":
             st.warning("가격 검색 인덱스에 연결하지 못했습니다.")
         elif track_b.status == "not_ingested":
             st.info("수집 자료의 빠른 가격 인덱스를 만드는 중입니다.")
         else:
-            st.info("현재 수집 범위에서 나라장터 납품요구 거래가격을 찾지 못했습니다.")
+            st.info("요약과 동일하게 A/B 동일제품 직접거래는 0건입니다.")
 
-        if not rows and run.results:
-            public_rows = evidence_rows(run.results)
-            st.markdown("#### 기타 공개 시장가격")
-            st.dataframe(
-                [
-                    {
-                        "가격": row["단가"],
-                        "출처": row["출처"],
-                        "거래일": row["거래일"] or "미확인",
-                        "자료성격": row["자료성격"],
-                        "URL": row["URL"],
-                    }
-                    for row in public_rows
-                ],
-                use_container_width=True,
-                hide_index=True,
-                column_config={"가격": st.column_config.NumberColumn("가격", format="%d원")},
+        if reference_rows:
+            st.warning(
+                f"검색 참고거래 {reference_count}건은 실제 관측 거래지만 동일제품으로 확정되지 않았습니다. "
+                "직접가격·시장범위·공급업체 집계에는 포함하지 않습니다."
             )
+            with st.expander(
+                f"검색 참고거래 {reference_count}건 보기 · 동일제품 직접가격 아님",
+                expanded=False,
+            ):
+                st.dataframe(
+                    reference_rows,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "가격": st.column_config.TextColumn("관측 단가"),
+                        "총액": st.column_config.TextColumn("거래총액"),
+                        "금액검증": st.column_config.TextColumn("단가×수량 검증"),
+                    },
+                )
+                st.caption(
+                    "품목·분류 또는 검색어 수준의 참고근거입니다. 모델·규격·옵션 동일성이 확인되기 전에는 직접 비교하지 않습니다."
+                )
+
+        if not direct_rows and run.results:
+            public_rows = evidence_rows(run.results)
+            with st.expander("기타 공개 시장가격 보기 · 직접가격 아님", expanded=False):
+                st.dataframe(
+                    [
+                        {
+                            "가격": row["단가"],
+                            "출처": row["출처"],
+                            "거래일": row["거래일"] or "미확인",
+                            "자료성격": row["자료성격"],
+                            "URL": row["URL"],
+                        }
+                        for row in public_rows
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={"가격": st.column_config.NumberColumn("가격", format="%d원")},
+                )
 
     with mfds_tab:
-        st.markdown("#### 식약처 등록정보")
+        st.markdown("#### 식약처 허가·등록정보")
         if not isinstance(mfds, MfdsWorkspaceResult):
             st.info("식약처 조회 상태를 확인할 수 없습니다.")
         elif mfds.status == "not_applicable":
@@ -397,8 +464,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
             st.info(
                 "형명정보 API의 INDT_NM은 '업종'이며 업체명이 아닙니다. "
-                "모델별 제조·수입 업체명은 업체명이 포함된 UDI/제품정보 공식 Source의 "
-                "역검색 계약을 확인한 뒤 연결합니다."
+                "현재 이 화면의 식약처 형명·허가정보는 live 조회이며 별도 누적 인덱스는 아직 연결되지 않았습니다. "
+                "모델·허가번호·UDI-DI·제조/수입업체를 하나의 로컬 identity index로 축적하는 후속작업이 필요합니다."
             )
 
             if mfds.business_records:
@@ -521,6 +588,7 @@ st.markdown(
     '<span id="unified-search-runtime-v3" style="display:none">unified-search-runtime-v3</span>'
     '<span id="unified-search-runtime-v4" style="display:none">unified-search-runtime-v4</span>'
     '<span id="purchase-workspace-runtime-v1" style="display:none">purchase-workspace-runtime-v1</span>'
+    '<span id="purchase-workspace-runtime-v2" style="display:none">purchase-workspace-runtime-v2</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>',
     unsafe_allow_html=True,
@@ -536,6 +604,29 @@ st.markdown(
 .home-title {text-align:center; font-size:2.35rem; font-weight:750; margin:0.2rem 0 0.35rem 0;}
 .home-subtitle {text-align:center; color:#6b7280; margin-bottom:1.6rem;}
 .home-section {margin-top:1.15rem;}
+div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+  gap: 0.45rem;
+  padding: 0.45rem;
+  background: #f6f7f9;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.8rem;
+  flex-wrap: wrap;
+}
+div[data-testid="stTabs"] button[data-baseweb="tab"] {
+  min-height: 2.75rem;
+  padding: 0.55rem 0.9rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.65rem;
+  font-weight: 650;
+}
+div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
+  background: #fff1f2;
+  border-color: #ff4b4b;
+  color: #b42318;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {display:none;}
 </style>
 """,
     unsafe_allow_html=True,
