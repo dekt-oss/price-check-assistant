@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Mapping
+from typing import Any
 
 PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY = "purchase_workspace_handoff_v1"
 _MAX_TEXT = 500
