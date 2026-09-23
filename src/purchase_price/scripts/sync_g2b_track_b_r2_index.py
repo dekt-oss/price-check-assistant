@@ -261,6 +261,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             final = {
                 "status": "NO_CHANGE",
                 "mode": mode,
+                "serving_schema": SERVING_INDEX_SCHEMA,
                 "state_recovered": state_recovered,
                 "row_count": row_count,
                 **report,
