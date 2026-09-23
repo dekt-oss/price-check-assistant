@@ -71,7 +71,7 @@ def build_validation_report(
             "permit_number": item.permit_number,
             "product_name": item.product_name,
             "model_name": item.model_name,
-            "industry_name": item.industry_name,
+            "industry_type": item.industry_type,
             "cancellation_status": item.cancellation_status,
             "export_only": item.export_only,
             "active_for_domestic_candidate": item.active_for_domestic_candidate,
