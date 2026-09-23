@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import tempfile
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
