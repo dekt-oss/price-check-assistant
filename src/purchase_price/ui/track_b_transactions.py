@@ -87,6 +87,19 @@ def _quantity_unit(quantity: Any, unit: str | None) -> str:
     return " ".join(part for part in (quantity_text, unit or "") if part) or "미확인"
 
 
+
+def _condition_text(candidate: Any) -> str:
+    parts = [
+        str(value).strip()
+        for value in (
+            getattr(candidate, "contract_delivery_type", None),
+            getattr(candidate, "contract_type", None),
+            getattr(candidate, "delivery_condition", None),
+        )
+        if value and str(value).strip()
+    ]
+    return " · ".join(dict.fromkeys(parts)) if parts else "미확인"
+
 def transaction_rows(track_b: Any) -> list[dict[str, object]]:
     """Build the purchase-facing transaction table from direct and Research-only evidence.
 
@@ -109,6 +122,7 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
                 "규격": getattr(candidate, "specification", None) or "미확인",
                 "품목식별번호": getattr(candidate, "product_id", None) or "미확인",
                 "세부품명번호": getattr(candidate, "detail_code", None) or "미확인",
+                "거래조건": _condition_text(candidate),
                 "판매처": getattr(candidate, "supplier", None) or "미확인",
                 "구매처": getattr(candidate, "demand_institution", None) or "미확인",
                 "거래일": getattr(candidate, "transaction_date", None) or "미확인",
@@ -136,6 +150,7 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
                 "규격": getattr(candidate, "specification", None) or "미확인",
                 "품목식별번호": getattr(candidate, "product_id", None) or "미확인",
                 "세부품명번호": getattr(candidate, "detail_code", None) or "미확인",
+                "거래조건": _condition_text(candidate),
                 "판매처": getattr(candidate, "supplier", None) or "미확인",
                 "구매처": getattr(candidate, "demand_institution", None) or "미확인",
                 "거래일": getattr(candidate, "transaction_date", None) or "미확인",
@@ -174,14 +189,15 @@ def model_price_group_rows(track_b: Any) -> list[dict[str, object]]:
     band cannot be mistaken for a fair-price range.
     """
 
-    groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    groups: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for candidate in strict_comparison_candidates(track_b):
         model = getattr(candidate, "model_name", None) or "모델 미확인"
         specification = getattr(candidate, "specification", None) or "규격 미확인"
-        groups[(model, specification)].append(candidate)
+        condition = _condition_text(candidate)
+        groups[(model, specification, condition)].append(candidate)
 
     rows: list[dict[str, object]] = []
-    for (model, specification), candidates in groups.items():
+    for (model, specification, condition), candidates in groups.items():
         prices = sorted(Decimal(str(candidate.price)) for candidate in candidates)
         quantities = [getattr(candidate, "quantity", None) for candidate in candidates]
         dates = [
@@ -193,6 +209,7 @@ def model_price_group_rows(track_b: Any) -> list[dict[str, object]]:
             {
                 "모델": model,
                 "규격": specification,
+                "거래조건": condition,
                 "거래건수": len(candidates),
                 "최저단가": _money_text(prices[0]),
                 "중앙값": _money_text(median(prices)),
@@ -203,5 +220,10 @@ def model_price_group_rows(track_b: Any) -> list[dict[str, object]]:
         )
     return sorted(
         rows,
-        key=lambda row: (-int(row["거래건수"]), str(row["모델"]), str(row["규격"])),
+        key=lambda row: (
+            -int(row["거래건수"]),
+            str(row["모델"]),
+            str(row["규격"]),
+            str(row["거래조건"]),
+        ),
     )
