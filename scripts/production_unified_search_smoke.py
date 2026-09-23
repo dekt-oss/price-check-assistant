@@ -10,7 +10,7 @@ from typing import Any
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#unified-search-runtime-v4"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v1"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
 ERROR_TEXTS = (
     "AttributeError",
@@ -90,7 +90,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose unified-search-runtime-v3 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-runtime-v1 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -103,7 +103,12 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
             continue
         _assert_no_error_text(body)
         match = RESULT_PATTERN.search(body)
-        if match is not None and "DFM100 거래가격" in body and "나라장터 거래가격" in body:
+        if (
+            match is not None
+            and "구매조사 워크스페이스" in body
+            and "동일제품 거래" in body
+            and "나라장터 실제 거래" in body
+        ):
             strict_count, reference_count = (int(value) for value in match.groups())
             if strict_count < 1:
                 raise RuntimeError(
@@ -115,27 +120,39 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
     raise RuntimeError("DFM100 Production unified search did not render a non-zero result summary")
 
 
-def _verify_detail_toggle_persists_result(page: Any, report: dict[str, object]) -> None:
+def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) -> None:
     app = _app(page)
-    toggle = app.get_by_text("상세 조사·근거 보기", exact=True)
-    toggle.wait_for(state="visible", timeout=20_000)
-    toggle.click()
+
+    research_tab = app.get_by_role("tab", name="Research·근거")
+    research_tab.wait_for(state="visible", timeout=20_000)
+    research_tab.click()
 
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
         if (
-            "DFM100 거래가격" in body
-            and "나라장터 거래가격" in body
-            and RESULT_PATTERN.search(body) is not None
-            and "상세 조사·근거" in body
+            "구매조사 워크스페이스" in body
+            and "공개조달 Research·근거" in body
+            and "동일제품 거래" in body
         ):
-            report["detail_toggle_persisted"] = True
-            _save_snapshot(page, report, "unified-search-dfm100-details")
+            break
+        page.wait_for_timeout(1_000)
+    else:
+        raise RuntimeError("Research workspace tab did not preserve DFM100 search result")
+
+    price_tab = app.get_by_role("tab", name="거래가격")
+    price_tab.click()
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        body = _body_text(page)
+        _assert_no_error_text(body)
+        if "나라장터 실제 거래" in body and RESULT_PATTERN.search(body) is not None:
+            report["workspace_tabs_persisted"] = True
+            _save_snapshot(page, report, "unified-search-dfm100-workspace")
             return
         page.wait_for_timeout(1_000)
-    raise RuntimeError("Detail toggle cleared DFM100 search results or failed to render details")
+    raise RuntimeError("Price workspace tab did not preserve DFM100 transaction results")
 
 
 def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
@@ -162,7 +179,7 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
             report["reference_count"] = reference_count
             report["total_track_b_results"] = strict_count + reference_count
             _save_snapshot(page, report, "unified-search-dfm100-success")
-            _verify_detail_toggle_persists_result(page, report)
+            _verify_workspace_tabs_persist_result(page, report)
             return
         except Exception as exc:
             attempts.append(
@@ -179,7 +196,7 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
         if attempt < 3:
             _wait_for_deployed_app(page, report)
 
-    raise RuntimeError("DFM100 Production unified search did not pass result + detail-toggle E2E")
+    raise RuntimeError("DFM100 Production unified search did not pass result + workspace-tab E2E")
 
 
 def main() -> None:
