@@ -12,11 +12,11 @@ from purchase_price.services.g2b_search_policy import (
 )
 from purchase_price.services.mfds_workspace import research_mfds_for_workspace
 from purchase_price.services.price_conditions import build_price_condition_profile
+from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
     build_purchase_workspace_handoff,
 )
-from purchase_price.services.pricing import assess_prices
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
 from purchase_price.services.track_b_db_quote_comparison import (
     TrackBIdentitySuggestion,
