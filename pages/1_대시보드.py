@@ -521,7 +521,8 @@ st.markdown(
     '<span id="unified-search-runtime-v3" style="display:none">unified-search-runtime-v3</span>'
     '<span id="unified-search-runtime-v4" style="display:none">unified-search-runtime-v4</span>'
     '<span id="purchase-workspace-runtime-v1" style="display:none">purchase-workspace-runtime-v1</span>'
-    '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>',
+    '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
+    '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>',
     unsafe_allow_html=True,
 )
 
