@@ -10,8 +10,13 @@ from purchase_price.services.g2b_search_policy import (
     G2B_LOOKBACK_OPTIONS,
     g2b_lookback_label,
 )
+from purchase_price.services.mfds_workspace import research_mfds_for_workspace
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
+from purchase_price.services.purchase_workspace_handoff import (
+    PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
+    build_purchase_workspace_handoff,
+)
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
 from purchase_price.services.track_b_db_quote_comparison import (
     TrackBIdentitySuggestion,
@@ -31,6 +36,7 @@ from purchase_price.ui.quote_review_contract import build_manual_quote_item
 from purchase_price.ui.quote_review_state import QuoteReviewState
 from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.quote_review_summary import render_purchase_review_summary
+from purchase_price.ui.track_b_transactions import model_price_group_rows
 from purchase_price.ui.widgets import (
     render_condition_table,
     render_evidence_table,
@@ -60,6 +66,19 @@ def _quantity_unit(quantity, unit: str | None) -> str:
     return " ".join(part for part in (quantity_text, unit or "") if part) or "미확인"
 
 
+def _condition_text(candidate) -> str:
+    parts = [
+        str(value).strip()
+        for value in (
+            getattr(candidate, "contract_delivery_type", None),
+            getattr(candidate, "contract_type", None),
+            getattr(candidate, "delivery_condition", None),
+        )
+        if value and str(value).strip()
+    ]
+    return " · ".join(dict.fromkeys(parts)) if parts else "미확인"
+
+
 def _comparison_label(candidate: TrackBQuoteCandidate) -> str:
     if candidate.match_grade.value in {"A", "B"}:
         return "동일 모델"
@@ -72,6 +91,12 @@ def _track_b_candidate_rows(
     return [
         {
             "가격": _money(candidate.price),
+            "총액": _money(getattr(candidate, "total_amount", None)),
+            "금액검증": candidate.amount_check or "미확인",
+            "제조사": getattr(candidate, "manufacturer", None) or "미확인",
+            "모델": getattr(candidate, "model_name", None) or "미확인",
+            "규격": getattr(candidate, "specification", None) or "미확인",
+            "거래조건": _condition_text(candidate),
             "판매처": candidate.supplier or "미확인",
             "구매처": candidate.demand_institution or "미확인",
             "거래일": candidate.transaction_date or "미확인",
@@ -95,6 +120,11 @@ def _track_b_reference_rows(
     return [
         {
             "가격": _money(candidate.price),
+            "총액": _money(getattr(candidate, "total_amount", None)),
+            "제조사": getattr(candidate, "manufacturer", None) or "미확인",
+            "모델": getattr(candidate, "model_name", None) or "미확인",
+            "규격": getattr(candidate, "specification", None) or "미확인",
+            "거래조건": _condition_text(candidate),
             "판매처": candidate.supplier or "미확인",
             "구매처": candidate.demand_institution or "미확인",
             "거래일": candidate.transaction_date or "미확인",
@@ -128,6 +158,7 @@ def _clear_research(state: QuoteReviewState) -> None:
     state.discoveries.clear()
     state.market_bundles.clear()
     state.track_b_db.clear()
+    state.mfds_workspace.clear()
     state.comparability_context.clear()
     state.approvals.clear()
 
@@ -278,6 +309,21 @@ def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
             )
 
 
+def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
+    if not state.items:
+        return
+    for index, item in enumerate(state.items):
+        if index in state.mfds_workspace:
+            continue
+        track_b = state.track_b_db.get(index)
+        if track_b is None:
+            continue
+        state.mfds_workspace[index] = research_mfds_for_workspace(
+            quote_item_query(item),
+            track_b,
+        )
+
+
 def _ensure_market_research(state: QuoteReviewState) -> bool:
     if not state.items:
         return False
@@ -326,6 +372,7 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
     discovery = state.discoveries.get(index)
     market_bundle = state.market_bundles.get(index)
     track_b = state.track_b_db.get(index)
+    mfds = state.mfds_workspace.get(index)
 
     with st.container(border=True):
         title = item.product_name or item.model_name or f"품목 {index + 1}"
@@ -342,6 +389,40 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             "'검색 참고'로 표시하며 견적 적정성 판정에는 자동 사용하지 않습니다."
         )
 
+        if mfds is not None and mfds.status in {"success", "success_0"}:
+            if mfds.exact_ambiguous:
+                st.warning("식약처 exact 모델이 복수 허가번호에 연결되어 확인이 필요합니다.")
+            elif mfds.exact_confirmed:
+                permits = " / ".join(mfds.permit_numbers) or "허가번호 미표기"
+                st.success(
+                    f"식약처 exact 모델 확인 · {permits} · "
+                    f"동일품목 국내 정상 등록모델 {len(mfds.active_records)}건"
+                )
+            elif mfds.records:
+                st.info(
+                    f"식약처 품목 등록모델 {len(mfds.records)}건을 조회했지만 "
+                    "입력 모델 exact 일치는 확인하지 못했습니다."
+                )
+        elif mfds is not None and mfds.status == "failure":
+            st.warning("식약처 조회 실패 · 가격검색 결과와 분리해 유지합니다.")
+
+        handoff = build_purchase_workspace_handoff(
+            product_name=item.product_name,
+            manufacturer=item.manufacturer,
+            model_name=item.model_name,
+            specification=item.specification,
+            quote_unit_price=item.unit_price,
+        )
+        if handoff is not None and st.button(
+            "통합 구매조사 열기",
+            key=f"quote_open_purchase_workspace_{index}",
+            use_container_width=True,
+        ):
+            st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = (
+                handoff.to_session_payload()
+            )
+            st.switch_page("pages/1_대시보드.py")
+
         st.markdown("**나라장터 거래가격**")
         direct_rows = _track_b_candidate_rows(track_b.candidates) if track_b is not None else []
         reference_rows = (
@@ -354,6 +435,14 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             st.caption(
                 f"동일성 확인 거래 {len(direct_rows)}건 · 검색 참고 {len(reference_rows)}건"
             )
+            if track_b is not None:
+                grouped_rows = model_price_group_rows(track_b)
+                if grouped_rows:
+                    with st.expander("모델·규격·조건별 직접가격 요약", expanded=False):
+                        st.dataframe(grouped_rows, use_container_width=True, hide_index=True)
+                        st.caption(
+                            "A/B 직접근거만 집계합니다. 검색 참고가격은 이 가격대에 합산하지 않습니다."
+                        )
             if track_b is not None and any(
                 candidate.amount_check == "inconsistent" for candidate in track_b.candidates
             ):
@@ -476,6 +565,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
 
     _render_compact_item_editor(state)
     _ensure_track_b_comparison(state)
+    _ensure_mfds_workspace(state)
     render_purchase_review_summary(state)
 
     st.subheader("가격 · 거래 이력")
