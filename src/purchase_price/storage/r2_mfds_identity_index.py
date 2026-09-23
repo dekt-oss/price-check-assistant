@@ -48,7 +48,7 @@ class R2MfdsIdentityIndexStore:
         self._quota_store = quota_store
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "R2MfdsIdentityIndexStore":
+    def from_settings(cls, settings: Settings) -> R2MfdsIdentityIndexStore:
         if not settings.r2_configured:
             raise R2ConfigurationError("R2 is not fully configured for MFDS identity index")
         endpoint = settings.resolved_r2_endpoint_url
