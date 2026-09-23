@@ -15,5 +15,7 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert 'id="unified-search-runtime-v3"' in source
     assert 'id="unified-search-runtime-v4"' in source
     assert 'id="purchase-workspace-runtime-v1"' in source
+    assert 'id="purchase-workspace-mfds-v1"' in source
+    assert "research_mfds_for_workspace" in source
     assert "interpret_unified_search" in source
     assert "_render_search_interpretation" in source
