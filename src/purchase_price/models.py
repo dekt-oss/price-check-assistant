@@ -166,4 +166,7 @@ class TrackBDeliveryLine(Base):
     transaction_date: Mapped[date | None] = mapped_column(Date)
     supplier: Mapped[str | None] = mapped_column(String(300))
     demand_institution: Mapped[str | None] = mapped_column(String(300))
+    contract_delivery_type: Mapped[str | None] = mapped_column(Text, deferred=True)
+    contract_type: Mapped[str | None] = mapped_column(Text, deferred=True)
+    delivery_condition: Mapped[str | None] = mapped_column(Text, deferred=True)
     api_params_json: Mapped[str] = mapped_column(Text)
