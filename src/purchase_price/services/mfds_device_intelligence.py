@@ -32,7 +32,7 @@ class MfdsPage:
 class MedicalDeviceModelRecord:
     product_serial_number: str | None
     regional_office: str | None
-    industry_name: str | None
+    industry_type: str | None
     permission_type: str | None
     permit_number: str | None
     product_name: str | None
@@ -42,6 +42,12 @@ class MedicalDeviceModelRecord:
     trade_name: str | None
     model_name: str | None
     export_only: bool | None
+
+    @property
+    def industry_name(self) -> str | None:
+        """Backward-compatible alias; MFDS INDT_NM means industry type, not company name."""
+
+        return self.industry_type
 
     @property
     def active_for_domestic_candidate(self) -> bool:
@@ -187,7 +193,7 @@ def parse_model_record(record: Mapping[str, Any]) -> MedicalDeviceModelRecord:
     return MedicalDeviceModelRecord(
         product_serial_number=_text_or_none(record.get("MDEQ_PRDLST_SN")),
         regional_office=_text_or_none(record.get("INST_AREA_DIVS_NM")),
-        industry_name=_text_or_none(record.get("INDT_NM")),
+        industry_type=_text_or_none(record.get("INDT_NM")),
         permission_type=_text_or_none(record.get("PRMSN_DCLR_DIVS_NM")),
         permit_number=_text_or_none(record.get("MEDDEV_ITEM_NO")),
         product_name=_text_or_none(record.get("PRDLST_NM")),
