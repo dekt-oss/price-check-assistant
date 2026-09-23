@@ -131,7 +131,6 @@ def _build_mfds_procurement_crosslinks(records, *, limit: int = 25) -> list[dict
         comparison = lookup_track_b_quote_from_r2(
             ProductQuery(
                 product_name=product,
-                manufacturer=company,
                 model_name=model,
             ),
             quote_unit_price=None,
