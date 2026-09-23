@@ -36,6 +36,7 @@ from purchase_price.ui.quote_review_contract import build_manual_quote_item
 from purchase_price.ui.quote_review_state import QuoteReviewState
 from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.quote_review_summary import render_purchase_review_summary
+from purchase_price.ui.track_b_transactions import model_price_group_rows
 from purchase_price.ui.widgets import (
     render_condition_table,
     render_evidence_table,
@@ -65,6 +66,19 @@ def _quantity_unit(quantity, unit: str | None) -> str:
     return " ".join(part for part in (quantity_text, unit or "") if part) or "미확인"
 
 
+def _condition_text(candidate) -> str:
+    parts = [
+        str(value).strip()
+        for value in (
+            getattr(candidate, "contract_delivery_type", None),
+            getattr(candidate, "contract_type", None),
+            getattr(candidate, "delivery_condition", None),
+        )
+        if value and str(value).strip()
+    ]
+    return " · ".join(dict.fromkeys(parts)) if parts else "미확인"
+
+
 def _comparison_label(candidate: TrackBQuoteCandidate) -> str:
     if candidate.match_grade.value in {"A", "B"}:
         return "동일 모델"
@@ -77,6 +91,12 @@ def _track_b_candidate_rows(
     return [
         {
             "가격": _money(candidate.price),
+            "총액": _money(getattr(candidate, "total_amount", None)),
+            "금액검증": candidate.amount_check or "미확인",
+            "제조사": getattr(candidate, "manufacturer", None) or "미확인",
+            "모델": getattr(candidate, "model_name", None) or "미확인",
+            "규격": getattr(candidate, "specification", None) or "미확인",
+            "거래조건": _condition_text(candidate),
             "판매처": candidate.supplier or "미확인",
             "구매처": candidate.demand_institution or "미확인",
             "거래일": candidate.transaction_date or "미확인",
@@ -100,6 +120,11 @@ def _track_b_reference_rows(
     return [
         {
             "가격": _money(candidate.price),
+            "총액": _money(getattr(candidate, "total_amount", None)),
+            "제조사": getattr(candidate, "manufacturer", None) or "미확인",
+            "모델": getattr(candidate, "model_name", None) or "미확인",
+            "규격": getattr(candidate, "specification", None) or "미확인",
+            "거래조건": _condition_text(candidate),
             "판매처": candidate.supplier or "미확인",
             "구매처": candidate.demand_institution or "미확인",
             "거래일": candidate.transaction_date or "미확인",
@@ -410,6 +435,14 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             st.caption(
                 f"동일성 확인 거래 {len(direct_rows)}건 · 검색 참고 {len(reference_rows)}건"
             )
+            if track_b is not None:
+                grouped_rows = model_price_group_rows(track_b)
+                if grouped_rows:
+                    with st.expander("모델·규격·조건별 직접가격 요약", expanded=False):
+                        st.dataframe(grouped_rows, use_container_width=True, hide_index=True)
+                        st.caption(
+                            "A/B 직접근거만 집계합니다. 검색 참고가격은 이 가격대에 합산하지 않습니다."
+                        )
             if track_b is not None and any(
                 candidate.amount_check == "inconsistent" for candidate in track_b.candidates
             ):
