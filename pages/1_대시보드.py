@@ -48,11 +48,8 @@ from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
-    direct_transaction_rows,
     has_transaction_candidates,
     model_price_group_rows,
-    reference_transaction_rows,
-    strict_comparison_candidates,
     transaction_rows,
 )
 from purchase_price.ui.widgets import (
@@ -110,6 +107,26 @@ def _identity_hydration(
     )
 
 
+def _match_grade_value(candidate: object) -> str:
+    grade = getattr(candidate, "match_grade", None)
+    return str(getattr(grade, "value", grade) or "").strip().upper()
+
+
+def _strict_candidates_compat(track_b: object) -> tuple[object, ...]:
+    return tuple(
+        candidate
+        for candidate in tuple(getattr(track_b, "candidates", ()) or ())
+        if _match_grade_value(candidate) in {"A", "B"}
+    )
+
+
+def _split_transaction_rows_compat(track_b: object) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    rows = transaction_rows(track_b)
+    direct = [row for row in rows if row.get("비교수준") == "동일 모델"]
+    references = [row for row in rows if row.get("비교수준") != "동일 모델"]
+    return direct, references
+
+
 def _build_mfds_procurement_crosslinks(records, *, limit: int = 25) -> list[dict[str, object]]:
     unique: dict[tuple[str, str, str], object] = {}
     for item in records:
@@ -135,7 +152,7 @@ def _build_mfds_procurement_crosslinks(records, *, limit: int = 25) -> list[dict
             ),
             quote_unit_price=None,
         )
-        direct = strict_comparison_candidates(comparison)
+        direct = _strict_candidates_compat(comparison)
         prices = sorted(
             Decimal(str(candidate.price))
             for candidate in direct
@@ -274,8 +291,7 @@ def _execute_search(
         procurement_detail_limit=4,
     )
     rows = transaction_rows(track_b)
-    direct_rows = direct_transaction_rows(track_b)
-    reference_rows = reference_transaction_rows(track_b)
+    direct_rows, reference_rows = _split_transaction_rows_compat(track_b)
     strict_count, reference_count = candidate_counts(track_b)
     return {
         "heading": resolved_model or resolved_product or raw_search,
@@ -337,11 +353,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
     query = state["query"]
     track_b = state["track_b"]
     direct_rows = state.get("direct_rows")
-    if not isinstance(direct_rows, list):
-        direct_rows = direct_transaction_rows(track_b)
     reference_rows = state.get("reference_rows")
-    if not isinstance(reference_rows, list):
-        reference_rows = reference_transaction_rows(track_b)
+    if not isinstance(direct_rows, list) or not isinstance(reference_rows, list):
+        direct_rows, reference_rows = _split_transaction_rows_compat(track_b)
     strict_count = len(direct_rows)
     reference_count = len(reference_rows)
     run = state["run"]
