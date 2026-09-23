@@ -34,6 +34,7 @@ def test_legacy_comparison_without_reference_candidates_does_not_crash() -> None
             "규격": "미확인",
             "품목식별번호": "미확인",
             "세부품명번호": "미확인",
+            "거래조건": "미확인",
             "판매처": "미확인",
             "구매처": "미확인",
             "거래일": "미확인",
@@ -134,6 +135,9 @@ def test_transaction_row_exposes_unit_price_total_and_identity_details() -> None
         specification="200J",
         product_id="12345678",
         detail_code="4217210101",
+        contract_delivery_type="일반납품",
+        contract_type="단가계약",
+        delivery_condition="현장설치도",
         product_title="저출력심장충격기, Philips goldway, Efficia DFM100, 200J",
         match_grade=MatchGrade.B,
         supplier="공급사",
@@ -155,6 +159,7 @@ def test_transaction_row_exposes_unit_price_total_and_identity_details() -> None
     assert row["규격"] == "200J"
     assert row["품목식별번호"] == "12345678"
     assert row["세부품명번호"] == "4217210101"
+    assert row["거래조건"] == "일반납품 · 단가계약 · 현장설치도"
 
 
 def test_model_price_group_rows_use_direct_evidence_only() -> None:
@@ -165,6 +170,9 @@ def test_model_price_group_rows_use_direct_evidence_only() -> None:
         specification="200J",
         quantity=Decimal("1"),
         transaction_date="2026-08-01",
+        contract_delivery_type="일반납품",
+        contract_type="단가계약",
+        delivery_condition="현장설치도",
     )
     direct_b = SimpleNamespace(
         price=Decimal("13200000"),
@@ -173,6 +181,9 @@ def test_model_price_group_rows_use_direct_evidence_only() -> None:
         specification="200J",
         quantity=Decimal("2"),
         transaction_date="2026-08-02",
+        contract_delivery_type="일반납품",
+        contract_type="단가계약",
+        delivery_condition="현장설치도",
     )
     reference = SimpleNamespace(
         price=Decimal("50000000"),
@@ -192,6 +203,7 @@ def test_model_price_group_rows_use_direct_evidence_only() -> None:
     assert len(rows) == 1
     assert rows[0]["모델"] == "Efficia DFM100"
     assert rows[0]["규격"] == "200J"
+    assert rows[0]["거래조건"] == "일반납품 · 단가계약 · 현장설치도"
     assert rows[0]["거래건수"] == 2
     assert rows[0]["최저단가"] == "9,900,000원"
     assert rows[0]["중앙값"] == "11,550,000원"
