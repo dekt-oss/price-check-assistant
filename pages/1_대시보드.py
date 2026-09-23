@@ -16,6 +16,10 @@ from purchase_price.services.mfds_workspace import (
 )
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_review import build_purchase_review_input
+from purchase_price.services.purchase_workspace_handoff import (
+    PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
+    parse_purchase_workspace_handoff,
+)
 from purchase_price.services.track_b_r2_quote_index import lookup_track_b_quote_from_r2
 from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
@@ -212,6 +216,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
     st.divider()
     st.caption("구매조사 워크스페이스")
     st.subheader(heading)
+    if state.get("origin") == "quote":
+        st.caption("견적서 품목에서 이어진 조사 · 견적단가를 비교기준으로 유지합니다.")
 
     st.info(
         "Safety 자동조회는 아직 공식 회수·판매중지 API 연결 전입니다. "
@@ -540,6 +546,30 @@ st.markdown(
     '<div class="home-subtitle">모델명만 입력해도 알려진 모델 힌트를 안전하게 구조화해 가격·공급·조달근거를 함께 찾습니다.</div>',
     unsafe_allow_html=True,
 )
+
+handoff_payload = st.session_state.pop(PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY, None)
+handoff = parse_purchase_workspace_handoff(handoff_payload)
+if handoff is not None:
+    try:
+        with st.status("견적서 품목의 가격·등록·공급근거를 조사하고 있습니다...", expanded=False) as status:
+            search_state = _execute_search(
+                search_text="",
+                product_name=handoff.product_name,
+                manufacturer=handoff.manufacturer,
+                model_name=handoff.model_name,
+                specification=handoff.specification,
+                quote_text=(
+                    str(handoff.quote_unit_price)
+                    if handoff.quote_unit_price is not None
+                    else ""
+                ),
+                lookback_days=G2B_DEFAULT_LOOKBACK_DAYS,
+            )
+            search_state["origin"] = "quote"
+            st.session_state[HOME_SEARCH_STATE_KEY] = search_state
+            status.update(label="견적 품목 구매조사 완료", state="complete")
+    except ValueError as exc:
+        st.warning(f"견적 품목 연결 실패: {exc}")
 
 with st.form("home_unified_search"):
     search_col, button_col = st.columns([8, 1.35], gap="small")
