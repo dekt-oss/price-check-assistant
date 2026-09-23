@@ -8,6 +8,10 @@ on:
       - "src/purchase_price/scripts/audit_track_b_transition.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
       - "src/purchase_price/services/track_b_supplemental_state.py"
+      - "src/purchase_price/services/track_b_db_quote_comparison.py"
+      - "src/purchase_price/storage/r2_serving_index.py"
+      - "src/purchase_price/models.py"
+      - "alembic/versions/0004_track_b_delivery_conditions.py"
   push:
     branches:
       - main
@@ -19,6 +23,8 @@ on:
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
       - "src/purchase_price/storage/r2_serving_index.py"
+      - "src/purchase_price/models.py"
+      - "alembic/versions/0004_track_b_delivery_conditions.py"
   workflow_run:
     workflows:
       - "Track B Daily Backfill"
