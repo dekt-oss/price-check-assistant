@@ -2,78 +2,119 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import tempfile
 from collections import Counter
-from decimal import Decimal
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session
-
 from purchase_price.config import Settings
-from purchase_price.models import TrackBDeliveryLine
-from purchase_price.scripts.sync_g2b_track_b_r2_index import _ref_from_pointer
 from purchase_price.services.track_b_pipeline_state import SERVING_INDEX_STATE_NAME
-from purchase_price.storage.r2_serving_index import R2ServingIndexStore
+from purchase_price.storage.r2_serving_index import R2ServingIndexRef, R2ServingIndexStore
 from purchase_price.storage.r2_state import R2OperationalStateStore
 
-
-def _money(value: Decimal | None) -> str | None:
-    return str(value) if value is not None else None
+POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
 
 
-def _source_record_id(row: TrackBDeliveryLine) -> str:
-    return (
-        f"delivery:{row.delivery_request_number}"
-        f"|change:{row.change_order}|line:{row.product_sequence}"
+def _ref_from_pointer(payload: Mapping[str, Any]) -> R2ServingIndexRef:
+    if payload.get("schema") != POINTER_SCHEMA:
+        raise ValueError("Track B serving-index pointer schema mismatch")
+    key = str(payload.get("key") or "").strip()
+    sha256 = str(payload.get("sha256") or "").strip()
+    if not key or len(sha256) != 64:
+        raise ValueError("Track B serving-index pointer is incomplete")
+    return R2ServingIndexRef(
+        key=key,
+        sha256=sha256,
+        stored_bytes=int(payload.get("stored_bytes") or 0),
+        uncompressed_bytes=int(payload.get("uncompressed_bytes") or 0),
     )
 
 
-def audit_conflict_rows(session: Session, *, sample_limit: int = 30) -> dict[str, Any]:
+def _source_record_id(row: sqlite3.Row) -> str:
+    return (
+        f"delivery:{row['delivery_request_number']}"
+        f"|change:{row['change_order']}|line:{row['product_sequence']}"
+    )
+
+
+def _text(value: object | None) -> str | None:
+    return None if value is None else str(value)
+
+
+def audit_conflict_rows(
+    connection: sqlite3.Connection,
+    *,
+    sample_limit: int = 30,
+) -> dict[str, Any]:
     if sample_limit < 1:
         raise ValueError("sample_limit must be positive")
 
-    rows = session.scalars(
-        select(TrackBDeliveryLine)
-        .where(TrackBDeliveryLine.identity_conflict.is_(True))
-        .order_by(
-            TrackBDeliveryLine.identity_conflict_count.desc(),
-            TrackBDeliveryLine.transaction_date.desc(),
-            TrackBDeliveryLine.id.desc(),
-        )
-    ).all()
+    connection.row_factory = sqlite3.Row
+    rows = connection.execute(
+        """
+        SELECT
+            id,
+            delivery_request_number,
+            change_order,
+            product_sequence,
+            identity_conflict_count,
+            detail_code,
+            product_id,
+            product_title,
+            unit_price,
+            quantity,
+            unit,
+            total_amount,
+            supplier,
+            demand_institution,
+            transaction_date,
+            contract_delivery_type,
+            contract_type,
+            delivery_condition,
+            raw_object_key
+        FROM track_b_delivery_lines
+        WHERE identity_conflict = 1
+        ORDER BY
+            identity_conflict_count DESC,
+            transaction_date DESC,
+            id DESC
+        """
+    ).fetchall()
 
-    event_count = sum(int(row.identity_conflict_count or 0) for row in rows)
-    detail_codes = Counter((row.detail_code or "미확인") for row in rows)
-    suppliers = Counter((row.supplier or "미확인") for row in rows)
-    demand_institutions = Counter((row.demand_institution or "미확인") for row in rows)
+    event_count = sum(int(row["identity_conflict_count"] or 0) for row in rows)
+    detail_codes = Counter((row["detail_code"] or "미확인") for row in rows)
+    suppliers = Counter((row["supplier"] or "미확인") for row in rows)
+    demand_institutions = Counter((row["demand_institution"] or "미확인") for row in rows)
     transaction_months = Counter(
-        row.transaction_date.strftime("%Y-%m") if row.transaction_date is not None else "미확인"
+        str(row["transaction_date"])[:7] if row["transaction_date"] else "미확인"
         for row in rows
     )
-    priced_rows = [row for row in rows if row.unit_price is not None and row.unit_price > 0]
+    priced_rows = [
+        row
+        for row in rows
+        if row["unit_price"] is not None and float(row["unit_price"]) > 0
+    ]
 
     samples = [
         {
             "source_record_id": _source_record_id(row),
-            "conflict_count": int(row.identity_conflict_count or 0),
-            "detail_code": row.detail_code,
-            "product_id": row.product_id,
-            "product_title": row.product_title,
-            "unit_price": _money(row.unit_price),
-            "quantity": _money(row.quantity),
-            "unit": row.unit,
-            "total_amount": _money(row.total_amount),
-            "supplier": row.supplier,
-            "demand_institution": row.demand_institution,
-            "transaction_date": (
-                row.transaction_date.isoformat() if row.transaction_date is not None else None
-            ),
-            "contract_delivery_type": row.contract_delivery_type,
-            "contract_type": row.contract_type,
-            "delivery_condition": row.delivery_condition,
-            "first_raw_object_key": row.raw_object_key,
+            "conflict_count": int(row["identity_conflict_count"] or 0),
+            "detail_code": row["detail_code"],
+            "product_id": row["product_id"],
+            "product_title": row["product_title"],
+            "unit_price": _text(row["unit_price"]),
+            "quantity": _text(row["quantity"]),
+            "unit": row["unit"],
+            "total_amount": _text(row["total_amount"]),
+            "supplier": row["supplier"],
+            "demand_institution": row["demand_institution"],
+            "transaction_date": _text(row["transaction_date"]),
+            "contract_delivery_type": row["contract_delivery_type"],
+            "contract_type": row["contract_type"],
+            "delivery_condition": row["delivery_condition"],
+            "first_raw_object_key": row["raw_object_key"],
         }
         for row in rows[:sample_limit]
     ]
@@ -83,7 +124,7 @@ def audit_conflict_rows(session: Session, *, sample_limit: int = 30) -> dict[str
         "conflict_row_count": len(rows),
         "conflict_event_count": event_count,
         "max_conflicts_for_one_identity": max(
-            (int(row.identity_conflict_count or 0) for row in rows),
+            (int(row["identity_conflict_count"] or 0) for row in rows),
             default=0,
         ),
         "priced_conflict_row_count": len(priced_rows),
@@ -114,12 +155,11 @@ def build_live_report(*, sample_limit: int = 30) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="track-b-conflict-audit-") as temp_dir:
         db_path = Path(temp_dir) / "track-b-serving.sqlite"
         R2ServingIndexStore.from_settings(settings).download_sqlite(ref, db_path)
-        engine = create_engine(f"sqlite+pysqlite:///{db_path}")
+        connection = sqlite3.connect(db_path)
         try:
-            with Session(engine) as session:
-                report = audit_conflict_rows(session, sample_limit=sample_limit)
+            report = audit_conflict_rows(connection, sample_limit=sample_limit)
         finally:
-            engine.dispose()
+            connection.close()
 
     report.update(
         {
