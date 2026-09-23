@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import gzip
+import hashlib
 import io
 from pathlib import Path
 
 from botocore.exceptions import ClientError
 
-from purchase_price.storage.r2_serving_index import R2ServingIndexStore
+from purchase_price.storage.r2_serving_index import R2ServingIndexRef, R2ServingIndexStore
 
 
 class FakeClient:
@@ -60,3 +62,29 @@ def test_serving_index_round_trip_and_prune(tmp_path: Path) -> None:
 
     store.delete(ref.key)
     assert ref.key not in client.objects
+
+
+def test_serving_index_download_accepts_legacy_v1_for_zero_downtime_rebuild(
+    tmp_path: Path,
+) -> None:
+    client = FakeClient()
+    store = R2ServingIndexStore(client=client, bucket="bucket")
+    raw = b"legacy-sqlite-public-index"
+    digest = hashlib.sha256(raw).hexdigest()
+    key = f"derived/v1/track-b-serving/{digest[:2]}/{digest}.sqlite.gz"
+    client.objects[key] = (
+        gzip.compress(raw, mtime=0),
+        {"sha256": digest, "schema": "track-b-serving-sqlite-v1"},
+        "application/x-sqlite3",
+    )
+    ref = R2ServingIndexRef(
+        key=key,
+        sha256=digest,
+        stored_bytes=len(client.objects[key][0]),
+        uncompressed_bytes=len(raw),
+    )
+    destination = tmp_path / "legacy-restored.sqlite"
+
+    store.download_sqlite(ref, destination)
+
+    assert destination.read_bytes() == raw

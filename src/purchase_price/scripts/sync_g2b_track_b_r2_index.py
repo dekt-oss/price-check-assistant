@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, inspect, select
 from sqlalchemy.orm import sessionmaker
 
 from purchase_price.config import Settings
@@ -30,11 +30,33 @@ from purchase_price.services.track_b_supplemental_state import (
     SupplementalTrackBState,
 )
 from purchase_price.storage.r2_reader import R2RawEvidenceReader, R2RawObject
-from purchase_price.storage.r2_serving_index import R2ServingIndexRef, R2ServingIndexStore
+from purchase_price.storage.r2_serving_index import (
+    SERVING_INDEX_SCHEMA,
+    R2ServingIndexRef,
+    R2ServingIndexStore,
+)
 from purchase_price.storage.r2_state import R2OperationalStateStore
 
 POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
 
+
+
+_REQUIRED_SERVING_V2_COLUMNS = {
+    "contract_delivery_type",
+    "contract_type",
+    "delivery_condition",
+}
+
+
+def _serving_schema_is_current(engine) -> bool:
+    try:
+        columns = {
+            str(column["name"])
+            for column in inspect(engine).get_columns("track_b_delivery_lines")
+        }
+    except Exception:
+        return False
+    return _REQUIRED_SERVING_V2_COLUMNS.issubset(columns)
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -196,10 +218,16 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             mode = "incremental"
 
         engine = create_engine(f"sqlite+pysqlite:///{db_path}")
+        if mode == "incremental" and not _serving_schema_is_current(engine):
+            engine.dispose()
+            db_path.unlink(missing_ok=True)
+            engine = create_engine(f"sqlite+pysqlite:///{db_path}")
+            mode = "schema-rebuild"
+
         Base.metadata.create_all(engine, tables=[TrackBDeliveryLine.__table__])
         session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
         try:
-            if mode == "full-bootstrap":
+            if mode in {"full-bootstrap", "schema-rebuild"}:
                 report = _full_bootstrap(
                     reader=reader,
                     session_factory=session_factory,
@@ -233,6 +261,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             final = {
                 "status": "NO_CHANGE",
                 "mode": mode,
+                "serving_schema": SERVING_INDEX_SCHEMA,
                 "state_recovered": state_recovered,
                 "row_count": row_count,
                 **report,
@@ -261,6 +290,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             "row_count": row_count,
             "updated_at": _now(),
             "mode": mode,
+            "serving_schema": SERVING_INDEX_SCHEMA,
             "state_recovered": state_recovered,
             "collection_cursor": {
                 "code_index": pipeline.collection_cursor.code_index,
@@ -294,6 +324,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
         final = {
             "status": "PARTIAL" if report["invalid_rows"] or report["conflicts"] else "SUCCESS",
             "mode": mode,
+            "serving_schema": SERVING_INDEX_SCHEMA,
             "state_recovered": state_recovered,
             "row_count": row_count,
             "index_key": ref.key,

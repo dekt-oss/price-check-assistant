@@ -20,7 +20,9 @@ from purchase_price.storage.r2 import (
 )
 
 _NOT_FOUND_CODES = {"404", "NoSuchKey", "NotFound"}
-SERVING_INDEX_SCHEMA = "track-b-serving-sqlite-v1"
+SERVING_INDEX_SCHEMA = "track-b-serving-sqlite-v2"
+LEGACY_SERVING_INDEX_SCHEMAS = {"track-b-serving-sqlite-v1"}
+SUPPORTED_SERVING_INDEX_SCHEMAS = {SERVING_INDEX_SCHEMA, *LEGACY_SERVING_INDEX_SCHEMAS}
 
 
 @dataclass(frozen=True)
@@ -123,7 +125,8 @@ class R2ServingIndexStore:
     def download_sqlite(self, ref: R2ServingIndexRef, destination: Path) -> Path:
         response = self._client.get_object(Bucket=self.bucket, Key=ref.key)
         metadata = response.get("Metadata") or {}
-        if metadata.get("schema") != SERVING_INDEX_SCHEMA or metadata.get("sha256") != ref.sha256:
+        schema = metadata.get("schema")
+        if schema not in SUPPORTED_SERVING_INDEX_SCHEMAS or metadata.get("sha256") != ref.sha256:
             raise R2IntegrityError(f"R2 serving index metadata mismatch for {ref.key}")
         compressed = response["Body"].read()
         try:

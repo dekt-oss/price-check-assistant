@@ -34,6 +34,9 @@ def _item(*, change: str = "00", price: str | None = "90", title: str | None = N
         "corpNm": "공급사A",
         "dminsttNm": "구매기관B",
         "prdctUnit": "대",
+        "cntrctDlvrDivNm": "일반납품",
+        "cntrctDivNm": "단가계약",
+        "dlvryCndtnNm": "현장설치도",
     }
     if price is not None:
         item["prdctUprc"] = price
@@ -94,6 +97,9 @@ def test_upload_comparison_uses_only_latest_explicit_unit_price(session: Session
     assert result.candidates[0].supplier == "공급사A"
     assert result.candidates[0].demand_institution == "구매기관B"
     assert result.candidates[0].unit == "대"
+    assert result.candidates[0].contract_delivery_type == "일반납품"
+    assert result.candidates[0].contract_type == "단가계약"
+    assert result.candidates[0].delivery_condition == "현장설치도"
     assert len(session.scalars(select(TrackBDeliveryLine)).all()) == 2
 
 
