@@ -22,6 +22,10 @@ from purchase_price.ui.market_research import (
     render_procurement_research,
     run_market_research,
 )
+from purchase_price.ui.purchase_workspace import (
+    build_purchase_workspace_stats,
+    supplier_rows,
+)
 from purchase_price.ui.quote_review_state import (
     QUOTE_REVIEW_STATE_SESSION_KEY,
     QuoteReviewState,
@@ -175,6 +179,10 @@ def _render_search_interpretation(
             )
 
 
+def _money_text(value: Decimal | None) -> str:
+    return f"{value:,.0f}원" if value is not None else "근거 없음"
+
+
 def _render_search_result(state: dict[str, Any]) -> None:
     heading = state["heading"]
     review_input = state["review_input"]
@@ -187,34 +195,84 @@ def _render_search_result(state: dict[str, Any]) -> None:
     discovery = state["discovery"]
     market_bundle = state["market_bundle"]
     interpretation = state.get("interpretation")
-    research_count = len(getattr(market_bundle, "records", ()) or ())
+    stats = build_purchase_workspace_stats(
+        track_b=track_b,
+        market_bundle=market_bundle,
+        quote_unit_price=review_input.quote_unit_price,
+    )
 
     st.divider()
+    st.caption("구매조사 워크스페이스")
+    st.subheader(heading)
+
+    st.info(
+        "Safety 자동조회는 아직 공식 회수·판매중지 API 연결 전입니다. "
+        "현재 화면에 경고가 없다는 사실을 '안전함'으로 해석하지 않습니다."
+    )
+
     if isinstance(interpretation, UnifiedSearchInterpretation):
         _render_search_interpretation(interpretation)
 
-    st.subheader(f"{heading} 거래가격")
-    s1, s2, s3 = st.columns(3)
-    s1.metric("동일성 확인 A/B", f"{strict_count}건")
-    s2.metric("검색 참고", f"{reference_count}건")
-    s3.metric("공개조달 Research", f"{research_count}건")
-    if strict_count:
-        st.success(
-            f"동일성 확인 근거 {strict_count}건을 우선 표시합니다. "
-            "규격·VAT·설치·옵션·보증 조건은 개별 원자료를 확인하세요."
-        )
-    elif reference_count:
-        st.warning(
-            f"직접 비교 가능한 A/B 근거는 0건이고 검색 참고가 {reference_count}건입니다. "
-            "참고가격을 적정가격으로 자동 해석하지 않습니다."
-        )
-    elif research_count:
-        st.info(
-            "납품요구 직접가격은 없지만 공개조달 Research 근거가 있습니다. "
-            "입찰예산·계약총액은 동일제품 단가로 사용하지 않습니다."
-        )
-    with st.container(border=True):
-        st.markdown("**나라장터 거래가격**")
+    summary_tab, price_tab, mfds_tab, supplier_tab, competitor_tab, research_tab = st.tabs(
+        [
+            "요약",
+            "거래가격",
+            "식약처·업체",
+            "공급사",
+            "경쟁장비",
+            "Research·근거",
+        ]
+    )
+
+    with summary_tab:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("동일제품 거래", f"{stats.direct_count}건")
+        if stats.min_price is not None and stats.max_price is not None:
+            c2.metric(
+                "직접가격 범위",
+                f"{stats.min_price:,.0f} ~ {stats.max_price:,.0f}원",
+            )
+        else:
+            c2.metric("직접가격 범위", "근거 없음")
+        c3.metric("실제 조달 공급업체", f"{stats.supplier_count}개")
+        c4.metric("공개조달 Research", f"{stats.research_count}건")
+
+        if stats.median_price is not None:
+            q1, q2, q3 = st.columns(3)
+            q1.metric("직접가격 중앙값", _money_text(stats.median_price))
+            q2.metric("최근 직접거래", stats.latest_transaction_date or "미확인")
+            if review_input.quote_unit_price is not None:
+                delta = stats.quote_vs_median_percent
+                q3.metric(
+                    "현재 견적",
+                    _money_text(review_input.quote_unit_price),
+                    None if delta is None else f"{delta:+.1f}% vs 중앙값",
+                )
+            else:
+                q3.metric("현재 견적", "미입력")
+
+        if stats.direct_count:
+            st.success(
+                "A/B 동일성 확인 거래만 직접가격 범위에 포함했습니다. "
+                "수량·총액·규격·납품조건은 거래가격 탭에서 확인하세요."
+            )
+        elif stats.reference_count:
+            st.warning(
+                f"직접 비교 가능한 A/B 거래는 없고 참고거래가 {stats.reference_count}건 있습니다. "
+                "참고가격은 적정가격 범위에 합산하지 않습니다."
+            )
+        elif stats.research_count:
+            st.info(
+                "납품요구 직접가격은 없지만 입찰·사전규격 등 Research 근거가 있습니다."
+            )
+        else:
+            st.info("현재 연결된 공개 근거에서 가격·조달자료를 확인하지 못했습니다.")
+
+        if stats.demand_institution_count:
+            st.caption(f"A/B 직접거래 수요기관 {stats.demand_institution_count}개 확인")
+
+    with price_tab:
+        st.markdown("#### 나라장터 실제 거래")
         if state["model_probe_used"]:
             st.caption("입력어가 모델명과 일치해 모델 기준 결과를 우선 표시합니다.")
         if rows:
@@ -231,46 +289,82 @@ def _render_search_result(state: dict[str, Any]) -> None:
             st.caption(f"동일성 확인 {strict_count}건 · 검색 참고 {reference_count}건")
             grouped_rows = model_price_group_rows(track_b)
             if grouped_rows:
-                with st.expander("모델·규격별 직접가격 요약", expanded=True):
-                    st.dataframe(
-                        grouped_rows,
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                    st.caption(
-                        "A/B 직접근거만 집계합니다. 검색 참고·Research 가격은 이 범위에 합산하지 않습니다."
-                    )
+                st.markdown("#### 모델·규격·조건별 직접가격")
+                st.dataframe(grouped_rows, use_container_width=True, hide_index=True)
+                st.caption(
+                    "A/B 직접근거만 집계합니다. C/Research 참고가격은 가격범위에 합산하지 않습니다."
+                )
         elif track_b.status == "unavailable":
-            st.info("가격 검색 인덱스에 연결하지 못했습니다. 공개 시장자료도 함께 조사합니다.")
+            st.warning("가격 검색 인덱스에 연결하지 못했습니다.")
         elif track_b.status == "not_ingested":
             st.info("수집 자료의 빠른 가격 인덱스를 만드는 중입니다.")
-        elif track_b.status == "insufficient_identity":
-            st.info("품목 또는 모델명을 입력하세요.")
         else:
-            st.info("현재 수집 범위에서 거래가격을 찾지 못했습니다. 공개 시장자료를 추가 조사합니다.")
+            st.info("현재 수집 범위에서 나라장터 납품요구 거래가격을 찾지 못했습니다.")
 
-    if not rows and run.results:
-        public_rows = evidence_rows(run.results)
-        st.markdown("**공개 시장가격**")
-        st.dataframe(
-            [
-                {
-                    "가격": row["단가"],
-                    "출처": row["출처"],
-                    "거래일": row["거래일"] or "미확인",
-                    "자료성격": row["자료성격"],
-                    "URL": row["URL"],
-                }
-                for row in public_rows
-            ],
-            use_container_width=True,
-            hide_index=True,
-            column_config={"가격": st.column_config.NumberColumn("가격", format="%d원")},
+        if not rows and run.results:
+            public_rows = evidence_rows(run.results)
+            st.markdown("#### 기타 공개 시장가격")
+            st.dataframe(
+                [
+                    {
+                        "가격": row["단가"],
+                        "출처": row["출처"],
+                        "거래일": row["거래일"] or "미확인",
+                        "자료성격": row["자료성격"],
+                        "URL": row["URL"],
+                    }
+                    for row in public_rows
+                ],
+                use_container_width=True,
+                hide_index=True,
+                column_config={"가격": st.column_config.NumberColumn("가격", format="%d원")},
+            )
+
+    with mfds_tab:
+        st.markdown("#### 식약처 등록정보")
+        st.info(
+            "현재 홈 통합검색에는 식약처 live 결과를 아직 합치지 않았습니다. "
+            "다음 연결 단계에서 품목·모델·허가번호·제조/수입업체를 이 탭에 직접 표시합니다."
+        )
+        st.caption(
+            "주의: 기존 형명정보 API의 INDT_NM은 공식 명세상 '업종'입니다. "
+            "이를 업체명으로 표시하지 않습니다."
+        )
+        st.page_link("pages/4_의료기기_조회.py", label="현재 의료기기 조회 화면 열기", icon="🏥")
+
+    with supplier_tab:
+        st.markdown("#### 실제 조달 공급업체")
+        procurement_suppliers = supplier_rows(track_b)
+        if procurement_suppliers:
+            st.dataframe(
+                procurement_suppliers,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "최저단가": st.column_config.NumberColumn("최저단가", format="%d원"),
+                    "최고단가": st.column_config.NumberColumn("최고단가", format="%d원"),
+                },
+            )
+            st.caption(
+                "A/B 동일제품으로 확인된 나라장터 납품요구의 공급업체만 집계합니다. "
+                "한 번의 납품실적이 공식 총판관계를 의미하지는 않습니다."
+            )
+        else:
+            st.info("A/B 동일제품 기준으로 확인된 조달 공급업체가 없습니다.")
+        st.caption(
+            "식약처 제조·수입업체와 업허가 업체는 다음 통합 단계에서 별도 근거등급으로 추가합니다."
         )
 
-    show_details = st.toggle("상세 조사·근거 보기", value=False, key=HOME_SEARCH_DETAILS_KEY)
-    if show_details:
-        st.markdown("#### 상세 조사·근거")
+    with competitor_tab:
+        st.markdown("#### 동일 품목 등록장비")
+        st.info(
+            "경쟁장비는 식약처 동일 품목의 국내 정상 등록모델만 후보로 표시할 예정입니다. "
+            "같은 품목이라는 이유만으로 임상적 대체 가능성을 자동 판정하지 않습니다."
+        )
+        st.page_link("pages/4_의료기기_조회.py", label="현재 등록모델 조회 화면 열기", icon="🏥")
+
+    with research_tab:
+        st.markdown("#### 공개조달 Research·근거")
         render_market_reference_summary(
             discovery,
             query=query,
