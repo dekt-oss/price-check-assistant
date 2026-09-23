@@ -98,7 +98,7 @@ with market_tab:
                                     "품목명": item.product_name or "",
                                     "모델명": item.model_name or "",
                                     "허가번호": item.permit_number or "",
-                                    "업체": item.industry_name or "",
+                                    "업종": item.industry_type or "",
                                     "허가일": item.permit_date.isoformat() if item.permit_date else "",
                                     "수출전용": item.export_only,
                                     "취소상태": item.cancellation_status or "",
