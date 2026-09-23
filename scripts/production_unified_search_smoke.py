@@ -122,6 +122,16 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
     raise RuntimeError("DFM100 Production unified search did not render a non-zero result summary")
 
 
+def _price_tab_direct_count(body: str) -> int | None:
+    if "나라장터 실제 거래" not in body:
+        return None
+    match = RESULT_PATTERN.search(body)
+    if match is None:
+        return None
+    direct_count = int(match.group(1))
+    return direct_count if direct_count >= 1 else None
+
+
 def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) -> None:
     app = _app(page)
 
@@ -162,8 +172,10 @@ def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) 
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
-        if "나라장터 실제 거래" in body and WORKSPACE_DIRECT_PATTERN.search(body) is not None:
+        direct_count = _price_tab_direct_count(body)
+        if direct_count is not None:
             report["workspace_tabs_persisted"] = True
+            report["price_tab_direct_count"] = direct_count
             _save_snapshot(page, report, "unified-search-dfm100-workspace")
             return
         page.wait_for_timeout(1_000)
