@@ -30,8 +30,10 @@ def test_auto_quote_flow_loads_db_comparison_and_invalidates_it(monkeypatch) -> 
     assert calls == [("MA-045DT", Decimal("100"))]
     assert state.track_b_db[0] is expected
 
+    state.mfds_workspace[0] = object()
     quote_market_research._clear_research(state)
     assert state.track_b_db == {}
+    assert state.mfds_workspace == {}
 
 
 def test_track_b_table_exposes_purchase_transaction_context() -> None:
@@ -105,3 +107,32 @@ def test_similar_identity_rows_never_expose_price() -> None:
 def test_money_input_uses_comma_separators() -> None:
     assert quote_market_research._money_input(Decimal("66000000")) == "66,000,000"
     assert quote_market_research._money_input(None) == ""
+
+
+
+def test_quote_flow_auto_checks_mfds_after_track_b(monkeypatch) -> None:
+    state = QuoteReviewState(items=[QuoteItem(
+        source_sheet="sheet",
+        source_row=1,
+        product_name="심장충격기",
+        model_name="Efficia DFM100",
+        unit_price=Decimal("12500000"),
+    )])
+    track_b = TrackBQuoteComparison("success_0", (), 0)
+    state.track_b_db[0] = track_b
+    expected = object()
+    calls = []
+
+    def research(query, comparison):
+        calls.append((query.product_name, query.model_name, comparison))
+        return expected
+
+    monkeypatch.setattr(quote_market_research, "research_mfds_for_workspace", research)
+
+    quote_market_research._ensure_mfds_workspace(state)
+
+    assert calls == [("심장충격기", "Efficia DFM100", track_b)]
+    assert state.mfds_workspace[0] is expected
+
+    quote_market_research._ensure_mfds_workspace(state)
+    assert len(calls) == 1
