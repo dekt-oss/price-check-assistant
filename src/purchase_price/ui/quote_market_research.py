@@ -10,6 +10,7 @@ from purchase_price.services.g2b_search_policy import (
     G2B_LOOKBACK_OPTIONS,
     g2b_lookback_label,
 )
+from purchase_price.services.mfds_workspace import research_mfds_for_workspace
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
@@ -132,6 +133,7 @@ def _clear_research(state: QuoteReviewState) -> None:
     state.discoveries.clear()
     state.market_bundles.clear()
     state.track_b_db.clear()
+    state.mfds_workspace.clear()
     state.comparability_context.clear()
     state.approvals.clear()
 
@@ -282,6 +284,21 @@ def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
             )
 
 
+def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
+    if not state.items:
+        return
+    for index, item in enumerate(state.items):
+        if index in state.mfds_workspace:
+            continue
+        track_b = state.track_b_db.get(index)
+        if track_b is None:
+            continue
+        state.mfds_workspace[index] = research_mfds_for_workspace(
+            quote_item_query(item),
+            track_b,
+        )
+
+
 def _ensure_market_research(state: QuoteReviewState) -> bool:
     if not state.items:
         return False
@@ -330,6 +347,7 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
     discovery = state.discoveries.get(index)
     market_bundle = state.market_bundles.get(index)
     track_b = state.track_b_db.get(index)
+    mfds = state.mfds_workspace.get(index)
 
     with st.container(border=True):
         title = item.product_name or item.model_name or f"품목 {index + 1}"
@@ -345,6 +363,23 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             "아래 표는 실제 수집된 거래가격을 우선 보여줍니다. 동일성이 충분하지 않은 행은 "
             "'검색 참고'로 표시하며 견적 적정성 판정에는 자동 사용하지 않습니다."
         )
+
+        if mfds is not None and mfds.status in {"success", "success_0"}:
+            if mfds.exact_ambiguous:
+                st.warning("식약처 exact 모델이 복수 허가번호에 연결되어 확인이 필요합니다.")
+            elif mfds.exact_confirmed:
+                permits = " / ".join(mfds.permit_numbers) or "허가번호 미표기"
+                st.success(
+                    f"식약처 exact 모델 확인 · {permits} · "
+                    f"동일품목 국내 정상 등록모델 {len(mfds.active_records)}건"
+                )
+            elif mfds.records:
+                st.info(
+                    f"식약처 품목 등록모델 {len(mfds.records)}건을 조회했지만 "
+                    "입력 모델 exact 일치는 확인하지 못했습니다."
+                )
+        elif mfds is not None and mfds.status == "failure":
+            st.warning("식약처 조회 실패 · 가격검색 결과와 분리해 유지합니다.")
 
         handoff = build_purchase_workspace_handoff(
             product_name=item.product_name,
@@ -497,6 +532,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
 
     _render_compact_item_editor(state)
     _ensure_track_b_comparison(state)
+    _ensure_mfds_workspace(state)
     render_purchase_review_summary(state)
 
     st.subheader("가격 · 거래 이력")
