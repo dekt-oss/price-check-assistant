@@ -4,7 +4,7 @@ from pathlib import Path
 def test_production_unified_search_smoke_uses_user_visible_result_contract() -> None:
     script = Path("scripts/production_unified_search_smoke.py").read_text(encoding="utf-8")
 
-    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-mfds-v1"' in script
+    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-quote-v1"' in script
     assert 'fill("DFM100")' in script
     assert "동일성 확인 (\\d+)건 · 검색 참고 (\\d+)건" in script
     assert "strict_count < 1" in script
