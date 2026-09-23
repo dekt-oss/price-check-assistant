@@ -1,6 +1,18 @@
+import importlib.util
 from pathlib import Path
 
-from scripts.production_unified_search_smoke import _price_tab_direct_count
+
+def _load_price_tab_direct_count():
+    root = Path(__file__).resolve().parents[1]
+    script_path = root / "scripts" / "production_unified_search_smoke.py"
+    spec = importlib.util.spec_from_file_location("production_unified_search_smoke", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._price_tab_direct_count
+
+
+_price_tab_direct_count = _load_price_tab_direct_count()
 
 
 def test_production_unified_search_smoke_uses_user_visible_result_contract() -> None:
