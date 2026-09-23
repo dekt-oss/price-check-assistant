@@ -10,7 +10,7 @@ from typing import Any
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v1"
+DEPLOYMENT_MARKER = "#purchase-workspace-mfds-v1"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
 ERROR_TEXTS = (
     "AttributeError",
@@ -90,7 +90,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-runtime-v1 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-mfds-v1 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -140,6 +140,19 @@ def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) 
         page.wait_for_timeout(1_000)
     else:
         raise RuntimeError("Research workspace tab did not preserve DFM100 search result")
+
+    mfds_tab = app.get_by_role("tab", name="식약처·업체")
+    mfds_tab.click()
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        body = _body_text(page)
+        _assert_no_error_text(body)
+        if "식약처 등록정보" in body:
+            report["mfds_tab_rendered"] = True
+            break
+        page.wait_for_timeout(1_000)
+    else:
+        raise RuntimeError("MFDS workspace tab did not render after DFM100 search")
 
     price_tab = app.get_by_role("tab", name="거래가격")
     price_tab.click()
