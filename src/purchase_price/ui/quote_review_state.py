@@ -9,8 +9,8 @@ from purchase_price.services.quote_comparability import evaluate_quote_comparabi
 
 if TYPE_CHECKING:
     from purchase_price.services.g2b_market_models import MarketResearchBundle
-    from purchase_price.services.mfds_workspace import MfdsWorkspaceResult
     from purchase_price.services.g2b_unmapped_discovery import G2BUnmappedDiscoveryResult
+    from purchase_price.services.mfds_workspace import MfdsWorkspaceResult
     from purchase_price.services.quote_comparability import QuoteComparabilityContext
     from purchase_price.services.quote_comparable_approval import QuoteComparableApproval
     from purchase_price.services.quote_extraction import QuoteExtractionResult, QuoteItem
