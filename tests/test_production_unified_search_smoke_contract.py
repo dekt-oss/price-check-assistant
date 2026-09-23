@@ -15,6 +15,9 @@ def test_production_unified_search_smoke_uses_user_visible_result_contract() -> 
     assert 'get_by_role("tab", name="식약처·업체")' in script
     assert 'report["mfds_tab_rendered"] = True' in script
     assert 'get_by_role("tab", name="거래가격")' in script
+    assert "price_match = RESULT_PATTERN.search(body)" in script
+    assert "int(price_match.group(1)) >= 1" in script
+    assert 'report["price_tab_direct_count"] = int(price_match.group(1))' in script
     assert 'report["workspace_tabs_persisted"] = True' in script
     assert "AttributeError" in script
     assert "This app has encountered an error" in script
