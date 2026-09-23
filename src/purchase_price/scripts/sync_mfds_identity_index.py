@@ -161,7 +161,7 @@ def sync(
                 for _ in range(max_pages):
                     try:
                         payload = client.get_json(
-                            MFDS_PRODUCT_INFO_BASE_URL,
+                            settings.mfds_product_info_base_url or MFDS_PRODUCT_INFO_BASE_URL,
                             MFDS_PRODUCT_INFO_OPERATION,
                             pageNo=page_no,
                             numOfRows=rows_per_page,
