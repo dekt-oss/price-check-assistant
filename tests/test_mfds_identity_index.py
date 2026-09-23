@@ -4,6 +4,7 @@ from purchase_price.services.mfds_identity_index import (
     lookup_identity,
     lookup_same_product,
     parse_mfds_product_info_record,
+    purge_identity_records_not_seen_in_cycle,
     upsert_identity_records,
 )
 
@@ -76,3 +77,28 @@ def test_identity_upsert_refreshes_same_identity_without_duplicate() -> None:
     rows = lookup_identity(connection, "CN-6000").records
     assert len(rows) == 1
     assert rows[0].trade_name == "new"
+
+
+def test_completed_cycle_can_purge_rows_not_seen_again() -> None:
+    connection = sqlite3.connect(":memory:")
+    upsert_identity_records(
+        connection,
+        [
+            _record(FOML_INFO="OLD", UDIDI_CD="old"),
+            _record(FOML_INFO="KEEP", UDIDI_CD="keep"),
+        ],
+        cycle=1,
+    )
+    connection.commit()
+
+    upsert_identity_records(
+        connection,
+        [_record(FOML_INFO="KEEP", UDIDI_CD="keep")],
+        cycle=2,
+    )
+    purged = purge_identity_records_not_seen_in_cycle(connection, 2)
+    connection.commit()
+
+    assert purged == 1
+    assert lookup_identity(connection, "OLD").status == "success_0"
+    assert lookup_identity(connection, "KEEP").status == "success"
