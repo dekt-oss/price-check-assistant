@@ -1,0 +1,116 @@
+name: MFDS Identity Index
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/mfds-identity-index.yml"
+      - "src/purchase_price/config.py"
+      - "src/purchase_price/services/mfds_identity_index.py"
+      - "src/purchase_price/services/mfds_identity_r2.py"
+      - "src/purchase_price/storage/r2_mfds_identity_index.py"
+      - "src/purchase_price/scripts/sync_mfds_identity_index.py"
+      - "pages/1_대시보드.py"
+      - "tests/test_mfds_identity_index.py"
+      - "tests/test_unified_search_state_contract.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/mfds-identity-index.yml"
+      - "src/purchase_price/services/mfds_identity_index.py"
+      - "src/purchase_price/services/mfds_identity_r2.py"
+      - "src/purchase_price/storage/r2_mfds_identity_index.py"
+      - "src/purchase_price/scripts/sync_mfds_identity_index.py"
+  schedule:
+    - cron: "10 19 * * *"
+  workflow_dispatch:
+    inputs:
+      max_pages:
+        description: Maximum MFDS pages to collect in this run
+        required: true
+        default: "200"
+      rows_per_page:
+        description: Rows requested per MFDS page
+        required: true
+        default: "100"
+
+concurrency:
+  group: mfds-identity-index
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Verify identity index contracts
+        run: |
+          pytest -q tests/test_mfds_identity_index.py
+          ruff check src/purchase_price/services/mfds_identity_index.py src/purchase_price/services/mfds_identity_r2.py src/purchase_price/storage/r2_mfds_identity_index.py src/purchase_price/scripts/sync_mfds_identity_index.py
+
+  collect-and-publish:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONPATH: src
+      MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Collect official MFDS identity pages and publish serving index
+        run: >-
+          python -m purchase_price.scripts.sync_mfds_identity_index
+          --max-pages "${{ inputs.max_pages || '200' }}"
+          --rows-per-page "${{ inputs.rows_per_page || '100' }}"
+          --output artifacts/mfds-identity/sync.json
+      - name: Print collection status
+        if: always()
+        run: |
+          if [ -f artifacts/mfds-identity/sync.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("artifacts/mfds-identity/sync.json").read_text())
+          print("status=", report.get("status"))
+          print("pages_collected=", report.get("pages_collected"))
+          print("rows_seen=", report.get("rows_seen"))
+          print("row_count=", report.get("row_count"))
+          print("next_page=", report.get("next_page"))
+          print("complete_cycles=", report.get("complete_cycles"))
+          if report.get("status") == "SOURCE_NOT_AUTHORIZED":
+              print("::warning::MFDS product-info API utilization approval is still required for this service key.")
+          PY
+          fi
+      - name: Upload collection evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfds-identity-sync
+          path: artifacts/mfds-identity/
+          retention-days: 14
+          if-no-files-found: warn

@@ -60,18 +60,19 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     assert "home_quote_upload" in page_text
     assert 'st.switch_page("pages/2_견적_검토.py")' in page_text
     assert "lookup_track_b_quote_from_r2" in page_text
-    assert "나라장터 실제 거래" in page_text
+    assert "나라장터 동일제품 직접거래" in page_text
+    assert "검색 참고거래" in page_text
     assert "transaction_rows(track_b)" in page_text
     assert "candidate_counts(track_b)" in page_text
     assert '"판매처"' in transaction_text
     assert '"구매처"' in transaction_text
     assert '"거래기록"' in transaction_text
-    assert '"요약"' in page_text
-    assert '"거래가격"' in page_text
-    assert '"식약처·업체"' in page_text
-    assert '"공급사"' in page_text
-    assert '"경쟁장비"' in page_text
-    assert '"Research·근거"' in page_text
+    assert '"📌 요약"' in page_text
+    assert '"💰 거래가격"' in page_text
+    assert '"🏥 식약처·허가"' in page_text
+    assert '"🏢 공급사"' in page_text
+    assert '"🔁 경쟁장비"' in page_text
+    assert '"📚 Research·근거"' in page_text
     assert "model_probe_query = model_probe_input.to_product_query()" in page_text
     assert "query = model_probe_query" in page_text
 
