@@ -233,7 +233,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     )
 
     with summary_tab:
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("동일제품 거래", f"{stats.direct_count}건")
         if stats.min_price is not None and stats.max_price is not None:
             c2.metric(
@@ -243,7 +243,22 @@ def _render_search_result(state: dict[str, Any]) -> None:
         else:
             c2.metric("직접가격 범위", "근거 없음")
         c3.metric("실제 조달 공급업체", f"{stats.supplier_count}개")
-        c4.metric("공개조달 Research", f"{stats.research_count}건")
+
+        if isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
+            if mfds.exact_ambiguous:
+                mfds_metric = "복수 허가"
+            elif mfds.exact_confirmed:
+                mfds_metric = "exact 확인"
+            elif mfds.records:
+                mfds_metric = "품목 확인"
+            else:
+                mfds_metric = "0건"
+        elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "failure":
+            mfds_metric = "조회 실패"
+        else:
+            mfds_metric = "대상 아님"
+        c4.metric("식약처 등록", mfds_metric)
+        c5.metric("공개조달 Research", f"{stats.research_count}건")
 
         if stats.median_price is not None:
             q1, q2, q3 = st.columns(3)
@@ -330,15 +345,79 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
     with mfds_tab:
         st.markdown("#### 식약처 등록정보")
-        st.info(
-            "현재 홈 통합검색에는 식약처 live 결과를 아직 합치지 않았습니다. "
-            "다음 연결 단계에서 품목·모델·허가번호·제조/수입업체를 이 탭에 직접 표시합니다."
-        )
-        st.caption(
-            "주의: 기존 형명정보 API의 INDT_NM은 공식 명세상 '업종'입니다. "
-            "이를 업체명으로 표시하지 않습니다."
-        )
-        st.page_link("pages/4_의료기기_조회.py", label="현재 의료기기 조회 화면 열기", icon="🏥")
+        if not isinstance(mfds, MfdsWorkspaceResult):
+            st.info("식약처 조회 상태를 확인할 수 없습니다.")
+        elif mfds.status == "not_applicable":
+            st.info("현재 조달분류 기준으로 의료기기 자동조회 대상이 아닙니다.")
+        elif mfds.status == "not_configured":
+            st.warning("식약처 API 서비스키가 연결되지 않아 자동조회를 실행하지 못했습니다.")
+        elif mfds.status == "failure":
+            st.warning(
+                f"식약처 조회 실패 · {mfds.error_type or '오류'} · "
+                f"{mfds.error_message or '상세 미확인'}"
+            )
+            st.caption("API 실패를 등록 0건으로 해석하지 않습니다.")
+        else:
+            m1c, m2c, m3c = st.columns(3)
+            m1c.metric("조회된 등록모델", f"{len(mfds.records)}건")
+            m2c.metric("국내 정상 후보", f"{len(mfds.active_records)}건")
+            if mfds.exact_ambiguous:
+                m3c.metric("exact 모델", "복수 허가 · 확인 필요")
+            elif mfds.exact_confirmed:
+                m3c.metric("exact 모델", "확인")
+            else:
+                m3c.metric("exact 모델", "미확인")
+
+            if mfds.exact_records:
+                st.markdown("##### 입력 모델과 exact 일치")
+                st.dataframe(
+                    [
+                        {
+                            "품목": item.product_name or "",
+                            "모델": item.model_name or "",
+                            "허가번호": item.permit_number or "",
+                            "허가일": item.permit_date.isoformat() if item.permit_date else "",
+                            "업종": item.industry_type or "",
+                            "수출전용": item.export_only,
+                            "취소상태": item.cancellation_status or "",
+                        }
+                        for item in mfds.exact_records
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                if mfds.permit_numbers:
+                    st.caption("Safety 공식 확인키 · " + " / ".join(mfds.permit_numbers))
+
+            st.info(
+                "형명정보 API의 INDT_NM은 '업종'이며 업체명이 아닙니다. "
+                "모델별 제조·수입 업체명은 업체명이 포함된 UDI/제품정보 공식 Source의 "
+                "역검색 계약을 확인한 뒤 연결합니다."
+            )
+
+            if mfds.business_records:
+                st.markdown("##### 업체명 힌트 업허가 교차확인")
+                st.dataframe(
+                    [
+                        {
+                            "업체": item.company_name or "",
+                            "업종": item.industry_type or "",
+                            "상태": item.business_status or "",
+                            "업허가번호": item.business_permit_number or "",
+                            "주소": item.address or "",
+                            "현재사용가능": item.is_active,
+                        }
+                        for item in mfds.business_records
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.caption(
+                    "사용자/견적의 제조사·업체명 힌트에 대한 업허가 확인입니다. "
+                    "해당 모델의 공식 제조·수입업체 관계를 자동 확정하지 않습니다."
+                )
+
+        st.page_link("pages/4_의료기기_조회.py", label="의료기기 상세 조회 화면 열기", icon="🏥")
 
     with supplier_tab:
         st.markdown("#### 실제 조달 공급업체")
@@ -359,17 +438,55 @@ def _render_search_result(state: dict[str, Any]) -> None:
             )
         else:
             st.info("A/B 동일제품 기준으로 확인된 조달 공급업체가 없습니다.")
-        st.caption(
-            "식약처 제조·수입업체와 업허가 업체는 다음 통합 단계에서 별도 근거등급으로 추가합니다."
-        )
+
+        if isinstance(mfds, MfdsWorkspaceResult) and mfds.business_records:
+            st.markdown("#### 식약처 업허가 교차확인")
+            st.dataframe(
+                [
+                    {
+                        "업체": item.company_name or "",
+                        "업종": item.industry_type or "",
+                        "상태": item.business_status or "",
+                        "업허가번호": item.business_permit_number or "",
+                        "근거": "식약처 업허가 · 모델 공급관계 미확정",
+                    }
+                    for item in mfds.business_records
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption(
+                "식약처 제조·수입 업체명 자동 연결은 company-bearing 제품 Source의 "
+                "공식 역검색 계약 확인 후 추가합니다."
+            )
 
     with competitor_tab:
-        st.markdown("#### 동일 품목 등록장비")
-        st.info(
-            "경쟁장비는 식약처 동일 품목의 국내 정상 등록모델만 후보로 표시할 예정입니다. "
-            "같은 품목이라는 이유만으로 임상적 대체 가능성을 자동 판정하지 않습니다."
-        )
-        st.page_link("pages/4_의료기기_조회.py", label="현재 등록모델 조회 화면 열기", icon="🏥")
+        st.markdown("#### 동일 식약처 품목 등록장비")
+        if isinstance(mfds, MfdsWorkspaceResult) and mfds.active_competitor_records:
+            st.dataframe(
+                [
+                    {
+                        "모델": item.model_name or "",
+                        "상품명": item.trade_name or "",
+                        "허가번호": item.permit_number or "",
+                        "허가일": item.permit_date.isoformat() if item.permit_date else "",
+                        "업종": item.industry_type or "",
+                    }
+                    for item in mfds.active_competitor_records
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "동일 식약처 품목의 국내 정상 등록모델입니다. "
+                "임상적 대체 가능성·성능동등성·수가조건을 자동 판정하지 않습니다."
+            )
+        elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
+            st.info("현재 조회 결과에서 다른 국내 정상 등록모델을 확인하지 못했습니다.")
+        else:
+            st.info("식약처 품목 조회가 완료되면 국내 정상 동일품목 후보를 표시합니다.")
+        st.page_link("pages/4_의료기기_조회.py", label="의료기기 상세 조회 화면 열기", icon="🏥")
 
     with research_tab:
         st.markdown("#### 공개조달 Research·근거")
