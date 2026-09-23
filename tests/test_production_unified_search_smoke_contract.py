@@ -4,9 +4,11 @@ from pathlib import Path
 def test_production_unified_search_smoke_uses_user_visible_result_contract() -> None:
     script = Path("scripts/production_unified_search_smoke.py").read_text(encoding="utf-8")
 
-    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-mfds-v1"' in script
+    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-quote-v1"' in script
     assert 'fill("DFM100")' in script
     assert "동일성 확인 (\\d+)건 · 검색 참고 (\\d+)건" in script
+    assert 'WORKSPACE_DIRECT_PATTERN = re.compile(r"동일제품 거래\\s*(\\d+)건")' in script
+    assert "workspace_match = WORKSPACE_DIRECT_PATTERN.search(body)" in script
     assert "strict_count < 1" in script
     assert "DFM100 one-line search did not recover direct A/B evidence" in script
     assert 'get_by_role("tab", name="Research·근거")' in script

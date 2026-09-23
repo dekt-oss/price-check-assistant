@@ -10,6 +10,7 @@ from purchase_price.services.quote_comparability import evaluate_quote_comparabi
 if TYPE_CHECKING:
     from purchase_price.services.g2b_market_models import MarketResearchBundle
     from purchase_price.services.g2b_unmapped_discovery import G2BUnmappedDiscoveryResult
+    from purchase_price.services.mfds_workspace import MfdsWorkspaceResult
     from purchase_price.services.quote_comparability import QuoteComparabilityContext
     from purchase_price.services.quote_comparable_approval import QuoteComparableApproval
     from purchase_price.services.quote_extraction import QuoteExtractionResult, QuoteItem
@@ -57,6 +58,7 @@ class QuoteReviewState:
     discoveries: dict[int, G2BUnmappedDiscoveryResult | None] = field(default_factory=dict)
     market_bundles: dict[int, MarketResearchBundle | None] = field(default_factory=dict)
     track_b_db: dict[int, TrackBQuoteComparison] = field(default_factory=dict)
+    mfds_workspace: dict[int, MfdsWorkspaceResult] = field(default_factory=dict)
     lookback_days: int = G2B_DEFAULT_LOOKBACK_DAYS
     comparability_context: dict[int, QuoteComparabilityContext] = field(default_factory=dict)
     approvals: dict[str, QuoteComparableApproval] = field(default_factory=dict)
@@ -73,6 +75,7 @@ class QuoteReviewState:
             self.discoveries.clear()
             self.market_bundles.clear()
             self.track_b_db.clear()
+            self.mfds_workspace.clear()
         if after_step < 5:
             self.comparability_context.clear()
         if after_step < 6:

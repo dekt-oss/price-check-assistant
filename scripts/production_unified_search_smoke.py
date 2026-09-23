@@ -10,8 +10,9 @@ from typing import Any
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-mfds-v1"
+DEPLOYMENT_MARKER = "#purchase-workspace-quote-v1"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
+WORKSPACE_DIRECT_PATTERN = re.compile(r"동일제품 거래\s*(\d+)건")
 ERROR_TEXTS = (
     "AttributeError",
     "This app has encountered an error",
@@ -90,7 +91,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-mfds-v1 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-quote-v1 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -102,14 +103,15 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
             page.wait_for_timeout(1_000)
             continue
         _assert_no_error_text(body)
-        match = RESULT_PATTERN.search(body)
+        legacy_match = RESULT_PATTERN.search(body)
+        workspace_match = WORKSPACE_DIRECT_PATTERN.search(body)
         if (
-            match is not None
+            workspace_match is not None
             and "구매조사 워크스페이스" in body
             and "동일제품 거래" in body
-            and "나라장터 실제 거래" in body
         ):
-            strict_count, reference_count = (int(value) for value in match.groups())
+            strict_count = int(workspace_match.group(1))
+            reference_count = int(legacy_match.group(2)) if legacy_match is not None else 0
             if strict_count < 1:
                 raise RuntimeError(
                     "DFM100 one-line search did not recover direct A/B evidence: "
@@ -160,7 +162,7 @@ def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) 
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
-        if "나라장터 실제 거래" in body and RESULT_PATTERN.search(body) is not None:
+        if "나라장터 실제 거래" in body and WORKSPACE_DIRECT_PATTERN.search(body) is not None:
             report["workspace_tabs_persisted"] = True
             _save_snapshot(page, report, "unified-search-dfm100-workspace")
             return
