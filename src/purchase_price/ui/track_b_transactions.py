@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from decimal import Decimal
+from statistics import median
 from typing import Any
 
 
@@ -97,6 +100,15 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
         rows.append(
             {
                 "가격": _money_text(candidate.price),
+                "총액": _money_text(getattr(candidate, "total_amount", None))
+                if getattr(candidate, "total_amount", None) is not None
+                else "미확인",
+                "금액검증": getattr(candidate, "amount_check", None) or "미확인",
+                "제조사": getattr(candidate, "manufacturer", None) or "미확인",
+                "모델": getattr(candidate, "model_name", None) or "미확인",
+                "규격": getattr(candidate, "specification", None) or "미확인",
+                "품목식별번호": getattr(candidate, "product_id", None) or "미확인",
+                "세부품명번호": getattr(candidate, "detail_code", None) or "미확인",
                 "판매처": getattr(candidate, "supplier", None) or "미확인",
                 "구매처": getattr(candidate, "demand_institution", None) or "미확인",
                 "거래일": getattr(candidate, "transaction_date", None) or "미확인",
@@ -115,6 +127,15 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
         rows.append(
             {
                 "가격": _money_text(candidate.price),
+                "총액": _money_text(getattr(candidate, "total_amount", None))
+                if getattr(candidate, "total_amount", None) is not None
+                else "미확인",
+                "금액검증": getattr(candidate, "amount_check", None) or "미확인",
+                "제조사": getattr(candidate, "manufacturer", None) or "미확인",
+                "모델": getattr(candidate, "model_name", None) or "미확인",
+                "규격": getattr(candidate, "specification", None) or "미확인",
+                "품목식별번호": getattr(candidate, "product_id", None) or "미확인",
+                "세부품명번호": getattr(candidate, "detail_code", None) or "미확인",
                 "판매처": getattr(candidate, "supplier", None) or "미확인",
                 "구매처": getattr(candidate, "demand_institution", None) or "미확인",
                 "거래일": getattr(candidate, "transaction_date", None) or "미확인",
@@ -129,3 +150,58 @@ def transaction_rows(track_b: Any) -> list[dict[str, object]]:
             }
         )
     return rows
+
+
+
+def _decimal_sum(values: list[Any]) -> Decimal | None:
+    total = Decimal("0")
+    found = False
+    for value in values:
+        if value is None:
+            continue
+        try:
+            total += Decimal(str(value))
+            found = True
+        except Exception:
+            continue
+    return total if found else None
+
+
+def model_price_group_rows(track_b: Any) -> list[dict[str, object]]:
+    """Summarize only A/B direct evidence by model and specification.
+
+    Reference-only C/Research evidence is intentionally excluded so the grouped
+    band cannot be mistaken for a fair-price range.
+    """
+
+    groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    for candidate in strict_comparison_candidates(track_b):
+        model = getattr(candidate, "model_name", None) or "모델 미확인"
+        specification = getattr(candidate, "specification", None) or "규격 미확인"
+        groups[(model, specification)].append(candidate)
+
+    rows: list[dict[str, object]] = []
+    for (model, specification), candidates in groups.items():
+        prices = sorted(Decimal(str(candidate.price)) for candidate in candidates)
+        quantities = [getattr(candidate, "quantity", None) for candidate in candidates]
+        dates = [
+            str(getattr(candidate, "transaction_date", "") or "")
+            for candidate in candidates
+            if getattr(candidate, "transaction_date", None)
+        ]
+        rows.append(
+            {
+                "모델": model,
+                "규격": specification,
+                "거래건수": len(candidates),
+                "최저단가": _money_text(prices[0]),
+                "중앙값": _money_text(median(prices)),
+                "최고단가": _money_text(prices[-1]),
+                "총수량": str(_decimal_sum(quantities) or "미확인"),
+                "최근거래일": max(dates) if dates else "미확인",
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (-int(row["거래건수"]), str(row["모델"]), str(row["규격"])),
+    )

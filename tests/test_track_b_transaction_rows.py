@@ -7,6 +7,7 @@ from purchase_price.domain import MatchGrade
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
     has_transaction_candidates,
+    model_price_group_rows,
     transaction_rows,
 )
 
@@ -26,6 +27,13 @@ def test_legacy_comparison_without_reference_candidates_does_not_crash() -> None
     assert rows == [
         {
             "가격": "2,981,000원",
+            "총액": "미확인",
+            "금액검증": "미확인",
+            "제조사": "미확인",
+            "모델": "미확인",
+            "규격": "미확인",
+            "품목식별번호": "미확인",
+            "세부품명번호": "미확인",
             "판매처": "미확인",
             "구매처": "미확인",
             "거래일": "미확인",
@@ -114,3 +122,79 @@ def test_transaction_prices_are_comma_formatted() -> None:
     comparison = SimpleNamespace(candidates=(candidate,), reference_candidates=(), status="success")
 
     assert transaction_rows(comparison)[0]["가격"] == "18,900,000원"
+
+
+def test_transaction_row_exposes_unit_price_total_and_identity_details() -> None:
+    candidate = SimpleNamespace(
+        price=Decimal("13200000"),
+        total_amount=Decimal("26400000"),
+        amount_check="consistent",
+        manufacturer="Philips goldway",
+        model_name="Efficia DFM100",
+        specification="200J",
+        product_id="12345678",
+        detail_code="4217210101",
+        product_title="저출력심장충격기, Philips goldway, Efficia DFM100, 200J",
+        match_grade=MatchGrade.B,
+        supplier="공급사",
+        demand_institution="병원",
+        transaction_date="2026-08-02",
+        quantity=Decimal("2"),
+        unit="대",
+    )
+    comparison = SimpleNamespace(candidates=(candidate,), reference_candidates=(), status="success")
+
+    row = transaction_rows(comparison)[0]
+
+    assert row["가격"] == "13,200,000원"
+    assert row["총액"] == "26,400,000원"
+    assert row["금액검증"] == "consistent"
+    assert row["수량/단위"] == "2 대"
+    assert row["제조사"] == "Philips goldway"
+    assert row["모델"] == "Efficia DFM100"
+    assert row["규격"] == "200J"
+    assert row["품목식별번호"] == "12345678"
+    assert row["세부품명번호"] == "4217210101"
+
+
+def test_model_price_group_rows_use_direct_evidence_only() -> None:
+    direct_a = SimpleNamespace(
+        price=Decimal("9900000"),
+        match_grade=MatchGrade.A,
+        model_name="Efficia DFM100",
+        specification="200J",
+        quantity=Decimal("1"),
+        transaction_date="2026-08-01",
+    )
+    direct_b = SimpleNamespace(
+        price=Decimal("13200000"),
+        match_grade=MatchGrade.B,
+        model_name="Efficia DFM100",
+        specification="200J",
+        quantity=Decimal("2"),
+        transaction_date="2026-08-02",
+    )
+    reference = SimpleNamespace(
+        price=Decimal("50000000"),
+        match_grade=MatchGrade.C,
+        model_name="Other",
+        specification="Other",
+        quantity=Decimal("1"),
+        transaction_date="2026-08-03",
+    )
+    comparison = SimpleNamespace(
+        candidates=(direct_a, direct_b, reference),
+        reference_candidates=(),
+    )
+
+    rows = model_price_group_rows(comparison)
+
+    assert len(rows) == 1
+    assert rows[0]["모델"] == "Efficia DFM100"
+    assert rows[0]["규격"] == "200J"
+    assert rows[0]["거래건수"] == 2
+    assert rows[0]["최저단가"] == "9,900,000원"
+    assert rows[0]["중앙값"] == "11,550,000원"
+    assert rows[0]["최고단가"] == "13,200,000원"
+    assert rows[0]["총수량"] == "3"
+    assert rows[0]["최근거래일"] == "2026-08-02"
