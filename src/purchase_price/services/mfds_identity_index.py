@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Iterable, Mapping
 from typing import Any
 
 from purchase_price.services.matching import normalize_text
