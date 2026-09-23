@@ -18,6 +18,7 @@ from purchase_price.services.mfds_identity_index import (
     MFDS_PRODUCT_INFO_RAW_OPERATION,
     create_identity_schema,
     parse_mfds_product_info_record,
+    purge_identity_records_not_seen_in_cycle,
     upsert_identity_records,
 )
 from purchase_price.services.mfds_identity_r2 import (
@@ -141,6 +142,9 @@ def sync(
         connection = sqlite3.connect(db_path)
         create_identity_schema(connection)
         page_no = int(pipeline["next_page"])
+        active_cycle = int(pipeline["cycle"])
+        cycle_completed = False
+        purged_stale_rows = 0
         pages_collected = 0
         rows_seen = 0
         upserted = 0
@@ -197,23 +201,34 @@ def sync(
                         )
                         for item in page.items
                     )
-                    upserted += upsert_identity_records(connection, records)
+                    upserted += upsert_identity_records(
+                        connection,
+                        records,
+                        cycle=active_cycle,
+                    )
                     rows_seen += len(records)
                     pages_collected += 1
 
                     if not page.items:
                         page_no = 1
+                        cycle_completed = True
                         pipeline["complete_cycles"] = int(pipeline["complete_cycles"]) + 1
-                        pipeline["cycle"] = int(pipeline["cycle"]) + 1
+                        pipeline["cycle"] = active_cycle + 1
                         break
 
                     page_no += 1
                     if total_count is not None and (page_no - 1) * rows_per_page >= total_count:
                         page_no = 1
+                        cycle_completed = True
                         pipeline["complete_cycles"] = int(pipeline["complete_cycles"]) + 1
-                        pipeline["cycle"] = int(pipeline["cycle"]) + 1
+                        pipeline["cycle"] = active_cycle + 1
                         break
 
+            if cycle_completed:
+                purged_stale_rows = purge_identity_records_not_seen_in_cycle(
+                    connection,
+                    active_cycle,
+                )
             connection.commit()
             row_count = int(
                 connection.execute("SELECT COUNT(*) FROM mfds_identity").fetchone()[0]
@@ -273,6 +288,8 @@ def sync(
             "next_page": page_no,
             "cycle": pipeline["cycle"],
             "complete_cycles": pipeline["complete_cycles"],
+            "cycle_completed": cycle_completed,
+            "purged_stale_rows": purged_stale_rows,
             "source_total_count": total_count,
             "index_key": ref.key,
             "index_sha256": ref.sha256,
