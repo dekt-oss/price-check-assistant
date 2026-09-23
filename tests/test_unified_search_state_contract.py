@@ -24,6 +24,8 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "lookup_same_mfds_product_from_r2" in source
     assert "허가번호" in source
     assert "동일 품목 → 허가번호 → 모델 → 등록업체 → 나라장터 가격" in source
-    assert "direct_transaction_rows" in source
-    assert "reference_transaction_rows" in source
+    assert "_split_transaction_rows_compat" in source
+    assert "_strict_candidates_compat" in source
+    assert "direct_transaction_rows" not in source
+    assert "reference_transaction_rows" not in source
     assert "검색 참고거래" in source
