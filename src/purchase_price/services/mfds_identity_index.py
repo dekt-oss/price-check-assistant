@@ -144,7 +144,8 @@ def create_identity_schema(connection: sqlite3.Connection) -> None:
             trade_name TEXT,
             registered_company TEXT,
             company_key TEXT NOT NULL,
-            source_payload_sha256 TEXT
+            source_payload_sha256 TEXT,
+            last_seen_cycle INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS idx_mfds_identity_permit
             ON mfds_identity(permit_key);
@@ -158,6 +159,14 @@ def create_identity_schema(connection: sqlite3.Connection) -> None:
             ON mfds_identity(udi_di);
         """
     )
+    columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(mfds_identity)").fetchall()
+    }
+    if "last_seen_cycle" not in columns:
+        connection.execute(
+            "ALTER TABLE mfds_identity ADD COLUMN last_seen_cycle INTEGER NOT NULL DEFAULT 1"
+        )
 
 
 def _row_key(record: MfdsIdentityRecord) -> str:
@@ -174,7 +183,11 @@ def _row_key(record: MfdsIdentityRecord) -> str:
 def upsert_identity_records(
     connection: sqlite3.Connection,
     records: Iterable[MfdsIdentityRecord],
+    *,
+    cycle: int = 1,
 ) -> int:
+    if cycle < 1:
+        raise ValueError("cycle must be positive")
     create_identity_schema(connection)
     count = 0
     for record in records:
@@ -185,8 +198,8 @@ def upsert_identity_records(
             INSERT INTO mfds_identity (
                 row_key, udi_di, product_name, product_key, classification_no, grade,
                 permit_number, permit_key, permit_date, model_name, model_key, trade_name,
-                registered_company, company_key, source_payload_sha256
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                registered_company, company_key, source_payload_sha256, last_seen_cycle
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(row_key) DO UPDATE SET
                 udi_di=excluded.udi_di,
                 product_name=excluded.product_name,
@@ -197,7 +210,8 @@ def upsert_identity_records(
                 model_name=excluded.model_name,
                 trade_name=excluded.trade_name,
                 registered_company=excluded.registered_company,
-                source_payload_sha256=excluded.source_payload_sha256
+                source_payload_sha256=excluded.source_payload_sha256,
+                last_seen_cycle=excluded.last_seen_cycle
             """,
             (
                 _row_key(record),
@@ -215,10 +229,25 @@ def upsert_identity_records(
                 record.registered_company,
                 record.company_key,
                 record.source_payload_sha256,
+                cycle,
             ),
         )
         count += 1
     return count
+
+
+def purge_identity_records_not_seen_in_cycle(
+    connection: sqlite3.Connection,
+    cycle: int,
+) -> int:
+    if cycle < 1:
+        raise ValueError("cycle must be positive")
+    create_identity_schema(connection)
+    cursor = connection.execute(
+        "DELETE FROM mfds_identity WHERE last_seen_cycle <> ?",
+        (cycle,),
+    )
+    return max(int(cursor.rowcount or 0), 0)
 
 
 def _records_from_rows(rows: Iterable[sqlite3.Row]) -> tuple[MfdsIdentityRecord, ...]:
