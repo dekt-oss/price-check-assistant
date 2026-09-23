@@ -7,9 +7,14 @@ from streamlit.testing.v1 import AppTest
 from purchase_price.services.mfds_udi import (
     MFDS_UDI_CODE_BASE_URL,
     MFDS_UDI_CODE_OPERATION,
+    MFDS_UDI_REGISTERED_COMPANY_BASE_URL,
+    MFDS_UDI_REGISTERED_COMPANY_OPERATION,
     MedicalDeviceUdiCodeRecord,
+    MedicalDeviceUdiRegisteredCompanyRecord,
     MfdsUdiCodeClient,
+    MfdsUdiRegisteredCompanyClient,
     parse_udi_code_record,
+    parse_udi_registered_company_record,
 )
 
 
@@ -103,3 +108,64 @@ def test_udi_page_loads_without_live_request() -> None:
     assert not app.exception
     assert app.title[0].value == "의료기기 UDI-DI 공식조회"
     assert any("UDIDI_CD" in item.value for item in app.caption)
+
+
+def test_parse_udi_registered_company_record_uses_official_fields() -> None:
+    record = parse_udi_registered_company_record(
+        {
+            "UDIDI_CD": "04987669582909",
+            "BSSH_NM": "(주)니덱한국",
+            "MDEQ_BSSH_PRMSN_NO": "4356",
+            "PRMSN_YMD": "2018/04/23",
+            "BSSH_ADDR": "서울특별시 중구 퇴계로 131",
+        }
+    )
+
+    assert record == MedicalDeviceUdiRegisteredCompanyRecord(
+        udi_di="04987669582909",
+        company_name="(주)니덱한국",
+        business_permit_number="4356",
+        permit_date="2018/04/23",
+        address="서울특별시 중구 퇴계로 131",
+    )
+
+
+def test_registered_company_lookup_uses_documented_exact_udi_filter() -> None:
+    fake = FakeClient(
+        _payload(
+            {
+                "UDIDI_CD": "04987669582909",
+                "BSSH_NM": "(주)니덱한국",
+                "MDEQ_BSSH_PRMSN_NO": "4356",
+            },
+            {
+                "UDIDI_CD": "DIFFERENT",
+                "BSSH_NM": "다른업체",
+                "MDEQ_BSSH_PRMSN_NO": "9999",
+            },
+        )
+    )
+    client = MfdsUdiRegisteredCompanyClient("unused-in-fake", client=fake)
+
+    records = client.lookup_udi(" 04987669582909 ")
+
+    assert [(item.udi_di, item.company_name) for item in records] == [
+        ("04987669582909", "(주)니덱한국")
+    ]
+    assert fake.calls == [
+        (
+            MFDS_UDI_REGISTERED_COMPANY_BASE_URL,
+            MFDS_UDI_REGISTERED_COMPANY_OPERATION,
+            {"UDIDI_CD": "04987669582909", "pageNo": 1, "numOfRows": 100},
+        )
+    ]
+
+
+def test_registered_company_lookup_rejects_empty_identifier() -> None:
+    client = MfdsUdiRegisteredCompanyClient(
+        "unused-in-fake",
+        client=FakeClient(_payload()),
+    )
+
+    with pytest.raises(ValueError, match="udi_di is required"):
+        client.lookup_udi("  ")
