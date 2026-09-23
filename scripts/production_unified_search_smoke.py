@@ -162,8 +162,14 @@ def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) 
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
-        if "나라장터 실제 거래" in body and WORKSPACE_DIRECT_PATTERN.search(body) is not None:
+        price_match = RESULT_PATTERN.search(body)
+        if (
+            "나라장터 실제 거래" in body
+            and price_match is not None
+            and int(price_match.group(1)) >= 1
+        ):
             report["workspace_tabs_persisted"] = True
+            report["price_tab_direct_count"] = int(price_match.group(1))
             _save_snapshot(page, report, "unified-search-dfm100-workspace")
             return
         page.wait_for_timeout(1_000)
