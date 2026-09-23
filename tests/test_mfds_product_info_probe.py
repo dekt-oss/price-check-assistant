@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.scripts.probe_mfds_product_info import (
     MFDS_PRODUCT_INFO_BASE_URL,
     MFDS_PRODUCT_INFO_OPERATION,
+    _is_source_not_authorized,
+    _source_not_authorized_report,
     probe_product_info,
 )
 
@@ -73,3 +76,23 @@ def test_probe_product_info_exact_match_is_whitespace_case_normalized() -> None:
     report = probe_product_info(fake, model_name="davinci83")
 
     assert report["exact_model_count"] == 1
+
+
+def test_source_not_authorized_detection_matches_data_portal_code_30() -> None:
+    error = PublicDataClientError(
+        "Public Data Portal request failed: HTTP 403 "
+        "error=SERVICE_KEY_IS_NOT_REGISTERED_ERROR "
+        "auth=등록되지 않은 서비스키 code=30"
+    )
+
+    assert _is_source_not_authorized(error) is True
+
+
+def test_source_not_authorized_report_is_explicit_and_fail_closed() -> None:
+    report = _source_not_authorized_report(model_name=" DFM100 ")
+
+    assert report["status"] == "SOURCE_NOT_AUTHORIZED"
+    assert report["query_model"] == "DFM100"
+    assert report["exact_model_count"] is None
+    assert report["records"] == []
+    assert report["writes_performed"] == 0
