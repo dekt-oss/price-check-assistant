@@ -20,6 +20,10 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "research_mfds_for_workspace" in source
     assert "interpret_unified_search" in source
     assert "_render_search_interpretation" in source
+    assert "lookup_mfds_identity_from_r2" in source
+    assert "lookup_same_mfds_product_from_r2" in source
+    assert "허가번호" in source
+    assert "동일 품목 → 허가번호 → 모델 → 등록업체 → 나라장터 가격" in source
     assert "direct_transaction_rows" in source
     assert "reference_transaction_rows" in source
     assert "검색 참고거래" in source
