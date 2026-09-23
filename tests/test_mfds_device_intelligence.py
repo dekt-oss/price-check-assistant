@@ -96,6 +96,8 @@ def test_parse_model_record_marks_active_domestic_candidate() -> None:
 
     assert record.product_name == "심장충격기"
     assert record.model_name == "MODEL-1"
+    assert record.industry_type == "수입업"
+    assert record.industry_name == "수입업"
     assert record.permit_date is not None
     assert record.active_for_domestic_candidate is True
 
