@@ -11,6 +11,7 @@ on:
       - "src/purchase_price/scripts/sync_mfds_identity_index.py"
       - "pages/1_대시보드.py"
       - "tests/test_mfds_identity_index.py"
+      - "tests/test_mfds_identity_workflow_contract.py"
       - "tests/test_unified_search_state_contract.py"
   push:
     branches:
@@ -22,11 +23,16 @@ on:
       - "src/purchase_price/storage/r2_mfds_identity_index.py"
       - "src/purchase_price/scripts/sync_mfds_identity_index.py"
   schedule:
-    - cron: "10 19 * * *"
+    # Stable backfill mode: twice daily. GitHub scheduled runs may start later than the cron time.
+    - cron: "23 0,12 * * *"
   workflow_dispatch:
     inputs:
-      max_pages:
-        description: Maximum MFDS pages to collect in this run
+      chunks:
+        description: Number of checkpointed MFDS collection chunks in this run
+        required: true
+        default: "5"
+      pages_per_chunk:
+        description: MFDS pages per checkpoint chunk
         required: true
         default: "200"
       rows_per_page:
@@ -58,7 +64,7 @@ jobs:
           pip install -e ".[dev]"
       - name: Verify identity index contracts
         run: |
-          pytest -q tests/test_mfds_identity_index.py
+          pytest -q tests/test_mfds_identity_index.py tests/test_mfds_identity_workflow_contract.py
           ruff check src/purchase_price/services/mfds_identity_index.py src/purchase_price/services/mfds_identity_r2.py src/purchase_price/storage/r2_mfds_identity_index.py src/purchase_price/scripts/sync_mfds_identity_index.py
 
   collect-and-publish:
@@ -72,6 +78,9 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      MFDS_BACKFILL_CHUNKS: ${{ inputs.chunks || '5' }}
+      MFDS_BACKFILL_PAGES_PER_CHUNK: ${{ inputs.pages_per_chunk || '200' }}
+      MFDS_BACKFILL_ROWS_PER_PAGE: ${{ inputs.rows_per_page || '100' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -82,30 +91,49 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-      - name: Collect official MFDS identity pages and publish serving index
-        run: >-
-          python -m purchase_price.scripts.sync_mfds_identity_index
-          --max-pages "${{ inputs.max_pages || '200' }}"
-          --rows-per-page "${{ inputs.rows_per_page || '100' }}"
-          --output artifacts/mfds-identity/sync.json
+      - name: Collect official MFDS identity pages in checkpointed stable mode
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/mfds-identity
+          for chunk in $(seq 1 "$MFDS_BACKFILL_CHUNKS"); do
+            echo "::group::MFDS stable backfill chunk $chunk/$MFDS_BACKFILL_CHUNKS"
+            output="artifacts/mfds-identity/sync-$chunk.json"
+            python -m purchase_price.scripts.sync_mfds_identity_index               --max-pages "$MFDS_BACKFILL_PAGES_PER_CHUNK"               --rows-per-page "$MFDS_BACKFILL_ROWS_PER_PAGE"               --output "$output"
+
+            status="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$output")"
+            echo "chunk_status=$status"
+            echo "::endgroup::"
+
+            if [ "$status" != "SUCCESS" ]; then
+              echo "::warning::Stopping this stable-mode run after chunk $chunk with status=$status"
+              break
+            fi
+          done
       - name: Print collection status
         if: always()
         run: |
-          if [ -f artifacts/mfds-identity/sync.json ]; then
-            python - <<'PY'
+          python - <<'PY'
           import json
           from pathlib import Path
-          report = json.loads(Path("artifacts/mfds-identity/sync.json").read_text())
-          print("status=", report.get("status"))
-          print("pages_collected=", report.get("pages_collected"))
-          print("rows_seen=", report.get("rows_seen"))
-          print("row_count=", report.get("row_count"))
-          print("next_page=", report.get("next_page"))
-          print("complete_cycles=", report.get("complete_cycles"))
-          if report.get("status") == "SOURCE_NOT_AUTHORIZED":
-              print("::warning::MFDS product-info API utilization approval is still required for this service key.")
+
+          files = sorted(Path("artifacts/mfds-identity").glob("sync-*.json"))
+          if not files:
+              print("status=NO_REPORT")
+              raise SystemExit(0)
+
+          reports = [json.loads(path.read_text()) for path in files]
+          latest = reports[-1]
+          print("chunks_completed=", len(reports))
+          print("statuses=", ",".join(str(item.get("status")) for item in reports))
+          print("pages_collected=", sum(int(item.get("pages_collected") or 0) for item in reports))
+          print("rows_seen=", sum(int(item.get("rows_seen") or 0) for item in reports))
+          print("row_count=", latest.get("row_count"))
+          print("next_page=", latest.get("next_page"))
+          print("complete_cycles=", latest.get("complete_cycles"))
+          print("source_total_count=", latest.get("source_total_count"))
+          if any(item.get("status") == "SOURCE_NOT_AUTHORIZED" for item in reports):
+              print("::warning::MFDS product-info API utilization approval is required for this service key.")
           PY
-          fi
       - name: Upload collection evidence
         if: always()
         uses: actions/upload-artifact@v4
