@@ -1,0 +1,58 @@
+name: MFDS Permit E2E UAT
+
+on:
+  push:
+    branches:
+      - "uat/mfds-permit-e2e-20260927"
+    paths:
+      - ".github/workflows/mfds-permit-e2e-uat.yml"
+      - "scripts/uat_mfds_permit_e2e.py"
+      - "scripts/production_mfds_permit_uat.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mfds-permit-e2e-uat
+  cancel-in-progress: false
+
+jobs:
+  uat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: src
+      PRODUCTION_URL: https://bp-price-research.streamlit.app/
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project and browser dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install "playwright>=1.55,<2"
+          python -m playwright install --with-deps chromium
+
+      - name: Run real-data MFDS permit backend UAT
+        run: python scripts/uat_mfds_permit_e2e.py
+
+      - name: Run Production permit-search browser UAT
+        run: python scripts/production_mfds_permit_uat.py
+
+      - name: Upload UAT evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfds-permit-e2e-uat
+          path: artifacts/mfds-permit-uat/
+          retention-days: 14
+          if-no-files-found: warn
