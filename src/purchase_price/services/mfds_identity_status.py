@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from typing import Any, Mapping
+from zoneinfo import ZoneInfo
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -74,6 +74,21 @@ def build_mfds_identity_collection_status(
     pointer = pointer or {}
     pipeline = pipeline or {}
     complete_cycles = max(_int(pipeline.get("complete_cycles")), 0)
+    next_page = max(_int(pipeline.get("next_page"), 1), 1) if pipeline else None
+    persisted_rows_per_page = pipeline.get("rows_per_page")
+    rows_per_page = (
+        max(_int(persisted_rows_per_page), 1)
+        if persisted_rows_per_page not in (None, "")
+        else (100 if next_page and next_page > 1 and complete_cycles == 0 else None)
+    )
+    persisted_cycle_rows = pipeline.get("cycle_rows_seen")
+    if persisted_cycle_rows not in (None, ""):
+        cycle_rows_seen = max(_int(persisted_cycle_rows), 0)
+    elif next_page is not None and rows_per_page is not None and complete_cycles == 0:
+        cycle_rows_seen = max((next_page - 1) * rows_per_page, 0)
+    else:
+        cycle_rows_seen = 0
+
     return MfdsIdentityCollectionStatus(
         status="available" if pointer or pipeline else "not_ingested",
         row_count=max(_int(pointer.get("row_count")), 0),
@@ -82,19 +97,11 @@ def build_mfds_identity_collection_status(
             if pipeline.get("last_total_count") not in (None, "")
             else None
         ),
-        next_page=(
-            max(_int(pipeline.get("next_page"), 1), 1)
-            if pipeline
-            else None
-        ),
+        next_page=next_page,
         cycle=max(_int(pipeline.get("cycle"), 1), 1),
         complete_cycles=complete_cycles,
-        cycle_rows_seen=max(_int(pipeline.get("cycle_rows_seen")), 0),
-        rows_per_page=(
-            max(_int(pipeline.get("rows_per_page")), 1)
-            if pipeline.get("rows_per_page") not in (None, "")
-            else None
-        ),
+        cycle_rows_seen=cycle_rows_seen,
+        rows_per_page=rows_per_page,
         updated_at=str(pointer.get("updated_at") or pipeline.get("updated_at") or "").strip()
         or None,
         stored_bytes=max(_int(pointer.get("stored_bytes")), 0),
