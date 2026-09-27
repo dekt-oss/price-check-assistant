@@ -103,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts/mfds-identity
-          python -m purchase_price.scripts.plan_mfds_identity_collection             --event-name "$GITHUB_EVENT_NAME"             --schedule "$MFDS_EVENT_SCHEDULE"             --requested-chunks "$MFDS_EFFECTIVE_CHUNKS"             --requested-pages-per-chunk "$MFDS_EFFECTIVE_PAGES_PER_CHUNK"             --requested-rows-per-page "$MFDS_EFFECTIVE_ROWS_PER_PAGE"             --output artifacts/mfds-identity/plan.json
+          python -m purchase_price.scripts.plan_mfds_identity_collection             --event-name "$GITHUB_EVENT_NAME"             --schedule "$MFDS_EVENT_SCHEDULE"             --requested-chunks "$MFDS_BACKFILL_CHUNKS"             --requested-pages-per-chunk "$MFDS_BACKFILL_PAGES_PER_CHUNK"             --requested-rows-per-page "$MFDS_BACKFILL_ROWS_PER_PAGE"             --output artifacts/mfds-identity/plan.json
           python - <<'PY'
           import json
           import os
