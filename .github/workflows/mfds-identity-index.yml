@@ -130,11 +130,17 @@ jobs:
             python -m purchase_price.scripts.sync_mfds_identity_index               --max-pages "$MFDS_EFFECTIVE_PAGES_PER_CHUNK"               --rows-per-page "$MFDS_EFFECTIVE_ROWS_PER_PAGE"               --output "$output"
 
             status="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$output")"
+            cycle_completed="$(python -c 'import json,sys; print(str(bool(json.load(open(sys.argv[1])).get("cycle_completed"))).lower())' "$output")"
             echo "chunk_status=$status"
+            echo "cycle_completed=$cycle_completed"
             echo "::endgroup::"
 
             if [ "$status" != "SUCCESS" ]; then
-              echo "::warning::Stopping this stable-mode run after chunk $chunk with status=$status"
+              echo "::warning::Stopping this collection run after chunk $chunk with status=$status"
+              break
+            fi
+            if [ "$cycle_completed" = "true" ]; then
+              echo "::notice::MFDS full source cycle completed; stopping before the next cycle."
               break
             fi
           done
