@@ -18,6 +18,7 @@ from purchase_price.services.mfds_identity_r2 import (
 )
 from purchase_price.services.mfds_identity_status import (
     MfdsIdentityCollectionStatus,
+    format_status_updated_at,
     get_mfds_identity_collection_status,
 )
 from purchase_price.services.mfds_workspace import (
@@ -220,8 +221,9 @@ def _render_mfds_collection_status() -> None:
         )
         if status.progress_fraction is not None:
             st.progress(status.progress_fraction)
-        if status.updated_at:
-            st.caption(f"최근 인덱스 갱신 · {status.updated_at}")
+        updated_at = format_status_updated_at(status.updated_at)
+        if updated_at:
+            st.caption(f"최근 인덱스 갱신 · {updated_at}")
         if status.first_backfill_complete:
             st.caption(
                 "첫 전체 수집 이후에는 하루 1회 20,000행 단위 rolling refresh로 자동 전환합니다. "
