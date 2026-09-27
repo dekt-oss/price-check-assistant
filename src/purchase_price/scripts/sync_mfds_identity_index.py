@@ -75,6 +75,8 @@ def _load_pipeline(state_store: R2OperationalStateStore) -> dict[str, Any]:
             "cycle": 1,
             "complete_cycles": 0,
             "last_total_count": None,
+            "cycle_rows_seen": None,
+            "rows_per_page": None,
         }
     if payload.get("schema") != PIPELINE_SCHEMA:
         raise ValueError("MFDS identity pipeline schema mismatch")
@@ -87,6 +89,8 @@ def _load_pipeline(state_store: R2OperationalStateStore) -> dict[str, Any]:
         "cycle": max(int(payload.get("cycle") or 1), 1),
         "complete_cycles": max(int(payload.get("complete_cycles") or 0), 0),
         "last_total_count": payload.get("last_total_count"),
+        "cycle_rows_seen": payload.get("cycle_rows_seen"),
+        "rows_per_page": payload.get("rows_per_page"),
     }
 
 
@@ -143,6 +147,11 @@ def sync(
         create_identity_schema(connection)
         page_no = int(pipeline["next_page"])
         active_cycle = int(pipeline["cycle"])
+        stored_cycle_rows_seen = pipeline.get("cycle_rows_seen")
+        if stored_cycle_rows_seen in (None, ""):
+            cycle_rows_seen = max((page_no - 1) * rows_per_page, 0)
+        else:
+            cycle_rows_seen = max(int(stored_cycle_rows_seen), 0)
         cycle_completed = False
         purged_stale_rows = 0
         pages_collected = 0
@@ -269,6 +278,8 @@ def sync(
 
         pipeline["next_page"] = page_no
         pipeline["last_total_count"] = total_count
+        pipeline["rows_per_page"] = rows_per_page
+        pipeline["cycle_rows_seen"] = 0 if cycle_completed else cycle_rows_seen + rows_seen
         pipeline["updated_at"] = _now()
         state_store.write_json(PIPELINE_STATE, pipeline)
 
@@ -288,6 +299,8 @@ def sync(
             "next_page": page_no,
             "cycle": pipeline["cycle"],
             "complete_cycles": pipeline["complete_cycles"],
+            "cycle_rows_seen": pipeline["cycle_rows_seen"],
+            "rows_per_page": pipeline["rows_per_page"],
             "cycle_completed": cycle_completed,
             "purged_stale_rows": purged_stale_rows,
             "source_total_count": total_count,
