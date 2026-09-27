@@ -98,3 +98,20 @@ def test_manual_dispatch_keeps_requested_size_after_backfill() -> None:
     assert plan.mode == "manual"
     assert plan.chunks == 3
     assert plan.pages_per_chunk == 150
+
+
+def test_collection_status_derives_progress_from_legacy_cursor_state() -> None:
+    status = build_mfds_identity_collection_status(
+        pointer={"row_count": 279417},
+        pipeline={
+            "next_page": 2801,
+            "cycle": 1,
+            "complete_cycles": 0,
+            "last_total_count": 2704269,
+        },
+    )
+
+    assert status.rows_per_page == 100
+    assert status.cycle_rows_seen == 280000
+    assert status.progress_percent is not None
+    assert 10.3 < status.progress_percent < 10.4
