@@ -190,7 +190,6 @@ def _build_mfds_procurement_crosslinks(records, *, limit: int = 25) -> list[dict
     return rows
 
 
-@st.cache_data(ttl=300, show_spinner=False)
 def _load_mfds_collection_status() -> MfdsIdentityCollectionStatus:
     return get_mfds_identity_collection_status()
 
