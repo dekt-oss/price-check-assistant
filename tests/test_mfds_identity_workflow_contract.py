@@ -20,6 +20,8 @@ def test_mfds_identity_workflow_uses_checkpointed_stable_backfill_mode() -> None
     assert '--rows-per-page "$MFDS_EFFECTIVE_ROWS_PER_PAGE"' in text
     assert 'sync-$chunk.json' in text
     assert 'if [ "$status" != "SUCCESS" ]; then' in text
+    assert 'cycle_completed="$(python -c' in text
+    assert 'if [ "$cycle_completed" = "true" ]; then' in text
     assert "cancel-in-progress: false" in text
     assert "timeout-minutes: 120" in text
 
