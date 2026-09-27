@@ -327,11 +327,12 @@ def _execute_search(
         indexed_identity.records
         if isinstance(indexed_identity, MfdsIdentityLookup)
         and indexed_identity.status == "success"
+        and indexed_identity.match_type == "permit"
         else ()
     )
     exact_identity_crosslinks = _build_mfds_procurement_crosslinks(
         exact_identity_records,
-        limit=50,
+        limit=25,
     )
     same_product_identity = (
         lookup_same_mfds_product_from_r2(identity_product) if identity_product else ()
@@ -352,7 +353,12 @@ def _execute_search(
     direct_rows, reference_rows = _split_transaction_rows_compat(track_b)
     strict_count, reference_count = candidate_counts(track_b)
     return {
-        "heading": resolved_model or resolved_product or raw_search,
+        "heading": (
+            raw_search
+            if isinstance(indexed_identity, MfdsIdentityLookup)
+            and indexed_identity.match_type == "permit"
+            else resolved_model or resolved_product or raw_search
+        ),
         "review_input": review_input,
         "query": query,
         "track_b": track_b,
@@ -467,6 +473,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 st.success(
                     f"허가번호 exact 일치 · 등록 모델 {len(indexed_identity.model_names)}개를 모델별 나라장터 직접가격과 교차조회합니다."
                 )
+                if len(indexed_identity.model_names) > 1:
+                    st.caption(
+                        "복수 모델 허가입니다. 하나를 대표모델로 임의 선택하지 않으며 아래 모델별 가격표를 기준으로 확인합니다."
+                    )
             elif indexed_identity.match_type in {"udi", "model"}:
                 st.caption("식약처 공식 identity exact 검색 결과입니다.")
 
