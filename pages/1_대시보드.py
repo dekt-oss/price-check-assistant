@@ -16,6 +16,10 @@ from purchase_price.services.mfds_identity_r2 import (
     lookup_mfds_identity_from_r2,
     lookup_same_mfds_product_from_r2,
 )
+from purchase_price.services.mfds_identity_status import (
+    MfdsIdentityCollectionStatus,
+    get_mfds_identity_collection_status,
+)
 from purchase_price.services.mfds_workspace import (
     MfdsWorkspaceResult,
     research_mfds_for_workspace,
@@ -97,10 +101,9 @@ def _identity_hydration(
 
     products = identity.product_names
     models = identity.model_names
-    companies = identity.companies
     return (
         products[0] if len(products) == 1 else product_name,
-        companies[0] if len(companies) == 1 else manufacturer,
+        manufacturer,
         models[0] if len(models) == 1 else model_name,
         specification,
         identity,
@@ -185,6 +188,50 @@ def _build_mfds_procurement_crosslinks(records, *, limit: int = 25) -> list[dict
             }
         )
     return rows
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_mfds_collection_status() -> MfdsIdentityCollectionStatus:
+    return get_mfds_identity_collection_status()
+
+
+def _render_mfds_collection_status() -> None:
+    status = _load_mfds_collection_status()
+    if status.status == "unavailable":
+        return
+
+    if status.first_backfill_complete:
+        label = "식약처 데이터 · 1차 전체수집 완료 · 자동 갱신 중"
+    elif status.progress_percent is not None:
+        label = f"식약처 데이터 수집 중 · {status.progress_percent:.1f}%"
+    else:
+        label = "식약처 데이터 수집 상태"
+
+    with st.expander(label, expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("검색 인덱스", f"{status.row_count:,}행")
+        if status.source_total_count:
+            c2.metric("원천 전체", f"{status.source_total_count:,}행")
+        else:
+            c2.metric("원천 전체", "확인 중")
+        c3.metric("다음 수집 위치", f"page {status.next_page:,}" if status.next_page else "미확인")
+        c4.metric(
+            "수집 모드",
+            "일일 rolling refresh" if status.first_backfill_complete else "고속 백필",
+        )
+        if status.progress_fraction is not None:
+            st.progress(status.progress_fraction)
+        if status.updated_at:
+            st.caption(f"최근 인덱스 갱신 · {status.updated_at}")
+        if status.first_backfill_complete:
+            st.caption(
+                "첫 전체 수집 이후에는 하루 1회 20,000행 단위 rolling refresh로 자동 전환합니다. "
+                "식약처 API에 변경일자 delta 조건이 확인되기 전까지는 변경분만 받는 진짜 증분수집으로 표시하지 않습니다."
+            )
+        else:
+            st.caption(
+                "현재는 하루 2회, 실행당 최대 100,000행을 20,000행 checkpoint 단위로 저장합니다."
+            )
 
 
 def _execute_search(
@@ -275,6 +322,16 @@ def _execute_search(
         and len(indexed_identity.product_names) == 1
         else resolved_product
     )
+    exact_identity_records = (
+        indexed_identity.records
+        if isinstance(indexed_identity, MfdsIdentityLookup)
+        and indexed_identity.status == "success"
+        else ()
+    )
+    exact_identity_crosslinks = _build_mfds_procurement_crosslinks(
+        exact_identity_records,
+        limit=50,
+    )
     same_product_identity = (
         lookup_same_mfds_product_from_r2(identity_product) if identity_product else ()
     )
@@ -310,6 +367,7 @@ def _execute_search(
         "market_bundle": market_bundle,
         "mfds": mfds,
         "mfds_identity": indexed_identity,
+        "exact_identity_crosslinks": exact_identity_crosslinks,
         "same_product_identity": same_product_identity,
         "mfds_procurement_crosslinks": mfds_procurement_crosslinks,
     }
@@ -363,6 +421,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     market_bundle = state["market_bundle"]
     mfds = state.get("mfds")
     indexed_identity = state.get("mfds_identity")
+    exact_identity_crosslinks = list(state.get("exact_identity_crosslinks") or [])
     same_product_identity = tuple(state.get("same_product_identity") or ())
     mfds_procurement_crosslinks = list(state.get("mfds_procurement_crosslinks") or [])
     interpretation = state.get("interpretation")
@@ -403,6 +462,12 @@ def _render_search_result(state: dict[str, Any]) -> None:
             i3.write(" / ".join(indexed_identity.model_names[:5]) or "미확인")
             i4.caption("식약처 등록업체")
             i4.write(" / ".join(indexed_identity.companies[:5]) or "미확인")
+            if indexed_identity.match_type == "permit":
+                st.success(
+                    f"허가번호 exact 일치 · 등록 모델 {len(indexed_identity.model_names)}개를 모델별 나라장터 직접가격과 교차조회합니다."
+                )
+            elif indexed_identity.match_type in {"udi", "model"}:
+                st.caption("식약처 공식 identity exact 검색 결과입니다.")
 
     if isinstance(interpretation, UnifiedSearchInterpretation):
         _render_search_interpretation(interpretation)
@@ -479,6 +544,25 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 )
                 i3.caption("허가일")
                 i3.write(" / ".join(permit_dates) or "미확인")
+
+        if (
+            isinstance(indexed_identity, MfdsIdentityLookup)
+            and indexed_identity.status == "success"
+            and indexed_identity.match_type == "permit"
+        ):
+            st.markdown("#### 허가번호 기준 모델·조달가격 연결")
+            if exact_identity_crosslinks:
+                st.dataframe(
+                    exact_identity_crosslinks,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.caption(
+                    "허가번호에 등록된 각 모델을 개별적으로 나라장터 A/B 직접거래와 교차조회합니다. "
+                    "식약처 제조·수입 등록업체와 실제 조달 납품업체는 서로 다른 관계입니다."
+                )
+            else:
+                st.info("허가정보는 확인됐지만 등록 모델 기준 나라장터 A/B 직접가격은 아직 확인되지 않았습니다.")
 
         if stats.median_price is not None:
             q1, q2, q3 = st.columns(3)
@@ -747,6 +831,21 @@ def _render_search_result(state: dict[str, Any]) -> None:
             )
 
     with competitor_tab:
+        if (
+            isinstance(indexed_identity, MfdsIdentityLookup)
+            and indexed_identity.status == "success"
+            and indexed_identity.match_type == "permit"
+        ):
+            st.markdown("#### 검색한 허가번호 → 등록모델 → 나라장터 가격")
+            if exact_identity_crosslinks:
+                st.dataframe(
+                    exact_identity_crosslinks,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("검색한 허가번호의 모델은 확인됐지만 나라장터 A/B 직접거래 연결은 없습니다.")
+
         st.markdown("#### 동일 품목 → 허가번호 → 모델 → 등록업체 → 나라장터 가격")
         if mfds_procurement_crosslinks:
             st.dataframe(
@@ -817,6 +916,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v1" style="display:none">purchase-workspace-runtime-v1</span>'
     '<span id="purchase-workspace-runtime-v2" style="display:none">purchase-workspace-runtime-v2</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
+    '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>',
     unsafe_allow_html=True,
 )
@@ -865,6 +965,8 @@ st.markdown(
     '<div class="home-subtitle">모델명만 입력해도 알려진 모델 힌트를 안전하게 구조화해 가격·공급·조달근거를 함께 찾습니다.</div>',
     unsafe_allow_html=True,
 )
+
+_render_mfds_collection_status()
 
 handoff_payload = st.session_state.pop(PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY, None)
 handoff = parse_purchase_workspace_handoff(handoff_payload)
