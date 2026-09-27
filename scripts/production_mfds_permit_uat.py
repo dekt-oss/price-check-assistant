@@ -85,12 +85,19 @@ def _wait_for_permit_result(page: Any, permit: str, report: dict[str, object]) -
 def _verify_summary_crosslink(page: Any, report: dict[str, object]) -> None:
     body = _body(page)
     _assert_no_app_error(body)
-    if "허가번호 기준 모델·조달가격 연결" not in body:
-        raise RuntimeError("Permit-specific procurement crosslink section did not render")
-    if "나라장터 가격범위" not in body:
-        raise RuntimeError("Permit-specific crosslink table did not render G2B price column")
-    if "식약처 등록업체" not in body:
-        raise RuntimeError("Permit-specific crosslink table did not render registered company")
+    required = (
+        "허가번호 기준 모델·조달가격 연결",
+        "동일제품 거래",
+        "직접가격 범위",
+        "실제 조달 공급업체",
+        "식약처 등록",
+    )
+    missing = [label for label in required if label not in body]
+    if missing:
+        raise RuntimeError(
+            "Permit summary did not render required decision evidence: "
+            + ", ".join(missing)
+        )
     report["summary_crosslink_rendered"] = True
 
 
