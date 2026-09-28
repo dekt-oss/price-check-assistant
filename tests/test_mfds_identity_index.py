@@ -1,6 +1,8 @@
 import sqlite3
 
+from purchase_price.domain import IdentityEvidenceStatus, MfdsItemAuthorizationType
 from purchase_price.services.mfds_identity_index import (
+    classify_mfds_item_number,
     lookup_identity,
     lookup_same_product,
     parse_mfds_product_info_record,
@@ -102,3 +104,36 @@ def test_completed_cycle_can_purge_rows_not_seen_again() -> None:
     assert purged == 1
     assert lookup_identity(connection, "OLD").status == "success_0"
     assert lookup_identity(connection, "KEEP").status == "success"
+
+
+
+def test_identity_semantic_status_distinguishes_coverage_miss_and_ambiguity() -> None:
+    connection = sqlite3.connect(":memory:")
+    upsert_identity_records(
+        connection,
+        [
+            _record(PERMIT_NO="수신 22-2177호", FOML_INFO="C101", MNFT_IPRT_ENTP_NM="업체A"),
+            _record(
+                UDIDI_CD="08800000000099",
+                PERMIT_NO="수신 23-9999호",
+                FOML_INFO="C101",
+                MNFT_IPRT_ENTP_NM="업체B",
+            ),
+        ],
+    )
+    connection.commit()
+
+    ambiguous = lookup_identity(connection, "C101")
+    missing = lookup_identity(connection, "NOT-EXIST")
+    permit = lookup_identity(connection, "수신22-2177호")
+
+    assert ambiguous.identity_status == IdentityEvidenceStatus.AMBIGUOUS
+    assert missing.identity_status == IdentityEvidenceStatus.NOT_FOUND_IN_COVERAGE
+    assert permit.identity_status == IdentityEvidenceStatus.FOUND
+
+
+def test_mfds_item_number_type_distinguishes_permit_certification_and_notification() -> None:
+    assert classify_mfds_item_number("수허 24-1호") == MfdsItemAuthorizationType.PERMIT
+    assert classify_mfds_item_number("제인 24-2호") == MfdsItemAuthorizationType.CERTIFICATION
+    assert classify_mfds_item_number("수신 22-2177호") == MfdsItemAuthorizationType.NOTIFICATION
+    assert classify_mfds_item_number("기타-1") == MfdsItemAuthorizationType.UNKNOWN
