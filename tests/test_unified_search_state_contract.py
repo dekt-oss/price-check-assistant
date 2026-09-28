@@ -34,6 +34,11 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert '"🏢 업체·조달"' in source
     assert '"🔁 동일품목 비교"' in source
     assert '"📚 Research·근거"' not in source
+    assert "build_market_survey_workbook" in source
+    assert "시장조사표 Excel 내려받기" in source
+    assert "priced_active_crosslinks" in source
+    assert '"현재 모델"' in source
+    assert "최대 25개" not in source
     assert 'id="unified-search-runtime-v3"' in source
     assert 'id="unified-search-runtime-v4"' in source
     assert 'id="purchase-workspace-runtime-v1"' in source
