@@ -26,6 +26,7 @@ from purchase_price.services.mfds_identity_status import (
     format_status_updated_at,
     get_mfds_identity_collection_status,
 )
+from purchase_price.services.market_survey_export import build_market_survey_workbook
 from purchase_price.services.mfds_workspace import (
     MfdsWorkspaceResult,
     research_mfds_for_workspace,
@@ -797,6 +798,82 @@ def _render_search_result(state: dict[str, Any]) -> None:
     if stats.demand_institution_count:
         st.caption(f"A/B 직접거래 수요기관 {stats.demand_institution_count}개 확인")
 
+    export_identity_rows: list[dict[str, object]] = []
+    if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.records:
+        export_identity_rows = [
+            {
+                "유형": item.item_authorization_type.value,
+                "식약처 품목번호": item.permit_number or "미확인",
+                "품목": item.product_name or "미확인",
+                "모델": item.model_name or "미확인",
+                "품목 책임주체": item.registered_company or "미확인",
+                "UDI-DI": item.udi_di or "미확인",
+                "식약처 처리일": item.permit_date or "미확인",
+                "등급": item.grade or "미확인",
+                "Source": MFDS_PRODUCT_INFO_DATASET_URL,
+                "원문근거해시": (item.source_payload_sha256 or "")[:16] or "미확인",
+            }
+            for item in indexed_identity.records
+        ]
+
+    export_research_rows = [
+        {"근거구분": "Track B 참고거래", **row}
+        for row in reference_rows
+    ]
+    if run.results:
+        export_research_rows.extend(
+            {
+                "근거구분": "공개시장 Research",
+                "가격": row["단가"],
+                "거래일": row["거래일"] or "미확인",
+                "자료성격": row["자료성격"],
+                "Source": row["출처"],
+                "원문": row["URL"],
+            }
+            for row in evidence_rows(run.results)
+        )
+
+    export_payload = build_market_survey_workbook(
+        search_identity={
+            "검색어": state.get("search_text") or heading,
+            "품목": getattr(query, "product_name", None) or "미확인",
+            "제조사": getattr(query, "manufacturer", None) or "미확인",
+            "모델": getattr(query, "model_name", None) or "미확인",
+            "규격": getattr(query, "specification", None) or "미확인",
+            "식약처 품목번호": (
+                " / ".join(indexed_identity.permit_numbers)
+                if isinstance(indexed_identity, MfdsIdentityLookup)
+                else "미확인"
+            ) or "미확인",
+        },
+        quote_context={
+            "내 견적가": workspace_quote,
+            "단위": quote_unit.strip() or "미확인",
+            "VAT": vat_status,
+            "설치·운송 등 조건": quote_conditions.strip() or "미확인",
+        },
+        direct_rows=direct_rows,
+        research_rows=export_research_rows,
+        supplier_rows=supplier_rows(track_b),
+        identity_rows=export_identity_rows,
+        data_as_of=None,
+    )
+    safe_export_name = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "_"
+        for character in str(heading or "market_survey")
+    ).strip("_") or "market_survey"
+    st.download_button(
+        "시장조사표 Excel 내려받기",
+        data=export_payload,
+        file_name=f"시장조사표_{safe_export_name}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"workspace_market_survey_export::{quote_key}",
+        use_container_width=False,
+    )
+    st.caption(
+        "Excel은 A/B 직접근거와 C/Research를 분리하고 Source·원문근거를 보존합니다. "
+        "연결 Source가 신뢰 가능한 data_as_of를 제공하지 않으면 임의 날짜를 만들지 않고 '미확인'으로 기록합니다."
+    )
 
     query_view = str(st.query_params.get("view") or "").strip()
     if query_view not in WORKSPACE_VIEWS:
