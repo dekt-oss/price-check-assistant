@@ -23,7 +23,7 @@ def test_manual_safety_state_preserves_exact_verification_keys() -> None:
         "식약처 품목번호: 수허 24-1",
         "식약처 품목번호: 제허 25-2",
     )
-    assert "안전하다는 뜻" in state.message
+    assert "공식 안전정보 확인 결과가 아닙니다" in state.message
 
 
 def test_manual_safety_state_without_identity_is_not_connected() -> None:
@@ -66,3 +66,16 @@ def test_legacy_error_maps_to_v3_check_failed() -> None:
     )
 
     assert state.evidence_status == SafetyEvidenceStatus.CHECK_FAILED
+
+
+def test_checked_none_preserves_query_timestamp_and_source() -> None:
+    state = no_match_safety_state(
+        model_name="C101",
+        permit_numbers=["수신 22-2177호"],
+        checked_at="2026-09-28T02:30:00Z",
+        source_url="https://example.test/mfds-safety",
+    )
+
+    assert state.evidence_status == SafetyEvidenceStatus.CHECKED_NONE
+    assert state.checked_at == "2026-09-28T02:30:00Z"
+    assert state.source_url == "https://example.test/mfds-safety"
