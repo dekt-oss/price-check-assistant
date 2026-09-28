@@ -182,3 +182,58 @@ def test_contract_failure_is_not_zero_results() -> None:
     assert source.request_count == 1
     assert source.error_type == "RuntimeError"
     assert "synthetic contract failure" in source.error_message
+
+
+class FakeUnauthorizedContractClient:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def search_by_bid_notice(self, *, bid_notice_no: str, max_pages: int = 1):
+        self.calls.append(bid_notice_no)
+        raise RuntimeError(
+            "Public Data Portal request failed: HTTP 403 "
+            "error=SERVICE_KEY_IS_NOT_REGISTERED_ERROR auth=등록되지 않은 서비스키 code=30"
+        )
+
+
+def test_contract_authorization_error_is_explicit_and_opens_source_circuit() -> None:
+    first = G2BResearchRecord(
+        source_type=G2BResearchSource.BID_NOTICE,
+        source_record_id="bid:1",
+        bid_notice_no="R26BK01234567",
+        published_date=date(2026, 9, 2),
+    )
+    second = G2BResearchRecord(
+        source_type=G2BResearchSource.BID_NOTICE,
+        source_record_id="bid:2",
+        bid_notice_no="R26BK07654321",
+        published_date=date(2026, 9, 1),
+    )
+    bundle = MarketResearchBundle(
+        query_terms=("심장충격기",),
+        sources=(
+            ResearchSourceResult(
+                source=G2BResearchSource.BID_NOTICE,
+                status=ResearchSourceStatus.SUCCESS,
+                records=(first, second),
+            ),
+        ),
+        records=(first, second),
+    )
+    client = FakeUnauthorizedContractClient()
+
+    enriched = enrich_market_bundle_with_contracts(
+        bundle,
+        service_key=None,
+        client=client,  # type: ignore[arg-type]
+        max_bid_notices=2,
+    )
+
+    source = next(
+        source for source in enriched.sources if source.source == G2BResearchSource.CONTRACT
+    )
+    assert source.status == ResearchSourceStatus.NOT_AUTHORIZED
+    assert source.request_count == 1
+    assert client.calls == ["R26BK01234567"]
+    assert "HTTP 403" in source.error_message
+    assert "code=30" in source.error_message
