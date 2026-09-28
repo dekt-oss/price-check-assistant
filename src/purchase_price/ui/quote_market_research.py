@@ -183,6 +183,33 @@ def _clear_item_failure(state: QuoteReviewState, index: int, stage: str) -> None
         state.item_research_failures.pop(index, None)
 
 
+def _quote_processing_counts(state: QuoteReviewState) -> tuple[int, int, int, int]:
+    total = len(state.items)
+    partial_failure = len(state.item_research_failures)
+    completed = sum(
+        1
+        for index in range(total)
+        if index in state.track_b_db and index not in state.item_research_failures
+    )
+    pending = max(total - completed - partial_failure, 0)
+    return total, completed, partial_failure, pending
+
+
+def _retry_failed_stage(state: QuoteReviewState, index: int, stage: str) -> None:
+    if stage == "나라장터 가격":
+        state.track_b_db.pop(index, None)
+        state.mfds_workspace.pop(index, None)
+    elif stage == "식약처":
+        state.mfds_workspace.pop(index, None)
+    elif stage == "추가 공개자료":
+        state.search_runs.pop(index, None)
+        state.discoveries.pop(index, None)
+        state.market_bundles.pop(index, None)
+    else:
+        return
+    _clear_item_failure(state, index, stage)
+
+
 def _invalidate_item_review(state: QuoteReviewState, index: int) -> None:
     state.item_confirmed[index] = False
     state.item_notes.pop(index, None)
@@ -622,6 +649,18 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
     _ensure_mfds_workspace(state)
     render_purchase_review_summary(state)
 
+    total, completed, partial_failure, pending = _quote_processing_counts(state)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("전체 품목", f"{total}건")
+    c2.metric("정상 처리", f"{completed}건")
+    c3.metric("부분 실패", f"{partial_failure}건")
+    c4.metric("대기", f"{pending}건")
+    if partial_failure:
+        st.caption(
+            "부분 실패 품목이 있어도 성공한 품목 결과는 유지됩니다. "
+            "아래에서 실패 Source만 선택해 다시 조사할 수 있습니다."
+        )
+
     st.subheader("가격 · 거래 이력")
     for index in range(len(state.items)):
         _render_item_result(state, index)
@@ -678,7 +717,23 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
             "일부 품목 조사에 실패했지만 성공한 품목의 결과는 유지했습니다. "
             "실패 품목: " + ", ".join(str(index + 1) for index in failed_items)
         )
-        if st.button("실패 품목만 다시 조사", key="quote_retry_failed_items"):
+        with st.expander("실패 Source별 재시도", expanded=True):
+            for index in failed_items:
+                item = state.items[index]
+                label = item.product_name or item.model_name or f"품목 {index + 1}"
+                st.markdown(f"**{index + 1}. {label}**")
+                failures = dict(state.item_research_failures.get(index, {}))
+                retry_columns = st.columns(max(len(failures), 1))
+                for column, (stage, error_type) in zip(retry_columns, failures.items()):
+                    column.caption(f"{stage} · {error_type}")
+                    if column.button(
+                        f"{stage} 다시 조사",
+                        key=f"quote_retry_{index}_{stage}",
+                        use_container_width=True,
+                    ):
+                        _retry_failed_stage(state, index, stage)
+                        st.rerun()
+        if st.button("실패 품목 전체 다시 조사", key="quote_retry_failed_items"):
             for index in failed_items:
                 state.track_b_db.pop(index, None)
                 state.mfds_workspace.pop(index, None)
