@@ -23,7 +23,7 @@ def test_manual_safety_state_preserves_exact_verification_keys() -> None:
         "식약처 품목번호: 수허 24-1",
         "식약처 품목번호: 제허 25-2",
     )
-    assert "안전하다는 뜻" in state.message
+    assert "공식 안전정보 확인 결과가 아닙니다" in state.message
 
 
 def test_manual_safety_state_without_identity_is_not_connected() -> None:
