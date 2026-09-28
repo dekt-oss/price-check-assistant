@@ -42,6 +42,7 @@ def test_direct_transaction_row_exposes_v3_price_evidence_fields() -> None:
     row = rows[0]
     assert row["가격"] == "450원"
     assert row["단가구분"] == "원문 단가"
+    assert row["단가근거"] == "Source 원문 단가"
     assert row["단위"] == "개"
     assert row["포장입수"] == "미확인"
     assert row["수량"] == "100"
@@ -73,3 +74,4 @@ def test_transaction_row_can_render_calculated_unit_price_basis() -> None:
     row = direct_transaction_rows(result)[0]
 
     assert row["단가구분"] == "계산단가"
+    assert row["단가근거"] == "거래총액 1,000원 ÷ 수량 10"
