@@ -32,3 +32,15 @@ def test_conflicting_official_identifiers_fail_closed_even_when_names_match() ->
 
     assert result.status == CompanyIdentityStatus.DIFFERENT
     assert result.confirmed_same is False
+
+
+def test_incomplete_business_identifier_never_confirms_same_company() -> None:
+    result = compare_company_identity(
+        left_name="주식회사 워터맨하우스",
+        right_name="(주)워터맨하우스",
+        left_business_id="123-45",
+        right_business_id="12345",
+    )
+
+    assert result.status == CompanyIdentityStatus.NAME_SIMILAR_UNCONFIRMED
+    assert result.confirmed_same is False
