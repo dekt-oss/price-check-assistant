@@ -20,17 +20,20 @@ def test_track_b_snapshot_reuses_one_pointer_engine_and_session(monkeypatch, tmp
     path_calls = 0
     engine_calls = 0
 
-    def fake_local_index_path(_settings):
+    def fake_local_index_snapshot(_settings):
         nonlocal path_calls
         path_calls += 1
-        return db_path
+        return db_path, {
+            "data_as_of": "2026-09-27",
+            "updated_at": "2026-09-28T00:30:00+00:00",
+        }
 
     def counted_create_engine(*args, **kwargs):
         nonlocal engine_calls
         engine_calls += 1
         return sqlalchemy_create_engine(*args, **kwargs)
 
-    monkeypatch.setattr(module, "_local_index_path", fake_local_index_path)
+    monkeypatch.setattr(module, "_local_index_snapshot", fake_local_index_snapshot)
     monkeypatch.setattr(module, "create_engine", counted_create_engine)
 
     with module.open_track_b_serving_snapshot(settings=FakeSettings()) as snapshot:
@@ -45,6 +48,8 @@ def test_track_b_snapshot_reuses_one_pointer_engine_and_session(monkeypatch, tmp
 
     assert path_calls == 1
     assert engine_calls == 1
+    assert snapshot.data_as_of == "2026-09-27"
+    assert snapshot.index_updated_at == "2026-09-28T00:30:00+00:00"
     assert first.status == "not_ingested"
     assert second.status == "not_ingested"
     assert snapshot.session is None
