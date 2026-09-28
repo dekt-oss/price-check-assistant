@@ -32,7 +32,7 @@ from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
     parse_purchase_workspace_handoff,
 )
-from purchase_price.services.track_b_r2_quote_index import lookup_track_b_quote_from_r2
+from purchase_price.services.track_b_r2_quote_index import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
     interpret_unified_search,
@@ -132,7 +132,12 @@ def _split_transaction_rows_compat(track_b: object) -> tuple[list[dict[str, obje
     return direct, references
 
 
-def _build_mfds_procurement_crosslinks(records, *, limit: int = 25) -> list[dict[str, object]]:
+def _build_mfds_procurement_crosslinks(
+    records,
+    *,
+    track_b_snapshot,
+    limit: int = 25,
+) -> list[dict[str, object]]:
     unique: dict[tuple[str, str, str], object] = {}
     for item in records:
         model = str(getattr(item, "model_name", "") or "").strip()
@@ -150,7 +155,7 @@ def _build_mfds_procurement_crosslinks(records, *, limit: int = 25) -> list[dict
         model = str(getattr(item, "model_name", "") or "").strip()
         product = str(getattr(item, "product_name", "") or "").strip()
         company = str(getattr(item, "registered_company", "") or "").strip()
-        comparison = lookup_track_b_quote_from_r2(
+        comparison = track_b_snapshot.lookup(
             ProductQuery(
                 product_name=product,
                 model_name=model,
@@ -301,57 +306,64 @@ def _execute_search(
         raise ValueError("검색조건을 확인하세요.")
     query = review_input.to_product_query()
 
-    track_b = lookup_track_b_quote_from_r2(query, quote_unit_price=review_input.quote_unit_price)
     model_probe_used = False
-    if (
-        raw_search
-        and not interpretation.model_name
-        and not product_name.strip()
-        and track_b.status == "success_0"
-    ):
-        model_probe_input = build_purchase_review_input(
-            product_name=raw_search,
-            manufacturer=resolved_manufacturer,
-            model_name=raw_search,
-            specification=resolved_specification,
-            quote_unit_price=quote,
+    with open_track_b_serving_snapshot() as track_b_snapshot:
+        track_b = track_b_snapshot.lookup(
+            query,
+            quote_unit_price=review_input.quote_unit_price,
         )
-        if model_probe_input is not None:
-            model_probe_query = model_probe_input.to_product_query()
-            model_probe = lookup_track_b_quote_from_r2(
-                model_probe_query,
-                quote_unit_price=model_probe_input.quote_unit_price,
+        if (
+            raw_search
+            and not interpretation.model_name
+            and not product_name.strip()
+            and track_b.status == "success_0"
+        ):
+            model_probe_input = build_purchase_review_input(
+                product_name=raw_search,
+                manufacturer=resolved_manufacturer,
+                model_name=raw_search,
+                specification=resolved_specification,
+                quote_unit_price=quote,
             )
-            if has_transaction_candidates(model_probe):
-                track_b = model_probe
-                query = model_probe_query
-                model_probe_used = True
+            if model_probe_input is not None:
+                model_probe_query = model_probe_input.to_product_query()
+                model_probe = track_b_snapshot.lookup(
+                    model_probe_query,
+                    quote_unit_price=model_probe_input.quote_unit_price,
+                )
+                if has_transaction_candidates(model_probe):
+                    track_b = model_probe
+                    query = model_probe_query
+                    model_probe_used = True
+
+        identity_product = (
+            indexed_identity.product_names[0]
+            if isinstance(indexed_identity, MfdsIdentityLookup)
+            and len(indexed_identity.product_names) == 1
+            else resolved_product
+        )
+        exact_identity_records = (
+            indexed_identity.records
+            if isinstance(indexed_identity, MfdsIdentityLookup)
+            and indexed_identity.status == "success"
+            and indexed_identity.match_type == "permit"
+            else ()
+        )
+        exact_identity_crosslinks = _build_mfds_procurement_crosslinks(
+            exact_identity_records,
+            track_b_snapshot=track_b_snapshot,
+            limit=25,
+        )
+        same_product_identity = (
+            lookup_same_mfds_product_from_r2(identity_product) if identity_product else ()
+        )
+        mfds_procurement_crosslinks = _build_mfds_procurement_crosslinks(
+            same_product_identity,
+            track_b_snapshot=track_b_snapshot,
+            limit=25,
+        )
 
     mfds = research_mfds_for_workspace(query, track_b)
-    identity_product = (
-        indexed_identity.product_names[0]
-        if isinstance(indexed_identity, MfdsIdentityLookup)
-        and len(indexed_identity.product_names) == 1
-        else resolved_product
-    )
-    exact_identity_records = (
-        indexed_identity.records
-        if isinstance(indexed_identity, MfdsIdentityLookup)
-        and indexed_identity.status == "success"
-        and indexed_identity.match_type == "permit"
-        else ()
-    )
-    exact_identity_crosslinks = _build_mfds_procurement_crosslinks(
-        exact_identity_records,
-        limit=25,
-    )
-    same_product_identity = (
-        lookup_same_mfds_product_from_r2(identity_product) if identity_product else ()
-    )
-    mfds_procurement_crosslinks = _build_mfds_procurement_crosslinks(
-        same_product_identity,
-        limit=25,
-    )
 
     run, discovery, market_bundle = run_market_research(
         query,
