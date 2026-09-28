@@ -18,6 +18,12 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert '"설치·운송 등 조건"' in source
     assert "build_quote_position_message" in source
     assert "MFDS_PRODUCT_INFO_DATASET_URL" in source
+    assert '"route": "candidate_selection"' in source
+    assert "_render_identity_candidate_selection" in source
+    assert "_ambiguous_identity_candidates" in source
+    assert "IdentityEvidenceStatus.AMBIGUOUS" in source
+    assert "동일 모델명이 여러 식약처 품목번호" in source
+    assert "후보 선택 전에는 나라장터 직접가격을 특정 제품의 가격으로 연결하지 않습니다." in source
     assert '"원문근거해시"' in source
     assert '"💰 가격 비교"' in source
     assert '"🏢 업체·조달"' in source
