@@ -469,7 +469,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
     st.info(
         "Safety 자동조회는 아직 공식 회수·판매중지 API 연결 전입니다. "
-        "현재 화면에 경고가 없다는 사실을 '안전함'으로 해석하지 않습니다."
+        "현재 화면에 경고가 없더라도 공식 안전정보 확인을 대체하지 않습니다."
     )
 
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
@@ -623,7 +623,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         elif stats.reference_count:
             st.warning(
                 f"직접 비교 가능한 A/B 거래는 없고 참고거래가 {stats.reference_count}건 있습니다. "
-                "참고가격은 적정가격 범위에 합산하지 않습니다."
+                "참고가격은 A/B 직접가격 범위에 포함하지 않습니다."
             )
         elif stats.research_count:
             st.info(
