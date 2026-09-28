@@ -524,8 +524,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
             "직접가격 범위",
             f"{stats.min_price:,.0f} ~ {stats.max_price:,.0f}원",
         )
+    elif getattr(track_b, "evidence_status", None) == PriceEvidenceStatus.UNAVAILABLE:
+        c2.metric("직접가격 범위", "조회 불가")
     else:
-        c2.metric("직접가격 범위", "근거 없음")
+        c2.metric("직접가격 범위", "직접근거 미확인")
     c3.metric("실제 조달 공급업체", f"{stats.supplier_count}개")
 
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
@@ -571,7 +573,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     if item.permit_date is not None
                 }
             )
-            i3.caption("허가일")
+            i3.caption("식약처 처리일")
             i3.write(" / ".join(permit_dates) or "미확인")
 
     if (
@@ -610,7 +612,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     if stats.direct_count:
         st.success(
             "A/B 동일성 확인 거래만 직접가격 범위에 포함했습니다. "
-            "수량·총액·규격·납품조건은 거래가격 탭에서 확인하세요."
+            "수량·총액·규격·납품조건은 가격 비교 영역에서 확인하세요."
         )
     elif stats.reference_count:
         st.warning(
@@ -647,7 +649,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
         key for key, label in WORKSPACE_VIEWS.items() if label == selected_label
     )
     st.session_state[HOME_WORKSPACE_VIEW_KEY] = selected_view
-    st.query_params["view"] = selected_view
+    if str(st.query_params.get("view") or "") != selected_view:
+        st.query_params["view"] = selected_view
 
     if selected_view == "price":
         st.markdown("#### 나라장터 동일제품 직접거래")
@@ -880,8 +883,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 "A/B 동일제품으로 확인된 나라장터 납품요구의 공급업체만 집계합니다. "
                 "한 번의 납품실적이 공식 총판관계를 의미하지는 않습니다."
             )
+        elif getattr(track_b, "evidence_status", None) == PriceEvidenceStatus.UNAVAILABLE:
+            st.warning("나라장터 가격 인덱스를 조회할 수 없어 조달 납품업체 상태를 확인하지 못했습니다.")
         else:
-            st.info("A/B 동일제품 기준으로 확인된 조달 공급업체가 없습니다.")
+            st.info("직접 동일성 확인 거래 기준 조달 납품업체 0개입니다.")
 
         if isinstance(mfds, MfdsWorkspaceResult) and mfds.business_records:
             st.markdown("#### 식약처 업허가 교차확인")
@@ -934,7 +939,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         elif same_product_identity:
             st.info("동일품목 등록정보는 있으나 모델 기준 나라장터 교차조회 결과를 만들 수 없습니다.")
         else:
-            st.caption("식약처 누적 인덱스가 채워지면 허가별 모델·등록업체·나라장터 직접가격을 연결합니다.")
+            st.caption("식약처 누적 인덱스가 채워지면 품목번호별 모델·품목 책임주체·나라장터 직접가격을 연결합니다.")
 
         st.markdown("#### 식약처 live 동일품목 등록장비")
         if isinstance(mfds, MfdsWorkspaceResult) and mfds.active_competitor_records:
@@ -1028,6 +1033,26 @@ if handoff is not None:
             status.update(label="견적 품목 구매조사 완료", state="complete")
     except ValueError as exc:
         st.warning(f"견적 품목 연결 실패: {exc}")
+
+search_state = st.session_state.get(HOME_SEARCH_STATE_KEY)
+shared_query = str(st.query_params.get("q") or "").strip()
+if not isinstance(search_state, dict) and shared_query and handoff is None:
+    try:
+        with st.status("공유된 검색조건을 복원하고 있습니다...", expanded=False) as status:
+            search_state = _execute_search(
+                search_text=shared_query,
+                product_name="",
+                manufacturer="",
+                model_name="",
+                specification="",
+                quote_text="",
+                lookback_days=G2B_DEFAULT_LOOKBACK_DAYS,
+            )
+            st.session_state[HOME_SEARCH_STATE_KEY] = search_state
+            status.update(label="검색결과 복원 완료", state="complete")
+            st.rerun()
+    except ValueError as exc:
+        st.warning(f"공유된 검색조건을 복원하지 못했습니다: {exc}")
 
 search_state = st.session_state.get(HOME_SEARCH_STATE_KEY)
 result_mode = isinstance(search_state, dict)
