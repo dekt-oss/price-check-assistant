@@ -20,6 +20,7 @@ def build_plan(
 ) -> dict[str, object]:
     status = get_mfds_identity_collection_status()
     plan = choose_mfds_collection_plan(
+        status=status.status,
         complete_cycles=status.complete_cycles,
         event_name=event_name,
         schedule=schedule,

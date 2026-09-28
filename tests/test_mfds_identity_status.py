@@ -115,3 +115,17 @@ def test_collection_status_derives_progress_from_legacy_cursor_state() -> None:
     assert status.cycle_rows_seen == 280000
     assert status.progress_percent is not None
     assert 10.3 < status.progress_percent < 10.4
+
+
+
+def test_collection_plan_fails_closed_when_operational_state_is_unavailable() -> None:
+    plan = choose_mfds_collection_plan(
+        status="unavailable",
+        complete_cycles=0,
+        event_name="schedule",
+        schedule="23 0 * * *",
+    )
+
+    assert plan.mode == "state_unknown"
+    assert plan.chunks == 0
+    assert "fail closed" in plan.reason

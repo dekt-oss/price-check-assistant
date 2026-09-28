@@ -534,6 +534,10 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
         type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg"],
         key="quote_auto_market_upload",
     )
+    st.caption(
+        "보안: 원본은 파싱용 임시파일로만 처리 후 삭제합니다. "
+        "현재 견적 추출은 로컬 파서/Tesseract를 사용하며 원문·OCR 텍스트를 외부 AI API로 전송하지 않습니다."
+    )
     if uploaded is not None and (state.file_name != uploaded.name or state.extraction is None):
         _store_extraction(uploaded, state)
         state.lookback_days = G2B_DEFAULT_LOOKBACK_DAYS

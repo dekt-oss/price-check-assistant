@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from time import perf_counter
 
 import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from purchase_price.db import Base
+from purchase_price.domain import MatchGrade, PriceEvidenceStatus
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
 from purchase_price.scripts.validate_g2b_track_b_db_live import _find_comparison_case
@@ -15,6 +17,7 @@ from purchase_price.services.g2b_track_b_normalization import (
     TrackBRawPage,
 )
 from purchase_price.services.track_b_db_quote_comparison import (
+    compare_track_b_models_batch,
     compare_track_b_quote,
     ingest_track_b_page,
     lookup_track_b_quote,
@@ -89,6 +92,7 @@ def test_upload_comparison_uses_only_latest_explicit_unit_price(session: Session
     result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
 
     assert result.status == "success"
+    assert result.evidence_status == PriceEvidenceStatus.FOUND
     assert len(result.candidates) == 1
     assert result.candidates[0].price == Decimal("90")
     assert result.candidates[0].delta_percent == Decimal("11.1")
@@ -136,8 +140,27 @@ def test_cross_page_non_serving_field_change_is_semantic_replay(session: Session
     assert replay.replayed == 1
 
 
-def test_missing_or_zero_unit_price_is_not_displayed(session: Session) -> None:
+def test_missing_source_unit_price_uses_labeled_calculation_and_caps_grade(session: Session) -> None:
+    ingest_track_b_page(session, _page([_item(price=None)]))
+    session.commit()
+
+    result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
+
+    assert result.status == "success"
+    assert result.evidence_status == PriceEvidenceStatus.FOUND
+    assert len(result.candidates) == 1
+    candidate = result.candidates[0]
+    assert candidate.price == Decimal("90")
+    assert candidate.unit_price_basis.value == "calculated_unit_price"
+    assert candidate.match_grade == MatchGrade.B
+    assert "calculated_unit_price_caps_grade_at_b" in candidate.match_note
+
+
+def test_missing_or_zero_unit_price_without_calculation_evidence_is_not_displayed(
+    session: Session,
+) -> None:
     missing = _item(price=None)
+    missing["prdctAmt"] = ""
     zero = _item(change="01", price="0")
     ingest_track_b_page(session, _page([missing, zero]))
     session.commit()
@@ -145,7 +168,49 @@ def test_missing_or_zero_unit_price_is_not_displayed(session: Session) -> None:
     result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
 
     assert result.status == "success_0"
+    assert result.evidence_status == PriceEvidenceStatus.ZERO
     assert result.candidates == ()
+
+
+def test_multi_model_shell_batches_50_models_in_one_select(session: Session) -> None:
+    items: list[dict[str, str]] = []
+    queries: list[ProductQuery] = []
+    for sequence in range(1, 51):
+        model = f"MA-{sequence:04d}"
+        item = _item(title=f"제습기, 나우이엘, {model}, 45L/d")
+        item["prdctSno"] = str(sequence)
+        items.append(item)
+        queries.append(
+            ProductQuery(
+                product_name="제습기",
+                manufacturer="나우이엘",
+                model_name=model,
+                specification="45L/d",
+            )
+        )
+    ingest_track_b_page(session, _page(items))
+    session.commit()
+
+    selects = 0
+
+    def count_selects(_conn, _cursor, statement, _parameters, _context, _executemany) -> None:
+        nonlocal selects
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects += 1
+
+    event.listen(session.bind, "before_cursor_execute", count_selects)
+    started = perf_counter()
+    try:
+        results = compare_track_b_models_batch(session, tuple(queries))
+    finally:
+        elapsed = perf_counter() - started
+        event.remove(session.bind, "before_cursor_execute", count_selects)
+
+    assert elapsed < 5.0
+    assert len(results) == 50
+    assert all(result.evidence_status == PriceEvidenceStatus.FOUND for result in results)
+    assert all(len(result.candidates) == 1 for result in results)
+    assert selects == 1
 
 
 def test_model_prefix_is_not_promoted_to_price_comparison(session: Session) -> None:
@@ -201,13 +266,19 @@ def test_ingest_batches_existing_identity_queries(session: Session) -> None:
     assert selects <= 2
 
 
-def test_latest_change_without_unit_price_suppresses_older_price(session: Session) -> None:
+def test_latest_change_without_source_price_uses_latest_calculation_not_older_price(
+    session: Session,
+) -> None:
     ingest_track_b_page(session, _page([_item(change="00", price="80")]))
     ingest_track_b_page(session, _page([_item(change="01", price=None)]))
     session.commit()
 
     result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
-    assert result.status == "success_0"
+
+    assert result.status == "success"
+    assert len(result.candidates) == 1
+    assert result.candidates[0].price == Decimal("90")
+    assert result.candidates[0].unit_price_basis.value == "calculated_unit_price"
 
 
 def test_numeric_change_order_collision_is_explicit(session: Session) -> None:
@@ -223,6 +294,7 @@ def test_missing_db_is_unavailable_not_zero_results(monkeypatch) -> None:
     monkeypatch.setattr(db, "SessionLocal", lambda: Session(engine))
     result = lookup_track_b_quote(_query(), quote_unit_price=Decimal("100"))
     assert result.status == "unavailable"
+    assert result.evidence_status == PriceEvidenceStatus.UNAVAILABLE
     engine.dispose()
 
 
@@ -305,3 +377,29 @@ def test_verified_ft10_order_code_alias_is_retrieved_as_direct_b(session: Sessio
     assert result.candidates[0].match_grade.value == "B"
     assert "verified_alias_with_verified_origin" in result.candidates[0].match_note
     assert "Covidien" in result.candidates[0].product_title
+
+
+
+def test_unit_unknown_caps_direct_match_at_b(session: Session) -> None:
+    item = _item()
+    item.pop("prdctUnit", None)
+    ingest_track_b_page(session, _page([item]))
+    session.commit()
+
+    result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
+
+    assert result.evidence_status == PriceEvidenceStatus.FOUND
+    assert len(result.candidates) == 1
+    assert result.candidates[0].match_grade == MatchGrade.B
+    assert "unit_unknown_caps_grade_at_b" in result.candidates[0].match_note
+
+
+def test_comparison_exposes_search_keys_used_for_zero_decision(session: Session) -> None:
+    ingest_track_b_page(session, _page([_item(title="제습기, 나우이엘, OTHER-MODEL, 45L/d")]))
+    session.commit()
+
+    result = compare_track_b_quote(session, _query(), quote_unit_price=None)
+
+    assert result.evidence_status == PriceEvidenceStatus.ZERO
+    assert "모델: MA-045DT" in result.search_keys
+    assert "품목: 제습기" in result.search_keys

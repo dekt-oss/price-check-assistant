@@ -4,6 +4,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from purchase_price.domain import SafetyEvidenceStatus
+
 MFDS_RECALL_PAGE_URL = "https://emedi.mfds.go.kr/recall/MNU20265"
 MFDS_ADMIN_SANCTION_PAGE_URL = "https://emedi.mfds.go.kr/disps/MNU20266"
 MFDS_SAFETY_LETTER_PAGE_URL = "https://emedi.mfds.go.kr/safeLet/safetyLttr/MNU20261"
@@ -26,13 +28,29 @@ class SafetyCheckState:
     message: str
     model_name: str = ""
     permit_numbers: tuple[str, ...] = ()
+    semantic_status: SafetyEvidenceStatus | None = None
+    checked_at: str | None = None
+    source_url: str | None = None
+    lot_scope: str | None = None
+
+    @property
+    def evidence_status(self) -> SafetyEvidenceStatus:
+        if self.semantic_status is not None:
+            return self.semantic_status
+        return {
+            SafetyCheckStatus.NOT_CONNECTED: SafetyEvidenceStatus.NOT_CONNECTED,
+            SafetyCheckStatus.CHECK_REQUIRED: SafetyEvidenceStatus.NOT_CONNECTED,
+            SafetyCheckStatus.MATCH: SafetyEvidenceStatus.RED,
+            SafetyCheckStatus.NO_MATCH: SafetyEvidenceStatus.CHECKED_NONE,
+            SafetyCheckStatus.ERROR: SafetyEvidenceStatus.CHECK_FAILED,
+        }[self.status]
 
     @property
     def search_keys(self) -> tuple[str, ...]:
         keys: list[str] = []
         if self.model_name:
             keys.append(f"모델명: {self.model_name}")
-        keys.extend(f"허가번호: {number}" for number in self.permit_numbers)
+        keys.extend(f"식약처 품목번호: {number}" for number in self.permit_numbers)
         return tuple(keys)
 
 
@@ -67,9 +85,9 @@ def build_manual_safety_check_state(
         return SafetyCheckState(
             status=SafetyCheckStatus.CHECK_REQUIRED,
             message=(
-                "회수·판매중지 자동 API는 아직 연결하지 않았습니다. 아래 exact 모델/허가번호를 "
+                "회수·판매중지 자동 API는 아직 연결하지 않았습니다. 아래 exact 모델/식약처 품목번호를 "
                 "기준으로 식약처 공식 회수·판매중지, 행정처분, 안전성서한을 직접 확인하세요. "
-                "자동조회 미연결 상태를 안전하다는 뜻으로 해석하지 않습니다."
+                "자동조회 미연결 상태는 공식 안전정보 확인 결과가 아닙니다."
             ),
             model_name=model,
             permit_numbers=permits,
@@ -77,14 +95,39 @@ def build_manual_safety_check_state(
     return SafetyCheckState(
         status=SafetyCheckStatus.NOT_CONNECTED,
         message=(
-            "회수·판매중지 자동 API는 아직 연결하지 않았고 exact 모델/허가번호도 확보되지 "
+            "회수·판매중지 자동 API는 아직 연결하지 않았고 exact 모델/식약처 품목번호도 확보되지 "
             "않았습니다. 제품 identity를 먼저 확인한 뒤 공식 안전정보를 검토해야 합니다."
         ),
     )
 
 
+def related_safety_state(
+    *,
+    message: str,
+    model_name: str = "",
+    permit_numbers: Iterable[str] = (),
+    checked_at: str | None = None,
+    source_url: str | None = None,
+) -> SafetyCheckState:
+    """Represent related safety information that is not an exact product action."""
+
+    return SafetyCheckState(
+        status=SafetyCheckStatus.CHECK_REQUIRED,
+        message=message,
+        semantic_status=SafetyEvidenceStatus.AMBER,
+        model_name=str(model_name or "").strip(),
+        permit_numbers=_unique_text(permit_numbers),
+        checked_at=checked_at,
+        source_url=source_url,
+    )
+
+
 def no_match_safety_state(
-    *, model_name: str = "", permit_numbers: Iterable[str] = ()
+    *,
+    model_name: str = "",
+    permit_numbers: Iterable[str] = (),
+    checked_at: str | None = None,
+    source_url: str | None = None,
 ) -> SafetyCheckState:
     """Future adapter result wording for a successful official query with zero exact matches."""
 
@@ -93,4 +136,6 @@ def no_match_safety_state(
         message="현재 연결된 공식 안전정보에서 일치 항목을 확인하지 못함",
         model_name=str(model_name or "").strip(),
         permit_numbers=_unique_text(permit_numbers),
+        checked_at=checked_at,
+        source_url=source_url,
     )

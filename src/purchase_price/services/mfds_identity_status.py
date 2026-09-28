@@ -159,6 +159,7 @@ def get_mfds_identity_collection_status(
 
 def choose_mfds_collection_plan(
     *,
+    status: str = "available",
     complete_cycles: int,
     event_name: str,
     schedule: str | None,
@@ -169,6 +170,15 @@ def choose_mfds_collection_plan(
     chunks = max(int(requested_chunks), 1)
     pages = max(int(requested_pages_per_chunk), 1)
     rows = max(int(requested_rows_per_page), 1)
+
+    if status == "unavailable":
+        return MfdsCollectionPlan(
+            mode="state_unknown",
+            chunks=0,
+            pages_per_chunk=pages,
+            rows_per_page=rows,
+            reason="MFDS operational state is unavailable; fail closed without collection",
+        )
 
     if complete_cycles < 1:
         return MfdsCollectionPlan(

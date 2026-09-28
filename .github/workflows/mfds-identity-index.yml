@@ -157,6 +157,11 @@ jobs:
               print("collection_mode=", plan.get("collection_mode"))
               print("collection_reason=", plan.get("reason"))
               print("planned_chunks=", plan.get("chunks"))
+              if plan.get("collection_mode") == "state_unknown":
+                  print(
+                      "::warning::MFDS operational state could not be read; "
+                      "collection was skipped fail-closed."
+                  )
 
           files = sorted(Path("artifacts/mfds-identity").glob("sync-*.json"))
           if not files:

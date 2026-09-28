@@ -30,10 +30,10 @@ from purchase_price.services.safety_support import (
 )
 from purchase_price.services.search import search_all
 
-st.set_page_config(page_title="의료기기 안전·공급사", page_icon="🛡️", layout="wide")
-st.title("의료기기 안전·공급사 확인")
+st.set_page_config(page_title="의료기기 안전·업체·조달", page_icon="🛡️", layout="wide")
+st.title("의료기기 안전·업체·조달 확인")
 st.caption(
-    "식약처 exact identity, 나라장터 실제 납품업체, 식약처 업허가 업체와 공식 안전정보 확인 경로를 "
+    "식약처 exact identity, 나라장터 실제 납품업체, 식약처 업 허가·신고 업체와 공식 안전정보 확인 경로를 "
     "한 화면에서 검토합니다. 현재 회수·판매중지 API는 request contract 확인 전까지 자동조회하지 않습니다."
 )
 
@@ -45,12 +45,12 @@ c1, c2 = st.columns(2)
 c1.caption("식약처 API: " + ("설정됨" if mfds_service_key else "미설정"))
 c2.caption("나라장터 API: " + ("설정됨" if g2b_service_key else "미설정"))
 
-with st.expander("이 화면에서 확인하는 근거의 우선순위", expanded=False):
+with st.expander("이 화면에서 확인하는 서로 다른 근거 역할", expanded=False):
     st.markdown(
         """
-1. **나라장터 실제 공개 납품업체** — verified exact-model 근거가 있을 때만 자동 연결
-2. **식약처 의료기기 업허가 업체** — 제조·수입·판매 등 업허가 확인 근거이며 특정 모델의 공식 총판을 의미하지 않음
-3. **웹 공급사 후보** — 보조 탐색이며 반드시 별도 공식 근거 확인 필요
+1. **조달 계약·납품 실적 업체** — verified exact-model 근거가 있을 때만 자동 연결
+2. **식약처 업 허가·신고 확인** — 의료기기 취급 자격 근거이며 특정 모델의 공급·총판 관계를 의미하지 않음
+3. **웹 판매처 Research** — 보조 탐색이며 반드시 별도 공식 근거 확인 필요
 
 Safety는 별도 축입니다. 회수·판매중지/행정처분/안전성서한은 가격이 싸더라도 우선 확인해야 하며,
 현재 자동 API가 미연결인 상태를 `안전`으로 해석하지 않습니다.
@@ -63,9 +63,9 @@ with st.form("device-safety-supplier-review"):
         product_name = st.text_input("식약처 품목명", placeholder="예: 심장충격기")
         model_name = st.text_input("모델명", placeholder="예: Efficia DFM100")
     with c2:
-        permit_number = st.text_input("품목허가번호 (선택)", placeholder="식약처 확인값이 있으면 입력")
+        permit_number = st.text_input("식약처 품목번호 (선택)", placeholder="허가·인증·신고 번호를 입력")
         company_name = st.text_input(
-            "확인할 제조·수입·공급업체명 (선택)", placeholder="예: ○○메디칼"
+            "확인할 업체명 (선택)", placeholder="예: ○○메디칼"
         )
     g2b_lookback_days = st.selectbox(
         "나라장터 공급실적 검색기간",
@@ -74,13 +74,13 @@ with st.form("device-safety-supplier-review"):
         format_func=lambda days: f"최근 {days}일",
         disabled=not bool(g2b_service_key),
     )
-    submitted = st.form_submit_button("안전·공급사 확인", type="primary")
+    submitted = st.form_submit_button("안전·업체·조달 확인", type="primary")
 
 if submitted:
     if not any(
         value.strip() for value in (product_name, model_name, permit_number, company_name)
     ):
-        st.warning("품목명·모델명·허가번호·업체명 중 하나 이상 입력하세요.")
+        st.warning("품목명·모델명·식약처 품목번호·업체명 중 하나 이상 입력하세요.")
         st.stop()
 
     exact_matches = ()
@@ -91,7 +91,7 @@ if submitted:
     if permit_number.strip():
         permit_numbers.append(permit_number.strip())
 
-    st.subheader("1. 공식 identity 및 공급사 근거")
+    st.subheader("1. 공식 identity 및 업체·조달 근거")
 
     if product_name.strip() and mfds_service_key:
         model_client = MfdsModelInfoClient(
@@ -124,8 +124,8 @@ if submitted:
                         "품목명": item.product_name or "",
                         "모델/형명": item.model_name or "",
                         "상품명": item.trade_name or "",
-                        "허가번호": item.permit_number or "",
-                        "허가구분": item.permission_type or "",
+                        "식약처 품목번호": item.permit_number or "",
+                        "품목구분": item.permission_type or "",
                         "현재 국내후보": "예" if item.active_for_domestic_candidate else "아니오",
                     }
                     for item in exact_matches
@@ -133,7 +133,7 @@ if submitted:
                 st.dataframe(pd.DataFrame(identity_rows), use_container_width=True, hide_index=True)
                 if exact_ambiguous:
                     st.warning(
-                        "동일 exact 모델이 둘 이상의 품목허가번호에 연결되어 자동 교차연결을 보류합니다."
+                        "동일 exact 모델이 둘 이상의 식약처 품목번호에 연결되어 자동 교차연결을 보류합니다."
                     )
                 elif active_exact_matches:
                     st.success("식약처 동일 품목 결과 안에서 입력 모델의 exact identity를 확인했습니다.")
@@ -182,12 +182,12 @@ if submitted:
         try:
             businesses = business_client.search_company(company_name.strip())
         except (PublicDataClientError, ValueError) as exc:
-            st.error(f"식약처 업체 업허가 조회 실패: {exc}")
+            st.error(f"식약처 업체 업 허가·신고 조회 실패: {exc}")
         mfds_suppliers = extract_mfds_business_supplier_candidates(businesses)
 
-    st.markdown("#### 공급사 근거 우선순위")
+    st.markdown("#### 업체·조달 근거 역할")
     if g2b_suppliers:
-        st.markdown("**① 나라장터 · 실제 공개 납품업체**")
+        st.markdown("**나라장터 · 조달 계약·납품 실적 업체**")
         st.dataframe(
             pd.DataFrame(
                 [
@@ -206,10 +206,10 @@ if submitted:
         if identity_ready_for_g2b:
             st.info("현재 verified 나라장터 공급실적에서 실제 납품업체 근거를 확인하지 못했습니다.")
         else:
-            st.info("나라장터 공급업체 자동연결은 식약처 active exact identity가 단일하게 확인될 때만 실행합니다.")
+            st.info("나라장터 납품업체 자동연결은 식약처 active exact identity가 단일하게 확인될 때만 실행합니다.")
 
     if mfds_suppliers:
-        st.markdown("**② 식약처 · 의료기기 업허가 업체**")
+        st.markdown("**식약처 · 업 허가·신고 확인**")
         st.dataframe(
             pd.DataFrame(
                 [
@@ -225,9 +225,9 @@ if submitted:
             hide_index=True,
         )
     elif company_name.strip() and mfds_service_key:
-        st.info("식약처 조회는 실행했지만 현재 사용 가능한 업허가 업체 근거를 확인하지 못했습니다.")
+        st.info("식약처 조회는 실행했지만 현재 사용 가능한 업 허가·신고 근거를 확인하지 못했습니다.")
 
-    st.markdown("**③ 웹 · 보조 공급사 탐색**")
+    st.markdown("**웹 · 일반 판매처 Research**")
     web_links = build_web_supplier_search_links(product_name, model_name)
     if web_links:
         cols = st.columns(len(web_links))
@@ -277,8 +277,8 @@ if submitted:
     st.divider()
     st.subheader("3. UDI·표준코드 identity 확장")
     st.info(
-        "식약처 표준코드별 제품정보 API는 UDI-DI, 품목명·분류번호·등급·허가번호·모델명·제품명·"
-        "제조/수입업체 등을 제공하는 공식 source입니다. 현재는 request filter 계약과 활용권한을 "
+        "식약처 표준코드별 제품정보 API는 UDI-DI, 품목명·분류번호·등급·식약처 품목번호·모델명·제품명·"
+        "품목 책임주체 정보를 제공하는 공식 source입니다. 현재는 request filter 계약과 활용권한을 "
         "완전히 검증하기 전이라 자동 모델검색에 연결하지 않았습니다."
     )
     c1, c2 = st.columns(2)
@@ -294,5 +294,5 @@ if submitted:
     )
 else:
     st.info(
-        "품목명·모델명·허가번호·업체명을 입력하면 현재 연결된 공식 근거와 Safety 확인 경로를 표시합니다."
+        "품목명·모델명·식약처 품목번호·업체명을 입력하면 현재 연결된 공식 근거와 Safety 확인 경로를 표시합니다."
     )
