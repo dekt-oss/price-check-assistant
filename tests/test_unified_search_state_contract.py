@@ -11,6 +11,14 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "_render_search_result(search_state)" in source
     assert "st.tabs(" not in source
     assert "st.segmented_control(" in source
+    assert "workspace_quote_context::" in source
+    assert '"내 견적가"' in source
+    assert '"단위"' in source
+    assert '"VAT"' in source
+    assert '"설치·운송 등 조건"' in source
+    assert "build_quote_position_message" in source
+    assert "MFDS_PRODUCT_INFO_DATASET_URL" in source
+    assert '"원문근거해시"' in source
     assert '"💰 가격 비교"' in source
     assert '"🏢 업체·조달"' in source
     assert '"🔁 동일품목 비교"' in source
