@@ -9,15 +9,23 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "st.session_state[HOME_SEARCH_STATE_KEY] = search_state" in source
     assert "search_state = st.session_state.get(HOME_SEARCH_STATE_KEY)" in source
     assert "_render_search_result(search_state)" in source
-    assert 'st.tabs(' in source
-    assert '"📚 Research·근거"' in source
-    assert '"💰 거래가격"' in source
+    assert "st.tabs(" not in source
+    assert "st.segmented_control(" in source
+    assert '"💰 가격 비교"' in source
+    assert '"🏢 업체·조달"' in source
+    assert '"🔁 동일품목 비교"' in source
+    assert '"📚 Research·근거"' not in source
     assert 'id="unified-search-runtime-v3"' in source
     assert 'id="unified-search-runtime-v4"' in source
     assert 'id="purchase-workspace-runtime-v1"' in source
     assert 'id="purchase-workspace-runtime-v2"' in source
     assert 'id="purchase-workspace-mfds-v1"' in source
     assert 'id="purchase-workspace-mfds-v2"' in source
+    assert 'id="purchase-workspace-v3-shell"' in source
+    assert 'st.query_params["q"]' in source
+    assert 'st.query_params["view"]' in source
+    assert "공유된 검색조건을 복원하고 있습니다" in source
+    assert "home_unified_search_compact" in source
     assert "research_mfds_for_workspace" in source
     assert "interpret_unified_search" in source
     assert "_render_search_interpretation" in source
