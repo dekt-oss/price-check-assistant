@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from purchase_price.evidence_domain import SafetyEvidenceStatus
+from purchase_price.services.matching import normalize_text
 
 MFDS_RECALL_PAGE_URL = "https://emedi.mfds.go.kr/recall/MNU20265"
 MFDS_ADMIN_SANCTION_PAGE_URL = "https://emedi.mfds.go.kr/disps/MNU20266"
@@ -20,6 +21,25 @@ class SafetyCheckStatus(StrEnum):
     MATCH = "공식 안전조치 일치"
     NO_MATCH = "공식 안전정보 일치 미확인"
     ERROR = "공식 안전정보 조회 실패"
+
+
+@dataclass(frozen=True)
+class MedicalDeviceRecallRecord:
+    """Normalized official recall/sale-stop record.
+
+    Network adapters must map only fields explicitly supplied by the official source.
+    Missing model/lot scope stays unknown and is never expanded by inference.
+    """
+
+    company_name: str | None = None
+    product_name: str | None = None
+    permit_number: str | None = None
+    model_name: str | None = None
+    manufacturing_number: str | None = None
+    manufacturing_date: str | None = None
+    reason: str | None = None
+    action_date: str | None = None
+    applies_to_all_models: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +137,107 @@ def related_safety_state(
         semantic_status=SafetyEvidenceStatus.AMBER,
         model_name=str(model_name or "").strip(),
         permit_numbers=_unique_text(permit_numbers),
+        checked_at=checked_at,
+        source_url=source_url,
+    )
+
+
+def evaluate_official_recall_records(
+    records: Iterable[MedicalDeviceRecallRecord],
+    *,
+    model_name: str = "",
+    permit_numbers: Iterable[str] = (),
+    checked_at: str | None = None,
+    source_url: str | None = MFDS_RECALL_DATASET_URL,
+) -> SafetyCheckState:
+    """Evaluate already-fetched official recall rows with fail-closed identity rules.
+
+    A RED state requires an exact permit match plus either an exact model match or an
+    explicit source flag saying the action applies to all models. Permit-related rows
+    with unknown/different model scope are AMBER rather than being promoted to RED.
+    Model-name-only matching is intentionally insufficient because model strings can be
+    shared across multiple permits or companies.
+    """
+
+    model = str(model_name or "").strip()
+    model_key = normalize_text(model)
+    permits = _unique_text(permit_numbers)
+    permit_keys = {normalize_text(number) for number in permits if normalize_text(number)}
+    if not permit_keys:
+        return SafetyCheckState(
+            status=SafetyCheckStatus.CHECK_REQUIRED,
+            message=(
+                "공식 회수·판매중지 조회 결과를 제품에 연결하려면 exact 식약처 품목번호가 필요합니다. "
+                "모델명만으로는 회수대상을 확정하지 않습니다."
+            ),
+            semantic_status=SafetyEvidenceStatus.AMBER,
+            model_name=model,
+            permit_numbers=permits,
+            checked_at=checked_at,
+            source_url=source_url,
+        )
+
+    related: list[MedicalDeviceRecallRecord] = []
+    exact: list[MedicalDeviceRecallRecord] = []
+    for record in records:
+        permit_key = normalize_text(record.permit_number)
+        if not permit_key or permit_key not in permit_keys:
+            continue
+        related.append(record)
+        record_model_key = normalize_text(record.model_name)
+        if record.applies_to_all_models is True:
+            exact.append(record)
+        elif model_key and record_model_key and record_model_key == model_key:
+            exact.append(record)
+
+    if exact:
+        lot_values = _unique_text(
+            record.manufacturing_number or ""
+            for record in exact
+            if record.manufacturing_number
+        )
+        action_dates = _unique_text(
+            record.action_date or ""
+            for record in exact
+            if record.action_date
+        )
+        date_text = f" · 조치일 {' / '.join(action_dates)}" if action_dates else ""
+        lot_text = (
+            f" · 제조번호/lot {' / '.join(lot_values)}"
+            if lot_values
+            else " · 제조번호/lot 범위는 Source 미제공"
+        )
+        return SafetyCheckState(
+            status=SafetyCheckStatus.MATCH,
+            message=(
+                "공식 회수·판매중지 데이터에서 exact 제품 identity와 일치하는 안전조치가 확인됨"
+                f"{date_text}{lot_text}"
+            ),
+            semantic_status=SafetyEvidenceStatus.RED,
+            model_name=model,
+            permit_numbers=permits,
+            checked_at=checked_at,
+            source_url=source_url,
+            lot_scope=" / ".join(lot_values) if lot_values else None,
+        )
+
+    if related:
+        return SafetyCheckState(
+            status=SafetyCheckStatus.CHECK_REQUIRED,
+            message=(
+                "동일 식약처 품목번호의 회수·판매중지 기록이 있으나 모델 적용범위를 exact로 확인하지 "
+                "못했습니다. 관련 안전정보로 표시하며 대상 모델·제조번호 범위를 원문에서 확인해야 합니다."
+            ),
+            semantic_status=SafetyEvidenceStatus.AMBER,
+            model_name=model,
+            permit_numbers=permits,
+            checked_at=checked_at,
+            source_url=source_url,
+        )
+
+    return no_match_safety_state(
+        model_name=model,
+        permit_numbers=permits,
         checked_at=checked_at,
         source_url=source_url,
     )
