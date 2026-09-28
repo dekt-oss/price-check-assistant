@@ -39,6 +39,10 @@ def normalize_business_id(value: str | None) -> str:
     return re.sub(r"\D+", "", str(value or ""))
 
 
+def _valid_business_id(value: str) -> bool:
+    return len(value) == 10 and value.isdigit()
+
+
 def normalize_company_name_candidate(value: str | None) -> str:
     """Normalize a name only for candidate discovery, never for identity confirmation."""
 
@@ -60,7 +64,10 @@ def compare_company_identity(
     left_id = normalize_business_id(left_business_id)
     right_id = normalize_business_id(right_business_id)
 
-    if left_id and right_id:
+    left_id_valid = _valid_business_id(left_id)
+    right_id_valid = _valid_business_id(right_id)
+
+    if left_id_valid and right_id_valid:
         if left_id == right_id:
             return CompanyIdentityDecision(
                 status=CompanyIdentityStatus.CONFIRMED_SAME,
@@ -78,6 +85,11 @@ def compare_company_identity(
             left_business_id=left_id,
             right_business_id=right_id,
         )
+
+    if left_id or right_id:
+        # A malformed or one-sided business identifier is not an identity key.
+        # Continue only as a name-similarity candidate and never promote to confirmed-same.
+        pass
 
     left_key = normalize_company_name_candidate(left)
     right_key = normalize_company_name_candidate(right)
