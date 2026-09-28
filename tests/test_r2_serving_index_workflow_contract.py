@@ -67,12 +67,12 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     assert '"판매처"' in transaction_text
     assert '"구매처"' in transaction_text
     assert '"거래기록"' in transaction_text
-    assert '"📌 요약"' in page_text
-    assert '"💰 거래가격"' in page_text
-    assert '"🏥 식약처·품목"' in page_text
-    assert '"🏢 공급사"' in page_text
-    assert '"🔁 경쟁장비"' in page_text
-    assert '"📚 Research·근거"' in page_text
+    assert "st.segmented_control(" in page_text
+    assert '"💰 가격 비교"' in page_text
+    assert '"🏢 업체·조달"' in page_text
+    assert '"🔁 동일품목 비교"' in page_text
+    assert '"📌 요약"' not in page_text
+    assert '"📚 Research·근거"' not in page_text
     assert "model_probe_query = model_probe_input.to_product_query()" in page_text
     assert "query = model_probe_query" in page_text
 
