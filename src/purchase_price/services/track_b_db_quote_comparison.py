@@ -10,7 +10,7 @@ from sqlalchemy import exists, inspect, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
-from purchase_price.domain import MatchGrade
+from purchase_price.domain import MatchGrade, PriceEvidenceStatus
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_track_b_normalization import (
@@ -104,6 +104,42 @@ class TrackBQuoteComparison:
     examined: int
     suggestions: tuple[TrackBIdentitySuggestion, ...] = ()
     reference_candidates: tuple[TrackBReferenceCandidate, ...] = ()
+    search_keys: tuple[str, ...] = ()
+
+    @property
+    def evidence_status(self) -> PriceEvidenceStatus:
+        if self.status in {"unavailable", "not_ingested"}:
+            return PriceEvidenceStatus.UNAVAILABLE
+        if self.status == "partial":
+            return PriceEvidenceStatus.PARTIAL
+        if self.status == "stale":
+            return PriceEvidenceStatus.STALE
+        if self.status == "insufficient_identity":
+            return PriceEvidenceStatus.PARTIAL
+
+        has_direct = any(
+            candidate.match_grade in {MatchGrade.A, MatchGrade.B}
+            for candidate in self.candidates
+        )
+        if has_direct:
+            return PriceEvidenceStatus.FOUND
+        if self.status in {"success", "success_0"}:
+            return PriceEvidenceStatus.ZERO
+        return PriceEvidenceStatus.UNAVAILABLE
+
+
+def _comparison_search_keys(query: ProductQuery) -> tuple[str, ...]:
+    values = (
+        ("모델", query.model_name),
+        ("품목", query.product_name),
+        ("제조사/업체 힌트", query.manufacturer),
+        ("규격", query.specification),
+    )
+    return tuple(
+        f"{label}: {str(value).strip()}"
+        for label, value in values
+        if str(value or "").strip()
+    )
 
 
 def lookup_track_b_quote(
@@ -522,8 +558,14 @@ def compare_track_b_quote(
     model_key = normalize_text(query.model_name)
     model_keys = equivalent_model_keys(query.model_name)
     class_key = normalize_text(query.product_name)
+    search_keys = _comparison_search_keys(query)
     if not model_key and not class_key:
-        return TrackBQuoteComparison("insufficient_identity", (), 0)
+        return TrackBQuoteComparison(
+            "insufficient_identity",
+            (),
+            0,
+            search_keys=search_keys,
+        )
     newer = aliased(TrackBDeliveryLine)
     current = ~exists(
         select(1).where(
@@ -557,13 +599,22 @@ def compare_track_b_quote(
         # before a safe rule correction can take effect.
         identity = parse_g2b_identity(row.product_title)
         decision = grade_product_identity(query, identity)
-        if decision.grade not in {MatchGrade.A, MatchGrade.B, MatchGrade.C}:
+        effective_grade = decision.grade
+        effective_note = decision.note
+        if effective_grade == MatchGrade.A and not str(row.unit or "").strip():
+            effective_grade = MatchGrade.B
+            effective_note = (
+                f"{decision.note}; unit_unknown_caps_grade_at_b"
+                if decision.note
+                else "unit_unknown_caps_grade_at_b"
+            )
+        if effective_grade not in {MatchGrade.A, MatchGrade.B, MatchGrade.C}:
             continue
         if row.unit_price is None or row.product_title is None:
             continue
         delta = None
         if (
-            decision.grade in {MatchGrade.A, MatchGrade.B}
+            effective_grade in {MatchGrade.A, MatchGrade.B}
             and quote_unit_price is not None
             and quote_unit_price > 0
         ):
@@ -582,8 +633,8 @@ def compare_track_b_quote(
                 ),
                 product_title=row.product_title,
                 price=row.unit_price,
-                match_grade=decision.grade,
-                match_note=decision.note,
+                match_grade=effective_grade,
+                match_note=effective_note,
                 delta_percent=delta,
                 raw_object_key=row.raw_object_key,
                 amount_check=row.amount_check,
@@ -635,4 +686,5 @@ def compare_track_b_quote(
         examined=min(len(rows), limit),
         suggestions=suggestions,
         reference_candidates=references,
+        search_keys=search_keys,
     )
