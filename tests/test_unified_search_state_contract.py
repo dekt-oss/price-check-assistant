@@ -55,6 +55,7 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "exact_identity_crosslinks" in source
     assert "track_b_snapshot.lookup_model_summaries(queries)" in source
     assert "for item in list(unique.values())[:limit]" not in source
+    assert "track_b_snapshot=track_b_snapshot,\n            limit=25" not in source
     assert "식약처 품목번호 기준 모델·조달가격 연결" in source
     assert "companies[0]" not in source
     assert "식약처 품목번호" in source
