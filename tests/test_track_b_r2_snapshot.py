@@ -86,3 +86,29 @@ def test_track_b_snapshot_batches_many_model_summaries_without_reopening_index(
     assert all(result.status == "not_ingested" for result in results)
     assert path_calls == 1
     assert engine_calls == 1
+
+
+
+def test_track_b_snapshot_propagates_pointer_data_as_of_to_fail_closed_results() -> None:
+    snapshot = module.TrackBServingSnapshot(
+        status="unavailable",
+        data_as_of="2026-09-28T06:35:46+00:00",
+    )
+
+    result = snapshot.lookup(
+        ProductQuery(product_name="채혈기", model_name="C101"),
+        quote_unit_price=None,
+    )
+    batch = snapshot.lookup_model_summaries(
+        (
+            ProductQuery(product_name="채혈기", model_name="C101"),
+            ProductQuery(product_name="채혈기", model_name="C102"),
+        )
+    )
+
+    assert result.status == "unavailable"
+    assert result.data_as_of == "2026-09-28T06:35:46+00:00"
+    assert [item.data_as_of for item in batch] == [
+        "2026-09-28T06:35:46+00:00",
+        "2026-09-28T06:35:46+00:00",
+    ]
