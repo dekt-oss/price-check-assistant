@@ -15,9 +15,13 @@ from purchase_price.services.g2b_search_policy import (
 from purchase_price.services.market_survey_export import build_market_survey_workbook
 from purchase_price.services.matching import normalize_text
 from purchase_price.services.mfds_identity_index import (
-    MFDS_PRODUCT_INFO_DATASET_URL,
     MfdsIdentityLookup,
     MfdsIdentityRecord,
+)
+from purchase_price.services.mfds_identity_presenter import (
+    MFDS_PRODUCT_INFO_DATASET_URL,
+    mfds_identity_status,
+    mfds_item_authorization_type,
 )
 from purchase_price.services.mfds_identity_r2 import (
     lookup_mfds_identity_from_r2,
@@ -197,7 +201,7 @@ def _build_mfds_procurement_crosslinks(
         )
         rows.append(
             {
-                "유형": getattr(getattr(item, "item_authorization_type", None), "value", "미확인"),
+                "유형": mfds_item_authorization_type(item).value,
                 "식약처 품목번호": getattr(item, "permit_number", None) or "",
                 "모델": model,
                 "현재 모델": "현재 모델" if normalize_text(model) == normalize_text(current_model) else "",
@@ -284,7 +288,7 @@ def _ambiguous_identity_candidates(identity: MfdsIdentityLookup) -> list[dict[st
             {
                 "품목": key[0] or "미확인",
                 "식약처 품목번호": key[1] or "미확인",
-                "유형": item.item_authorization_type.value,
+                "유형": mfds_item_authorization_type(item).value,
                 "모델": key[2] or "미확인",
                 "품목 책임주체": key[3] or "미확인",
                 "등급": str(item.grade or "").strip() or "미확인",
@@ -357,7 +361,7 @@ def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
         format_func=lambda index: (
             f"{candidates[index].product_name or '품목 미확인'} · "
             f"{candidates[index].model_name or '모델 미확인'} · "
-            f"[{candidates[index].item_authorization_type.value}] "
+            f"[{mfds_item_authorization_type(candidates[index]).value}] "
             f"{candidates[index].permit_number or '품목번호 미확인'} · "
             f"{candidates[index].registered_company or '책임주체 미확인'}"
         ),
@@ -440,7 +444,7 @@ def _execute_search(
         )
     if (
         isinstance(indexed_identity, MfdsIdentityLookup)
-        and indexed_identity.identity_status == IdentityEvidenceStatus.AMBIGUOUS
+        and mfds_identity_status(indexed_identity) == IdentityEvidenceStatus.AMBIGUOUS
         and indexed_identity.match_type == "model"
     ):
         return {
@@ -849,7 +853,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.records:
         export_identity_rows = [
             {
-                "유형": item.item_authorization_type.value,
+                "유형": mfds_item_authorization_type(item).value,
                 "식약처 품목번호": item.permit_number or "미확인",
                 "품목": item.product_name or "미확인",
                 "모델": item.model_name or "미확인",
@@ -1046,7 +1050,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 st.dataframe(
                     [
                         {
-                            "유형": item.item_authorization_type.value,
+                            "유형": mfds_item_authorization_type(item).value,
                             "식약처 품목번호": item.permit_number or "",
                             "품목": item.product_name or "",
                             "모델": item.model_name or "",
@@ -1065,7 +1069,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 st.caption(
                     "식약처 공식 제품정보를 수집한 누적 인덱스입니다. 품목 책임주체는 제조·수입 제품관계이며 실제 납품업체와 구분합니다."
                 )
-            elif indexed_identity.identity_status == IdentityEvidenceStatus.NOT_FOUND_IN_COVERAGE:
+            elif mfds_identity_status(indexed_identity) == IdentityEvidenceStatus.NOT_FOUND_IN_COVERAGE:
                 st.info("현재 수집된 식약처 자료 범위에서 일치 identity를 찾지 못했습니다.")
             elif indexed_identity.status == "not_ingested":
                 st.info("식약처 Identity Index를 아직 사용할 수 없습니다.")
