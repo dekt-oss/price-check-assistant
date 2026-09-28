@@ -6,6 +6,7 @@ from typing import Any
 
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.mfds_identity_index import MfdsIdentityRecord
+from purchase_price.services.mfds_identity_presenter import mfds_item_authorization_type
 
 
 def _grade(candidate: Any) -> str:
@@ -87,7 +88,7 @@ def build_company_procurement_rows(
         )
         rows.append(
             {
-                "유형": item.item_authorization_type.value,
+                "유형": mfds_item_authorization_type(item).value,
                 "식약처 품목번호": item.permit_number or "미확인",
                 "품목": item.product_name or "미확인",
                 "모델": item.model_name or "미확인",
