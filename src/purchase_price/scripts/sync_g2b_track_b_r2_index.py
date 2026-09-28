@@ -289,6 +289,9 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             "uncompressed_bytes": ref.uncompressed_bytes,
             "row_count": row_count,
             "updated_at": _now(),
+            "data_as_of": (
+                pipeline.rolling_covered_through if pipeline.backfill_complete else None
+            ),
             "mode": mode,
             "serving_schema": SERVING_INDEX_SCHEMA,
             "state_recovered": state_recovered,
