@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import exists, inspect, or_, select
+from sqlalchemy import and_, exists, inspect, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
@@ -416,6 +416,121 @@ def _row_conditions(row: TrackBDeliveryLine, *, available: bool) -> tuple[str | 
         return None, None, None
     return row.contract_delivery_type, row.contract_type, row.delivery_condition
 
+
+def _price_evidence_clause():
+    """Rows with an explicit source unit price or a safely calculable amount/quantity pair."""
+
+    return or_(
+        TrackBDeliveryLine.unit_price > 0,
+        and_(
+            TrackBDeliveryLine.unit_price.is_(None),
+            TrackBDeliveryLine.total_amount > 0,
+            TrackBDeliveryLine.quantity > 0,
+        ),
+    )
+
+
+def _row_unit_price_evidence(
+    row: TrackBDeliveryLine,
+) -> tuple[Decimal | None, UnitPriceBasis]:
+    """Prefer source unit price; derive total/quantity only when source price is absent."""
+
+    if row.unit_price is not None and row.unit_price > 0:
+        return row.unit_price, UnitPriceBasis.SOURCE_UNIT_PRICE
+    if (
+        row.unit_price is None
+        and row.total_amount is not None
+        and row.total_amount > 0
+        and row.quantity is not None
+        and row.quantity > 0
+    ):
+        return row.total_amount / row.quantity, UnitPriceBasis.CALCULATED_UNIT_PRICE
+    return None, UnitPriceBasis.UNKNOWN
+
+
+def _append_match_note(note: str | None, marker: str) -> str:
+    return f"{note}; {marker}" if note else marker
+
+
+def _candidate_from_row(
+    row: TrackBDeliveryLine,
+    query: ProductQuery,
+    *,
+    quote_unit_price: Decimal | None,
+    include_conditions: bool,
+    condition_columns_available: bool = False,
+) -> TrackBQuoteCandidate | None:
+    if row.product_title is None:
+        return None
+    price, unit_price_basis = _row_unit_price_evidence(row)
+    if price is None:
+        return None
+
+    identity = parse_g2b_identity(row.product_title)
+    decision = grade_product_identity(query, identity)
+    effective_grade = decision.grade
+    effective_note = decision.note
+    if effective_grade == MatchGrade.A and unit_price_basis == UnitPriceBasis.CALCULATED_UNIT_PRICE:
+        effective_grade = MatchGrade.B
+        effective_note = _append_match_note(
+            effective_note,
+            "calculated_unit_price_caps_grade_at_b",
+        )
+    if effective_grade == MatchGrade.A and not str(row.unit or "").strip():
+        effective_grade = MatchGrade.B
+        effective_note = _append_match_note(
+            effective_note,
+            "unit_unknown_caps_grade_at_b",
+        )
+    if effective_grade not in {MatchGrade.A, MatchGrade.B, MatchGrade.C}:
+        return None
+
+    delta = None
+    if (
+        effective_grade in {MatchGrade.A, MatchGrade.B}
+        and quote_unit_price is not None
+        and quote_unit_price > 0
+    ):
+        delta = ((quote_unit_price - price) / price * 100).quantize(Decimal("0.1"))
+
+    contract_delivery_type = contract_type = delivery_condition = None
+    if include_conditions:
+        contract_delivery_type, contract_type, delivery_condition = _row_conditions(
+            row,
+            available=condition_columns_available,
+        )
+
+    return TrackBQuoteCandidate(
+        source_record_id=(
+            f"delivery:{row.delivery_request_number}"
+            f"|change:{row.change_order}|line:{row.product_sequence}"
+        ),
+        product_title=row.product_title,
+        price=price,
+        match_grade=effective_grade,
+        match_note=effective_note,
+        delta_percent=delta,
+        raw_object_key=row.raw_object_key,
+        amount_check=row.amount_check,
+        transaction_date=(
+            row.transaction_date.isoformat() if row.transaction_date is not None else None
+        ),
+        supplier=row.supplier,
+        demand_institution=row.demand_institution,
+        quantity=row.quantity,
+        unit=row.unit,
+        total_amount=row.total_amount,
+        manufacturer=row.manufacturer,
+        model_name=row.model_name,
+        specification=row.specification,
+        product_id=row.product_id,
+        detail_code=row.detail_code,
+        contract_delivery_type=contract_delivery_type,
+        contract_type=contract_type,
+        delivery_condition=delivery_condition,
+        unit_price_basis=unit_price_basis,
+    )
+
 def _reference_tokens(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
@@ -586,7 +701,7 @@ def compare_track_b_quote(
         .where(
             current,
             identity_filter,
-            TrackBDeliveryLine.unit_price > 0,
+            _price_evidence_clause(),
             TrackBDeliveryLine.identity_conflict.is_(False),
         )
         .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
@@ -595,69 +710,15 @@ def compare_track_b_quote(
     condition_columns_available = _condition_columns_available(session)
     candidates: list[TrackBQuoteCandidate] = []
     for row in rows[:limit]:
-        # Re-parse the immutable G2B source title with the current verified parser at read time.
-        # The serving index can outlive parser-rule updates (for example a newly verified origin
-        # qualifier), so relying only on persisted derived flags would require a full index rebuild
-        # before a safe rule correction can take effect.
-        identity = parse_g2b_identity(row.product_title)
-        decision = grade_product_identity(query, identity)
-        effective_grade = decision.grade
-        effective_note = decision.note
-        if effective_grade == MatchGrade.A and not str(row.unit or "").strip():
-            effective_grade = MatchGrade.B
-            effective_note = (
-                f"{decision.note}; unit_unknown_caps_grade_at_b"
-                if decision.note
-                else "unit_unknown_caps_grade_at_b"
-            )
-        if effective_grade not in {MatchGrade.A, MatchGrade.B, MatchGrade.C}:
-            continue
-        if row.unit_price is None or row.product_title is None:
-            continue
-        delta = None
-        if (
-            effective_grade in {MatchGrade.A, MatchGrade.B}
-            and quote_unit_price is not None
-            and quote_unit_price > 0
-        ):
-            delta = ((quote_unit_price - row.unit_price) / row.unit_price * 100).quantize(
-                Decimal("0.1")
-            )
-        contract_delivery_type, contract_type, delivery_condition = _row_conditions(
+        candidate = _candidate_from_row(
             row,
-            available=condition_columns_available,
+            query,
+            quote_unit_price=quote_unit_price,
+            include_conditions=True,
+            condition_columns_available=condition_columns_available,
         )
-        candidates.append(
-            TrackBQuoteCandidate(
-                source_record_id=(
-                    f"delivery:{row.delivery_request_number}"
-                    f"|change:{row.change_order}|line:{row.product_sequence}"
-                ),
-                product_title=row.product_title,
-                price=row.unit_price,
-                match_grade=effective_grade,
-                match_note=effective_note,
-                delta_percent=delta,
-                raw_object_key=row.raw_object_key,
-                amount_check=row.amount_check,
-                transaction_date=(
-                    row.transaction_date.isoformat() if row.transaction_date is not None else None
-                ),
-                supplier=row.supplier,
-                demand_institution=row.demand_institution,
-                quantity=row.quantity,
-                unit=row.unit,
-                total_amount=row.total_amount,
-                manufacturer=row.manufacturer,
-                model_name=row.model_name,
-                specification=row.specification,
-                product_id=row.product_id,
-                detail_code=row.detail_code,
-                contract_delivery_type=contract_delivery_type,
-                contract_type=contract_type,
-                delivery_condition=delivery_condition,
-            )
-        )
+        if candidate is not None:
+            candidates.append(candidate)
     status = "partial" if len(rows) > limit else "success" if candidates else "success_0"
     if status == "success_0" and session.scalar(select(TrackBDeliveryLine.id).limit(1)) is None:
         status = "not_ingested"
@@ -690,3 +751,138 @@ def compare_track_b_quote(
         reference_candidates=references,
         search_keys=search_keys,
     )
+
+
+def compare_track_b_models_batch(
+    session: Session,
+    queries: tuple[ProductQuery, ...],
+    *,
+    quote_unit_prices: tuple[Decimal | None, ...] | None = None,
+    limit_per_model: int = 50,
+) -> tuple[TrackBQuoteComparison, ...]:
+    """Build multi-model first-shell evidence with one indexed SQL query.
+
+    Research expansion and deferred commercial-condition columns are intentionally skipped;
+    detailed evidence remains lazy until one model is opened.
+    """
+
+    if limit_per_model < 1 or limit_per_model > 500:
+        raise ValueError("limit_per_model must be between 1 and 500")
+    queries = tuple(queries)
+    if not queries:
+        return ()
+    prices = tuple(quote_unit_prices) if quote_unit_prices is not None else tuple(None for _ in queries)
+    if len(prices) != len(queries):
+        raise ValueError("quote_unit_prices must align with queries")
+
+    model_keys_by_query = tuple(
+        tuple(dict.fromkeys(equivalent_model_keys(query.model_name))) for query in queries
+    )
+    all_model_keys = tuple(
+        dict.fromkeys(key for model_keys in model_keys_by_query for key in model_keys if key)
+    )
+    if not all_model_keys:
+        return tuple(
+            TrackBQuoteComparison(
+                "insufficient_identity",
+                (),
+                0,
+                search_keys=_comparison_search_keys(query),
+            )
+            for query in queries
+        )
+
+    newer = aliased(TrackBDeliveryLine)
+    current = ~exists(
+        select(1).where(
+            newer.delivery_request_number == TrackBDeliveryLine.delivery_request_number,
+            newer.product_sequence == TrackBDeliveryLine.product_sequence,
+            newer.change_order_number > TrackBDeliveryLine.change_order_number,
+        )
+    )
+    rows = session.scalars(
+        select(TrackBDeliveryLine)
+        .where(
+            current,
+            TrackBDeliveryLine.model_key.in_(all_model_keys),
+            _price_evidence_clause(),
+            TrackBDeliveryLine.identity_conflict.is_(False),
+        )
+        .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
+    ).all()
+
+    rows_by_model: dict[str, list[TrackBDeliveryLine]] = {}
+    for row in rows:
+        if row.model_key:
+            rows_by_model.setdefault(row.model_key, []).append(row)
+
+    any_ingested = bool(rows)
+    if not any_ingested:
+        any_ingested = session.scalar(select(TrackBDeliveryLine.id).limit(1)) is not None
+
+    cache: dict[tuple[object, ...], TrackBQuoteComparison] = {}
+    results: list[TrackBQuoteComparison] = []
+    for query, quote_unit_price, model_keys in zip(queries, prices, model_keys_by_query, strict=True):
+        cache_key = (
+            normalize_text(query.product_name),
+            normalize_text(query.manufacturer),
+            tuple(model_keys),
+            normalize_text(query.specification),
+            quote_unit_price,
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            results.append(cached)
+            continue
+
+        query_rows: list[TrackBDeliveryLine] = []
+        seen_ids: set[int] = set()
+        for model_key in model_keys:
+            for row in rows_by_model.get(model_key, ()):
+                if row.id in seen_ids:
+                    continue
+                seen_ids.add(row.id)
+                query_rows.append(row)
+        query_rows.sort(
+            key=lambda row: (
+                row.transaction_date.toordinal() if row.transaction_date is not None else 0,
+                row.id,
+            ),
+            reverse=True,
+        )
+
+        candidates: list[TrackBQuoteCandidate] = []
+        overflow = False
+        for row in query_rows:
+            candidate = _candidate_from_row(
+                row,
+                query,
+                quote_unit_price=quote_unit_price,
+                include_conditions=False,
+            )
+            if candidate is None:
+                continue
+            if len(candidates) >= limit_per_model:
+                overflow = True
+                break
+            candidates.append(candidate)
+
+        status = (
+            "partial"
+            if overflow
+            else "success"
+            if candidates
+            else "success_0"
+            if any_ingested
+            else "not_ingested"
+        )
+        comparison = TrackBQuoteComparison(
+            status=status,
+            candidates=tuple(candidates),
+            examined=min(len(query_rows), limit_per_model),
+            search_keys=_comparison_search_keys(query),
+        )
+        cache[cache_key] = comparison
+        results.append(comparison)
+
+    return tuple(results)
