@@ -30,7 +30,7 @@ class TrackBServingSnapshot:
     engine: Engine | None = None
     session: Session | None = None
 
-    def __enter__(self) -> "TrackBServingSnapshot":
+    def __enter__(self) -> TrackBServingSnapshot:
         return self
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
