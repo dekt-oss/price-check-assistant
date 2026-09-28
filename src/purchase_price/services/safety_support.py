@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from purchase_price.domain import SafetyEvidenceStatus
+from purchase_price.evidence_domain import SafetyEvidenceStatus
 
 MFDS_RECALL_PAGE_URL = "https://emedi.mfds.go.kr/recall/MNU20265"
 MFDS_ADMIN_SANCTION_PAGE_URL = "https://emedi.mfds.go.kr/disps/MNU20266"
