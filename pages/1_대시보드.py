@@ -1120,14 +1120,18 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 f"{sum(item.direct_price_model_count > 0 for item in company_summaries)}개",
             )
             company_metric_cols[2].metric(
-                "국내 정상 등록모델",
+                (
+                    "국내 정상 등록모델"
+                    if company_active_keys is not None
+                    else "등록모델 · 상태 미확인"
+                ),
                 f"{sum(item.registered_model_count for item in company_summaries)}건",
             )
             st.dataframe(
                 [
                     {
                         "품목 책임주체": item.company_name,
-                        "국내 정상 등록모델": item.registered_model_count,
+                        "등록모델": item.registered_model_count,
                         "허가건수": item.permit_count,
                         "최근 식약처 처리일": item.latest_permit_date or "",
                         "대표모델": " / ".join(item.representative_models),
