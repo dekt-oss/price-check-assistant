@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: workspace-v3-phase0-a-validation
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
