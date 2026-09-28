@@ -4,8 +4,10 @@ from streamlit.testing.v1 import AppTest
 
 from purchase_price.domain import SafetyEvidenceStatus
 from purchase_price.services.safety_support import (
+    MedicalDeviceRecallRecord,
     SafetyCheckStatus,
     build_manual_safety_check_state,
+    evaluate_official_recall_records,
     no_match_safety_state,
 )
 
@@ -79,3 +81,87 @@ def test_checked_none_preserves_query_timestamp_and_source() -> None:
     assert state.evidence_status == SafetyEvidenceStatus.CHECKED_NONE
     assert state.checked_at == "2026-09-28T02:30:00Z"
     assert state.source_url == "https://example.test/mfds-safety"
+
+
+def test_official_recall_exact_permit_and_model_is_red_without_inventing_lot_scope() -> None:
+    state = evaluate_official_recall_records(
+        [
+            MedicalDeviceRecallRecord(
+                permit_number="수신 22-2177호",
+                model_name="C101",
+                reason="품질 문제",
+                action_date="2026-09-20",
+            )
+        ],
+        model_name="C101",
+        permit_numbers=["수신22-2177호"],
+        checked_at="2026-09-28T08:00:00Z",
+    )
+
+    assert state.evidence_status == SafetyEvidenceStatus.RED
+    assert state.lot_scope is None
+    assert "Source 미제공" in state.message
+    assert "2026-09-20" in state.message
+
+
+def test_official_recall_permit_match_with_unknown_model_scope_is_amber() -> None:
+    state = evaluate_official_recall_records(
+        [
+            MedicalDeviceRecallRecord(
+                permit_number="수신 22-2177호",
+                model_name=None,
+                manufacturing_number="LOT-1",
+            )
+        ],
+        model_name="C101",
+        permit_numbers=["수신 22-2177호"],
+    )
+
+    assert state.evidence_status == SafetyEvidenceStatus.AMBER
+    assert state.status == SafetyCheckStatus.CHECK_REQUIRED
+    assert state.lot_scope is None
+
+
+def test_official_recall_explicit_all_models_scope_can_be_red() -> None:
+    state = evaluate_official_recall_records(
+        [
+            MedicalDeviceRecallRecord(
+                permit_number="수신 22-2177호",
+                applies_to_all_models=True,
+                manufacturing_number="LOT-A",
+            )
+        ],
+        model_name="C101",
+        permit_numbers=["수신 22-2177호"],
+    )
+
+    assert state.evidence_status == SafetyEvidenceStatus.RED
+    assert state.lot_scope == "LOT-A"
+
+
+def test_official_recall_model_only_never_confirms_exact_product_action() -> None:
+    state = evaluate_official_recall_records(
+        [
+            MedicalDeviceRecallRecord(
+                permit_number="수신 99-9999호",
+                model_name="C101",
+            )
+        ],
+        model_name="C101",
+        permit_numbers=[],
+    )
+
+    assert state.evidence_status == SafetyEvidenceStatus.AMBER
+    assert "exact 식약처 품목번호" in state.message
+
+
+def test_official_recall_successful_zero_is_checked_none_not_safe() -> None:
+    state = evaluate_official_recall_records(
+        [],
+        model_name="C101",
+        permit_numbers=["수신 22-2177호"],
+        checked_at="2026-09-28T08:00:00Z",
+    )
+
+    assert state.evidence_status == SafetyEvidenceStatus.CHECKED_NONE
+    assert "안전함" not in state.message
