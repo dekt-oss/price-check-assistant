@@ -47,6 +47,8 @@ def test_legacy_comparison_without_reference_candidates_does_not_crash() -> None
             "매칭등급": "A",
             "매칭근거": "미확인",
             "거래기록": "나라장터 납품요구",
+            "Source": "나라장터 납품요구",
+            "원문근거키": "미확인",
             "품목/모델": "레이저프린터, Fujifilm, ApeosPrint C5570 GK",
             "비교수준": "동일 모델",
         }
