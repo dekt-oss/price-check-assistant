@@ -107,6 +107,7 @@ class TrackBQuoteComparison:
     suggestions: tuple[TrackBIdentitySuggestion, ...] = ()
     reference_candidates: tuple[TrackBReferenceCandidate, ...] = ()
     search_keys: tuple[str, ...] = ()
+    data_as_of: str | None = None
 
     @property
     def evidence_status(self) -> PriceEvidenceStatus:
