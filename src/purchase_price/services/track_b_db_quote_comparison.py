@@ -62,7 +62,6 @@ class TrackBQuoteCandidate:
     delivery_condition: str | None = None
     transaction_type: str = "나라장터 납품요구"
     unit_price_basis: UnitPriceBasis = UnitPriceBasis.SOURCE_UNIT_PRICE
-    unit_price_basis: UnitPriceBasis = UnitPriceBasis.SOURCE_UNIT_PRICE
 
 
 @dataclass(frozen=True)
@@ -88,6 +87,7 @@ class TrackBReferenceCandidate:
     delivery_condition: str | None = None
     reference_scope: str = "KEYWORD"
     transaction_type: str = "나라장터 납품요구"
+    unit_price_basis: UnitPriceBasis = UnitPriceBasis.SOURCE_UNIT_PRICE
 
 
 @dataclass(frozen=True)
