@@ -39,6 +39,16 @@ class MfdsWorkspaceResult:
     error_type: str | None = None
     error_message: str | None = None
 
+
+@dataclass(frozen=True)
+class MfdsBusinessLookupResult:
+    status: str
+    query: str
+    records: tuple[MedicalDeviceBusinessRecord, ...] = ()
+    error_type: str | None = None
+    error_message: str | None = None
+
+
     @property
     def active_competitor_records(self) -> tuple[MedicalDeviceModelRecord, ...]:
         exact_ids = {
@@ -94,6 +104,43 @@ def should_query_mfds(query: ProductQuery, track_b: Any) -> bool:
         mapping
         and mapping.detail_product_code
         and mapping.detail_product_code.startswith("42")
+    )
+
+
+def lookup_mfds_business_license(
+    company_name: str,
+    *,
+    settings: Settings | None = None,
+    business_client: MfdsBusinessLicenseClient | None = None,
+) -> MfdsBusinessLookupResult:
+    query = company_name.strip()
+    if not query:
+        return MfdsBusinessLookupResult(status="not_run", query="")
+
+    settings = settings or Settings()
+    service_key = (settings.resolved_mfds_service_key or "").strip()
+    if business_client is None and not service_key:
+        return MfdsBusinessLookupResult(status="not_configured", query=query)
+
+    business_client = business_client or MfdsBusinessLicenseClient(
+        service_key,
+        base_url=settings.mfds_business_license_base_url or MFDS_BUSINESS_LICENSE_BASE_URL,
+        timeout_seconds=settings.mfds_request_timeout_seconds,
+        max_retries=settings.mfds_max_retries,
+    )
+    try:
+        records = business_client.search_company(query)
+    except (PublicDataClientError, ValueError) as exc:
+        return MfdsBusinessLookupResult(
+            status="failure",
+            query=query,
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+        )
+    return MfdsBusinessLookupResult(
+        status="success" if records else "success_0",
+        query=query,
+        records=records,
     )
 
 
