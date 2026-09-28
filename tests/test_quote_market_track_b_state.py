@@ -136,3 +136,124 @@ def test_quote_flow_auto_checks_mfds_after_track_b(monkeypatch) -> None:
 
     quote_market_research._ensure_mfds_workspace(state)
     assert len(calls) == 1
+
+
+
+def test_multi_item_track_b_failure_is_isolated_per_item(monkeypatch) -> None:
+    state = QuoteReviewState(
+        items=[
+            QuoteItem(
+                source_sheet="sheet",
+                source_row=1,
+                product_name="품목A",
+                model_name="A-1",
+                unit_price=Decimal("100"),
+            ),
+            QuoteItem(
+                source_sheet="sheet",
+                source_row=2,
+                product_name="품목B",
+                model_name="B-1",
+                unit_price=Decimal("200"),
+            ),
+        ]
+    )
+
+    calls: list[str] = []
+
+    def lookup(query, *, quote_unit_price):
+        calls.append(query.model_name)
+        if query.model_name == "A-1":
+            raise RuntimeError("index read failed")
+        return TrackBQuoteComparison("success_0", (), 0)
+
+    monkeypatch.setattr(quote_market_research, "lookup_track_b_quote", lookup)
+
+    quote_market_research._ensure_track_b_comparison(state)
+
+    assert calls == ["A-1", "B-1"]
+    assert 0 not in state.track_b_db
+    assert state.track_b_db[1].status == "success_0"
+    assert "나라장터" in state.item_errors[0]
+    assert "RuntimeError" in state.item_errors[0]["나라장터"]
+
+
+def test_quote_item_table_edits_update_only_changed_items_and_reset_research() -> None:
+    state = QuoteReviewState(
+        items=[
+            QuoteItem(
+                source_sheet="sheet",
+                source_row=1,
+                product_name="품목A",
+                manufacturer="제조사A",
+                model_name="A-1",
+                specification="규격A",
+                quantity=Decimal("1"),
+                unit="대",
+                unit_price=Decimal("100"),
+            ),
+            QuoteItem(
+                source_sheet="sheet",
+                source_row=2,
+                product_name="품목B",
+                manufacturer="제조사B",
+                model_name="B-1",
+                specification="규격B",
+                quantity=Decimal("2"),
+                unit="개",
+                unit_price=Decimal("200"),
+            ),
+        ]
+    )
+    state.item_confirmed = {0: True, 1: True}
+    state.track_b_db[0] = TrackBQuoteComparison("success_0", (), 0)
+    state.track_b_db[1] = TrackBQuoteComparison("success_0", (), 0)
+    state.item_errors[1] = {"나라장터": "RuntimeError: stale"}
+
+    rows = quote_market_research._quote_item_editor_rows(state)
+    rows[1]["모델"] = "B-2"
+    rows[1]["견적 단가"] = "250"
+
+    changed = quote_market_research._apply_quote_item_table_edits(state, rows)
+
+    assert changed == [1]
+    assert state.items[0].model_name == "A-1"
+    assert state.items[1].model_name == "B-2"
+    assert state.items[1].unit_price == Decimal("250")
+    assert state.item_confirmed[0] is True
+    assert state.item_confirmed[1] is False
+    assert state.track_b_db == {}
+    assert state.item_errors == {}
+
+
+def test_market_research_failure_does_not_block_following_quote_item(monkeypatch) -> None:
+    state = QuoteReviewState(
+        items=[
+            QuoteItem(source_sheet="sheet", source_row=1, product_name="품목A", model_name="A-1"),
+            QuoteItem(source_sheet="sheet", source_row=2, product_name="품목B", model_name="B-1"),
+        ]
+    )
+
+    class Progress:
+        def progress(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(quote_market_research.st, "progress", lambda *_args, **_kwargs: Progress())
+
+    calls: list[str] = []
+
+    def run(query, **_kwargs):
+        calls.append(query.model_name)
+        if query.model_name == "A-1":
+            raise RuntimeError("external search failed")
+        return object(), object(), object()
+
+    monkeypatch.setattr(quote_market_research, "run_market_research", run)
+
+    changed = quote_market_research._ensure_market_research(state)
+
+    assert changed is True
+    assert calls == ["A-1", "B-1"]
+    assert 0 not in state.search_runs
+    assert 1 in state.search_runs
+    assert "공개 Research" in state.item_errors[0]
