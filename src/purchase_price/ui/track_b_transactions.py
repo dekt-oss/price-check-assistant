@@ -74,6 +74,20 @@ def _money_text(value: Any) -> str:
         return str(value)
 
 
+def _text_or_unknown(value: Any) -> str:
+    text = str(value or "").strip()
+    return text or "미확인"
+
+
+def _quantity_text(value: Any) -> str:
+    if value is None:
+        return "미확인"
+    try:
+        return f"{value:g}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _quantity_unit(quantity: Any, unit: str | None) -> str:
     if quantity is None and not unit:
         return "미확인"
@@ -101,8 +115,21 @@ def _condition_text(candidate: Any) -> str:
     return " · ".join(dict.fromkeys(parts)) if parts else "미확인"
 
 def _transaction_row(candidate: Any, *, comparison_level: str) -> dict[str, object]:
+    quantity = getattr(candidate, "quantity", None)
+    unit = getattr(candidate, "unit", None)
+    grade = _grade_value(candidate) or "미확인"
+    match_note = str(
+        getattr(candidate, "match_note", None)
+        or getattr(candidate, "reference_reason", None)
+        or ""
+    ).strip() or "미확인"
     return {
         "가격": _money_text(candidate.price),
+        "단가구분": "원문 단가",
+        "단위": _text_or_unknown(unit),
+        "포장입수": "미확인",
+        "수량": _quantity_text(quantity),
+        "VAT": "미확인",
         "총액": _money_text(getattr(candidate, "total_amount", None))
         if getattr(candidate, "total_amount", None) is not None
         else "미확인",
@@ -116,10 +143,9 @@ def _transaction_row(candidate: Any, *, comparison_level: str) -> dict[str, obje
         "판매처": getattr(candidate, "supplier", None) or "미확인",
         "구매처": getattr(candidate, "demand_institution", None) or "미확인",
         "거래일": getattr(candidate, "transaction_date", None) or "미확인",
-        "수량/단위": _quantity_unit(
-            getattr(candidate, "quantity", None),
-            getattr(candidate, "unit", None),
-        ),
+        "수량/단위": _quantity_unit(quantity, unit),
+        "매칭등급": grade,
+        "매칭근거": match_note,
         "거래기록": getattr(candidate, "transaction_type", None)
         or "나라장터 납품요구",
         "품목/모델": candidate.product_title,
