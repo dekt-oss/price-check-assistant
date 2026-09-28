@@ -134,6 +134,35 @@ class TrackBServingSnapshot:
         )
         return refine_track_b_reference_quality(self.session, query, result)
 
+    def lookup_model_summaries(
+        self,
+        queries: tuple[ProductQuery, ...],
+        *,
+        quote_unit_prices=None,
+        limit_per_model: int = 50,
+    ):
+        """Return first-shell model summaries without N per-model SQL lookups."""
+
+        from purchase_price.services.track_b_db_quote_comparison import (
+            TrackBQuoteComparison,
+            compare_track_b_models_batch,
+        )
+
+        queries = tuple(queries)
+        if self.status in {"unavailable", "not_ingested"} or self.session is None:
+            return tuple(TrackBQuoteComparison(self.status, (), 0) for _ in queries)
+        prices = (
+            tuple(quote_unit_prices)
+            if quote_unit_prices is not None
+            else tuple(None for _ in queries)
+        )
+        return compare_track_b_models_batch(
+            self.session,
+            queries,
+            quote_unit_prices=prices,
+            limit_per_model=limit_per_model,
+        )
+
 
 def open_track_b_serving_snapshot(
     *,
