@@ -5,6 +5,7 @@ from typing import Any
 
 import streamlit as st
 
+from purchase_price.domain import IdentityEvidenceStatus, PriceEvidenceStatus
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
@@ -176,13 +177,23 @@ def _build_mfds_procurement_crosslinks(records, *, limit: int = 25) -> list[dict
         )
         rows.append(
             {
-                "허가번호": getattr(item, "permit_number", None) or "",
+                "유형": getattr(getattr(item, "item_authorization_type", None), "value", "미확인"),
+                "식약처 품목번호": getattr(item, "permit_number", None) or "",
                 "모델": model,
-                "식약처 등록업체": company,
+                "품목 책임주체": company,
                 "UDI-DI": getattr(item, "udi_di", None) or "",
-                "나라장터 직접거래": len(direct),
+                "나라장터 상태": comparison.evidence_status.value,
+                "나라장터 직접거래": (
+                    len(direct)
+                    if comparison.evidence_status != PriceEvidenceStatus.UNAVAILABLE
+                    else None
+                ),
                 "나라장터 가격범위": (
-                    f"{prices[0]:,.0f} ~ {prices[-1]:,.0f}원" if prices else "직접근거 없음"
+                    f"{prices[0]:,.0f} ~ {prices[-1]:,.0f}원"
+                    if prices
+                    else "조회 불가"
+                    if comparison.evidence_status == PriceEvidenceStatus.UNAVAILABLE
+                    else "직접 동일성 확인 거래 0건"
                 ),
                 "최근거래": dates[-1] if dates else "",
                 "실제 조달 공급업체": " / ".join(suppliers[:5]),
@@ -456,26 +467,26 @@ def _render_search_result(state: dict[str, Any]) -> None:
             i1.caption("검색 기준")
             i1.write(
                 {
-                    "permit": "허가번호",
+                    "permit": "식약처 품목번호",
                     "udi": "UDI-DI",
                     "model": "모델",
-                    "company": "등록업체",
+                    "company": "품목 책임주체",
                     "product": "품목",
                 }.get(indexed_identity.match_type, indexed_identity.match_type or "미확인")
             )
-            i2.caption("허가번호")
+            i2.caption("식약처 품목번호")
             i2.write(" / ".join(indexed_identity.permit_numbers[:5]) or "미확인")
             i3.caption("모델")
             i3.write(" / ".join(indexed_identity.model_names[:5]) or "미확인")
-            i4.caption("식약처 등록업체")
+            i4.caption("품목 책임주체")
             i4.write(" / ".join(indexed_identity.companies[:5]) or "미확인")
             if indexed_identity.match_type == "permit":
                 st.success(
-                    f"허가번호 exact 일치 · 등록 모델 {len(indexed_identity.model_names)}개를 모델별 나라장터 직접가격과 교차조회합니다."
+                    f"식약처 품목번호 exact 일치 · 등록 모델 {len(indexed_identity.model_names)}개를 모델별 나라장터 직접가격과 교차조회합니다."
                 )
                 if len(indexed_identity.model_names) > 1:
                     st.caption(
-                        "복수 모델 허가입니다. 하나를 대표모델로 임의 선택하지 않으며 아래 모델별 가격표를 기준으로 확인합니다."
+                        "복수 모델 품목번호입니다. 하나를 대표모델로 임의 선택하지 않으며 아래 모델별 가격표를 기준으로 확인합니다."
                     )
             elif indexed_identity.match_type in {"udi", "model"}:
                 st.caption("식약처 공식 identity exact 검색 결과입니다.")
@@ -491,7 +502,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         [
             "📌 요약",
             "💰 거래가격",
-            "🏥 식약처·허가",
+            "🏥 식약처·품목",
             "🏢 공급사",
             "🔁 경쟁장비",
             "📚 Research·근거",
@@ -500,7 +511,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
     with summary_tab:
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("동일제품 거래", f"{stats.direct_count}건")
+        if getattr(track_b, "evidence_status", None) == PriceEvidenceStatus.UNAVAILABLE:
+            c1.metric("직접 동일성 확인 거래", "조회 불가")
+        else:
+            c1.metric("직접 동일성 확인 거래", f"{stats.direct_count}건")
         if stats.min_price is not None and stats.max_price is not None:
             c2.metric(
                 "직접가격 범위",
@@ -511,10 +525,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
         c3.metric("실제 조달 공급업체", f"{stats.supplier_count}개")
 
         if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
-            mfds_metric = "허가 확인"
+            mfds_metric = "품목번호 확인"
         elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
             if mfds.exact_ambiguous:
-                mfds_metric = "복수 허가"
+                mfds_metric = "복수 품목번호"
             elif mfds.exact_confirmed:
                 mfds_metric = "exact 확인"
             elif mfds.records:
@@ -525,12 +539,12 @@ def _render_search_result(state: dict[str, Any]) -> None:
             mfds_metric = "조회 실패"
         else:
             mfds_metric = "대상 아님"
-        c4.metric("식약처 등록", mfds_metric)
+        c4.metric("식약처 품목정보", mfds_metric)
         c5.metric("공개조달 Research", f"{stats.research_count}건")
 
         if isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_records:
             with st.container(border=True):
-                st.markdown("**식약처 허가 identity**")
+                st.markdown("**식약처 품목 identity**")
                 i1, i2, i3 = st.columns(3)
                 i1.caption("품목 / 모델")
                 i1.write(
@@ -544,7 +558,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     )
                     or "미확인"
                 )
-                i2.caption("허가번호")
+                i2.caption("식약처 품목번호")
                 i2.write(" / ".join(mfds.permit_numbers) or "미확인")
                 permit_dates = sorted(
                     {
@@ -561,7 +575,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
             and indexed_identity.status == "success"
             and indexed_identity.match_type == "permit"
         ):
-            st.markdown("#### 허가번호 기준 모델·조달가격 연결")
+            st.markdown("#### 식약처 품목번호 기준 모델·조달가격 연결")
             if exact_identity_crosslinks:
                 st.dataframe(
                     exact_identity_crosslinks,
@@ -569,11 +583,11 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     hide_index=True,
                 )
                 st.caption(
-                    "허가번호에 등록된 각 모델을 개별적으로 나라장터 A/B 직접거래와 교차조회합니다. "
-                    "식약처 제조·수입 등록업체와 실제 조달 납품업체는 서로 다른 관계입니다."
+                    "식약처 품목번호에 연결된 각 모델을 개별적으로 나라장터 A/B 직접거래와 교차조회합니다. "
+                    "식약처 품목 책임주체와 실제 조달 납품업체는 서로 다른 관계입니다."
                 )
             else:
-                st.info("허가정보는 확인됐지만 등록 모델 기준 나라장터 A/B 직접가격은 아직 확인되지 않았습니다.")
+                st.info("식약처 품목정보는 확인됐지만 등록 모델 기준 나라장터 A/B 직접가격은 아직 확인되지 않았습니다.")
 
         if stats.median_price is not None:
             q1, q2, q3 = st.columns(3)
@@ -683,19 +697,20 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 )
 
     with mfds_tab:
-        st.markdown("#### 식약처 허가·등록정보")
+        st.markdown("#### 식약처 품목·Identity")
         if isinstance(indexed_identity, MfdsIdentityLookup):
             if indexed_identity.status == "success" and indexed_identity.records:
                 st.markdown("##### 누적 Identity Index")
                 st.dataframe(
                     [
                         {
-                            "허가번호": item.permit_number or "",
+                            "유형": item.item_authorization_type.value,
+                            "식약처 품목번호": item.permit_number or "",
                             "품목": item.product_name or "",
                             "모델": item.model_name or "",
-                            "식약처 등록업체": item.registered_company or "",
+                            "품목 책임주체": item.registered_company or "",
                             "UDI-DI": item.udi_di or "",
-                            "허가일": item.permit_date or "",
+                            "식약처 처리일": item.permit_date or "",
                             "등급": item.grade or "",
                         }
                         for item in indexed_identity.records
@@ -704,10 +719,12 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     hide_index=True,
                 )
                 st.caption(
-                    "식약처 공식 제품정보를 수집한 누적 인덱스입니다. 등록업체는 제조·수입 관계이며 실제 납품업체와 구분합니다."
+                    "식약처 공식 제품정보를 수집한 누적 인덱스입니다. 품목 책임주체는 제조·수입 제품관계이며 실제 납품업체와 구분합니다."
                 )
+            elif indexed_identity.identity_status == IdentityEvidenceStatus.NOT_FOUND_IN_COVERAGE:
+                st.info("현재 수집된 식약처 자료 범위에서 일치 identity를 찾지 못했습니다.")
             elif indexed_identity.status == "not_ingested":
-                st.info("식약처 Identity Index 첫 백필이 아직 완료되지 않았습니다.")
+                st.info("식약처 Identity Index를 아직 사용할 수 없습니다.")
             elif indexed_identity.status == "unavailable":
                 st.warning("식약처 Identity Index를 현재 읽을 수 없습니다.")
 
@@ -741,8 +758,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
                         {
                             "품목": item.product_name or "",
                             "모델": item.model_name or "",
-                            "허가번호": item.permit_number or "",
-                            "허가일": item.permit_date.isoformat() if item.permit_date else "",
+                            "식약처 품목번호": item.permit_number or "",
+                            "식약처 처리일": item.permit_date.isoformat() if item.permit_date else "",
                             "업종": item.industry_type or "",
                             "수출전용": item.export_only,
                             "취소상태": item.cancellation_status or "",
@@ -757,7 +774,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
             st.info(
                 "형명정보 API의 INDT_NM은 '업종'이며 업체명이 아닙니다. "
-                "업체 관계는 누적 Identity Index의 공식 제품정보에 포함된 제조·수입업체 필드를 우선 사용합니다."
+                "품목 책임주체는 누적 Identity Index의 공식 제품정보에 포함된 제조·수입업체 필드를 사용하며 실제 조달 납품업체와 구분합니다."
             )
 
             if mfds.business_records:
@@ -786,12 +803,12 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
     with supplier_tab:
         if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.companies:
-            st.markdown("#### 식약처 제품 등록업체")
+            st.markdown("#### 식약처 품목 책임주체")
             st.dataframe(
                 [
                     {
                         "업체": company,
-                        "근거": "식약처 제품정보 · 제조/수입 등록관계",
+                        "근거": "식약처 제품정보 · 제조/수입 제품관계",
                     }
                     for company in indexed_identity.companies
                 ],
@@ -847,7 +864,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
             and indexed_identity.status == "success"
             and indexed_identity.match_type == "permit"
         ):
-            st.markdown("#### 검색한 허가번호 → 등록모델 → 나라장터 가격")
+            st.markdown("#### 검색한 식약처 품목번호 → 등록모델 → 나라장터 가격")
             if exact_identity_crosslinks:
                 st.dataframe(
                     exact_identity_crosslinks,
@@ -855,9 +872,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     hide_index=True,
                 )
             else:
-                st.info("검색한 허가번호의 모델은 확인됐지만 나라장터 A/B 직접거래 연결은 없습니다.")
+                st.info("검색한 식약처 품목번호의 모델은 확인됐지만 나라장터 A/B 직접거래 연결은 확인되지 않았습니다.")
 
-        st.markdown("#### 동일 품목 → 허가번호 → 모델 → 등록업체 → 나라장터 가격")
+        st.markdown("#### 동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격")
         if mfds_procurement_crosslinks:
             st.dataframe(
                 mfds_procurement_crosslinks,
@@ -865,7 +882,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 hide_index=True,
             )
             st.caption(
-                f"식약처 누적 인덱스 동일품목 {len(same_product_identity)}행 중 모델 기준 최대 25개를 나라장터 A/B 직접근거와 교차조회합니다."
+                f"식약처 누적 인덱스 동일품목 {len(same_product_identity)}행 중 모델 기준 최대 25개를 나라장터 A/B 직접근거와 교차조회합니다. 품목 책임주체와 조달 납품업체는 별도 관계입니다."
             )
         elif same_product_identity:
             st.info("동일품목 등록정보는 있으나 모델 기준 나라장터 교차조회 결과를 만들 수 없습니다.")
@@ -879,8 +896,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     {
                         "모델": item.model_name or "",
                         "상품명": item.trade_name or "",
-                        "허가번호": item.permit_number or "",
-                        "허가일": item.permit_date.isoformat() if item.permit_date else "",
+                        "식약처 품목번호": item.permit_number or "",
+                        "식약처 처리일": item.permit_date.isoformat() if item.permit_date else "",
                         "업종": item.industry_type or "",
                     }
                     for item in mfds.active_competitor_records
