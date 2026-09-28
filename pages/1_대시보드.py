@@ -12,7 +12,10 @@ from purchase_price.services.g2b_search_policy import (
     G2B_LOOKBACK_OPTIONS,
     g2b_lookback_label,
 )
-from purchase_price.services.mfds_identity_index import MfdsIdentityLookup
+from purchase_price.services.mfds_identity_index import (
+    MFDS_PRODUCT_INFO_DATASET_URL,
+    MfdsIdentityLookup,
+)
 from purchase_price.services.mfds_identity_r2 import (
     lookup_mfds_identity_from_r2,
     lookup_same_mfds_product_from_r2,
@@ -809,6 +812,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
                             "UDI-DI": item.udi_di or "",
                             "식약처 처리일": item.permit_date or "",
                             "등급": item.grade or "",
+                            "Source": MFDS_PRODUCT_INFO_DATASET_URL,
+                            "원문근거해시": (item.source_payload_sha256 or "")[:16],
                         }
                         for item in indexed_identity.records
                     ],
