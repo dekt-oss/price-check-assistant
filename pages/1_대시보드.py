@@ -15,6 +15,7 @@ from purchase_price.services.g2b_search_policy import (
 from purchase_price.services.mfds_identity_index import (
     MFDS_PRODUCT_INFO_DATASET_URL,
     MfdsIdentityLookup,
+    MfdsIdentityRecord,
 )
 from purchase_price.services.mfds_identity_r2 import (
     lookup_mfds_identity_from_r2,
@@ -288,6 +289,19 @@ def _ambiguous_identity_candidates(identity: MfdsIdentityLookup) -> list[dict[st
     return rows
 
 
+def _candidate_identity_records(identity: MfdsIdentityLookup) -> list[MfdsIdentityRecord]:
+    unique: dict[tuple[str, str, str, str], MfdsIdentityRecord] = {}
+    for item in identity.records:
+        key = (
+            str(item.product_name or "").strip(),
+            str(item.permit_number or "").strip(),
+            str(item.model_name or "").strip(),
+            str(item.registered_company or "").strip(),
+        )
+        unique.setdefault(key, item)
+    return list(unique.values())
+
+
 def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
     identity = state.get("mfds_identity")
     st.divider()
@@ -299,12 +313,47 @@ def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
     if not isinstance(identity, MfdsIdentityLookup) or not identity.records:
         st.info("후보 identity를 표시할 수 없습니다.")
         return
-    rows = _ambiguous_identity_candidates(identity)
-    st.dataframe(rows, use_container_width=True, hide_index=True)
-    st.caption(
-        "품목·식약처 품목번호·품목 책임주체를 확인한 뒤 상세조건 검색으로 정확한 identity를 지정하세요. "
-        "후보 선택 전에는 나라장터 직접가격을 특정 제품의 가격으로 연결하지 않습니다."
+
+    candidates = _candidate_identity_records(identity)
+    st.dataframe(
+        _ambiguous_identity_candidates(identity),
+        use_container_width=True,
+        hide_index=True,
     )
+    selected_index = st.selectbox(
+        "조사할 제품 identity 선택",
+        options=list(range(len(candidates))),
+        format_func=lambda index: (
+            f"{candidates[index].product_name or '품목 미확인'} · "
+            f"{candidates[index].model_name or '모델 미확인'} · "
+            f"[{candidates[index].item_authorization_type.value}] "
+            f"{candidates[index].permit_number or '품목번호 미확인'} · "
+            f"{candidates[index].registered_company or '책임주체 미확인'}"
+        ),
+        key="workspace_v3_identity_candidate",
+    )
+    st.caption(
+        "후보 선택 전에는 나라장터 직접가격을 특정 제품의 가격으로 연결하지 않습니다. "
+        "품목 책임주체는 식약처 제품관계이며 나라장터 제조사 조건으로 자동 주입하지 않습니다."
+    )
+    if st.button("선택한 identity로 구매조사", type="primary"):
+        selected = candidates[int(selected_index)]
+        with st.status("선택한 제품 identity의 가격·조달근거를 조사하고 있습니다...", expanded=False) as status:
+            resolved = _execute_search(
+                search_text=state.get("search_text") or selected.model_name or "",
+                product_name=selected.product_name or "",
+                manufacturer="",
+                model_name=selected.model_name or "",
+                specification="",
+                quote_text="",
+                lookback_days=G2B_DEFAULT_LOOKBACK_DAYS,
+                selected_identity=selected,
+            )
+            st.session_state[HOME_SEARCH_STATE_KEY] = resolved
+            st.query_params["q"] = state.get("search_text") or selected.model_name or ""
+            st.query_params["view"] = "price"
+            status.update(label="제품 identity 선택 완료", state="complete")
+        st.rerun()
 
 
 def _execute_search(
@@ -316,21 +365,32 @@ def _execute_search(
     specification: str,
     quote_text: str,
     lookback_days: int,
+    selected_identity: MfdsIdentityRecord | None = None,
 ) -> dict[str, Any]:
     raw_search = search_text.strip()
-    (
-        product_name,
-        manufacturer,
-        model_name,
-        specification,
-        indexed_identity,
-    ) = _identity_hydration(
-        raw_search,
-        product_name=product_name,
-        manufacturer=manufacturer,
-        model_name=model_name,
-        specification=specification,
-    )
+    if selected_identity is None:
+        (
+            product_name,
+            manufacturer,
+            model_name,
+            specification,
+            indexed_identity,
+        ) = _identity_hydration(
+            raw_search,
+            product_name=product_name,
+            manufacturer=manufacturer,
+            model_name=model_name,
+            specification=specification,
+        )
+    else:
+        product_name = selected_identity.product_name or product_name
+        model_name = selected_identity.model_name or model_name
+        indexed_identity = MfdsIdentityLookup(
+            "success",
+            raw_search or model_name,
+            "model",
+            (selected_identity,),
+        )
     if (
         isinstance(indexed_identity, MfdsIdentityLookup)
         and indexed_identity.identity_status == IdentityEvidenceStatus.AMBIGUOUS
@@ -1166,10 +1226,7 @@ if not isinstance(search_state, dict) and shared_query and handoff is None:
         st.warning(f"공유된 검색조건을 복원하지 못했습니다: {exc}")
 
 search_state = st.session_state.get(HOME_SEARCH_STATE_KEY)
-result_mode = (
-    isinstance(search_state, dict)
-    and search_state.get("route") != "candidate_selection"
-)
+result_mode = isinstance(search_state, dict)
 default_query = (
     str(search_state.get("search_text") or search_state.get("heading") or "")
     if result_mode
