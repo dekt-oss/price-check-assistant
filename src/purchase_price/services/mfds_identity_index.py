@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from purchase_price.domain import IdentityEvidenceStatus, MfdsItemAuthorizationType
+from purchase_price.evidence_domain import IdentityEvidenceStatus, MfdsItemAuthorizationType
 from purchase_price.services.matching import normalize_text
 
 MFDS_PRODUCT_INFO_BASE_URL = "https://apis.data.go.kr/1471000/MdeqStdCdPrdtInfoService03"
