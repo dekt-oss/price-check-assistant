@@ -159,8 +159,28 @@ def _clear_research(state: QuoteReviewState) -> None:
     state.market_bundles.clear()
     state.track_b_db.clear()
     state.mfds_workspace.clear()
+    state.item_research_failures.clear()
     state.comparability_context.clear()
     state.approvals.clear()
+
+
+def _record_item_failure(
+    state: QuoteReviewState,
+    index: int,
+    stage: str,
+    exc: Exception,
+) -> None:
+    failures = state.item_research_failures.setdefault(index, {})
+    failures[stage] = type(exc).__name__
+
+
+def _clear_item_failure(state: QuoteReviewState, index: int, stage: str) -> None:
+    failures = state.item_research_failures.get(index)
+    if not failures:
+        return
+    failures.pop(stage, None)
+    if not failures:
+        state.item_research_failures.pop(index, None)
 
 
 def _invalidate_item_review(state: QuoteReviewState, index: int) -> None:
@@ -303,10 +323,16 @@ def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
     if not state.items:
         return
     for index, item in enumerate(state.items):
-        if index not in state.track_b_db:
+        if index in state.track_b_db:
+            continue
+        try:
             state.track_b_db[index] = lookup_track_b_quote(
                 quote_item_query(item), quote_unit_price=item.unit_price
             )
+        except Exception as exc:
+            _record_item_failure(state, index, "나라장터 가격", exc)
+            continue
+        _clear_item_failure(state, index, "나라장터 가격")
 
 
 def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
@@ -318,10 +344,15 @@ def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
         track_b = state.track_b_db.get(index)
         if track_b is None:
             continue
-        state.mfds_workspace[index] = research_mfds_for_workspace(
-            quote_item_query(item),
-            track_b,
-        )
+        try:
+            state.mfds_workspace[index] = research_mfds_for_workspace(
+                quote_item_query(item),
+                track_b,
+            )
+        except Exception as exc:
+            _record_item_failure(state, index, "식약처", exc)
+            continue
+        _clear_item_failure(state, index, "식약처")
 
 
 def _ensure_market_research(state: QuoteReviewState) -> bool:
@@ -343,16 +374,25 @@ def _ensure_market_research(state: QuoteReviewState) -> bool:
                 f"{item.product_name or item.model_name or '미확인 품목'} 조사 중"
             ),
         )
-        run, discovery, market_bundle = run_market_research(
-            query,
-            lookback_days=state.lookback_days,
-            research_pages_per_term=1,
-            research_request_budget=18,
-            procurement_detail_limit=4,
-        )
+        try:
+            run, discovery, market_bundle = run_market_research(
+                query,
+                lookback_days=state.lookback_days,
+                research_pages_per_term=1,
+                research_request_budget=18,
+                procurement_detail_limit=4,
+            )
+        except Exception as exc:
+            _record_item_failure(state, index, "추가 공개자료", exc)
+            progress.progress(
+                done / total,
+                text=f"{index + 1}/{len(state.items)} · 조사 실패 · 다른 품목 계속 진행",
+            )
+            continue
         state.search_runs[index] = run
         state.discoveries[index] = discovery
         state.market_bundles[index] = market_bundle
+        _clear_item_failure(state, index, "추가 공개자료")
     progress.progress(1.0, text="추가 공개자료 조사를 완료했습니다.")
     return True
 
@@ -388,6 +428,16 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             "아래 표는 실제 수집된 거래가격을 우선 보여줍니다. 동일성이 충분하지 않은 행은 "
             "'검색 참고'로 표시하며 견적 적정성 판정에는 자동 사용하지 않습니다."
         )
+
+        failures = state.item_research_failures.get(index, {})
+        if failures:
+            failure_text = " · ".join(
+                f"{stage}: {error_type}" for stage, error_type in failures.items()
+            )
+            st.warning(
+                "이 품목의 일부 조사 단계가 실패했습니다. 다른 품목의 결과는 유지하며 "
+                f"실패 단계만 다시 시도할 수 있습니다. {failure_text}"
+            )
 
         if mfds is not None and mfds.status in {"success", "success_0"}:
             if mfds.exact_ambiguous:
@@ -620,4 +670,20 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
             st.rerun()
         if st.button("가격 다시 검색", key="quote_auto_research_again"):
             _clear_research(state)
+            st.rerun()
+
+    failed_items = sorted(state.item_research_failures)
+    if failed_items:
+        st.warning(
+            "일부 품목 조사에 실패했지만 성공한 품목의 결과는 유지했습니다. "
+            "실패 품목: " + ", ".join(str(index + 1) for index in failed_items)
+        )
+        if st.button("실패 품목만 다시 조사", key="quote_retry_failed_items"):
+            for index in failed_items:
+                state.track_b_db.pop(index, None)
+                state.mfds_workspace.pop(index, None)
+                state.search_runs.pop(index, None)
+                state.discoveries.pop(index, None)
+                state.market_bundles.pop(index, None)
+            state.item_research_failures.clear()
             st.rerun()
