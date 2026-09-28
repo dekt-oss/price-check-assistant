@@ -19,9 +19,11 @@ def test_mfds_serving_pointer_is_published_only_after_complete_index_upload() ->
 
     upload = source.index("ref = artifact_store.put_sqlite(db_path)")
     pointer = source.index("state_store.write_json(MFDS_IDENTITY_POINTER_STATE, pointer_payload)")
-    cleanup = source.index("artifact_store.delete(previous_ref.key)")
+    cleanup = source.index("artifact_store.delete(stale_retained_key)")
 
     assert upload < pointer < cleanup
+    assert '"previous_key": previous_ref.key if previous_ref is not None else None' in source
+    assert "artifact_store.delete(previous_ref.key)" not in source
 
 
 def test_dashboard_reuses_one_track_b_snapshot_for_crosslinks() -> None:
