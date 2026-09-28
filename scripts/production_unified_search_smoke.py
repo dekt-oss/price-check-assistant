@@ -134,7 +134,7 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
         raise RuntimeError("Default price workspace did not render after DFM100 search")
     report["price_section_rendered"] = True
 
-    supplier_section = app.get_by_text("🏢 업체·조달", exact=True)
+    supplier_section = app.get_by_text("업체·조달", exact=True)
     supplier_section.wait_for(state="visible", timeout=20_000)
     supplier_section.click()
     deadline = time.monotonic() + 45
@@ -151,7 +151,7 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
     else:
         raise RuntimeError("Supplier/procurement section did not preserve DFM100 result")
 
-    compare_section = app.get_by_text("🔁 동일품목 비교", exact=True)
+    compare_section = app.get_by_text("동일품목 비교", exact=True)
     compare_section.click()
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
