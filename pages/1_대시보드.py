@@ -58,7 +58,7 @@ from purchase_price.ui.market_research import (
     render_procurement_research,
     run_market_research,
 )
-from purchase_price.ui.purchase_workspace import (
+from purchase_price.ui.purchase_workspace_presenter import (
     build_purchase_workspace_stats,
     build_quote_position_message,
     supplier_rows,
