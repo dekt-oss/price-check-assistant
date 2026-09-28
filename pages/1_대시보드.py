@@ -261,6 +261,52 @@ def _render_mfds_collection_status() -> None:
             )
 
 
+def _ambiguous_identity_candidates(identity: MfdsIdentityLookup) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for item in identity.records:
+        key = (
+            str(item.product_name or "").strip(),
+            str(item.permit_number or "").strip(),
+            str(item.model_name or "").strip(),
+            str(item.registered_company or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "품목": key[0] or "미확인",
+                "식약처 품목번호": key[1] or "미확인",
+                "유형": item.item_authorization_type.value,
+                "모델": key[2] or "미확인",
+                "품목 책임주체": key[3] or "미확인",
+                "등급": str(item.grade or "").strip() or "미확인",
+                "UDI-DI": str(item.udi_di or "").strip() or "미확인",
+            }
+        )
+    return rows
+
+
+def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
+    identity = state.get("mfds_identity")
+    st.divider()
+    st.caption("검색 후보 선택")
+    st.subheader(state.get("heading") or state.get("search_text") or "검색 결과")
+    st.warning(
+        "동일 모델명이 여러 식약처 품목번호 또는 품목 책임주체에 연결되어 자동으로 하나를 선택하지 않습니다."
+    )
+    if not isinstance(identity, MfdsIdentityLookup) or not identity.records:
+        st.info("후보 identity를 표시할 수 없습니다.")
+        return
+    rows = _ambiguous_identity_candidates(identity)
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.caption(
+        "품목·식약처 품목번호·품목 책임주체를 확인한 뒤 상세조건 검색으로 정확한 identity를 지정하세요. "
+        "후보 선택 전에는 나라장터 직접가격을 특정 제품의 가격으로 연결하지 않습니다."
+    )
+
+
 def _execute_search(
     *,
     search_text: str,
@@ -285,6 +331,18 @@ def _execute_search(
         model_name=model_name,
         specification=specification,
     )
+    if (
+        isinstance(indexed_identity, MfdsIdentityLookup)
+        and indexed_identity.identity_status == IdentityEvidenceStatus.AMBIGUOUS
+        and indexed_identity.match_type == "model"
+    ):
+        return {
+            "route": "candidate_selection",
+            "search_text": raw_search,
+            "heading": raw_search,
+            "mfds_identity": indexed_identity,
+        }
+
     interpretation = interpret_unified_search(
         search_text=raw_search,
         product_name=product_name,
@@ -386,6 +444,7 @@ def _execute_search(
     direct_rows, reference_rows = _split_transaction_rows_compat(track_b)
     strict_count, reference_count = candidate_counts(track_b)
     return {
+        "route": "workspace",
         "search_text": raw_search,
         "heading": (
             raw_search
@@ -1107,7 +1166,10 @@ if not isinstance(search_state, dict) and shared_query and handoff is None:
         st.warning(f"공유된 검색조건을 복원하지 못했습니다: {exc}")
 
 search_state = st.session_state.get(HOME_SEARCH_STATE_KEY)
-result_mode = isinstance(search_state, dict)
+result_mode = (
+    isinstance(search_state, dict)
+    and search_state.get("route") != "candidate_selection"
+)
 default_query = (
     str(search_state.get("search_text") or search_state.get("heading") or "")
     if result_mode
@@ -1222,7 +1284,10 @@ if submitted:
 
 search_state = st.session_state.get(HOME_SEARCH_STATE_KEY)
 if isinstance(search_state, dict):
-    _render_search_result(search_state)
+    if search_state.get("route") == "candidate_selection":
+        _render_identity_candidate_selection(search_state)
+    else:
+        _render_search_result(search_state)
 
 st.caption(
     "검색 참고 가격은 실제 관측값이지만 동일제품으로 확정된 가격은 아닙니다. "
