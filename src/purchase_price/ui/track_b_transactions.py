@@ -102,6 +102,21 @@ def _quantity_unit(quantity: Any, unit: str | None) -> str:
 
 
 
+def _unit_price_basis_text(candidate: Any) -> str:
+    sentinel = object()
+    basis = getattr(candidate, "unit_price_basis", sentinel)
+    if basis is sentinel:
+        # Backward compatibility: legacy Track B candidates predate the explicit basis field,
+        # but their price was already sourced only from explicit prdctUprc.
+        return "원문 단가"
+    value = str(getattr(basis, "value", basis) or "").strip()
+    if value == "calculated_unit_price":
+        return "계산단가"
+    if value == "source_unit_price":
+        return "원문 단가"
+    return "미확인"
+
+
 def _condition_text(candidate: Any) -> str:
     parts = [
         str(value).strip()
@@ -125,7 +140,7 @@ def _transaction_row(candidate: Any, *, comparison_level: str) -> dict[str, obje
     ).strip() or "미확인"
     return {
         "가격": _money_text(candidate.price),
-        "단가구분": "원문 단가",
+        "단가구분": _unit_price_basis_text(candidate),
         "단위": _text_or_unknown(unit),
         "포장입수": "미확인",
         "수량": _quantity_text(quantity),
