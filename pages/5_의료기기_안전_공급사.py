@@ -7,11 +7,14 @@ from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.company_workspace import build_company_procurement_rows
 from purchase_price.services.market_research_support import (
     build_web_supplier_search_links,
     extract_g2b_supplier_candidates,
     extract_mfds_business_supplier_candidates,
 )
+from purchase_price.services.mfds_identity_r2 import lookup_mfds_identity_from_r2
+from purchase_price.services.track_b_r2_quote_index import open_track_b_serving_snapshot
 from purchase_price.services.mfds_device_intelligence import (
     MFDS_BUSINESS_LICENSE_BASE_URL,
     MFDS_MODEL_INFO_BASE_URL,
@@ -92,6 +95,47 @@ if submitted:
         permit_numbers.append(permit_number.strip())
 
     st.subheader("1. 공식 identity 및 업체·조달 근거")
+
+    if company_name.strip():
+        st.markdown("#### 업체 중심 품목·조달 연결")
+        company_identity = lookup_mfds_identity_from_r2(company_name.strip())
+        if company_identity.status == "success" and company_identity.match_type == "company":
+            with open_track_b_serving_snapshot() as track_b_snapshot:
+                company_rows = build_company_procurement_rows(
+                    company_identity.records,
+                    track_b_snapshot=track_b_snapshot,
+                )
+            c1, c2, c3 = st.columns(3)
+            c1.metric("식약처 책임품목 행", f"{len(company_identity.records)}건")
+            c2.metric("등록 모델", f"{len(company_identity.model_names)}개")
+            supplier_names = {
+                supplier.strip()
+                for row in company_rows
+                for supplier in str(row.get("실제 조달 납품업체") or "").split("/")
+                if supplier.strip() and supplier.strip() != "미확인"
+            }
+            c3.metric("관측 조달 납품업체", f"{len(supplier_names)}개")
+            if company_rows:
+                st.dataframe(
+                    pd.DataFrame(company_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("해당 품목 책임주체의 모델 단위 조달 교차조회 대상을 만들 수 없습니다.")
+            st.caption(
+                "위 표의 '품목 책임주체'는 식약처 제품관계이고 '실제 조달 납품업체'는 나라장터 A/B 직접근거입니다. "
+                "업체명이 같거나 함께 나타나더라도 총판·대리점·판매권 관계로 자동 확정하지 않습니다."
+            )
+        elif company_identity.status == "success":
+            st.info(
+                "입력어가 식약처 누적 인덱스에서 업체가 아닌 다른 exact identity로 먼저 확인되어 "
+                "업체 관계로 자동 해석하지 않습니다."
+            )
+        elif company_identity.status == "success_0":
+            st.info("현재 수집된 식약처 자료 범위에서 exact 업체명 일치를 확인하지 못했습니다.")
+        elif company_identity.status in {"unavailable", "not_ingested"}:
+            st.warning("식약처 누적 Identity Index를 현재 사용할 수 없어 업체 중심 품목 연결을 확인하지 못했습니다.")
 
     if product_name.strip() and mfds_service_key:
         model_client = MfdsModelInfoClient(
