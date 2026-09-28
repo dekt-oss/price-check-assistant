@@ -70,24 +70,41 @@ class TrackBServingSnapshot:
         quote_unit_prices: tuple[Any, ...] | None = None,
         limit_per_model: int = 50,
     ):
-        from purchase_price.services.track_b_db_quote_comparison import (
-            TrackBQuoteComparison,
-            compare_track_b_models_batch,
-        )
+        from purchase_price.services import track_b_db_quote_comparison as track_b_db
 
         queries = tuple(queries)
+        comparison_type = track_b_db.TrackBQuoteComparison
         if self.status in {"unavailable", "not_ingested"} or self.session is None:
-            return tuple(TrackBQuoteComparison(self.status, (), 0) for _ in queries)
+            return tuple(comparison_type(self.status, (), 0) for _ in queries)
         prices = (
             tuple(quote_unit_prices)
             if quote_unit_prices is not None
             else tuple(None for _ in queries)
         )
-        return compare_track_b_models_batch(
-            self.session,
-            queries,
-            quote_unit_prices=prices,
-            limit_per_model=limit_per_model,
+        if len(prices) != len(queries):
+            raise ValueError("quote_unit_prices must align with queries")
+
+        native_batch = getattr(track_b_db, "compare_track_b_models_batch", None)
+        if callable(native_batch):
+            return native_batch(
+                self.session,
+                queries,
+                quote_unit_prices=prices,
+                limit_per_model=limit_per_model,
+            )
+
+        # Streamlit Cloud may retain the pre-batch module object across a hot reload.
+        # Preserve correctness with the legacy strict comparator rather than failing the
+        # entire Workspace. This compatibility path is temporary and intentionally
+        # sacrifices batch performance only while the stale module remains resident.
+        return tuple(
+            track_b_db.compare_track_b_quote(
+                self.session,
+                query,
+                quote_unit_price=quote_unit_price,
+                limit=limit_per_model,
+            )
+            for query, quote_unit_price in zip(queries, prices, strict=True)
         )
 
 
