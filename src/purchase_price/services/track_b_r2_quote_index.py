@@ -50,11 +50,13 @@ def _remember_validated_cache(path: Path, sha256: str) -> None:
     _VALIDATED_CACHE_FILES[sha256] = _file_fingerprint(path)
 
 
-def _local_index_path(settings: Settings) -> Path | None:
+def _local_index_snapshot(
+    settings: Settings,
+) -> tuple[Path | None, dict[str, object] | None]:
     state_store = R2OperationalStateStore.from_settings(settings)
     pointer = state_store.read_json(SERVING_INDEX_STATE_NAME)
     if pointer is None:
-        return None
+        return None, None
     if pointer.get("schema") != POINTER_SCHEMA:
         raise R2IntegrityError("Track B serving-index pointer schema mismatch")
     key = str(pointer.get("key") or "").strip()
@@ -65,7 +67,7 @@ def _local_index_path(settings: Settings) -> Path | None:
     destination = _CACHE_DIR / f"{sha256}.sqlite"
     if destination.exists():
         if _cache_file_is_valid(destination, sha256):
-            return destination
+            return destination, dict(pointer)
         _VALIDATED_CACHE_FILES.pop(sha256, None)
         try:
             destination.unlink()
@@ -87,7 +89,12 @@ def _local_index_path(settings: Settings) -> Path | None:
                 stale.unlink()
             except OSError:
                 pass
-    return destination
+    return destination, dict(pointer)
+
+
+def _local_index_path(settings: Settings) -> Path | None:
+    path, _pointer = _local_index_snapshot(settings)
+    return path
 
 
 
@@ -100,6 +107,8 @@ class TrackBServingSnapshot:
     path: Path | None = None
     engine: Engine | None = None
     session: Session | None = None
+    data_as_of: str | None = None
+    index_updated_at: str | None = None
 
     def __enter__(self) -> TrackBServingSnapshot:
         return self
@@ -174,9 +183,12 @@ def open_track_b_serving_snapshot(
     if not settings.r2_configured:
         return TrackBServingSnapshot("unavailable")
     try:
-        path = _local_index_path(settings)
+        path, pointer = _local_index_snapshot(settings)
         if path is None:
             return TrackBServingSnapshot("not_ingested")
+        pointer = pointer or {}
+        data_as_of = str(pointer.get("data_as_of") or "").strip() or None
+        index_updated_at = str(pointer.get("updated_at") or "").strip() or None
         engine = create_engine(
             f"sqlite+pysqlite:///{path}",
             connect_args={"check_same_thread": False},
@@ -186,6 +198,8 @@ def open_track_b_serving_snapshot(
             path=path,
             engine=engine,
             session=Session(bind=engine, autoflush=False, expire_on_commit=False),
+            data_as_of=data_as_of,
+            index_updated_at=index_updated_at,
         )
     except (
         BotoCoreError,
