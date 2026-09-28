@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from time import perf_counter
 
 import pytest
 from sqlalchemy import create_engine, event, select
@@ -198,11 +199,14 @@ def test_multi_model_shell_batches_50_models_in_one_select(session: Session) -> 
             selects += 1
 
     event.listen(session.bind, "before_cursor_execute", count_selects)
+    started = perf_counter()
     try:
         results = compare_track_b_models_batch(session, tuple(queries))
     finally:
+        elapsed = perf_counter() - started
         event.remove(session.bind, "before_cursor_execute", count_selects)
 
+    assert elapsed < 5.0
     assert len(results) == 50
     assert all(result.evidence_status == PriceEvidenceStatus.FOUND for result in results)
     assert all(len(result.candidates) == 1 for result in results)
