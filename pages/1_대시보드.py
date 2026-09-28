@@ -44,6 +44,7 @@ from purchase_price.ui.market_research import (
 )
 from purchase_price.ui.purchase_workspace import (
     build_purchase_workspace_stats,
+    build_quote_position_message,
     supplier_rows,
 )
 from purchase_price.ui.quote_review_state import (
@@ -462,10 +463,11 @@ def _render_search_result(state: dict[str, Any]) -> None:
     same_product_identity = tuple(state.get("same_product_identity") or ())
     mfds_procurement_crosslinks = list(state.get("mfds_procurement_crosslinks") or [])
     interpretation = state.get("interpretation")
-    stats = build_purchase_workspace_stats(
-        track_b=track_b,
-        market_bundle=market_bundle,
-        quote_unit_price=review_input.quote_unit_price,
+    quote_key = str(heading or "result").strip()
+    default_quote = (
+        f"{review_input.quote_unit_price:f}"
+        if review_input.quote_unit_price is not None
+        else ""
     )
 
     st.divider()
@@ -514,6 +516,51 @@ def _render_search_result(state: dict[str, Any]) -> None:
         _render_search_interpretation(interpretation)
 
     st.markdown("### 구매판단 요약")
+    with st.form(f"workspace_quote_context::{quote_key}"):
+        q1, q2, q3, q4, q5 = st.columns([2.2, 1.2, 1.2, 3.0, 1.2])
+        quote_text = q1.text_input(
+            "내 견적가",
+            value=default_quote,
+            placeholder="선택 · 숫자만 입력",
+            key=f"workspace_quote_price::{quote_key}",
+        )
+        quote_unit = q2.text_input(
+            "단위",
+            placeholder="예: 대 / 개",
+            key=f"workspace_quote_unit::{quote_key}",
+        )
+        vat_status = q3.selectbox(
+            "VAT",
+            options=["미확인", "포함", "별도"],
+            key=f"workspace_quote_vat::{quote_key}",
+        )
+        quote_conditions = q4.text_input(
+            "설치·운송 등 조건",
+            placeholder="예: 설치 포함 · 운송 포함",
+            key=f"workspace_quote_conditions::{quote_key}",
+        )
+        q5.form_submit_button("비교 반영", use_container_width=True)
+
+    try:
+        workspace_quote = _parse_quote(quote_text)
+    except ValueError:
+        workspace_quote = review_input.quote_unit_price
+        st.warning("내 견적가는 숫자로 입력하세요. 직전 검색 기준값으로 표시합니다.")
+
+    stats = build_purchase_workspace_stats(
+        track_b=track_b,
+        market_bundle=market_bundle,
+        quote_unit_price=workspace_quote,
+    )
+    st.caption(
+        build_quote_position_message(
+            quote_unit_price=workspace_quote,
+            stats=stats,
+            unit=quote_unit,
+            vat_status="" if vat_status == "미확인" else vat_status,
+            conditions=quote_conditions,
+        )
+    )
     c1, c2, c3, c4, c5 = st.columns(5)
     if getattr(track_b, "evidence_status", None) == PriceEvidenceStatus.UNAVAILABLE:
         c1.metric("직접 동일성 확인 거래", "조회 불가")
