@@ -42,7 +42,6 @@ from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
     parse_purchase_workspace_handoff,
 )
-from purchase_price.services.track_b_r2_quote_index import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
     interpret_unified_search,
@@ -54,7 +53,6 @@ from purchase_price.ui.market_research import (
 )
 from purchase_price.ui.purchase_workspace import (
     build_purchase_workspace_stats,
-    build_quote_position_message,
     supplier_rows,
 )
 from purchase_price.ui.quote_review_state import (
@@ -68,6 +66,10 @@ from purchase_price.ui.track_b_transactions import (
     has_transaction_candidates,
     model_price_group_rows,
     transaction_rows,
+)
+from purchase_price.ui.workspace_runtime_compat import (
+    build_quote_position_message_compat,
+    open_track_b_serving_snapshot_compat,
 )
 from purchase_price.ui.widgets import (
     evidence_rows,
@@ -486,7 +488,7 @@ def _execute_search(
     query = review_input.to_product_query()
 
     model_probe_used = False
-    with open_track_b_serving_snapshot() as track_b_snapshot:
+    with open_track_b_serving_snapshot_compat() as track_b_snapshot:
         track_b = track_b_snapshot.lookup(
             query,
             quote_unit_price=review_input.quote_unit_price,
@@ -726,7 +728,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         quote_unit_price=workspace_quote,
     )
     st.caption(
-        build_quote_position_message(
+        build_quote_position_message_compat(
             quote_unit_price=workspace_quote,
             stats=stats,
             unit=quote_unit,
