@@ -103,7 +103,12 @@ def _quantity_unit(quantity: Any, unit: str | None) -> str:
 
 
 def _unit_price_basis_text(candidate: Any) -> str:
-    basis = getattr(candidate, "unit_price_basis", None)
+    sentinel = object()
+    basis = getattr(candidate, "unit_price_basis", sentinel)
+    if basis is sentinel:
+        # Backward compatibility: legacy Track B candidates predate the explicit basis field,
+        # but their price was already sourced only from explicit prdctUprc.
+        return "원문 단가"
     value = str(getattr(basis, "value", basis) or "").strip()
     if value == "calculated_unit_price":
         return "계산단가"
