@@ -17,7 +17,7 @@ class LegacyTrackBServingSnapshot:
     status = "legacy_compat"
     data_as_of: str | None = None
 
-    def __enter__(self) -> "LegacyTrackBServingSnapshot":
+    def __enter__(self) -> LegacyTrackBServingSnapshot:
         return self
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
