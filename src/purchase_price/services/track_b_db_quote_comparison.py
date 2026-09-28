@@ -10,7 +10,7 @@ from sqlalchemy import exists, inspect, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
-from purchase_price.domain import MatchGrade, PriceEvidenceStatus
+from purchase_price.domain import MatchGrade, PriceEvidenceStatus, UnitPriceBasis
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_track_b_normalization import (
@@ -61,6 +61,7 @@ class TrackBQuoteCandidate:
     contract_type: str | None = None
     delivery_condition: str | None = None
     transaction_type: str = "나라장터 납품요구"
+    unit_price_basis: UnitPriceBasis = UnitPriceBasis.SOURCE_UNIT_PRICE
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,7 @@ class TrackBReferenceCandidate:
     delivery_condition: str | None = None
     reference_scope: str = "KEYWORD"
     transaction_type: str = "나라장터 납품요구"
+    unit_price_basis: UnitPriceBasis = UnitPriceBasis.SOURCE_UNIT_PRICE
 
 
 @dataclass(frozen=True)
