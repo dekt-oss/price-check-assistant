@@ -42,7 +42,7 @@ from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
     parse_purchase_workspace_handoff,
 )
-from purchase_price.services.track_b_r2_quote_index import open_track_b_serving_snapshot
+from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
     interpret_unified_search,
