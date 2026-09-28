@@ -14,6 +14,10 @@ from purchase_price.services.g2b_search_policy import (
 )
 from purchase_price.services.market_survey_export import build_market_survey_workbook
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.mfds_company_summary import (
+    build_registered_company_summaries,
+    company_identity_rows,
+)
 from purchase_price.services.mfds_identity_index import (
     MfdsIdentityLookup,
     MfdsIdentityRecord,
@@ -34,6 +38,7 @@ from purchase_price.services.mfds_identity_status import (
 )
 from purchase_price.services.mfds_workspace import (
     MfdsWorkspaceResult,
+    lookup_mfds_business_license,
     research_mfds_for_workspace,
 )
 from purchase_price.services.pricing import assess_prices
@@ -1090,6 +1095,125 @@ def _render_search_result(state: dict[str, Any]) -> None:
             st.caption("엄격한 동일제품 직접가격은 현재 조사 범위에서 확인되지 않았습니다.")
 
     elif selected_view == "supplier":
+        st.markdown("#### 식약처 품목 등록업체 · 품목 책임주체")
+        company_active_keys: set[tuple[str, str]] | None = None
+        if isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
+            company_active_keys = {
+                (
+                    normalize_text(item.permit_number),
+                    normalize_text(item.model_name),
+                )
+                for item in mfds.active_records
+                if item.permit_number and item.model_name
+            }
+
+        company_summaries = build_registered_company_summaries(
+            same_product_identity,
+            procurement_crosslinks=mfds_procurement_crosslinks,
+            active_live_keys=company_active_keys,
+        )
+        if company_summaries:
+            company_metric_cols = st.columns(3)
+            company_metric_cols[0].metric("품목 책임주체", f"{len(company_summaries)}개")
+            company_metric_cols[1].metric(
+                "나라장터 직접가격 보유 업체",
+                f"{sum(item.direct_price_model_count > 0 for item in company_summaries)}개",
+            )
+            company_metric_cols[2].metric(
+                "국내 정상 등록모델",
+                f"{sum(item.registered_model_count for item in company_summaries)}건",
+            )
+            st.dataframe(
+                [
+                    {
+                        "품목 책임주체": item.company_name,
+                        "국내 정상 등록모델": item.registered_model_count,
+                        "허가건수": item.permit_count,
+                        "최근 식약처 처리일": item.latest_permit_date or "",
+                        "대표모델": " / ".join(item.representative_models),
+                        "나라장터 직접가격 모델": item.direct_price_model_count,
+                        "실제 조달 공급업체": " / ".join(item.procurement_suppliers),
+                        "상태": item.live_status,
+                    }
+                    for item in company_summaries
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "식약처 제품정보의 품목 책임주체를 업체별로 집계합니다. "
+                "나라장터 실제 납품업체는 별도 근거이며 동일 회사라고 자동 간주하지 않습니다."
+            )
+
+            selected_company = st.selectbox(
+                "품목 책임주체 상세보기",
+                options=[item.company_name for item in company_summaries],
+                key=f"workspace_company_drilldown::{quote_key}",
+            )
+            detail_rows = company_identity_rows(
+                same_product_identity,
+                selected_company,
+                active_live_keys=company_active_keys,
+            )
+            if detail_rows:
+                st.dataframe(detail_rows, use_container_width=True, hide_index=True)
+
+            business_cache_key = (
+                "workspace_company_business_lookup::"
+                + normalize_text(selected_company)
+            )
+            if st.button(
+                "선택 업체 식약처 업허가 확인",
+                key=f"workspace_company_business_button::{quote_key}",
+            ):
+                st.session_state[business_cache_key] = lookup_mfds_business_license(
+                    selected_company
+                )
+            selected_business_lookup = st.session_state.get(business_cache_key)
+            if selected_business_lookup is not None:
+                if selected_business_lookup.status == "success":
+                    st.dataframe(
+                        [
+                            {
+                                "업체": item.company_name or "",
+                                "업종": item.industry_type or "",
+                                "영업상태": item.business_status or "",
+                                "업 허가·신고 번호": item.business_permit_number or "",
+                                "허가일": item.permit_date.isoformat() if item.permit_date else "",
+                                "주소": item.address or "",
+                                "현재사용가능": item.is_active,
+                            }
+                            for item in selected_business_lookup.records
+                        ],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    st.caption(
+                        "선택 업체명의 식약처 업허가 조회 결과입니다. "
+                        "업허가가 확인되어도 특정 모델의 판매점·총판 관계를 의미하지 않습니다."
+                    )
+                elif selected_business_lookup.status == "success_0":
+                    st.info("선택한 업체명으로 확인된 식약처 업허가 결과가 0건입니다.")
+                elif selected_business_lookup.status == "not_configured":
+                    st.warning("식약처 업허가 API 서비스키가 연결되지 않아 조회하지 못했습니다.")
+                elif selected_business_lookup.status == "failure":
+                    st.warning(
+                        "식약처 업허가 조회 실패 · "
+                        f"{selected_business_lookup.error_type or '오류'} · "
+                        f"{selected_business_lookup.error_message or '상세 미확인'}"
+                    )
+        elif same_product_identity and company_active_keys is not None:
+            st.info(
+                "같은 식약처 품목의 Identity는 확인됐지만 국내 정상 상태가 확인된 품목 책임주체·모델이 없습니다."
+            )
+        elif same_product_identity:
+            st.info(
+                "품목 책임주체는 확인됐지만 식약처 live 상태를 확인하지 못해 활성 업체로 추정하지 않습니다."
+            )
+        else:
+            st.caption("같은 식약처 품목의 Identity가 확인되면 품목 책임주체를 업체별로 집계합니다.")
+
+        st.divider()
         st.markdown("#### 식약처 품목·Identity")
         if isinstance(indexed_identity, MfdsIdentityLookup):
             if indexed_identity.status == "success" and indexed_identity.records:
@@ -1233,27 +1357,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
         else:
             st.info("직접 동일성 확인 거래 기준 조달 납품업체 0개입니다.")
 
-        if isinstance(mfds, MfdsWorkspaceResult) and mfds.business_records:
-            st.markdown("#### 식약처 업허가 교차확인")
-            st.dataframe(
-                [
-                    {
-                        "업체": item.company_name or "",
-                        "업종": item.industry_type or "",
-                        "상태": item.business_status or "",
-                        "업 허가·신고 번호": item.business_permit_number or "",
-                        "근거": "식약처 업허가 · 모델 공급관계 미확정",
-                    }
-                    for item in mfds.business_records
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.caption(
-                "식약처 제조·수입 업체명 자동 연결은 company-bearing 제품 Source의 "
-                "공식 역검색 계약 확인 후 추가합니다."
-            )
+        st.caption(
+            "업체별 업허가는 위 품목 책임주체 상세보기에서 필요할 때만 조회합니다. "
+            "실제 조달 공급업체와 식약처 품목 책임주체·업허가 업체는 서로 다른 근거입니다."
+        )
 
     else:
         if (
