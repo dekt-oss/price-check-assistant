@@ -94,4 +94,7 @@ def test_serving_pointer_publishes_coverage_date_only_after_backfill_complete() 
     text = Path("src/purchase_price/scripts/sync_g2b_track_b_r2_index.py").read_text()
 
     assert '"data_as_of"' in text
+    assert "def _data_as_of(pipeline: TrackBPipelineState)" in text
     assert "pipeline.rolling_covered_through if pipeline.backfill_complete else None" in text
+    assert 'refreshed_pointer["data_as_of"] = _data_as_of(pipeline)' in text
+    assert "state_store.write_json(SERVING_INDEX_STATE_NAME, refreshed_pointer)" in text
