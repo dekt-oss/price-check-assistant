@@ -59,7 +59,7 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     assert "상세 검색조건" in page_text
     assert "home_quote_upload" in page_text
     assert 'st.switch_page("pages/2_견적_검토.py")' in page_text
-    assert "lookup_track_b_quote_from_r2" in page_text
+    assert "open_track_b_serving_snapshot" in page_text
     assert "나라장터 동일제품 직접거래" in page_text
     assert "검색 참고거래" in page_text
     assert "transaction_rows(track_b)" in page_text
