@@ -159,8 +159,29 @@ def _clear_research(state: QuoteReviewState) -> None:
     state.market_bundles.clear()
     state.track_b_db.clear()
     state.mfds_workspace.clear()
+    state.item_errors.clear()
     state.comparability_context.clear()
     state.approvals.clear()
+
+
+def _record_item_error(
+    state: QuoteReviewState,
+    index: int,
+    stage: str,
+    exc: Exception,
+) -> None:
+    state.item_errors.setdefault(index, {})[stage] = (
+        f"{type(exc).__name__}: {str(exc).strip() or '상세 미확인'}"
+    )
+
+
+def _clear_item_error(state: QuoteReviewState, index: int, stage: str) -> None:
+    errors = state.item_errors.get(index)
+    if not errors:
+        return
+    errors.pop(stage, None)
+    if not errors:
+        state.item_errors.pop(index, None)
 
 
 def _invalidate_item_review(state: QuoteReviewState, index: int) -> None:
@@ -253,49 +274,88 @@ def _render_inline_manual_item_form(state: QuoteReviewState) -> None:
     st.rerun()
 
 
+def _quote_item_editor_rows(state: QuoteReviewState) -> list[dict[str, object]]:
+    return [
+        {
+            "번호": index + 1,
+            "품명": item.product_name,
+            "제조사": item.manufacturer,
+            "모델": item.model_name,
+            "규격": item.specification,
+            "수량": "" if item.quantity is None else format(item.quantity, "f"),
+            "단위": item.unit,
+            "견적 단가": _money_input(item.unit_price),
+        }
+        for index, item in enumerate(state.items)
+    ]
+
+
+def _apply_quote_item_table_edits(
+    state: QuoteReviewState,
+    rows: list[dict[str, object]],
+) -> list[int]:
+    if len(rows) != len(state.items):
+        raise ValueError("품목 행 수가 변경되어 수정값을 반영할 수 없습니다.")
+
+    changed: list[int] = []
+    for index, row in enumerate(rows):
+        item = state.items[index]
+        updated = replace(
+            item,
+            product_name=str(row.get("품명") or "").strip(),
+            manufacturer=str(row.get("제조사") or "").strip(),
+            model_name=str(row.get("모델") or "").strip(),
+            specification=str(row.get("규격") or "").strip(),
+            quantity=parse_quote_decimal(row.get("수량")),
+            unit=str(row.get("단위") or "").strip(),
+            unit_price=parse_quote_decimal(row.get("견적 단가")),
+        )
+        if updated != item:
+            state.items[index] = updated
+            changed.append(index)
+
+    if changed:
+        for index in changed:
+            state.item_confirmed[index] = False
+            state.item_notes.pop(index, None)
+            state.condition_notes.pop(index, None)
+            state.identity.pop(index, None)
+        _clear_research(state)
+        state.step = 2
+    return changed
+
+
 def _render_compact_item_editor(state: QuoteReviewState) -> None:
     if not state.items:
         return
-    with st.expander("추출 내용 확인·수정", expanded=False):
+    with st.expander("추출 품목 한 번에 확인·수정", expanded=False):
         st.caption(
-            "자동 추출이 틀린 경우 품명·제조사·모델·규격·견적 단가만 수정하세요."
+            "품명·제조사·모델·규격·수량·단위·견적 단가를 표에서 한 번에 수정할 수 있습니다. "
+            "수정된 품목만 확인상태를 해제하고 가격·등록근거를 다시 조회합니다."
         )
-        index = st.selectbox(
-            "수정할 품목",
-            options=list(range(len(state.items))),
-            format_func=lambda i: (
-                f"{i + 1}. {state.items[i].product_name or state.items[i].model_name or '미확인 품목'}"
-            ),
-            key="quote_auto_edit_index",
+        edited = st.data_editor(
+            _quote_item_editor_rows(state),
+            use_container_width=True,
+            hide_index=True,
+            disabled=["번호"],
+            key="quote_phase2_item_editor",
+            num_rows="fixed",
         )
-        item = state.items[int(index)]
-        with st.form(f"quote_auto_edit_{index}"):
-            c1, c2 = st.columns(2)
-            product_name = c1.text_input("품명", value=item.product_name)
-            manufacturer = c2.text_input("제조사", value=item.manufacturer)
-            model_name = c1.text_input("모델명", value=item.model_name)
-            specification = c2.text_input("규격", value=item.specification)
-            unit_price = c1.text_input(
-                "견적 단가",
-                value=_money_input(item.unit_price),
+        if st.button("표 수정 반영", key="quote_phase2_item_editor_apply"):
+            try:
+                rows = edited.to_dict("records") if hasattr(edited, "to_dict") else list(edited)
+                changed = _apply_quote_item_table_edits(state, rows)
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+            if not changed:
+                st.info("변경된 품목이 없습니다.")
+                return
+            st.success(
+                "수정 반영: "
+                + ", ".join(f"{index + 1}번" for index in changed)
+                + " 품목의 가격·등록근거를 다시 조회합니다."
             )
-            quantity = c2.text_input(
-                "수량",
-                value="" if item.quantity is None else format(item.quantity, "f"),
-            )
-            saved = st.form_submit_button("수정 저장")
-        if saved:
-            state.items[int(index)] = replace(
-                item,
-                product_name=product_name.strip(),
-                manufacturer=manufacturer.strip(),
-                model_name=model_name.strip(),
-                specification=specification.strip(),
-                unit_price=parse_quote_decimal(unit_price),
-                quantity=parse_quote_decimal(quantity),
-            )
-            _invalidate_item_review(state, int(index))
-            st.success("품목을 수정했습니다. 가격을 다시 검색합니다.")
             st.rerun()
 
 
@@ -303,10 +363,15 @@ def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
     if not state.items:
         return
     for index, item in enumerate(state.items):
-        if index not in state.track_b_db:
+        if index in state.track_b_db:
+            continue
+        try:
             state.track_b_db[index] = lookup_track_b_quote(
                 quote_item_query(item), quote_unit_price=item.unit_price
             )
+            _clear_item_error(state, index, "나라장터")
+        except Exception as exc:
+            _record_item_error(state, index, "나라장터", exc)
 
 
 def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
@@ -318,10 +383,14 @@ def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
         track_b = state.track_b_db.get(index)
         if track_b is None:
             continue
-        state.mfds_workspace[index] = research_mfds_for_workspace(
-            quote_item_query(item),
-            track_b,
-        )
+        try:
+            state.mfds_workspace[index] = research_mfds_for_workspace(
+                quote_item_query(item),
+                track_b,
+            )
+            _clear_item_error(state, index, "식약처")
+        except Exception as exc:
+            _record_item_error(state, index, "식약처", exc)
 
 
 def _ensure_market_research(state: QuoteReviewState) -> bool:
@@ -343,16 +412,20 @@ def _ensure_market_research(state: QuoteReviewState) -> bool:
                 f"{item.product_name or item.model_name or '미확인 품목'} 조사 중"
             ),
         )
-        run, discovery, market_bundle = run_market_research(
-            query,
-            lookback_days=state.lookback_days,
-            research_pages_per_term=1,
-            research_request_budget=18,
-            procurement_detail_limit=4,
-        )
-        state.search_runs[index] = run
-        state.discoveries[index] = discovery
-        state.market_bundles[index] = market_bundle
+        try:
+            run, discovery, market_bundle = run_market_research(
+                query,
+                lookback_days=state.lookback_days,
+                research_pages_per_term=1,
+                research_request_budget=18,
+                procurement_detail_limit=4,
+            )
+            state.search_runs[index] = run
+            state.discoveries[index] = discovery
+            state.market_bundles[index] = market_bundle
+            _clear_item_error(state, index, "공개 Research")
+        except Exception as exc:
+            _record_item_error(state, index, "공개 Research", exc)
     progress.progress(1.0, text="추가 공개자료 조사를 완료했습니다.")
     return True
 
@@ -381,6 +454,15 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             part for part in (item.manufacturer, item.model_name, item.specification) if part
         )
         st.caption(identity_text or "추가 식별정보 없음")
+
+        item_errors = state.item_errors.get(index, {})
+        if item_errors:
+            st.warning(
+                "이 품목의 일부 조회가 실패했지만 다른 품목 조사는 계속 진행했습니다. "
+                + " · ".join(
+                    f"{stage}: {detail}" for stage, detail in item_errors.items()
+                )
+            )
 
         price_col, info_col = st.columns([1.25, 3.75])
         price_col.metric("견적 단가", _money(item.unit_price))
@@ -424,6 +506,8 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             st.switch_page("pages/1_대시보드.py")
 
         st.markdown("**나라장터 거래가격**")
+        if track_b is not None and getattr(track_b, "data_as_of", None):
+            st.caption(f"나라장터 serving index 기준시각 · {track_b.data_as_of}")
         direct_rows = _track_b_candidate_rows(track_b.candidates) if track_b is not None else []
         reference_rows = (
             _track_b_reference_rows(track_b.reference_candidates) if track_b is not None else []
