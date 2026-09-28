@@ -87,7 +87,7 @@ def build_manual_safety_check_state(
             message=(
                 "회수·판매중지 자동 API는 아직 연결하지 않았습니다. 아래 exact 모델/식약처 품목번호를 "
                 "기준으로 식약처 공식 회수·판매중지, 행정처분, 안전성서한을 직접 확인하세요. "
-                "자동조회 미연결 상태를 안전하다는 뜻으로 해석하지 않습니다."
+                "자동조회 미연결 상태는 공식 안전정보 확인 결과가 아닙니다."
             ),
             model_name=model,
             permit_numbers=permits,
