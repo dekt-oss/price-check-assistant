@@ -154,7 +154,7 @@ def open_track_b_serving_snapshot(
             status="available",
             path=path,
             engine=engine,
-            session=Session(engine, autoflush=False, expire_on_commit=False),
+            session=Session(bind=engine, autoflush=False, expire_on_commit=False),
         )
     except (
         BotoCoreError,
