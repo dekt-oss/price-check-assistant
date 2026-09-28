@@ -514,118 +514,118 @@ def _render_search_result(state: dict[str, Any]) -> None:
         _render_search_interpretation(interpretation)
 
     st.markdown("### 구매판단 요약")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        if getattr(track_b, "evidence_status", None) == PriceEvidenceStatus.UNAVAILABLE:
-            c1.metric("직접 동일성 확인 거래", "조회 불가")
-        else:
-            c1.metric("직접 동일성 확인 거래", f"{stats.direct_count}건")
-        if stats.min_price is not None and stats.max_price is not None:
-            c2.metric(
-                "직접가격 범위",
-                f"{stats.min_price:,.0f} ~ {stats.max_price:,.0f}원",
-            )
-        else:
-            c2.metric("직접가격 범위", "근거 없음")
-        c3.metric("실제 조달 공급업체", f"{stats.supplier_count}개")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    if getattr(track_b, "evidence_status", None) == PriceEvidenceStatus.UNAVAILABLE:
+        c1.metric("직접 동일성 확인 거래", "조회 불가")
+    else:
+        c1.metric("직접 동일성 확인 거래", f"{stats.direct_count}건")
+    if stats.min_price is not None and stats.max_price is not None:
+        c2.metric(
+            "직접가격 범위",
+            f"{stats.min_price:,.0f} ~ {stats.max_price:,.0f}원",
+        )
+    else:
+        c2.metric("직접가격 범위", "근거 없음")
+    c3.metric("실제 조달 공급업체", f"{stats.supplier_count}개")
 
-        if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
-            mfds_metric = "품목번호 확인"
-        elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
-            if mfds.exact_ambiguous:
-                mfds_metric = "복수 품목번호"
-            elif mfds.exact_confirmed:
-                mfds_metric = "exact 확인"
-            elif mfds.records:
-                mfds_metric = "품목 확인"
-            else:
-                mfds_metric = "0건"
-        elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "failure":
-            mfds_metric = "조회 실패"
+    if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
+        mfds_metric = "품목번호 확인"
+    elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
+        if mfds.exact_ambiguous:
+            mfds_metric = "복수 품목번호"
+        elif mfds.exact_confirmed:
+            mfds_metric = "exact 확인"
+        elif mfds.records:
+            mfds_metric = "품목 확인"
         else:
-            mfds_metric = "대상 아님"
-        c4.metric("식약처 품목정보", mfds_metric)
-        c5.metric("공개조달 Research", f"{stats.research_count}건")
+            mfds_metric = "0건"
+    elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "failure":
+        mfds_metric = "조회 실패"
+    else:
+        mfds_metric = "대상 아님"
+    c4.metric("식약처 품목정보", mfds_metric)
+    c5.metric("공개조달 Research", f"{stats.research_count}건")
 
-        if isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_records:
-            with st.container(border=True):
-                st.markdown("**식약처 품목 identity**")
-                i1, i2, i3 = st.columns(3)
-                i1.caption("품목 / 모델")
-                i1.write(
-                    " / ".join(
-                        part
-                        for part in (
-                            mfds.exact_records[0].product_name,
-                            mfds.exact_records[0].model_name,
-                        )
-                        if part
+    if isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_records:
+        with st.container(border=True):
+            st.markdown("**식약처 품목 identity**")
+            i1, i2, i3 = st.columns(3)
+            i1.caption("품목 / 모델")
+            i1.write(
+                " / ".join(
+                    part
+                    for part in (
+                        mfds.exact_records[0].product_name,
+                        mfds.exact_records[0].model_name,
                     )
-                    or "미확인"
+                    if part
                 )
-                i2.caption("식약처 품목번호")
-                i2.write(" / ".join(mfds.permit_numbers) or "미확인")
-                permit_dates = sorted(
-                    {
-                        item.permit_date.isoformat()
-                        for item in mfds.exact_records
-                        if item.permit_date is not None
-                    }
-                )
-                i3.caption("허가일")
-                i3.write(" / ".join(permit_dates) or "미확인")
-
-        if (
-            isinstance(indexed_identity, MfdsIdentityLookup)
-            and indexed_identity.status == "success"
-            and indexed_identity.match_type == "permit"
-        ):
-            st.markdown("#### 식약처 품목번호 기준 모델·조달가격 연결")
-            if exact_identity_crosslinks:
-                st.dataframe(
-                    exact_identity_crosslinks,
-                    use_container_width=True,
-                    hide_index=True,
-                )
-                st.caption(
-                    "식약처 품목번호에 연결된 각 모델을 개별적으로 나라장터 A/B 직접거래와 교차조회합니다. "
-                    "식약처 품목 책임주체와 실제 조달 납품업체는 서로 다른 관계입니다."
-                )
-            else:
-                st.info("식약처 품목정보는 확인됐지만 등록 모델 기준 나라장터 A/B 직접가격은 아직 확인되지 않았습니다.")
-
-        if stats.median_price is not None:
-            q1, q2, q3 = st.columns(3)
-            q1.metric("직접가격 중앙값", _money_text(stats.median_price))
-            q2.metric("최근 직접거래", stats.latest_transaction_date or "미확인")
-            if review_input.quote_unit_price is not None:
-                delta = stats.quote_vs_median_percent
-                q3.metric(
-                    "현재 견적",
-                    _money_text(review_input.quote_unit_price),
-                    None if delta is None else f"{delta:+.1f}% vs 중앙값",
-                )
-            else:
-                q3.metric("현재 견적", "미입력")
-
-        if stats.direct_count:
-            st.success(
-                "A/B 동일성 확인 거래만 직접가격 범위에 포함했습니다. "
-                "수량·총액·규격·납품조건은 거래가격 탭에서 확인하세요."
+                or "미확인"
             )
-        elif stats.reference_count:
-            st.warning(
-                f"직접 비교 가능한 A/B 거래는 없고 참고거래가 {stats.reference_count}건 있습니다. "
-                "참고가격은 A/B 직접가격 범위에 포함하지 않습니다."
+            i2.caption("식약처 품목번호")
+            i2.write(" / ".join(mfds.permit_numbers) or "미확인")
+            permit_dates = sorted(
+                {
+                    item.permit_date.isoformat()
+                    for item in mfds.exact_records
+                    if item.permit_date is not None
+                }
             )
-        elif stats.research_count:
-            st.info(
-                "납품요구 직접가격은 없지만 입찰·사전규격 등 Research 근거가 있습니다."
+            i3.caption("허가일")
+            i3.write(" / ".join(permit_dates) or "미확인")
+
+    if (
+        isinstance(indexed_identity, MfdsIdentityLookup)
+        and indexed_identity.status == "success"
+        and indexed_identity.match_type == "permit"
+    ):
+        st.markdown("#### 식약처 품목번호 기준 모델·조달가격 연결")
+        if exact_identity_crosslinks:
+            st.dataframe(
+                exact_identity_crosslinks,
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "식약처 품목번호에 연결된 각 모델을 개별적으로 나라장터 A/B 직접거래와 교차조회합니다. "
+                "식약처 품목 책임주체와 실제 조달 납품업체는 서로 다른 관계입니다."
             )
         else:
-            st.info("현재 연결된 공개 근거에서 가격·조달자료를 확인하지 못했습니다.")
+            st.info("식약처 품목정보는 확인됐지만 등록 모델 기준 나라장터 A/B 직접가격은 아직 확인되지 않았습니다.")
 
-        if stats.demand_institution_count:
-            st.caption(f"A/B 직접거래 수요기관 {stats.demand_institution_count}개 확인")
+    if stats.median_price is not None:
+        q1, q2, q3 = st.columns(3)
+        q1.metric("직접가격 중앙값", _money_text(stats.median_price))
+        q2.metric("최근 직접거래", stats.latest_transaction_date or "미확인")
+        if review_input.quote_unit_price is not None:
+            delta = stats.quote_vs_median_percent
+            q3.metric(
+                "현재 견적",
+                _money_text(review_input.quote_unit_price),
+                None if delta is None else f"{delta:+.1f}% vs 중앙값",
+            )
+        else:
+            q3.metric("현재 견적", "미입력")
+
+    if stats.direct_count:
+        st.success(
+            "A/B 동일성 확인 거래만 직접가격 범위에 포함했습니다. "
+            "수량·총액·규격·납품조건은 거래가격 탭에서 확인하세요."
+        )
+    elif stats.reference_count:
+        st.warning(
+            f"직접 비교 가능한 A/B 거래는 없고 참고거래가 {stats.reference_count}건 있습니다. "
+            "참고가격은 A/B 직접가격 범위에 포함하지 않습니다."
+        )
+    elif stats.research_count:
+        st.info(
+            "납품요구 직접가격은 없지만 입찰·사전규격 등 Research 근거가 있습니다."
+        )
+    else:
+        st.info("현재 연결된 공개 근거에서 가격·조달자료를 확인하지 못했습니다.")
+
+    if stats.demand_institution_count:
+        st.caption(f"A/B 직접거래 수요기관 {stats.demand_institution_count}개 확인")
 
 
     query_view = str(st.query_params.get("view") or "").strip()
@@ -633,11 +633,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
         query_view = str(st.session_state.get(HOME_WORKSPACE_VIEW_KEY) or "price")
     if query_view not in WORKSPACE_VIEWS:
         query_view = "price"
-    view_labels = list(WORKSPACE_VIEWS.values())
     current_label = WORKSPACE_VIEWS[query_view]
     selected_label = st.segmented_control(
         "구매조사 영역",
-        options=view_labels,
+        options=list(WORKSPACE_VIEWS.values()),
         default=current_label,
         selection_mode="single",
         key="workspace_v3_segment",
@@ -651,243 +650,182 @@ def _render_search_result(state: dict[str, Any]) -> None:
     st.query_params["view"] = selected_view
 
     if selected_view == "price":
-            st.markdown("#### 나라장터 동일제품 직접거래")
-            if state["model_probe_used"]:
-                st.caption("입력어가 모델명과 일치해 모델 기준 결과를 우선 표시합니다.")
+        st.markdown("#### 나라장터 동일제품 직접거래")
+        if state["model_probe_used"]:
+            st.caption("입력어가 모델명과 일치해 모델 기준 결과를 우선 표시합니다.")
 
-            if direct_rows:
+        if direct_rows:
+            st.dataframe(
+                direct_rows,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "가격": st.column_config.TextColumn("대당단가"),
+                    "총액": st.column_config.TextColumn("거래총액"),
+                    "금액검증": st.column_config.TextColumn("단가×수량 검증"),
+                },
+            )
+            st.success(f"요약과 동일한 A/B 직접거래 {strict_count}건입니다.")
+            grouped_rows = model_price_group_rows(track_b)
+            if grouped_rows:
+                st.markdown("#### 모델·규격·조건별 직접가격")
+                st.dataframe(grouped_rows, use_container_width=True, hide_index=True)
+                st.caption(
+                    "A/B 직접근거만 집계합니다. C/Research 참고가격은 직접가격 범위에 합산하지 않습니다."
+                )
+        elif track_b.status == "unavailable":
+            st.warning("가격 검색 인덱스에 연결하지 못했습니다.")
+        elif track_b.status == "not_ingested":
+            st.info("수집 자료의 빠른 가격 인덱스를 만드는 중입니다.")
+        else:
+            st.info("요약과 동일하게 A/B 동일제품 직접거래는 0건입니다.")
+
+        if reference_rows:
+            st.warning(
+                f"검색 참고거래 {reference_count}건은 실제 관측 거래지만 동일제품으로 확정되지 않았습니다. "
+                "직접가격·시장범위·공급업체 집계에는 포함하지 않습니다."
+            )
+            with st.expander(
+                f"검색 참고거래 {reference_count}건 보기 · 동일제품 직접가격 아님",
+                expanded=False,
+            ):
                 st.dataframe(
-                    direct_rows,
+                    reference_rows,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "가격": st.column_config.TextColumn("대당단가"),
+                        "가격": st.column_config.TextColumn("관측 단가"),
                         "총액": st.column_config.TextColumn("거래총액"),
                         "금액검증": st.column_config.TextColumn("단가×수량 검증"),
                     },
                 )
-                st.success(f"요약과 동일한 A/B 직접거래 {strict_count}건입니다.")
-                grouped_rows = model_price_group_rows(track_b)
-                if grouped_rows:
-                    st.markdown("#### 모델·규격·조건별 직접가격")
-                    st.dataframe(grouped_rows, use_container_width=True, hide_index=True)
-                    st.caption(
-                        "A/B 직접근거만 집계합니다. C/Research 참고가격은 직접가격 범위에 합산하지 않습니다."
-                    )
-            elif track_b.status == "unavailable":
-                st.warning("가격 검색 인덱스에 연결하지 못했습니다.")
-            elif track_b.status == "not_ingested":
-                st.info("수집 자료의 빠른 가격 인덱스를 만드는 중입니다.")
-            else:
-                st.info("요약과 동일하게 A/B 동일제품 직접거래는 0건입니다.")
-
-            if reference_rows:
-                st.warning(
-                    f"검색 참고거래 {reference_count}건은 실제 관측 거래지만 동일제품으로 확정되지 않았습니다. "
-                    "직접가격·시장범위·공급업체 집계에는 포함하지 않습니다."
-                )
-                with st.expander(
-                    f"검색 참고거래 {reference_count}건 보기 · 동일제품 직접가격 아님",
-                    expanded=False,
-                ):
-                    st.dataframe(
-                        reference_rows,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "가격": st.column_config.TextColumn("관측 단가"),
-                            "총액": st.column_config.TextColumn("거래총액"),
-                            "금액검증": st.column_config.TextColumn("단가×수량 검증"),
-                        },
-                    )
-                    st.caption(
-                        "품목·분류 또는 검색어 수준의 참고근거입니다. 모델·규격·옵션 동일성이 확인되기 전에는 직접 비교하지 않습니다."
-                    )
-
-            if not direct_rows and run.results:
-                public_rows = evidence_rows(run.results)
-                with st.expander("기타 공개 시장가격 보기 · 직접가격 아님", expanded=False):
-                    st.dataframe(
-                        [
-                            {
-                                "가격": row["단가"],
-                                "출처": row["출처"],
-                                "거래일": row["거래일"] or "미확인",
-                                "자료성격": row["자료성격"],
-                                "URL": row["URL"],
-                            }
-                            for row in public_rows
-                        ],
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={"가격": st.column_config.NumberColumn("가격", format="%d원")},
-                    )
-
-        st.divider()
-        st.markdown("#### 참고근거 · Research")
-            st.markdown("#### 공개조달 Research·근거")
-            render_market_reference_summary(
-                discovery,
-                query=query,
-                quote_unit_price=review_input.quote_unit_price,
-            )
-            render_procurement_research(market_bundle)
-            render_source_status(run)
-            if run.results:
-                assessment = assess_prices(run.results, review_input.quote_unit_price)
-                m1, m2, m3 = st.columns(3)
-                m1.metric("직접가격 근거", f"{assessment.observed_count}건")
-                m2.metric("독립 출처", f"{assessment.source_count}개")
-                m3.metric("근거 신뢰도", assessment.confidence)
-                render_observation_cards(run.results)
-                render_evidence_table(run.results)
-            else:
-                st.caption("엄격한 동일제품 직접가격은 현재 조사 범위에서 확인되지 않았습니다.")
-
-    elif selected_view == "supplier":
-        st.markdown("#### 식약처 품목·Identity")
-            st.markdown("#### 식약처 품목·Identity")
-            if isinstance(indexed_identity, MfdsIdentityLookup):
-                if indexed_identity.status == "success" and indexed_identity.records:
-                    st.markdown("##### 누적 Identity Index")
-                    st.dataframe(
-                        [
-                            {
-                                "유형": item.item_authorization_type.value,
-                                "식약처 품목번호": item.permit_number or "",
-                                "품목": item.product_name or "",
-                                "모델": item.model_name or "",
-                                "품목 책임주체": item.registered_company or "",
-                                "UDI-DI": item.udi_di or "",
-                                "식약처 처리일": item.permit_date or "",
-                                "등급": item.grade or "",
-                            }
-                            for item in indexed_identity.records
-                        ],
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                    st.caption(
-                        "식약처 공식 제품정보를 수집한 누적 인덱스입니다. 품목 책임주체는 제조·수입 제품관계이며 실제 납품업체와 구분합니다."
-                    )
-                elif indexed_identity.identity_status == IdentityEvidenceStatus.NOT_FOUND_IN_COVERAGE:
-                    st.info("현재 수집된 식약처 자료 범위에서 일치 identity를 찾지 못했습니다.")
-                elif indexed_identity.status == "not_ingested":
-                    st.info("식약처 Identity Index를 아직 사용할 수 없습니다.")
-                elif indexed_identity.status == "unavailable":
-                    st.warning("식약처 Identity Index를 현재 읽을 수 없습니다.")
-
-            if not isinstance(mfds, MfdsWorkspaceResult):
-                st.info("식약처 조회 상태를 확인할 수 없습니다.")
-            elif mfds.status == "not_applicable":
-                st.info("현재 조달분류 기준으로 의료기기 자동조회 대상이 아닙니다.")
-            elif mfds.status == "not_configured":
-                st.warning("식약처 API 서비스키가 연결되지 않아 자동조회를 실행하지 못했습니다.")
-            elif mfds.status == "failure":
-                st.warning(
-                    f"식약처 조회 실패 · {mfds.error_type or '오류'} · "
-                    f"{mfds.error_message or '상세 미확인'}"
-                )
-                st.caption("API 실패를 등록 0건으로 해석하지 않습니다.")
-            else:
-                m1c, m2c, m3c = st.columns(3)
-                m1c.metric("조회된 등록모델", f"{len(mfds.records)}건")
-                m2c.metric("국내 정상 후보", f"{len(mfds.active_records)}건")
-                if mfds.exact_ambiguous:
-                    m3c.metric("exact 모델", "복수 허가 · 확인 필요")
-                elif mfds.exact_confirmed:
-                    m3c.metric("exact 모델", "확인")
-                else:
-                    m3c.metric("exact 모델", "미확인")
-
-                if mfds.exact_records:
-                    st.markdown("##### 입력 모델과 exact 일치")
-                    st.dataframe(
-                        [
-                            {
-                                "품목": item.product_name or "",
-                                "모델": item.model_name or "",
-                                "식약처 품목번호": item.permit_number or "",
-                                "식약처 처리일": item.permit_date.isoformat() if item.permit_date else "",
-                                "업종": item.industry_type or "",
-                                "수출전용": item.export_only,
-                                "취소상태": item.cancellation_status or "",
-                            }
-                            for item in mfds.exact_records
-                        ],
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                    if mfds.permit_numbers:
-                        st.caption("Safety 공식 확인키 · " + " / ".join(mfds.permit_numbers))
-
-                st.info(
-                    "형명정보 API의 INDT_NM은 '업종'이며 업체명이 아닙니다. "
-                    "품목 책임주체는 누적 Identity Index의 공식 제품정보에 포함된 제조·수입업체 필드를 사용하며 실제 조달 납품업체와 구분합니다."
+                st.caption(
+                    "품목·분류 또는 검색어 수준의 참고근거입니다. 모델·규격·옵션 동일성이 확인되기 전에는 직접 비교하지 않습니다."
                 )
 
-                if mfds.business_records:
-                    st.markdown("##### 업체명 힌트 업허가 교차확인")
-                    st.dataframe(
-                        [
-                            {
-                                "업체": item.company_name or "",
-                                "업종": item.industry_type or "",
-                                "상태": item.business_status or "",
-                                "업 허가·신고 번호": item.business_permit_number or "",
-                                "주소": item.address or "",
-                                "현재사용가능": item.is_active,
-                            }
-                            for item in mfds.business_records
-                        ],
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                    st.caption(
-                        "사용자/견적의 제조사·업체명 힌트에 대한 업허가 확인입니다. "
-                        "해당 모델의 공식 제조·수입업체 관계를 자동 확정하지 않습니다."
-                    )
-
-            st.page_link("pages/4_의료기기_조회.py", label="의료기기 상세 조회 화면 열기", icon="🏥")
-
-        st.divider()
-        st.markdown("#### 업체·조달 관계")
-            if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.companies:
-                st.markdown("#### 식약처 품목 책임주체")
+        if not direct_rows and run.results:
+            public_rows = evidence_rows(run.results)
+            with st.expander("기타 공개 시장가격 보기 · 직접가격 아님", expanded=False):
                 st.dataframe(
                     [
                         {
-                            "업체": company,
-                            "근거": "식약처 제품정보 · 제조/수입 제품관계",
+                            "가격": row["단가"],
+                            "출처": row["출처"],
+                            "거래일": row["거래일"] or "미확인",
+                            "자료성격": row["자료성격"],
+                            "URL": row["URL"],
                         }
-                        for company in indexed_identity.companies
+                        for row in public_rows
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={"가격": st.column_config.NumberColumn("가격", format="%d원")},
+                )
+
+        st.divider()
+        st.markdown("#### 참고근거 · Research")
+        st.markdown("#### 공개조달 Research·근거")
+        render_market_reference_summary(
+            discovery,
+            query=query,
+            quote_unit_price=review_input.quote_unit_price,
+        )
+        render_procurement_research(market_bundle)
+        render_source_status(run)
+        if run.results:
+            assessment = assess_prices(run.results, review_input.quote_unit_price)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("직접가격 근거", f"{assessment.observed_count}건")
+            m2.metric("독립 출처", f"{assessment.source_count}개")
+            m3.metric("근거 신뢰도", assessment.confidence)
+            render_observation_cards(run.results)
+            render_evidence_table(run.results)
+        else:
+            st.caption("엄격한 동일제품 직접가격은 현재 조사 범위에서 확인되지 않았습니다.")
+
+    elif selected_view == "supplier":
+        st.markdown("#### 식약처 품목·Identity")
+        if isinstance(indexed_identity, MfdsIdentityLookup):
+            if indexed_identity.status == "success" and indexed_identity.records:
+                st.markdown("##### 누적 Identity Index")
+                st.dataframe(
+                    [
+                        {
+                            "유형": item.item_authorization_type.value,
+                            "식약처 품목번호": item.permit_number or "",
+                            "품목": item.product_name or "",
+                            "모델": item.model_name or "",
+                            "품목 책임주체": item.registered_company or "",
+                            "UDI-DI": item.udi_di or "",
+                            "식약처 처리일": item.permit_date or "",
+                            "등급": item.grade or "",
+                        }
+                        for item in indexed_identity.records
                     ],
                     use_container_width=True,
                     hide_index=True,
                 )
-                st.caption("아래 나라장터 실제 납품업체와 의미가 다릅니다.")
+                st.caption(
+                    "식약처 공식 제품정보를 수집한 누적 인덱스입니다. 품목 책임주체는 제조·수입 제품관계이며 실제 납품업체와 구분합니다."
+                )
+            elif indexed_identity.identity_status == IdentityEvidenceStatus.NOT_FOUND_IN_COVERAGE:
+                st.info("현재 수집된 식약처 자료 범위에서 일치 identity를 찾지 못했습니다.")
+            elif indexed_identity.status == "not_ingested":
+                st.info("식약처 Identity Index를 아직 사용할 수 없습니다.")
+            elif indexed_identity.status == "unavailable":
+                st.warning("식약처 Identity Index를 현재 읽을 수 없습니다.")
 
-            st.markdown("#### 실제 조달 공급업체")
-            procurement_suppliers = supplier_rows(track_b)
-            if procurement_suppliers:
+        if not isinstance(mfds, MfdsWorkspaceResult):
+            st.info("식약처 조회 상태를 확인할 수 없습니다.")
+        elif mfds.status == "not_applicable":
+            st.info("현재 조달분류 기준으로 의료기기 자동조회 대상이 아닙니다.")
+        elif mfds.status == "not_configured":
+            st.warning("식약처 API 서비스키가 연결되지 않아 자동조회를 실행하지 못했습니다.")
+        elif mfds.status == "failure":
+            st.warning(
+                f"식약처 조회 실패 · {mfds.error_type or '오류'} · "
+                f"{mfds.error_message or '상세 미확인'}"
+            )
+            st.caption("API 실패를 등록 0건으로 해석하지 않습니다.")
+        else:
+            m1c, m2c, m3c = st.columns(3)
+            m1c.metric("조회된 등록모델", f"{len(mfds.records)}건")
+            m2c.metric("국내 정상 후보", f"{len(mfds.active_records)}건")
+            if mfds.exact_ambiguous:
+                m3c.metric("exact 모델", "복수 허가 · 확인 필요")
+            elif mfds.exact_confirmed:
+                m3c.metric("exact 모델", "확인")
+            else:
+                m3c.metric("exact 모델", "미확인")
+
+            if mfds.exact_records:
+                st.markdown("##### 입력 모델과 exact 일치")
                 st.dataframe(
-                    procurement_suppliers,
+                    [
+                        {
+                            "품목": item.product_name or "",
+                            "모델": item.model_name or "",
+                            "식약처 품목번호": item.permit_number or "",
+                            "식약처 처리일": item.permit_date.isoformat() if item.permit_date else "",
+                            "업종": item.industry_type or "",
+                            "수출전용": item.export_only,
+                            "취소상태": item.cancellation_status or "",
+                        }
+                        for item in mfds.exact_records
+                    ],
                     use_container_width=True,
                     hide_index=True,
-                    column_config={
-                        "최저단가": st.column_config.NumberColumn("최저단가", format="%d원"),
-                        "최고단가": st.column_config.NumberColumn("최고단가", format="%d원"),
-                    },
                 )
-                st.caption(
-                    "A/B 동일제품으로 확인된 나라장터 납품요구의 공급업체만 집계합니다. "
-                    "한 번의 납품실적이 공식 총판관계를 의미하지는 않습니다."
-                )
-            else:
-                st.info("A/B 동일제품 기준으로 확인된 조달 공급업체가 없습니다.")
+                if mfds.permit_numbers:
+                    st.caption("Safety 공식 확인키 · " + " / ".join(mfds.permit_numbers))
 
-            if isinstance(mfds, MfdsWorkspaceResult) and mfds.business_records:
-                st.markdown("#### 식약처 업허가 교차확인")
+            st.info(
+                "형명정보 API의 INDT_NM은 '업종'이며 업체명이 아닙니다. "
+                "품목 책임주체는 누적 Identity Index의 공식 제품정보에 포함된 제조·수입업체 필드를 사용하며 실제 조달 납품업체와 구분합니다."
+            )
+
+            if mfds.business_records:
+                st.markdown("##### 업체명 힌트 업허가 교차확인")
                 st.dataframe(
                     [
                         {
@@ -895,75 +833,134 @@ def _render_search_result(state: dict[str, Any]) -> None:
                             "업종": item.industry_type or "",
                             "상태": item.business_status or "",
                             "업 허가·신고 번호": item.business_permit_number or "",
-                            "근거": "식약처 업허가 · 모델 공급관계 미확정",
+                            "주소": item.address or "",
+                            "현재사용가능": item.is_active,
                         }
                         for item in mfds.business_records
                     ],
                     use_container_width=True,
                     hide_index=True,
                 )
-            else:
                 st.caption(
-                    "식약처 제조·수입 업체명 자동 연결은 company-bearing 제품 Source의 "
-                    "공식 역검색 계약 확인 후 추가합니다."
+                    "사용자/견적의 제조사·업체명 힌트에 대한 업허가 확인입니다. "
+                    "해당 모델의 공식 제조·수입업체 관계를 자동 확정하지 않습니다."
                 )
+
+        st.page_link("pages/4_의료기기_조회.py", label="의료기기 상세 조회 화면 열기", icon="🏥")
+
+        st.divider()
+        if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.companies:
+            st.markdown("#### 식약처 품목 책임주체")
+            st.dataframe(
+                [
+                    {
+                        "업체": company,
+                        "근거": "식약처 제품정보 · 제조/수입 제품관계",
+                    }
+                    for company in indexed_identity.companies
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption("아래 나라장터 실제 납품업체와 의미가 다릅니다.")
+
+        st.markdown("#### 실제 조달 공급업체")
+        procurement_suppliers = supplier_rows(track_b)
+        if procurement_suppliers:
+            st.dataframe(
+                procurement_suppliers,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "최저단가": st.column_config.NumberColumn("최저단가", format="%d원"),
+                    "최고단가": st.column_config.NumberColumn("최고단가", format="%d원"),
+                },
+            )
+            st.caption(
+                "A/B 동일제품으로 확인된 나라장터 납품요구의 공급업체만 집계합니다. "
+                "한 번의 납품실적이 공식 총판관계를 의미하지는 않습니다."
+            )
+        else:
+            st.info("A/B 동일제품 기준으로 확인된 조달 공급업체가 없습니다.")
+
+        if isinstance(mfds, MfdsWorkspaceResult) and mfds.business_records:
+            st.markdown("#### 식약처 업허가 교차확인")
+            st.dataframe(
+                [
+                    {
+                        "업체": item.company_name or "",
+                        "업종": item.industry_type or "",
+                        "상태": item.business_status or "",
+                        "업 허가·신고 번호": item.business_permit_number or "",
+                        "근거": "식약처 업허가 · 모델 공급관계 미확정",
+                    }
+                    for item in mfds.business_records
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption(
+                "식약처 제조·수입 업체명 자동 연결은 company-bearing 제품 Source의 "
+                "공식 역검색 계약 확인 후 추가합니다."
+            )
 
     else:
-            if (
-                isinstance(indexed_identity, MfdsIdentityLookup)
-                and indexed_identity.status == "success"
-                and indexed_identity.match_type == "permit"
-            ):
-                st.markdown("#### 검색한 식약처 품목번호 → 등록모델 → 나라장터 가격")
-                if exact_identity_crosslinks:
-                    st.dataframe(
-                        exact_identity_crosslinks,
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                else:
-                    st.info("검색한 식약처 품목번호의 모델은 확인됐지만 나라장터 A/B 직접거래 연결은 확인되지 않았습니다.")
-
-            st.markdown("#### 동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격")
-            if mfds_procurement_crosslinks:
+        if (
+            isinstance(indexed_identity, MfdsIdentityLookup)
+            and indexed_identity.status == "success"
+            and indexed_identity.match_type == "permit"
+        ):
+            st.markdown("#### 검색한 식약처 품목번호 → 등록모델 → 나라장터 가격")
+            if exact_identity_crosslinks:
                 st.dataframe(
-                    mfds_procurement_crosslinks,
+                    exact_identity_crosslinks,
                     use_container_width=True,
                     hide_index=True,
                 )
-                st.caption(
-                    f"식약처 누적 인덱스 동일품목 {len(same_product_identity)}행 중 모델 기준 최대 25개를 나라장터 A/B 직접근거와 교차조회합니다. 품목 책임주체와 조달 납품업체는 별도 관계입니다."
-                )
-            elif same_product_identity:
-                st.info("동일품목 등록정보는 있으나 모델 기준 나라장터 교차조회 결과를 만들 수 없습니다.")
             else:
-                st.caption("식약처 누적 인덱스가 채워지면 허가별 모델·등록업체·나라장터 직접가격을 연결합니다.")
+                st.info("검색한 식약처 품목번호의 모델은 확인됐지만 나라장터 A/B 직접거래 연결은 확인되지 않았습니다.")
 
-            st.markdown("#### 식약처 live 동일품목 등록장비")
-            if isinstance(mfds, MfdsWorkspaceResult) and mfds.active_competitor_records:
-                st.dataframe(
-                    [
-                        {
-                            "모델": item.model_name or "",
-                            "상품명": item.trade_name or "",
-                            "식약처 품목번호": item.permit_number or "",
-                            "식약처 처리일": item.permit_date.isoformat() if item.permit_date else "",
-                            "업종": item.industry_type or "",
-                        }
-                        for item in mfds.active_competitor_records
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-                st.caption(
-                    "동일 식약처 품목의 국내 정상 등록모델입니다. "
-                    "임상적 대체 가능성·성능동등성·수가조건을 자동 판정하지 않습니다."
-                )
-            elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
-                st.info("현재 조회 결과에서 다른 국내 정상 등록모델을 확인하지 못했습니다.")
-            else:
-                st.info("식약처 품목 조회가 완료되면 국내 정상 동일품목 후보를 표시합니다.")
-            st.page_link("pages/4_의료기기_조회.py", label="의료기기 상세 조회 화면 열기", icon="🏥")
+        st.markdown("#### 동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격")
+        if mfds_procurement_crosslinks:
+            st.dataframe(
+                mfds_procurement_crosslinks,
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                f"식약처 누적 인덱스 동일품목 {len(same_product_identity)}행 중 모델 기준 최대 25개를 나라장터 A/B 직접근거와 교차조회합니다. 품목 책임주체와 조달 납품업체는 별도 관계입니다."
+            )
+        elif same_product_identity:
+            st.info("동일품목 등록정보는 있으나 모델 기준 나라장터 교차조회 결과를 만들 수 없습니다.")
+        else:
+            st.caption("식약처 누적 인덱스가 채워지면 허가별 모델·등록업체·나라장터 직접가격을 연결합니다.")
+
+        st.markdown("#### 식약처 live 동일품목 등록장비")
+        if isinstance(mfds, MfdsWorkspaceResult) and mfds.active_competitor_records:
+            st.dataframe(
+                [
+                    {
+                        "모델": item.model_name or "",
+                        "상품명": item.trade_name or "",
+                        "식약처 품목번호": item.permit_number or "",
+                        "식약처 처리일": item.permit_date.isoformat() if item.permit_date else "",
+                        "업종": item.industry_type or "",
+                    }
+                    for item in mfds.active_competitor_records
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "동일 식약처 품목의 국내 정상 등록모델입니다. "
+                "임상적 대체 가능성·성능동등성·수가조건을 자동 판정하지 않습니다."
+            )
+        elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
+            st.info("현재 조회 결과에서 다른 국내 정상 등록모델을 확인하지 못했습니다.")
+        else:
+            st.info("식약처 품목 조회가 완료되면 국내 정상 동일품목 후보를 표시합니다.")
+        st.page_link("pages/4_의료기기_조회.py", label="의료기기 상세 조회 화면 열기", icon="🏥")
 
 
 
@@ -1005,7 +1002,7 @@ if not existing_result and not handoff_pending:
         '<div class="home-subtitle">모델명만 입력해도 알려진 모델 힌트를 안전하게 구조화해 가격·공급·조달근거를 함께 찾습니다.</div>',
         unsafe_allow_html=True,
     )
-
+    
     _render_mfds_collection_status()
 
 handoff_payload = st.session_state.pop(PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY, None)
@@ -1040,9 +1037,10 @@ default_query = (
     else str(st.query_params.get("q") or "")
 )
 
+uploaded = None
 if result_mode:
     with st.form("home_unified_search_compact"):
-        search_col, button_col, reset_col = st.columns([7.5, 1.2, 1.2], gap="small")
+        search_col, button_col, reset_col = st.columns([7.4, 1.3, 1.3], gap="small")
         search_text = search_col.text_input(
             "통합 검색",
             value=default_query,
@@ -1064,8 +1062,8 @@ if result_mode:
         st.query_params.clear()
         st.rerun()
 
-    with st.expander("견적서 업로드 · 상세 검색조건", expanded=False):
-        st.caption("새 견적서 업로드 또는 세부조건 검색은 보조 작업으로 유지합니다.")
+    with st.expander("견적서 업로드 · 상세 검색", expanded=False):
+        st.caption("결과 화면에서는 검색 보조기능을 접어두고 구매조사 결과를 우선 표시합니다.")
         uploaded = st.file_uploader(
             "견적서 업로드",
             type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg"],
@@ -1137,8 +1135,7 @@ if submitted:
             st.session_state[HOME_SEARCH_STATE_KEY] = search_state
             st.session_state[HOME_SEARCH_DETAILS_KEY] = False
             st.query_params["q"] = search_text.strip()
-            if str(st.query_params.get("view") or "") not in WORKSPACE_VIEWS:
-                st.query_params["view"] = "price"
+            st.query_params["view"] = "price"
             status.update(label="추가 자료 확인 완료", state="complete")
             st.rerun()
     except ValueError as exc:
