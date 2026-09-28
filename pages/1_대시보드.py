@@ -67,15 +67,15 @@ from purchase_price.ui.track_b_transactions import (
     model_price_group_rows,
     transaction_rows,
 )
-from purchase_price.ui.workspace_runtime_compat import (
-    build_quote_position_message_compat,
-    open_track_b_serving_snapshot_compat,
-)
 from purchase_price.ui.widgets import (
     evidence_rows,
     render_evidence_table,
     render_observation_cards,
     render_source_status,
+)
+from purchase_price.ui.workspace_runtime_compat import (
+    build_quote_position_message_compat,
+    open_track_b_serving_snapshot_compat,
 )
 
 HOME_SEARCH_STATE_KEY = "home_unified_search_result"
