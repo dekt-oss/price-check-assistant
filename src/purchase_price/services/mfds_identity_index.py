@@ -12,6 +12,7 @@ from purchase_price.services.matching import normalize_text
 MFDS_PRODUCT_INFO_BASE_URL = "https://apis.data.go.kr/1471000/MdeqStdCdPrdtInfoService03"
 MFDS_PRODUCT_INFO_OPERATION = "getMdeqStdCdPrdtInfoInq03"
 MFDS_PRODUCT_INFO_RAW_OPERATION = "mfds-product-info-page"
+MFDS_PRODUCT_INFO_DATASET_URL = "https://www.data.go.kr/data/15073875/openapi.do"
 MFDS_IDENTITY_SCHEMA = "mfds-identity-sqlite-v1"
 
 
