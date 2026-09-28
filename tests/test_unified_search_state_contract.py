@@ -20,6 +20,11 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "MFDS_PRODUCT_INFO_DATASET_URL" in source
     assert '"route": "candidate_selection"' in source
     assert "_render_identity_candidate_selection" in source
+    assert "_candidate_identity_records" in source
+    assert '"조사할 제품 identity 선택"' in source
+    assert '"선택한 identity로 구매조사"' in source
+    assert "selected_identity=selected" in source
+    assert 'manufacturer=""' in source
     assert "_ambiguous_identity_candidates" in source
     assert "IdentityEvidenceStatus.AMBIGUOUS" in source
     assert "동일 모델명이 여러 식약처 품목번호" in source
