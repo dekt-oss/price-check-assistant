@@ -88,3 +88,10 @@ def test_r2_serving_index_run_audits_historical_to_rolling_transition() -> None:
     assert "issue_157_acceptance=" in text
     assert "historical_remaining_codes=" in text
     assert "rolling_cycles_completed=" in text
+
+
+def test_serving_pointer_publishes_coverage_date_only_after_backfill_complete() -> None:
+    text = Path("src/purchase_price/scripts/sync_g2b_track_b_r2_index.py").read_text()
+
+    assert '"data_as_of"' in text
+    assert "pipeline.rolling_covered_through if pipeline.backfill_complete else None" in text
