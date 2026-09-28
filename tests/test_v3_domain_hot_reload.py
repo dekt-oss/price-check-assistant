@@ -1,7 +1,6 @@
 from pathlib import Path
 
-from purchase_price import domain
-from purchase_price import evidence_domain
+from purchase_price import domain, evidence_domain
 
 
 def test_legacy_domain_reexports_same_v3_enum_objects() -> None:
