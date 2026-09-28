@@ -36,6 +36,12 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert '"📚 Research·근거"' not in source
     assert "build_market_survey_workbook" in source
     assert "시장조사표 Excel 내려받기" in source
+    assert "build_manual_safety_check_state" in source
+    assert 'st.markdown("### Safety")' in source
+    assert "MFDS_RECALL_PAGE_URL" in source
+    assert "MFDS_ADMIN_SANCTION_PAGE_URL" in source
+    assert "MFDS_SAFETY_LETTER_PAGE_URL" in source
+    assert "공식 안전정보 확인키" in source
     assert "priced_active_crosslinks" in source
     assert '"현재 모델"' in source
     assert "최대 25개" not in source
