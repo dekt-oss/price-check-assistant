@@ -5,7 +5,7 @@ from typing import Any
 
 import streamlit as st
 
-from purchase_price.domain import IdentityEvidenceStatus, PriceEvidenceStatus
+from purchase_price.evidence_domain import IdentityEvidenceStatus, PriceEvidenceStatus
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
