@@ -8,7 +8,9 @@ from purchase_price.services.mfds_device_intelligence import (
     parse_business_record,
     parse_model_record,
 )
+from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.services.mfds_workspace import (
+    lookup_mfds_business_license,
     research_mfds_for_workspace,
     should_query_mfds,
 )
@@ -131,3 +133,51 @@ def test_workspace_business_lookup_is_only_a_company_hint_cross_check() -> None:
     assert result.business_query == "예시메디칼"
     assert result.business_records == (business,)
     assert result.registered_company_status == "company_source_not_connected"
+
+
+def test_on_demand_business_lookup_returns_official_records() -> None:
+    business = parse_business_record(
+        {
+            "ENTRPS": "예시메디칼",
+            "INDUTY_TYPE": "수입업",
+            "BIZ_STTUS": "영업",
+            "MEDDEV_ENTP_NO": "제123호",
+        }
+    )
+
+    class BusinessClient:
+        def search_company(self, company_name: str):
+            assert company_name == "예시메디칼"
+            return (business,)
+
+    result = lookup_mfds_business_license(
+        "예시메디칼",
+        business_client=BusinessClient(),
+    )
+
+    assert result.status == "success"
+    assert result.query == "예시메디칼"
+    assert result.records == (business,)
+
+
+def test_on_demand_business_lookup_keeps_failure_distinct_from_zero() -> None:
+    class BusinessClient:
+        def search_company(self, company_name: str):
+            raise PublicDataClientError("synthetic MFDS failure")
+
+    result = lookup_mfds_business_license(
+        "예시메디칼",
+        business_client=BusinessClient(),
+    )
+
+    assert result.status == "failure"
+    assert result.records == ()
+    assert result.error_type == "PublicDataClientError"
+    assert "synthetic MFDS failure" in (result.error_message or "")
+
+
+def test_on_demand_business_lookup_empty_company_is_not_run() -> None:
+    result = lookup_mfds_business_license("")
+
+    assert result.status == "not_run"
+    assert result.records == ()
