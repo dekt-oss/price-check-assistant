@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -21,6 +21,7 @@ from purchase_price.storage.r2_state import R2OperationalStateStore
 POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
 _CACHE_DIR = Path(tempfile.gettempdir()) / "price-check-track-b"
 _VALIDATED_CACHE_FILES: dict[str, tuple[int, int, int, int]] = {}
+_INDEX_DATA_AS_OF_BY_PATH: dict[str, str | None] = {}
 
 
 def _sha256_file(path: Path) -> str:
@@ -63,6 +64,9 @@ def _local_index_path(settings: Settings) -> Path | None:
         raise R2IntegrityError("Track B serving-index pointer is incomplete")
 
     destination = _CACHE_DIR / f"{sha256}.sqlite"
+    _INDEX_DATA_AS_OF_BY_PATH[str(destination)] = (
+        str(pointer.get("updated_at") or "").strip() or None
+    )
     if destination.exists():
         if _cache_file_is_valid(destination, sha256):
             return destination
@@ -100,6 +104,7 @@ class TrackBServingSnapshot:
     path: Path | None = None
     engine: Engine | None = None
     session: Session | None = None
+    data_as_of: str | None = None
 
     def __enter__(self) -> TrackBServingSnapshot:
         return self
@@ -125,14 +130,20 @@ class TrackBServingSnapshot:
         )
 
         if self.status in {"unavailable", "not_ingested"} or self.session is None:
-            return TrackBQuoteComparison(self.status, (), 0)
+            return TrackBQuoteComparison(
+                self.status,
+                (),
+                0,
+                data_as_of=self.data_as_of,
+            )
 
         result = compare_track_b_quote(
             self.session,
             query,
             quote_unit_price=quote_unit_price,
         )
-        return refine_track_b_reference_quality(self.session, query, result)
+        refined = refine_track_b_reference_quality(self.session, query, result)
+        return replace(refined, data_as_of=self.data_as_of)
 
     def lookup_model_summaries(
         self,
@@ -150,17 +161,29 @@ class TrackBServingSnapshot:
 
         queries = tuple(queries)
         if self.status in {"unavailable", "not_ingested"} or self.session is None:
-            return tuple(TrackBQuoteComparison(self.status, (), 0) for _ in queries)
+            return tuple(
+                TrackBQuoteComparison(
+                    self.status,
+                    (),
+                    0,
+                    data_as_of=self.data_as_of,
+                )
+                for _ in queries
+            )
         prices = (
             tuple(quote_unit_prices)
             if quote_unit_prices is not None
             else tuple(None for _ in queries)
         )
-        return compare_track_b_models_batch(
+        results = compare_track_b_models_batch(
             self.session,
             queries,
             quote_unit_prices=prices,
             limit_per_model=limit_per_model,
+        )
+        return tuple(
+            replace(result, data_as_of=self.data_as_of)
+            for result in results
         )
 
 
@@ -186,6 +209,7 @@ def open_track_b_serving_snapshot(
             path=path,
             engine=engine,
             session=Session(bind=engine, autoflush=False, expire_on_commit=False),
+            data_as_of=_INDEX_DATA_AS_OF_BY_PATH.get(str(path)),
         )
     except (
         BotoCoreError,
