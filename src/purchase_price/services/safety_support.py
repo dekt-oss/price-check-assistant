@@ -106,6 +106,8 @@ def related_safety_state(
     message: str,
     model_name: str = "",
     permit_numbers: Iterable[str] = (),
+    checked_at: str | None = None,
+    source_url: str | None = None,
 ) -> SafetyCheckState:
     """Represent related safety information that is not an exact product action."""
 
@@ -134,4 +136,6 @@ def no_match_safety_state(
         message="현재 연결된 공식 안전정보에서 일치 항목을 확인하지 못함",
         model_name=str(model_name or "").strip(),
         permit_numbers=_unique_text(permit_numbers),
+        checked_at=checked_at,
+        source_url=source_url,
     )
