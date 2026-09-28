@@ -42,6 +42,12 @@ from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
     parse_purchase_workspace_handoff,
 )
+from purchase_price.services.safety_support import (
+    MFDS_ADMIN_SANCTION_PAGE_URL,
+    MFDS_RECALL_PAGE_URL,
+    MFDS_SAFETY_LETTER_PAGE_URL,
+    build_manual_safety_check_state,
+)
 from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
@@ -649,10 +655,36 @@ def _render_search_result(state: dict[str, Any]) -> None:
     if state.get("origin") == "quote":
         st.caption("견적서 품목에서 이어진 조사 · 견적단가를 비교기준으로 유지합니다.")
 
-    st.info(
-        "Safety 자동조회는 아직 공식 회수·판매중지 API 연결 전입니다. "
-        "현재 화면에 경고가 없더라도 공식 안전정보 확인을 대체하지 않습니다."
+    safety_permit_numbers: list[str] = []
+    if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
+        safety_permit_numbers.extend(indexed_identity.permit_numbers)
+    if isinstance(mfds, MfdsWorkspaceResult):
+        safety_permit_numbers.extend(mfds.permit_numbers)
+    safety_state = build_manual_safety_check_state(
+        model_name=str(getattr(query, "model_name", "") or "").strip(),
+        permit_numbers=safety_permit_numbers,
     )
+    with st.container(border=True):
+        st.markdown("### Safety")
+        st.warning(f"{safety_state.evidence_status.value} · {safety_state.message}")
+        if safety_state.search_keys:
+            st.caption("공식 안전정보 확인키 · " + " / ".join(safety_state.search_keys))
+        safety_cols = st.columns(3)
+        safety_cols[0].link_button(
+            "회수·판매중지 확인",
+            MFDS_RECALL_PAGE_URL,
+            use_container_width=True,
+        )
+        safety_cols[1].link_button(
+            "행정처분 확인",
+            MFDS_ADMIN_SANCTION_PAGE_URL,
+            use_container_width=True,
+        )
+        safety_cols[2].link_button(
+            "안전성서한 확인",
+            MFDS_SAFETY_LETTER_PAGE_URL,
+            use_container_width=True,
+        )
 
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
         with st.container(border=True):
