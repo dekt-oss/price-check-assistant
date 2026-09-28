@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from purchase_price.domain import IdentityEvidenceStatus, MfdsItemAuthorizationType
 from purchase_price.services.matching import normalize_text
 
 MFDS_PRODUCT_INFO_BASE_URL = "https://apis.data.go.kr/1471000/MdeqStdCdPrdtInfoService03"
@@ -32,6 +33,10 @@ class MfdsIdentityRecord:
         return normalize_text(self.permit_number)
 
     @property
+    def item_authorization_type(self) -> MfdsItemAuthorizationType:
+        return classify_mfds_item_number(self.permit_number)
+
+    @property
     def model_key(self) -> str:
         return normalize_text(self.model_name)
 
@@ -50,6 +55,29 @@ class MfdsIdentityLookup:
     query: str
     match_type: str | None
     records: tuple[MfdsIdentityRecord, ...]
+
+    @property
+    def identity_status(self) -> IdentityEvidenceStatus:
+        if self.status in {"unavailable", "not_ingested"}:
+            return IdentityEvidenceStatus.UNAVAILABLE
+        if self.status == "success_0":
+            return IdentityEvidenceStatus.NOT_FOUND_IN_COVERAGE
+        if self.status != "success":
+            return IdentityEvidenceStatus.UNAVAILABLE
+
+        if self.match_type in {"model", "udi"}:
+            identity_keys = {
+                (
+                    item.permit_key,
+                    item.company_key,
+                    item.product_key,
+                )
+                for item in self.records
+                if any((item.permit_key, item.company_key, item.product_key))
+            }
+            if len(identity_keys) > 1:
+                return IdentityEvidenceStatus.AMBIGUOUS
+        return IdentityEvidenceStatus.FOUND
 
     @property
     def permit_numbers(self) -> tuple[str, ...]:
@@ -98,6 +126,19 @@ class MfdsIdentityLookup:
                 }
             )
         )
+
+
+def classify_mfds_item_number(
+    permit_number: str | None,
+) -> MfdsItemAuthorizationType:
+    text = str(permit_number or "").strip().replace(" ", "")
+    if text.startswith(("제허", "수허")):
+        return MfdsItemAuthorizationType.PERMIT
+    if text.startswith(("제인", "수인")):
+        return MfdsItemAuthorizationType.CERTIFICATION
+    if text.startswith(("제신", "수신")):
+        return MfdsItemAuthorizationType.NOTIFICATION
+    return MfdsItemAuthorizationType.UNKNOWN
 
 
 def _text(value: Any) -> str | None:
