@@ -111,7 +111,7 @@ def test_quote_market_ui_exposes_partial_failure_and_retry_contract() -> None:
     )
 
     assert "다른 품목의 결과는 유지" in source
-    assert "실패 품목만 다시 조사" in source
+    assert "실패 품목 전체 다시 조사" in source
     assert "state.item_research_failures" in source
     assert "_record_item_failure" in source
     assert "_clear_item_failure" in source
