@@ -307,6 +307,32 @@ def _candidate_identity_records(identity: MfdsIdentityLookup) -> list[MfdsIdenti
     return list(unique.values())
 
 
+def _identity_selection_token(record: MfdsIdentityRecord) -> str:
+    return "|".join(
+        (
+            normalize_text(record.permit_number),
+            normalize_text(record.model_name),
+            normalize_text(record.registered_company),
+            normalize_text(record.product_name),
+        )
+    )
+
+
+def _selected_identity_from_token(
+    identity: MfdsIdentityLookup | None,
+    token: str,
+) -> MfdsIdentityRecord | None:
+    cleaned = str(token or "").strip()
+    if not cleaned or not isinstance(identity, MfdsIdentityLookup):
+        return None
+    matches = [
+        record
+        for record in identity.records
+        if _identity_selection_token(record) == cleaned
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
     identity = state.get("mfds_identity")
     st.divider()
@@ -357,6 +383,7 @@ def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
             st.session_state[HOME_SEARCH_STATE_KEY] = resolved
             st.query_params["q"] = state.get("search_text") or selected.model_name or ""
             st.query_params["view"] = "price"
+            st.query_params["identity"] = _identity_selection_token(selected)
             status.update(label="제품 identity 선택 완료", state="complete")
         st.rerun()
 
@@ -371,6 +398,7 @@ def _execute_search(
     quote_text: str,
     lookback_days: int,
     selected_identity: MfdsIdentityRecord | None = None,
+    selected_identity_token: str = "",
 ) -> dict[str, Any]:
     raw_search = search_text.strip()
     if selected_identity is None:
@@ -387,6 +415,20 @@ def _execute_search(
             model_name=model_name,
             specification=specification,
         )
+        token_identity = _selected_identity_from_token(
+            indexed_identity,
+            selected_identity_token,
+        )
+        if token_identity is not None:
+            selected_identity = token_identity
+            product_name = token_identity.product_name or product_name
+            model_name = token_identity.model_name or model_name
+            indexed_identity = MfdsIdentityLookup(
+                "success",
+                raw_search or model_name,
+                "model",
+                (token_identity,),
+            )
     else:
         product_name = selected_identity.product_name or product_name
         model_name = selected_identity.model_name or model_name
@@ -1328,6 +1370,7 @@ if not isinstance(search_state, dict) and shared_query and handoff is None:
                 specification="",
                 quote_text="",
                 lookback_days=G2B_DEFAULT_LOOKBACK_DAYS,
+                selected_identity_token=str(st.query_params.get("identity") or ""),
             )
             st.session_state[HOME_SEARCH_STATE_KEY] = search_state
             status.update(label="검색결과 복원 완료", state="complete")
@@ -1442,6 +1485,7 @@ if submitted:
             st.session_state[HOME_SEARCH_DETAILS_KEY] = False
             st.query_params["q"] = search_text.strip()
             st.query_params["view"] = "price"
+            st.query_params.pop("identity", None)
             status.update(label="추가 자료 확인 완료", state="complete")
             st.rerun()
     except ValueError as exc:
