@@ -101,7 +101,7 @@ class TrackBServingSnapshot:
     engine: Engine | None = None
     session: Session | None = None
 
-    def __enter__(self) -> "TrackBServingSnapshot":
+    def __enter__(self) -> TrackBServingSnapshot:
         return self
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
@@ -120,7 +120,9 @@ class TrackBServingSnapshot:
             TrackBQuoteComparison,
             compare_track_b_quote,
         )
-        from purchase_price.services.track_b_reference_quality import refine_track_b_reference_quality
+        from purchase_price.services.track_b_reference_quality import (
+            refine_track_b_reference_quality,
+        )
 
         if self.status in {"unavailable", "not_ingested"} or self.session is None:
             return TrackBQuoteComparison(self.status, (), 0)
