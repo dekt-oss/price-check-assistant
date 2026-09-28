@@ -62,6 +62,10 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _data_as_of(pipeline: TrackBPipelineState) -> str | None:
+    return pipeline.rolling_covered_through if pipeline.backfill_complete else None
+
+
 def _ref_from_pointer(payload: Mapping[str, Any]) -> R2ServingIndexRef:
     if payload.get("schema") != POINTER_SCHEMA:
         raise ValueError("Track B serving-index pointer schema mismatch")
@@ -258,6 +262,11 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             engine.dispose()
 
         if mode == "incremental" and not indexed_keys:
+            if pointer is not None:
+                refreshed_pointer = dict(pointer)
+                refreshed_pointer["data_as_of"] = _data_as_of(pipeline)
+                refreshed_pointer["updated_at"] = _now()
+                state_store.write_json(SERVING_INDEX_STATE_NAME, refreshed_pointer)
             final = {
                 "status": "NO_CHANGE",
                 "mode": mode,
@@ -289,9 +298,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             "uncompressed_bytes": ref.uncompressed_bytes,
             "row_count": row_count,
             "updated_at": _now(),
-            "data_as_of": (
-                pipeline.rolling_covered_through if pipeline.backfill_complete else None
-            ),
+            "data_as_of": _data_as_of(pipeline),
             "mode": mode,
             "serving_schema": SERVING_INDEX_SCHEMA,
             "state_recovered": state_recovered,
