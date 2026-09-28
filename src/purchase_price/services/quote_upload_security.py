@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Iterator
+from dataclasses import dataclass
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
@@ -13,7 +14,26 @@ class UploadedQuoteFile(Protocol):
     def getvalue(self) -> bytes: ...
 
 
-_ALLOWED_SUFFIXES = {".pdf", ".xlsx", ".xls"}
+@dataclass(frozen=True)
+class QuoteUploadSecurityPolicy:
+    """Current public-PoC handling contract for uploaded quotation originals."""
+
+    allowed_suffixes: frozenset[str]
+    raw_retention: str
+    raw_content_logging: bool
+    external_ai_transfer: bool
+    external_ai_retention: str
+
+
+CURRENT_QUOTE_UPLOAD_SECURITY_POLICY = QuoteUploadSecurityPolicy(
+    allowed_suffixes=frozenset({".pdf", ".xlsx", ".xls"}),
+    raw_retention="temporary_file_only_deleted_after_parsing",
+    raw_content_logging=False,
+    external_ai_transfer=False,
+    external_ai_retention="not_applicable",
+)
+
+_ALLOWED_SUFFIXES = set(CURRENT_QUOTE_UPLOAD_SECURITY_POLICY.allowed_suffixes)
 
 
 @contextmanager
