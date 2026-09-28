@@ -844,6 +844,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
     if stats.demand_institution_count:
         st.caption(f"A/B 직접거래 수요기관 {stats.demand_institution_count}개 확인")
+    track_b_data_as_of = str(getattr(track_b, "data_as_of", "") or "").strip()
+    if track_b_data_as_of:
+        st.caption(f"나라장터 serving index 기준시각 · {track_b_data_as_of}")
 
     export_identity_rows: list[dict[str, object]] = []
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.records:
@@ -903,7 +906,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         research_rows=export_research_rows,
         supplier_rows=supplier_rows(track_b),
         identity_rows=export_identity_rows,
-        data_as_of=None,
+        data_as_of=getattr(track_b, "data_as_of", None),
     )
     safe_export_name = "".join(
         character if character.isalnum() or character in {"-", "_"} else "_"
