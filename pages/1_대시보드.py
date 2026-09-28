@@ -481,7 +481,6 @@ def _execute_search(
         exact_identity_crosslinks = _build_mfds_procurement_crosslinks(
             exact_identity_records,
             track_b_snapshot=track_b_snapshot,
-            limit=25,
         )
         same_product_identity = (
             lookup_same_mfds_product_from_r2(identity_product) if identity_product else ()
@@ -489,7 +488,6 @@ def _execute_search(
         mfds_procurement_crosslinks = _build_mfds_procurement_crosslinks(
             same_product_identity,
             track_b_snapshot=track_b_snapshot,
-            limit=25,
         )
 
     mfds = research_mfds_for_workspace(query, track_b)
