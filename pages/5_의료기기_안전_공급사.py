@@ -277,8 +277,8 @@ if submitted:
     st.divider()
     st.subheader("3. UDI·표준코드 identity 확장")
     st.info(
-        "식약처 표준코드별 제품정보 API는 UDI-DI, 품목명·분류번호·등급·허가번호·모델명·제품명·"
-        "제조/수입업체 등을 제공하는 공식 source입니다. 현재는 request filter 계약과 활용권한을 "
+        "식약처 표준코드별 제품정보 API는 UDI-DI, 품목명·분류번호·등급·식약처 품목번호·모델명·제품명·"
+        "품목 책임주체 정보를 제공하는 공식 source입니다. 현재는 request filter 계약과 활용권한을 "
         "완전히 검증하기 전이라 자동 모델검색에 연결하지 않았습니다."
     )
     c1, c2 = st.columns(2)
