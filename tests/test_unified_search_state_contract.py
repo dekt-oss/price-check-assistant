@@ -53,6 +53,8 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "get_mfds_identity_collection_status" in source
     assert "_render_mfds_collection_status" in source
     assert "exact_identity_crosslinks" in source
+    assert "track_b_snapshot.lookup_model_summaries(queries)" in source
+    assert "for item in list(unique.values())[:limit]" not in source
     assert "식약처 품목번호 기준 모델·조달가격 연결" in source
     assert "companies[0]" not in source
     assert "식약처 품목번호" in source
@@ -66,4 +68,5 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "품목 책임주체" in source
     assert "직접 동일성 확인 거래" in source
     assert "적정가격 범위" not in source
-    assert "'안전함'" not in source
+    for prohibited in ("미등록", "거래 없음", "안전함", "이상 없음", "공식 공급처"):
+        assert prohibited not in source
