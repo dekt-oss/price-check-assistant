@@ -67,17 +67,20 @@ def test_track_b_snapshot_batches_many_model_summaries_without_reopening_index(
     path_calls = 0
     engine_calls = 0
 
-    def fake_local_index_path(_settings):
+    def fake_local_index_snapshot(_settings):
         nonlocal path_calls
         path_calls += 1
-        return db_path
+        return db_path, {
+            "data_as_of": "2026-09-27",
+            "updated_at": "2026-09-28T00:30:00+00:00",
+        }
 
     def counted_create_engine(*args, **kwargs):
         nonlocal engine_calls
         engine_calls += 1
         return sqlalchemy_create_engine(*args, **kwargs)
 
-    monkeypatch.setattr(module, "_local_index_path", fake_local_index_path)
+    monkeypatch.setattr(module, "_local_index_snapshot", fake_local_index_snapshot)
     monkeypatch.setattr(module, "create_engine", counted_create_engine)
 
     queries = tuple(
@@ -91,3 +94,4 @@ def test_track_b_snapshot_batches_many_model_summaries_without_reopening_index(
     assert all(result.status == "not_ingested" for result in results)
     assert path_calls == 1
     assert engine_calls == 1
+    assert snapshot.data_as_of == "2026-09-27"
