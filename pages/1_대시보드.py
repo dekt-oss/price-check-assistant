@@ -492,7 +492,11 @@ def _execute_search(
     query = review_input.to_product_query()
 
     model_probe_used = False
+    track_b_data_as_of: str | None = None
+    track_b_index_updated_at: str | None = None
     with open_track_b_serving_snapshot() as track_b_snapshot:
+        track_b_data_as_of = getattr(track_b_snapshot, "data_as_of", None)
+        track_b_index_updated_at = getattr(track_b_snapshot, "index_updated_at", None)
         track_b = track_b_snapshot.lookup(
             query,
             quote_unit_price=review_input.quote_unit_price,
@@ -587,6 +591,8 @@ def _execute_search(
         "exact_identity_crosslinks": exact_identity_crosslinks,
         "same_product_identity": same_product_identity,
         "mfds_procurement_crosslinks": mfds_procurement_crosslinks,
+        "track_b_data_as_of": track_b_data_as_of,
+        "track_b_index_updated_at": track_b_index_updated_at,
     }
 
 
@@ -641,6 +647,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
     exact_identity_crosslinks = list(state.get("exact_identity_crosslinks") or [])
     same_product_identity = tuple(state.get("same_product_identity") or ())
     mfds_procurement_crosslinks = list(state.get("mfds_procurement_crosslinks") or [])
+    track_b_data_as_of = str(state.get("track_b_data_as_of") or "").strip() or None
+    track_b_index_updated_at = str(state.get("track_b_index_updated_at") or "").strip() or None
     interpretation = state.get("interpretation")
     quote_key = str(heading or "result").strip()
     default_quote = (
@@ -799,6 +807,13 @@ def _render_search_result(state: dict[str, Any]) -> None:
         mfds_metric = "대상 아님"
     c4.metric("식약처 품목정보", mfds_metric)
     c5.metric("공개조달 Research", f"{stats.research_count}건")
+    if track_b_data_as_of:
+        st.caption(f"나라장터 직접가격 데이터 기준일 · {track_b_data_as_of}")
+    elif track_b_index_updated_at:
+        st.caption(
+            f"나라장터 serving index 갱신시각 · {track_b_index_updated_at} · "
+            "전체 데이터 coverage 기준일은 아직 미확인"
+        )
 
     if isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_records:
         with st.container(border=True):
@@ -939,7 +954,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         research_rows=export_research_rows,
         supplier_rows=supplier_rows(track_b),
         identity_rows=export_identity_rows,
-        data_as_of=None,
+        data_as_of=track_b_data_as_of,
     )
     safe_export_name = "".join(
         character if character.isalnum() or character in {"-", "_"} else "_"
