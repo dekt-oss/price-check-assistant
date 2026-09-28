@@ -112,6 +112,8 @@ def test_supplier_rows_are_based_on_direct_procurement_only() -> None:
             "최고단가": Decimal("120"),
             "최근거래일": "2026-08-02",
             "근거": "나라장터 실제 납품요구 · A/B 직접근거",
+            "Source": "나라장터 납품요구",
+            "원문근거키": "미확인",
         }
     ]
 
