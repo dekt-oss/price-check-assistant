@@ -1,9 +1,6 @@
 from enum import StrEnum
 
 
-
-
-
 class IdentityEvidenceStatus(StrEnum):
     """V3 semantic state for regulatory identity lookup."""
 
