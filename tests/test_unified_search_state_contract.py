@@ -38,3 +38,5 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "식약처 등록업체" not in source
     assert "품목 책임주체" in source
     assert "직접 동일성 확인 거래" in source
+    assert "적정가격 범위" not in source
+    assert "'안전함'" not in source
