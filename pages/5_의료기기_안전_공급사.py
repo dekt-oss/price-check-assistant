@@ -13,8 +13,6 @@ from purchase_price.services.market_research_support import (
     extract_g2b_supplier_candidates,
     extract_mfds_business_supplier_candidates,
 )
-from purchase_price.services.mfds_identity_r2 import lookup_mfds_identity_from_r2
-from purchase_price.services.track_b_r2_quote_index import open_track_b_serving_snapshot
 from purchase_price.services.mfds_device_intelligence import (
     MFDS_BUSINESS_LICENSE_BASE_URL,
     MFDS_MODEL_INFO_BASE_URL,
@@ -22,6 +20,7 @@ from purchase_price.services.mfds_device_intelligence import (
     MfdsModelInfoClient,
     resolve_exact_model_identity,
 )
+from purchase_price.services.mfds_identity_r2 import lookup_mfds_identity_from_r2
 from purchase_price.services.safety_support import (
     MFDS_ADMIN_SANCTION_PAGE_URL,
     MFDS_RECALL_DATASET_URL,
@@ -32,6 +31,7 @@ from purchase_price.services.safety_support import (
     build_manual_safety_check_state,
 )
 from purchase_price.services.search import search_all
+from purchase_price.services.track_b_r2_quote_index import open_track_b_serving_snapshot
 
 st.set_page_config(page_title="의료기기 안전·업체·조달", page_icon="🛡️", layout="wide")
 st.title("의료기기 안전·업체·조달 확인")
