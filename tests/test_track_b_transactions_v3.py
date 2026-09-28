@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from purchase_price.domain import MatchGrade
+from purchase_price.domain import MatchGrade, UnitPriceBasis
 from purchase_price.services.track_b_db_quote_comparison import (
     TrackBQuoteCandidate,
     TrackBQuoteComparison,
@@ -49,3 +49,25 @@ def test_direct_transaction_row_exposes_v3_price_evidence_fields() -> None:
     assert row["총액"] == "45,000원"
     assert row["매칭등급"] == "A"
     assert row["매칭근거"] == "model_exact_and_product_match"
+
+
+def test_transaction_row_can_render_calculated_unit_price_basis() -> None:
+    candidate = TrackBQuoteCandidate(
+        source_record_id="delivery:REQ-2|change:00|line:1",
+        product_title="테스트품목, 제조사A, MODEL-1",
+        price=Decimal("100"),
+        match_grade=MatchGrade.B,
+        match_note="manual_calculation_contract",
+        delta_percent=None,
+        raw_object_key="raw/v1/example2.json.gz",
+        amount_check="consistent",
+        transaction_date="2026-09-01",
+        quantity=Decimal("10"),
+        total_amount=Decimal("1000"),
+        unit_price_basis=UnitPriceBasis.CALCULATED_UNIT_PRICE,
+    )
+    result = TrackBQuoteComparison(status="success", candidates=(candidate,), examined=1)
+
+    row = direct_transaction_rows(result)[0]
+
+    assert row["단가구분"] == "계산단가"
