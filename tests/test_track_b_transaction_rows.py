@@ -28,6 +28,7 @@ def test_legacy_comparison_without_reference_candidates_does_not_crash() -> None
         {
             "가격": "2,981,000원",
             "단가구분": "원문 단가",
+            "단가근거": "Source 원문 단가",
             "단위": "미확인",
             "포장입수": "미확인",
             "수량": "미확인",
