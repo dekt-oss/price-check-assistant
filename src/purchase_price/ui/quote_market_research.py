@@ -506,6 +506,8 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             st.switch_page("pages/1_대시보드.py")
 
         st.markdown("**나라장터 거래가격**")
+        if track_b is not None and getattr(track_b, "data_as_of", None):
+            st.caption(f"나라장터 serving index 기준시각 · {track_b.data_as_of}")
         direct_rows = _track_b_candidate_rows(track_b.candidates) if track_b is not None else []
         reference_rows = (
             _track_b_reference_rows(track_b.reference_candidates) if track_b is not None else []
