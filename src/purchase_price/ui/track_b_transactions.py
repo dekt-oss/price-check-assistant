@@ -163,6 +163,8 @@ def _transaction_row(candidate: Any, *, comparison_level: str) -> dict[str, obje
         "매칭근거": match_note,
         "거래기록": getattr(candidate, "transaction_type", None)
         or "나라장터 납품요구",
+        "Source": "나라장터 납품요구",
+        "원문근거키": getattr(candidate, "raw_object_key", None) or "미확인",
         "품목/모델": candidate.product_title,
         "비교수준": comparison_level,
     }
