@@ -114,7 +114,7 @@ with market_tab:
                 exact_ready = bool(exact and exact.confirmed and not exact.ambiguous)
                 if exact is not None:
                     if exact.ambiguous:
-                        st.error("동일 모델명이 복수 허가번호에 걸려 자동 identity로 확정하지 않습니다.")
+                        st.error("동일 모델명이 복수 식약처 품목번호에 걸려 자동 identity로 확정하지 않습니다.")
                     elif exact.confirmed:
                         permits = ", ".join(
                             item.permit_number or "품목번호 미표기" for item in exact.exact_matches
