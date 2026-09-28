@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.domain import MatchGrade
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.mfds_device_intelligence import (
     parse_business_record,
     parse_model_record,
 )
-from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.services.mfds_workspace import (
     lookup_mfds_business_license,
     research_mfds_for_workspace,
