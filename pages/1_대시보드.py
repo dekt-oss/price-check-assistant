@@ -785,7 +785,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                             "업체": item.company_name or "",
                             "업종": item.industry_type or "",
                             "상태": item.business_status or "",
-                            "업허가번호": item.business_permit_number or "",
+                            "업 허가·신고 번호": item.business_permit_number or "",
                             "주소": item.address or "",
                             "현재사용가능": item.is_active,
                         }
@@ -844,7 +844,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                         "업체": item.company_name or "",
                         "업종": item.industry_type or "",
                         "상태": item.business_status or "",
-                        "업허가번호": item.business_permit_number or "",
+                        "업 허가·신고 번호": item.business_permit_number or "",
                         "근거": "식약처 업허가 · 모델 공급관계 미확정",
                     }
                     for item in mfds.business_records
@@ -1025,14 +1025,14 @@ with st.form("home_unified_search"):
     with search_col:
         search_text = st.text_input(
             "통합 검색",
-            placeholder="품목·모델·허가번호·제조사  예) DFM100, 수허 24-1234호, Philips Efficia DFM100",
+            placeholder="품목·모델·식약처 품목번호·업체  예) DFM100, 수허 24-1234호, Philips Efficia DFM100",
             label_visibility="collapsed",
         )
     with button_col:
         submitted = st.form_submit_button("검색", type="primary", use_container_width=True)
 
     st.caption(
-        "한 줄 검색은 식약처 누적 인덱스의 허가번호·UDI·모델과 검증된 제품 힌트를 우선 해석합니다. "
+        "한 줄 검색은 식약처 누적 인덱스의 품목번호·UDI·모델과 검증된 제품 힌트를 우선 해석합니다. "
         "정확한 품명·제조사·모델을 알고 있으면 아래 조건에서 직접 수정할 수 있습니다."
     )
 
