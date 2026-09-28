@@ -48,6 +48,11 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert 'id="purchase-workspace-v3-shell"' in source
     assert 'st.query_params["q"]' in source
     assert 'st.query_params["view"]' in source
+    assert 'st.query_params["identity"]' in source
+    assert "_identity_selection_token" in source
+    assert "_selected_identity_from_token" in source
+    assert "selected_identity_token=str(st.query_params.get(\"identity\") or \"\")" in source
+    assert 'st.query_params.pop("identity", None)' in source
     assert "공유된 검색조건을 복원하고 있습니다" in source
     assert "home_unified_search_compact" in source
     assert "research_mfds_for_workspace" in source
