@@ -38,3 +38,17 @@ def test_streamlit_runtime_does_not_require_new_v3_names_from_cached_legacy_doma
 
     dashboard = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
     assert "from purchase_price.domain import IdentityEvidenceStatus" not in dashboard
+
+
+def test_dashboard_does_not_require_new_symbols_from_cached_mfds_identity_module() -> None:
+    dashboard = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+
+    assert "from purchase_price.services.mfds_identity_presenter import (" in dashboard
+    assert "mfds_identity_status(" in dashboard
+    assert "mfds_item_authorization_type(" in dashboard
+    legacy_import = dashboard.split(
+        "from purchase_price.services.mfds_identity_index import (", 1
+    )[1].split(")", 1)[0]
+    assert "MFDS_PRODUCT_INFO_DATASET_URL" not in legacy_import
+    assert ".identity_status" not in dashboard
+    assert ".item_authorization_type" not in dashboard
