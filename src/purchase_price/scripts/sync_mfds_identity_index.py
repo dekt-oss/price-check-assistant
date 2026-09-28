@@ -139,6 +139,11 @@ def _sync_without_lock(
     artifact_store = R2MfdsIdentityIndexStore.from_settings(settings)
     pipeline = _load_pipeline(state_store)
     pointer = state_store.read_json(MFDS_IDENTITY_POINTER_STATE)
+    stale_retained_key = (
+        str(pointer.get("previous_key") or "").strip()
+        if pointer is not None
+        else ""
+    )
 
     previous_ref: MfdsIdentityIndexRef | None = None
     with tempfile.TemporaryDirectory(prefix="mfds-identity-") as temp_dir:
@@ -277,6 +282,7 @@ def _sync_without_lock(
             "updated_at": _now(),
             "source_operation": MFDS_PRODUCT_INFO_OPERATION,
             "last_raw_key": last_raw_key,
+            "previous_key": previous_ref.key if previous_ref is not None else None,
         }
         state_store.write_json(MFDS_IDENTITY_POINTER_STATE, pointer_payload)
 
@@ -287,9 +293,16 @@ def _sync_without_lock(
         pipeline["updated_at"] = _now()
         state_store.write_json(PIPELINE_STATE, pipeline)
 
-        if previous_ref is not None and previous_ref.key != ref.key:
+        # Keep the immediately previous complete index as a grace generation.
+        # A reader may have fetched the old pointer just before this publish. Delete only
+        # the generation that was already retained by the previous pointer.
+        if (
+            stale_retained_key
+            and stale_retained_key != ref.key
+            and (previous_ref is None or stale_retained_key != previous_ref.key)
+        ):
             try:
-                artifact_store.delete(previous_ref.key)
+                artifact_store.delete(stale_retained_key)
             except Exception:
                 pass
 
