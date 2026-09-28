@@ -39,16 +39,6 @@ class MfdsWorkspaceResult:
     error_type: str | None = None
     error_message: str | None = None
 
-
-@dataclass(frozen=True)
-class MfdsBusinessLookupResult:
-    status: str
-    query: str
-    records: tuple[MedicalDeviceBusinessRecord, ...] = ()
-    error_type: str | None = None
-    error_message: str | None = None
-
-
     @property
     def active_competitor_records(self) -> tuple[MedicalDeviceModelRecord, ...]:
         exact_ids = {
@@ -78,6 +68,15 @@ class MfdsBusinessLookupResult:
             if record.industry_type and record.industry_type.strip()
         }
         return tuple(sorted(values))
+
+
+@dataclass(frozen=True)
+class MfdsBusinessLookupResult:
+    status: str
+    query: str
+    records: tuple[MedicalDeviceBusinessRecord, ...] = ()
+    error_type: str | None = None
+    error_message: str | None = None
 
 
 def _candidate_detail_codes(track_b: Any) -> set[str]:
