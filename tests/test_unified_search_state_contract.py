@@ -26,12 +26,15 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "get_mfds_identity_collection_status" in source
     assert "_render_mfds_collection_status" in source
     assert "exact_identity_crosslinks" in source
-    assert "허가번호 기준 모델·조달가격 연결" in source
+    assert "식약처 품목번호 기준 모델·조달가격 연결" in source
     assert "companies[0]" not in source
-    assert "허가번호" in source
-    assert "동일 품목 → 허가번호 → 모델 → 등록업체 → 나라장터 가격" in source
+    assert "식약처 품목번호" in source
+    assert "동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격" in source
     assert "_split_transaction_rows_compat" in source
     assert "_strict_candidates_compat" in source
     assert "direct_transaction_rows" not in source
     assert "reference_transaction_rows" not in source
     assert "검색 참고거래" in source
+    assert "식약처 등록업체" not in source
+    assert "품목 책임주체" in source
+    assert "직접 동일성 확인 거래" in source
