@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 
 from purchase_price.config import Settings
 from purchase_price.schemas import ProductQuery
@@ -88,39 +90,72 @@ def _local_index_path(settings: Settings) -> Path | None:
     return destination
 
 
-def lookup_track_b_quote_from_r2(query: ProductQuery, *, quote_unit_price):
-    # Local imports avoid a module cycle: the DB comparison module calls this function as its
-    # preferred production lookup, while compare_track_b_quote remains the shared strict matcher.
-    from purchase_price.services.track_b_db_quote_comparison import (
-        TrackBQuoteComparison,
-        compare_track_b_quote,
-    )
-    from purchase_price.services.track_b_reference_quality import (
-        refine_track_b_reference_quality,
-    )
 
-    settings = Settings()
+
+@dataclass
+class TrackBServingSnapshot:
+    """One immutable serving-index snapshot reused for all lookups in one user search."""
+
+    status: str
+    path: Path | None = None
+    engine: Engine | None = None
+    session: Session | None = None
+
+    def __enter__(self) -> "TrackBServingSnapshot":
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self.session is not None:
+            self.session.close()
+            self.session = None
+        if self.engine is not None:
+            self.engine.dispose()
+            self.engine = None
+
+    def lookup(self, query: ProductQuery, *, quote_unit_price):
+        from purchase_price.services.track_b_db_quote_comparison import (
+            TrackBQuoteComparison,
+            compare_track_b_quote,
+        )
+        from purchase_price.services.track_b_reference_quality import refine_track_b_reference_quality
+
+        if self.status in {"unavailable", "not_ingested"} or self.session is None:
+            return TrackBQuoteComparison(self.status, (), 0)
+
+        result = compare_track_b_quote(
+            self.session,
+            query,
+            quote_unit_price=quote_unit_price,
+        )
+        return refine_track_b_reference_quality(self.session, query, result)
+
+
+def open_track_b_serving_snapshot(
+    *,
+    settings: Settings | None = None,
+) -> TrackBServingSnapshot:
+    """Open the current Track B pointer once and reuse one engine/session."""
+
+    settings = settings or Settings()
     if not settings.r2_configured:
-        return TrackBQuoteComparison("unavailable", (), 0)
+        return TrackBServingSnapshot("unavailable")
     try:
         path = _local_index_path(settings)
         if path is None:
-            return TrackBQuoteComparison("not_ingested", (), 0)
+            return TrackBServingSnapshot("not_ingested")
         engine = create_engine(
             f"sqlite+pysqlite:///{path}",
             connect_args={"check_same_thread": False},
         )
-        session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-        try:
-            with session_factory() as session:
-                result = compare_track_b_quote(
-                    session,
-                    query,
-                    quote_unit_price=quote_unit_price,
-                )
-                return refine_track_b_reference_quality(session, query, result)
-        finally:
-            engine.dispose()
+        return TrackBServingSnapshot(
+            status="available",
+            path=path,
+            engine=engine,
+            session=Session(engine, autoflush=False, expire_on_commit=False),
+        )
     except (
         BotoCoreError,
         ClientError,
@@ -130,4 +165,11 @@ def lookup_track_b_quote_from_r2(query: ProductQuery, *, quote_unit_price):
         R2IntegrityError,
         ValueError,
     ):
-        return TrackBQuoteComparison("unavailable", (), 0)
+        return TrackBServingSnapshot("unavailable")
+
+
+def lookup_track_b_quote_from_r2(query: ProductQuery, *, quote_unit_price):
+    """Single-query compatibility wrapper over a reusable serving-index snapshot."""
+
+    with open_track_b_serving_snapshot() as snapshot:
+        return snapshot.lookup(query, quote_unit_price=quote_unit_price)
