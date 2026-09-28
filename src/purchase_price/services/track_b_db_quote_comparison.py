@@ -10,7 +10,8 @@ from sqlalchemy import and_, exists, inspect, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
-from purchase_price.domain import MatchGrade, PriceEvidenceStatus, UnitPriceBasis
+from purchase_price.domain import MatchGrade
+from purchase_price.evidence_domain import PriceEvidenceStatus, UnitPriceBasis
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_track_b_normalization import (
