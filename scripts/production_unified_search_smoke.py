@@ -10,9 +10,9 @@ from typing import Any
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-quote-v1"
+DEPLOYMENT_MARKER = "#purchase-workspace-v3-shell"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
-WORKSPACE_DIRECT_PATTERN = re.compile(r"동일제품 거래\s*(\d+)건")
+WORKSPACE_DIRECT_PATTERN = re.compile(r"직접 동일성 확인 거래\s*(\d+)건")
 ERROR_TEXTS = (
     "AttributeError",
     "This app has encountered an error",
@@ -91,7 +91,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-quote-v1 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-v3-shell in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -122,55 +122,47 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
     raise RuntimeError("DFM100 Production unified search did not render a non-zero result summary")
 
 
-def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) -> None:
+def _verify_workspace_sections_persist_result(page: Any, report: dict[str, object]) -> None:
     app = _app(page)
 
-    research_tab = app.get_by_role("tab", name="Research·근거")
-    research_tab.wait_for(state="visible", timeout=20_000)
-    research_tab.click()
+    body = _body_text(page)
+    _assert_no_error_text(body)
+    if (
+        "나라장터 동일제품 직접거래" not in body
+        or "참고근거 · Research" not in body
+    ):
+        raise RuntimeError("Default price workspace did not render after DFM100 search")
+    report["price_section_rendered"] = True
 
+    supplier_section = app.get_by_text("🏢 업체·조달", exact=True)
+    supplier_section.wait_for(state="visible", timeout=20_000)
+    supplier_section.click()
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
         if (
-            "구매조사 워크스페이스" in body
-            and "공개조달 Research·근거" in body
-            and "동일제품 거래" in body
+            "식약처 품목·Identity" in body
+            and "실제 조달 공급업체" in body
         ):
+            report["supplier_section_rendered"] = True
             break
         page.wait_for_timeout(1_000)
     else:
-        raise RuntimeError("Research workspace tab did not preserve DFM100 search result")
+        raise RuntimeError("Supplier/procurement section did not preserve DFM100 result")
 
-    mfds_tab = app.get_by_role("tab", name="식약처·허가")
-    mfds_tab.click()
+    compare_section = app.get_by_text("🔁 동일품목 비교", exact=True)
+    compare_section.click()
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
-        if "식약처 허가·등록정보" in body:
-            report["mfds_tab_rendered"] = True
-            break
-        page.wait_for_timeout(1_000)
-    else:
-        raise RuntimeError("MFDS workspace tab did not render after DFM100 search")
-
-    price_tab = app.get_by_role("tab", name="거래가격")
-    price_tab.click()
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        body = _body_text(page)
-        _assert_no_error_text(body)
-        if (
-            "나라장터 동일제품 직접거래" in body
-            and "요약과 동일한 A/B 직접거래" in body
-        ):
-            report["workspace_tabs_persisted"] = True
+        if "동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격" in body:
+            report["comparison_section_rendered"] = True
             _save_snapshot(page, report, "unified-search-dfm100-workspace")
             return
         page.wait_for_timeout(1_000)
-    raise RuntimeError("Price workspace tab did not preserve DFM100 transaction results")
+    raise RuntimeError("Same-item comparison section did not preserve DFM100 result")
 
 
 def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
@@ -197,7 +189,7 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
             report["reference_count"] = reference_count
             report["total_track_b_results"] = strict_count + reference_count
             _save_snapshot(page, report, "unified-search-dfm100-success")
-            _verify_workspace_tabs_persist_result(page, report)
+            _verify_workspace_sections_persist_result(page, report)
             return
         except Exception as exc:
             attempts.append(
@@ -214,7 +206,7 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
         if attempt < 3:
             _wait_for_deployed_app(page, report)
 
-    raise RuntimeError("DFM100 Production unified search did not pass result + workspace-tab E2E")
+    raise RuntimeError("DFM100 Production unified search did not pass result + workspace-section E2E")
 
 
 def main() -> None:
