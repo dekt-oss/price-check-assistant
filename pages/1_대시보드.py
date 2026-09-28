@@ -147,7 +147,6 @@ def _build_mfds_procurement_crosslinks(
     records,
     *,
     track_b_snapshot,
-    limit: int = 25,
 ) -> list[dict[str, object]]:
     unique: dict[tuple[str, str, str], object] = {}
     for item in records:
@@ -161,18 +160,20 @@ def _build_mfds_procurement_crosslinks(
         )
         unique.setdefault(key, item)
 
-    rows: list[dict[str, object]] = []
-    for item in list(unique.values())[:limit]:
-        model = str(getattr(item, "model_name", "") or "").strip()
-        product = str(getattr(item, "product_name", "") or "").strip()
-        company = str(getattr(item, "registered_company", "") or "").strip()
-        comparison = track_b_snapshot.lookup(
-            ProductQuery(
-                product_name=product,
-                model_name=model,
-            ),
-            quote_unit_price=None,
+    items = list(unique.values())
+    queries = tuple(
+        ProductQuery(
+            product_name=str(getattr(item, "product_name", "") or "").strip(),
+            model_name=str(getattr(item, "model_name", "") or "").strip(),
         )
+        for item in items
+    )
+    comparisons = track_b_snapshot.lookup_model_summaries(queries)
+
+    rows: list[dict[str, object]] = []
+    for item, comparison in zip(items, comparisons, strict=True):
+        model = str(getattr(item, "model_name", "") or "").strip()
+        company = str(getattr(item, "registered_company", "") or "").strip()
         direct = _strict_candidates_compat(comparison)
         prices = sorted(
             Decimal(str(candidate.price))
