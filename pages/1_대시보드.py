@@ -12,6 +12,7 @@ from purchase_price.services.g2b_search_policy import (
     G2B_LOOKBACK_OPTIONS,
     g2b_lookback_label,
 )
+from purchase_price.services.matching import normalize_text
 from purchase_price.services.mfds_identity_index import (
     MFDS_PRODUCT_INFO_DATASET_URL,
     MfdsIdentityLookup,
@@ -148,6 +149,7 @@ def _build_mfds_procurement_crosslinks(
     records,
     *,
     track_b_snapshot,
+    current_model: str = "",
 ) -> list[dict[str, object]]:
     unique: dict[tuple[str, str, str], object] = {}
     for item in records:
@@ -198,6 +200,7 @@ def _build_mfds_procurement_crosslinks(
                 "유형": getattr(getattr(item, "item_authorization_type", None), "value", "미확인"),
                 "식약처 품목번호": getattr(item, "permit_number", None) or "",
                 "모델": model,
+                "현재 모델": "현재 모델" if normalize_text(model) == normalize_text(current_model) else "",
                 "품목 책임주체": company,
                 "UDI-DI": getattr(item, "udi_di", None) or "",
                 "나라장터 상태": comparison.evidence_status.value,
@@ -482,6 +485,7 @@ def _execute_search(
         exact_identity_crosslinks = _build_mfds_procurement_crosslinks(
             exact_identity_records,
             track_b_snapshot=track_b_snapshot,
+            current_model=query.model_name or "",
         )
         same_product_identity = (
             lookup_same_mfds_product_from_r2(identity_product) if identity_product else ()
@@ -489,6 +493,7 @@ def _execute_search(
         mfds_procurement_crosslinks = _build_mfds_procurement_crosslinks(
             same_product_identity,
             track_b_snapshot=track_b_snapshot,
+            current_model=query.model_name or "",
         )
 
     mfds = research_mfds_for_workspace(query, track_b)
@@ -1174,17 +1179,46 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 st.info("검색한 식약처 품목번호의 모델은 확인됐지만 나라장터 A/B 직접거래 연결은 확인되지 않았습니다.")
 
         st.markdown("#### 동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격")
-        if mfds_procurement_crosslinks:
+        active_live_keys: set[tuple[str, str]] = set()
+        if isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
+            active_live_keys = {
+                (
+                    normalize_text(item.permit_number),
+                    normalize_text(item.model_name),
+                )
+                for item in mfds.active_records
+                if item.permit_number and item.model_name
+            }
+        priced_active_crosslinks = [
+            row
+            for row in mfds_procurement_crosslinks
+            if int(row.get("나라장터 직접거래") or 0) > 0
+            and (
+                normalize_text(str(row.get("식약처 품목번호") or "")),
+                normalize_text(str(row.get("모델") or "")),
+            )
+            in active_live_keys
+        ]
+        if priced_active_crosslinks:
             st.dataframe(
-                mfds_procurement_crosslinks,
+                priced_active_crosslinks,
                 use_container_width=True,
                 hide_index=True,
             )
             st.caption(
-                f"식약처 누적 인덱스 동일품목 {len(same_product_identity)}행 중 모델 기준 최대 25개를 나라장터 A/B 직접근거와 교차조회합니다. 품목 책임주체와 조달 납품업체는 별도 관계입니다."
+                "동일품목 비교에서는 나라장터 A/B 직접근거가 있고 식약처 live에서 국내 정상 상태를 확인한 모델만 기본 표시합니다. "
+                "취소·취하 또는 수출전용 상태는 기본 비교에서 제외하며, 현재 검색모델은 별도 표시합니다. "
+                "품목 책임주체와 조달 납품업체는 별도 관계입니다."
+            )
+        elif same_product_identity and not active_live_keys:
+            st.info(
+                "동일품목 등록정보는 확인됐지만 식약처 live 상태를 확인하지 못해 "
+                "취소·취하·수출전용 여부를 추정하지 않고 기본 비교표를 표시하지 않습니다."
             )
         elif same_product_identity:
-            st.info("동일품목 등록정보는 있으나 모델 기준 나라장터 교차조회 결과를 만들 수 없습니다.")
+            st.info(
+                "국내 정상 상태가 확인된 동일품목 중 나라장터 A/B 직접가격이 있는 모델을 확인하지 못했습니다."
+            )
         else:
             st.caption("식약처 누적 인덱스가 채워지면 품목번호별 모델·품목 책임주체·나라장터 직접가격을 연결합니다.")
 
