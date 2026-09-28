@@ -29,6 +29,9 @@ class SafetyCheckState:
     model_name: str = ""
     permit_numbers: tuple[str, ...] = ()
     semantic_status: SafetyEvidenceStatus | None = None
+    checked_at: str | None = None
+    source_url: str | None = None
+    lot_scope: str | None = None
 
     @property
     def evidence_status(self) -> SafetyEvidenceStatus:
@@ -112,11 +115,17 @@ def related_safety_state(
         semantic_status=SafetyEvidenceStatus.AMBER,
         model_name=str(model_name or "").strip(),
         permit_numbers=_unique_text(permit_numbers),
+        checked_at=checked_at,
+        source_url=source_url,
     )
 
 
 def no_match_safety_state(
-    *, model_name: str = "", permit_numbers: Iterable[str] = ()
+    *,
+    model_name: str = "",
+    permit_numbers: Iterable[str] = (),
+    checked_at: str | None = None,
+    source_url: str | None = None,
 ) -> SafetyCheckState:
     """Future adapter result wording for a successful official query with zero exact matches."""
 
