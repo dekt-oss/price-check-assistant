@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import tempfile
+import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,10 +32,12 @@ from purchase_price.storage.r2_mfds_identity_index import (
     MfdsIdentityIndexRef,
     R2MfdsIdentityIndexStore,
 )
-from purchase_price.storage.r2_state import R2OperationalStateStore
+from purchase_price.storage.r2_state import R2LockHeldError, R2OperationalStateStore
 
 PIPELINE_STATE = "mfds-identity-pipeline"
 PIPELINE_SCHEMA = "mfds-identity-pipeline-v1"
+COLLECTION_LOCK_STATE = "mfds-identity-collection-lock"
+COLLECTION_LOCK_TTL_SECONDS = 3 * 60 * 60
 _SOURCE_NOT_AUTHORIZED_MARKERS = (
     "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
     "SERVICE_ACCESS_DENIED_ERROR",
@@ -103,7 +107,7 @@ def _write_report(output: Path, payload: Mapping[str, Any]) -> None:
     print(json.dumps(dict(payload), ensure_ascii=False, sort_keys=True))
 
 
-def sync(
+def _sync_without_lock(
     *,
     max_pages: int,
     rows_per_page: int,
@@ -312,6 +316,62 @@ def sync(
         _write_report(output, report)
         return 0
 
+
+
+def sync(
+    *,
+    max_pages: int,
+    rows_per_page: int,
+    output: Path,
+    settings: Settings | None = None,
+) -> int:
+    settings = settings or Settings()
+    service_key = (settings.resolved_mfds_service_key or "").strip()
+    if not service_key or not settings.r2_configured:
+        return _sync_without_lock(
+            max_pages=max_pages,
+            rows_per_page=rows_per_page,
+            output=output,
+            settings=settings,
+        )
+
+    state_store = R2OperationalStateStore.from_settings(settings)
+    owner = (
+        os.getenv("GITHUB_RUN_ID")
+        or os.getenv("HOSTNAME")
+        or f"local-{uuid.uuid4().hex}"
+    )
+    try:
+        state_store.acquire_lock(
+            COLLECTION_LOCK_STATE,
+            owner=owner,
+            ttl_seconds=COLLECTION_LOCK_TTL_SECONDS,
+        )
+    except R2LockHeldError:
+        _write_report(
+            output,
+            {
+                "status": "LOCK_HELD",
+                "source": "MFDS medical-device product information",
+                "writes_performed": 0,
+            },
+        )
+        return 0
+
+    try:
+        return _sync_without_lock(
+            max_pages=max_pages,
+            rows_per_page=rows_per_page,
+            output=output,
+            settings=settings,
+        )
+    finally:
+        try:
+            state_store.release_lock(COLLECTION_LOCK_STATE, owner=owner)
+        except Exception:
+            # The TTL guarantees eventual recovery. A release transport error must not
+            # overwrite the collector's evidence/report result.
+            pass
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
