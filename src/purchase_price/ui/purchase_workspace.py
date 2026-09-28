@@ -170,6 +170,13 @@ def supplier_rows(track_b: Any) -> list[dict[str, object]]:
             for candidate in candidates
             if getattr(candidate, "transaction_date", None)
         ]
+        raw_keys = sorted(
+            {
+                str(getattr(candidate, "raw_object_key", "") or "").strip()
+                for candidate in candidates
+                if str(getattr(candidate, "raw_object_key", "") or "").strip()
+            }
+        )
         rows.append(
             {
                 "공급업체": supplier,
@@ -179,6 +186,8 @@ def supplier_rows(track_b: Any) -> list[dict[str, object]]:
                 "최고단가": prices[-1] if prices else None,
                 "최근거래일": max(dates) if dates else None,
                 "근거": "나라장터 실제 납품요구 · A/B 직접근거",
+                "Source": "나라장터 납품요구",
+                "원문근거키": " / ".join(raw_keys[:3]) or "미확인",
             }
         )
     return sorted(rows, key=lambda row: (-int(row["직접거래건수"]), str(row["공급업체"])))
