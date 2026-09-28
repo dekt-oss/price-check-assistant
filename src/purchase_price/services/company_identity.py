@@ -86,11 +86,6 @@ def compare_company_identity(
             right_business_id=right_id,
         )
 
-    if left_id or right_id:
-        # A malformed or one-sided business identifier is not an identity key.
-        # Continue only as a name-similarity candidate and never promote to confirmed-same.
-        pass
-
     left_key = normalize_company_name_candidate(left)
     right_key = normalize_company_name_candidate(right)
     if not left_key or not right_key:
