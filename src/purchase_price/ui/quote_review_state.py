@@ -59,6 +59,7 @@ class QuoteReviewState:
     market_bundles: dict[int, MarketResearchBundle | None] = field(default_factory=dict)
     track_b_db: dict[int, TrackBQuoteComparison] = field(default_factory=dict)
     mfds_workspace: dict[int, MfdsWorkspaceResult] = field(default_factory=dict)
+    item_errors: dict[int, dict[str, str]] = field(default_factory=dict)
     lookback_days: int = G2B_DEFAULT_LOOKBACK_DAYS
     comparability_context: dict[int, QuoteComparabilityContext] = field(default_factory=dict)
     approvals: dict[str, QuoteComparableApproval] = field(default_factory=dict)
@@ -76,6 +77,7 @@ class QuoteReviewState:
             self.market_bundles.clear()
             self.track_b_db.clear()
             self.mfds_workspace.clear()
+            self.item_errors.clear()
         if after_step < 5:
             self.comparability_context.clear()
         if after_step < 6:
