@@ -1,0 +1,37 @@
+name: Workspace V3 Phase0 Branch Validation
+
+on:
+  push:
+    branches:
+      - "feat/workspace-v3-phase0-a"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install OCR system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             tesseract-ocr             tesseract-ocr-kor             tesseract-ocr-eng
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check .
+      - name: V3 Phase 0 targeted contracts
+        run: |
+          pytest -q             tests/test_mfds_identity_index.py             tests/test_safety_support.py             tests/test_track_b_db_quote_comparison.py             tests/test_track_b_transactions_v3.py             tests/test_unified_search_state_contract.py
+      - name: Streamlit startup smoke
+        run: pytest -q tests/test_streamlit_startup_smoke.py
+      - name: Full pytest
+        run: pytest -q
