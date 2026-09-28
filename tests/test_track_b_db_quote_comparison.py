@@ -266,13 +266,19 @@ def test_ingest_batches_existing_identity_queries(session: Session) -> None:
     assert selects <= 2
 
 
-def test_latest_change_without_unit_price_suppresses_older_price(session: Session) -> None:
+def test_latest_change_without_source_price_uses_latest_calculation_not_older_price(
+    session: Session,
+) -> None:
     ingest_track_b_page(session, _page([_item(change="00", price="80")]))
     ingest_track_b_page(session, _page([_item(change="01", price=None)]))
     session.commit()
 
     result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
-    assert result.status == "success_0"
+
+    assert result.status == "success"
+    assert len(result.candidates) == 1
+    assert result.candidates[0].price == Decimal("90")
+    assert result.candidates[0].unit_price_basis.value == "calculated_unit_price"
 
 
 def test_numeric_change_order_collision_is_explicit(session: Session) -> None:
