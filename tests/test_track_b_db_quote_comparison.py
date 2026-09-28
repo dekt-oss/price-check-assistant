@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from purchase_price.db import Base
+from purchase_price.domain import MatchGrade, PriceEvidenceStatus
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
 from purchase_price.scripts.validate_g2b_track_b_db_live import _find_comparison_case
@@ -89,6 +90,7 @@ def test_upload_comparison_uses_only_latest_explicit_unit_price(session: Session
     result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
 
     assert result.status == "success"
+    assert result.evidence_status == PriceEvidenceStatus.FOUND
     assert len(result.candidates) == 1
     assert result.candidates[0].price == Decimal("90")
     assert result.candidates[0].delta_percent == Decimal("11.1")
@@ -145,6 +147,7 @@ def test_missing_or_zero_unit_price_is_not_displayed(session: Session) -> None:
     result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
 
     assert result.status == "success_0"
+    assert result.evidence_status == PriceEvidenceStatus.ZERO
     assert result.candidates == ()
 
 
@@ -223,6 +226,7 @@ def test_missing_db_is_unavailable_not_zero_results(monkeypatch) -> None:
     monkeypatch.setattr(db, "SessionLocal", lambda: Session(engine))
     result = lookup_track_b_quote(_query(), quote_unit_price=Decimal("100"))
     assert result.status == "unavailable"
+    assert result.evidence_status == PriceEvidenceStatus.UNAVAILABLE
     engine.dispose()
 
 
@@ -305,3 +309,29 @@ def test_verified_ft10_order_code_alias_is_retrieved_as_direct_b(session: Sessio
     assert result.candidates[0].match_grade.value == "B"
     assert "verified_alias_with_verified_origin" in result.candidates[0].match_note
     assert "Covidien" in result.candidates[0].product_title
+
+
+
+def test_unit_unknown_caps_direct_match_at_b(session: Session) -> None:
+    item = _item()
+    item.pop("prdctUnit", None)
+    ingest_track_b_page(session, _page([item]))
+    session.commit()
+
+    result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
+
+    assert result.evidence_status == PriceEvidenceStatus.FOUND
+    assert len(result.candidates) == 1
+    assert result.candidates[0].match_grade == MatchGrade.B
+    assert "unit_unknown_caps_grade_at_b" in result.candidates[0].match_note
+
+
+def test_comparison_exposes_search_keys_used_for_zero_decision(session: Session) -> None:
+    ingest_track_b_page(session, _page([_item(title="제습기, 나우이엘, OTHER-MODEL, 45L/d")]))
+    session.commit()
+
+    result = compare_track_b_quote(session, _query(), quote_unit_price=None)
+
+    assert result.evidence_status == PriceEvidenceStatus.ZERO
+    assert "모델: MA-045DT" in result.search_keys
+    assert "품목: 제습기" in result.search_keys
