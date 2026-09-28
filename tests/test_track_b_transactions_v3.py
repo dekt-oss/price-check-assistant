@@ -49,6 +49,8 @@ def test_direct_transaction_row_exposes_v3_price_evidence_fields() -> None:
     assert row["총액"] == "45,000원"
     assert row["매칭등급"] == "A"
     assert row["매칭근거"] == "model_exact_and_product_match"
+    assert row["Source"] == "나라장터 납품요구"
+    assert row["원문근거키"] == "raw/v1/example.json.gz"
 
 
 def test_transaction_row_can_render_calculated_unit_price_basis() -> None:
