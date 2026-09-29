@@ -5,7 +5,10 @@ from decimal import Decimal
 from typing import Any
 
 from purchase_price.evidence_domain import IdentityEvidenceStatus
-from purchase_price.services.safety_support import build_manual_safety_check_state
+from purchase_price.services.safety_support import (
+    build_manual_safety_check_state,
+    build_safety_state_from_recall_lookup,
+)
 from purchase_price.ui.track_b_transactions import strict_comparison_candidates
 
 
@@ -78,6 +81,7 @@ def build_quote_item_intelligence_summary(
     track_b: Any,
     mfds_workspace: Any,
     mfds_identity: Any,
+    safety_lookup: Any = None,
 ) -> QuoteItemIntelligenceSummary:
     direct = strict_comparison_candidates(track_b) if track_b is not None else ()
     prices = _positive_prices(direct)
@@ -105,9 +109,20 @@ def build_quote_item_intelligence_summary(
     else:
         business_license_status = "업허가 상세 확인"
 
-    safety = build_manual_safety_check_state(
-        model_name=str(getattr(item, "model_name", "") or "").strip(),
-        permit_numbers=tuple(sorted(permit_numbers)),
+    model_name = str(getattr(item, "model_name", "") or "").strip()
+    product_name = str(getattr(item, "product_name", "") or "").strip()
+    safety = (
+        build_safety_state_from_recall_lookup(
+            safety_lookup,
+            model_name=model_name,
+            product_name=product_name,
+            permit_numbers=tuple(sorted(permit_numbers)),
+        )
+        if safety_lookup is not None
+        else build_manual_safety_check_state(
+            model_name=model_name,
+            permit_numbers=tuple(sorted(permit_numbers)),
+        )
     )
 
     return QuoteItemIntelligenceSummary(
