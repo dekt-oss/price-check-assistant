@@ -37,12 +37,16 @@ jobs:
 
           base = "https://apis.data.go.kr/1471000/MdlpRtrvlSleStpgeInfoService02"
           candidates = [
-              "getMdlpRtrvlSleStpgeInfoInq02",
-              "getMdlpRtrvlSleStpgeInfoList02",
-              "getMdlpRtrvlSleStpgeInfoInq",
-              "getMdlpRtrvlSleStpgeInfoList",
-              "getMdlpRtrvlSleStpgeInfo",
-              "getMdlpRtrvlSleStpgeInfo01",
+              "getMdlpRtrvlSleStpgeInq02",
+              "getMdlpRtrvlSleStpgeList02",
+              "getMdlpRtrvlSleStpgeInq01",
+              "getMdlpRtrvlSleStpgeList01",
+              "getMdlpRtrvlSleStpgeInq",
+              "getMdlpRtrvlSleStpgeList",
+              "getMdlpRtrvlSleStpge",
+              "getMdlpRtrvlSleStpgePrdtInq02",
+              "getMdlpRtrvlSleStpgePrdtList02",
+              "getMdlpRtrvlSleStpgeDtlInq02",
           ]
 
           def summarize(body: bytes):
