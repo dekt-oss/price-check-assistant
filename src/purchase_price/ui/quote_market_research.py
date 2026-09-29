@@ -10,6 +10,7 @@ from purchase_price.services.g2b_search_policy import (
     G2B_LOOKBACK_OPTIONS,
     g2b_lookback_label,
 )
+from purchase_price.services.mfds_identity_r2 import lookup_mfds_identity_from_r2
 from purchase_price.services.mfds_workspace import research_mfds_for_workspace
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
@@ -23,6 +24,10 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBQuoteCandidate,
     TrackBReferenceCandidate,
     lookup_track_b_quote,
+)
+from purchase_price.ui.quote_item_intelligence import (
+    build_quote_item_intelligence_summary,
+    quote_item_intelligence_rows,
 )
 from purchase_price.ui.market_research import (
     render_external_research_links,
@@ -159,6 +164,7 @@ def _clear_research(state: QuoteReviewState) -> None:
     state.market_bundles.clear()
     state.track_b_db.clear()
     state.mfds_workspace.clear()
+    state.mfds_identity.clear()
     state.item_research_failures.clear()
     state.comparability_context.clear()
     state.approvals.clear()
@@ -382,6 +388,18 @@ def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
         _clear_item_failure(state, index, "식약처")
 
 
+def _ensure_mfds_identity(state: QuoteReviewState) -> None:
+    if not state.items:
+        return
+    for index, item in enumerate(state.items):
+        if index in state.mfds_identity:
+            continue
+        lookup_key = (item.model_name or item.product_name or "").strip()
+        if not lookup_key:
+            continue
+        state.mfds_identity[index] = lookup_mfds_identity_from_r2(lookup_key)
+
+
 def _ensure_market_research(state: QuoteReviewState) -> bool:
     if not state.items:
         return False
@@ -440,6 +458,13 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
     market_bundle = state.market_bundles.get(index)
     track_b = state.track_b_db.get(index)
     mfds = state.mfds_workspace.get(index)
+    mfds_identity = state.mfds_identity.get(index)
+    intelligence = build_quote_item_intelligence_summary(
+        item=item,
+        track_b=track_b,
+        mfds_workspace=mfds,
+        mfds_identity=mfds_identity,
+    )
 
     with st.container(border=True):
         title = item.product_name or item.model_name or f"품목 {index + 1}"
@@ -448,6 +473,34 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             part for part in (item.manufacturer, item.model_name, item.specification) if part
         )
         st.caption(identity_text or "추가 식별정보 없음")
+
+        status_cols = st.columns(5)
+        status_cols[0].metric("직접가격", f"{intelligence.direct_count}건")
+        status_cols[1].metric("식약처 Identity", intelligence.identity_status)
+        status_cols[2].metric(
+            "품목 책임주체",
+            f"{len(intelligence.responsible_companies)}개"
+            if intelligence.responsible_companies
+            else "미확인",
+        )
+        status_cols[3].metric(
+            "실제 조달 공급업체",
+            f"{len(intelligence.supplier_names)}개",
+        )
+        status_cols[4].metric("Safety", intelligence.safety_status)
+        if intelligence.responsible_companies:
+            st.caption(
+                "품목 책임주체 · " + " / ".join(intelligence.responsible_companies[:5])
+                + " · "
+                + intelligence.business_license_status
+            )
+        if intelligence.supplier_names:
+            st.caption("실제 조달 공급업체 · " + " / ".join(intelligence.supplier_names[:5]))
+        if intelligence.permit_numbers:
+            st.caption("식약처 품목번호 · " + " / ".join(intelligence.permit_numbers[:5]))
+        st.caption(
+            "Safety 자동조회가 미연결인 경우 공식 확인이 완료된 것으로 해석하지 않습니다."
+        )
 
         price_col, info_col = st.columns([1.25, 3.75])
         price_col.metric("견적 단가", _money(item.unit_price))
@@ -647,6 +700,35 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
     _render_compact_item_editor(state)
     _ensure_track_b_comparison(state)
     _ensure_mfds_workspace(state)
+    _ensure_mfds_identity(state)
+
+    integrated_summaries = [
+        (
+            index,
+            state.items[index].product_name
+            or state.items[index].model_name
+            or f"품목 {index + 1}",
+            build_quote_item_intelligence_summary(
+                item=state.items[index],
+                track_b=state.track_b_db.get(index),
+                mfds_workspace=state.mfds_workspace.get(index),
+                mfds_identity=state.mfds_identity.get(index),
+            ),
+        )
+        for index in range(len(state.items))
+    ]
+    with st.container(border=True):
+        st.markdown("### 통합 품목 상태")
+        st.caption(
+            "견적 품목별로 A/B 직접가격, 식약처 Identity·품목 책임주체, 실제 조달 공급업체, "
+            "Safety 확인상태를 한 번에 봅니다. 각 근거의 의미는 서로 합치지 않습니다."
+        )
+        st.dataframe(
+            quote_item_intelligence_rows(integrated_summaries),
+            use_container_width=True,
+            hide_index=True,
+        )
+
     render_purchase_review_summary(state)
 
     total, completed, partial_failure, pending = _quote_processing_counts(state)
