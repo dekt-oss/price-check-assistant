@@ -5,7 +5,11 @@ from typing import Any
 
 import streamlit as st
 
-from purchase_price.evidence_domain import IdentityEvidenceStatus, PriceEvidenceStatus
+from purchase_price.evidence_domain import (
+    IdentityEvidenceStatus,
+    PriceEvidenceStatus,
+    SafetyEvidenceStatus,
+)
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
@@ -36,6 +40,7 @@ from purchase_price.services.mfds_identity_status import (
     format_status_updated_at,
     get_mfds_identity_collection_status,
 )
+from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.mfds_workspace import (
     MfdsWorkspaceResult,
     lookup_mfds_business_license,
@@ -52,6 +57,7 @@ from purchase_price.services.safety_support import (
     MFDS_RECALL_PAGE_URL,
     MFDS_SAFETY_LETTER_PAGE_URL,
     build_manual_safety_check_state,
+    build_safety_state_from_recall_lookup,
 )
 from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
@@ -558,6 +564,10 @@ def _execute_search(
         )
 
     mfds = research_mfds_for_workspace(query, track_b)
+    safety_lookup = lookup_mfds_recall(
+        model_name=query.model_name,
+        product_name=query.product_name,
+    )
 
     run, discovery, market_bundle = run_market_research(
         query,
@@ -592,6 +602,7 @@ def _execute_search(
         "discovery": discovery,
         "market_bundle": market_bundle,
         "mfds": mfds,
+        "safety_lookup": safety_lookup,
         "mfds_identity": indexed_identity,
         "exact_identity_crosslinks": exact_identity_crosslinks,
         "same_product_identity": same_product_identity,
@@ -648,6 +659,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     discovery = state["discovery"]
     market_bundle = state["market_bundle"]
     mfds = state.get("mfds")
+    safety_lookup = state.get("safety_lookup")
     indexed_identity = state.get("mfds_identity")
     exact_identity_crosslinks = list(state.get("exact_identity_crosslinks") or [])
     same_product_identity = tuple(state.get("same_product_identity") or ())
@@ -673,15 +685,57 @@ def _render_search_result(state: dict[str, Any]) -> None:
         safety_permit_numbers.extend(indexed_identity.permit_numbers)
     if isinstance(mfds, MfdsWorkspaceResult):
         safety_permit_numbers.extend(mfds.permit_numbers)
-    safety_state = build_manual_safety_check_state(
-        model_name=str(getattr(query, "model_name", "") or "").strip(),
-        permit_numbers=safety_permit_numbers,
-    )
+    if safety_lookup is not None:
+        safety_state = build_safety_state_from_recall_lookup(
+            safety_lookup,
+            model_name=str(getattr(query, "model_name", "") or "").strip(),
+            product_name=str(getattr(query, "product_name", "") or "").strip(),
+            permit_numbers=safety_permit_numbers,
+        )
+    else:
+        safety_state = build_manual_safety_check_state(
+            model_name=str(getattr(query, "model_name", "") or "").strip(),
+            permit_numbers=safety_permit_numbers,
+        )
     with st.container(border=True):
         st.markdown("### Safety")
-        st.warning(f"{safety_state.evidence_status.value} · {safety_state.message}")
+        safety_text = f"{safety_state.evidence_status.value} · {safety_state.message}"
+        if safety_state.evidence_status == SafetyEvidenceStatus.RED:
+            st.error(safety_text)
+        elif safety_state.evidence_status in {
+            SafetyEvidenceStatus.AMBER,
+            SafetyEvidenceStatus.CHECK_FAILED,
+            SafetyEvidenceStatus.NOT_CONNECTED,
+        }:
+            st.warning(safety_text)
+        else:
+            st.info(safety_text)
+        if safety_state.checked_at:
+            st.caption(f"식약처 회수·판매중지 API 확인시각 · {safety_state.checked_at}")
         if safety_state.search_keys:
             st.caption("공식 안전정보 확인키 · " + " / ".join(safety_state.search_keys))
+        recall_records = tuple(getattr(safety_lookup, "records", ()) or ())
+        if recall_records:
+            st.dataframe(
+                [
+                    {
+                        "모델": item.model_name or "",
+                        "제조원": item.manufacturer_name or "",
+                        "보고상태": item.report_state_name or "",
+                        "회수구분": item.report_kind_name or "",
+                        "보고일": item.report_submit_date or "",
+                        "회수사유": item.reason or "",
+                        "회수품목일련번호": item.recall_item_seq or "",
+                    }
+                    for item in recall_records
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "Service04 형명/품목 응답에는 exact 식약처 품목번호가 없어 관련 안전정보로 표시합니다. "
+                "허가제품·제조번호 적용범위는 원문에서 확인해야 합니다."
+            )
         safety_cols = st.columns(3)
         safety_cols[0].link_button(
             "회수·판매중지 확인",
