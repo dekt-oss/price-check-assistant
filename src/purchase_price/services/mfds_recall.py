@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 from purchase_price.clients.data_go_kr import (
     PublicDataClientError,
@@ -52,10 +54,15 @@ class MfdsRecallLookupResult:
     error_type: str | None = None
     error_message: str | None = None
     source_url: str = MFDS_RECALL_SOURCE_URL
+    checked_at: str | None = None
 
     @property
     def checked(self) -> bool:
         return self.status in {"success", "success_0"}
+
+
+def _checked_at() -> str:
+    return datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
 
 
 def _text(value: Any) -> str | None:
@@ -261,6 +268,7 @@ def lookup_mfds_recall(
             query=query,
             error_type=type(exc).__name__,
             error_message=str(exc),
+            checked_at=_checked_at(),
         )
     except ValueError as exc:
         return MfdsRecallLookupResult(
@@ -269,6 +277,7 @@ def lookup_mfds_recall(
             query=query,
             error_type=type(exc).__name__,
             error_message=str(exc),
+            checked_at=_checked_at(),
         )
 
     return MfdsRecallLookupResult(
@@ -276,4 +285,5 @@ def lookup_mfds_recall(
         query_type=query_type,
         query=query,
         records=records,
+        checked_at=_checked_at(),
     )
