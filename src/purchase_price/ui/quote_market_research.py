@@ -11,6 +11,7 @@ from purchase_price.services.g2b_search_policy import (
     g2b_lookback_label,
 )
 from purchase_price.services.mfds_identity_r2 import lookup_mfds_identity_from_r2
+from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.mfds_workspace import research_mfds_for_workspace
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
@@ -165,6 +166,7 @@ def _clear_research(state: QuoteReviewState) -> None:
     state.track_b_db.clear()
     state.mfds_workspace.clear()
     state.mfds_identity.clear()
+    state.safety_lookup.clear()
     state.item_research_failures.clear()
     state.comparability_context.clear()
     state.approvals.clear()
@@ -211,6 +213,8 @@ def _retry_failed_stage(state: QuoteReviewState, index: int, stage: str) -> None
         state.search_runs.pop(index, None)
         state.discoveries.pop(index, None)
         state.market_bundles.pop(index, None)
+    elif stage == "Safety":
+        state.safety_lookup.pop(index, None)
     else:
         return
     _clear_item_failure(state, index, stage)
@@ -400,6 +404,32 @@ def _ensure_mfds_identity(state: QuoteReviewState) -> None:
         state.mfds_identity[index] = lookup_mfds_identity_from_r2(lookup_key)
 
 
+def _ensure_safety_lookup(state: QuoteReviewState) -> None:
+    if not state.items:
+        return
+    for index, item in enumerate(state.items):
+        if index in state.safety_lookup:
+            continue
+        model_name = (item.model_name or "").strip()
+        product_name = (item.product_name or "").strip()
+        if not model_name and not product_name:
+            continue
+        try:
+            lookup = lookup_mfds_recall(
+                model_name=model_name,
+                product_name=product_name,
+            )
+        except Exception as exc:
+            _record_item_failure(state, index, "Safety", exc)
+            continue
+        state.safety_lookup[index] = lookup
+        if lookup.status == "failure":
+            failures = state.item_research_failures.setdefault(index, {})
+            failures["Safety"] = lookup.error_type or "SafetyLookupError"
+        else:
+            _clear_item_failure(state, index, "Safety")
+
+
 def _ensure_market_research(state: QuoteReviewState) -> bool:
     if not state.items:
         return False
@@ -459,11 +489,13 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
     track_b = state.track_b_db.get(index)
     mfds = state.mfds_workspace.get(index)
     mfds_identity = state.mfds_identity.get(index)
+    safety_lookup = state.safety_lookup.get(index)
     intelligence = build_quote_item_intelligence_summary(
         item=item,
         track_b=track_b,
         mfds_workspace=mfds,
         mfds_identity=mfds_identity,
+        safety_lookup=safety_lookup,
     )
 
     with st.container(border=True):
@@ -498,9 +530,16 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             st.caption("실제 조달 공급업체 · " + " / ".join(intelligence.supplier_names[:5]))
         if intelligence.permit_numbers:
             st.caption("식약처 품목번호 · " + " / ".join(intelligence.permit_numbers[:5]))
-        st.caption(
-            "Safety 자동조회가 미연결인 경우 공식 확인이 완료된 것으로 해석하지 않습니다."
-        )
+        if safety_lookup is not None and safety_lookup.status in {
+            "success",
+            "not_authorized",
+            "failure",
+        }:
+            st.warning(intelligence.safety_message)
+        else:
+            st.caption(
+                "Safety 자동조회가 미연결인 경우 공식 확인이 완료된 것으로 해석하지 않습니다."
+            )
 
         price_col, info_col = st.columns([1.25, 3.75])
         price_col.metric("견적 단가", _money(item.unit_price))
@@ -701,6 +740,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
     _ensure_track_b_comparison(state)
     _ensure_mfds_workspace(state)
     _ensure_mfds_identity(state)
+    _ensure_safety_lookup(state)
 
     integrated_summaries = [
         (
@@ -713,6 +753,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
                 track_b=state.track_b_db.get(index),
                 mfds_workspace=state.mfds_workspace.get(index),
                 mfds_identity=state.mfds_identity.get(index),
+                safety_lookup=state.safety_lookup.get(index),
             ),
         )
         for index in range(len(state.items))
@@ -819,6 +860,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
             for index in failed_items:
                 state.track_b_db.pop(index, None)
                 state.mfds_workspace.pop(index, None)
+                state.safety_lookup.pop(index, None)
                 state.search_runs.pop(index, None)
                 state.discoveries.pop(index, None)
                 state.market_bundles.pop(index, None)
