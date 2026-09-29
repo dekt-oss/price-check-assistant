@@ -25,10 +25,6 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBReferenceCandidate,
     lookup_track_b_quote,
 )
-from purchase_price.ui.quote_item_intelligence import (
-    build_quote_item_intelligence_summary,
-    quote_item_intelligence_rows,
-)
 from purchase_price.ui.market_research import (
     render_external_research_links,
     render_market_alternative_candidates,
@@ -36,6 +32,10 @@ from purchase_price.ui.market_research import (
     render_model_price_research_summary,
     render_procurement_research,
     run_market_research,
+)
+from purchase_price.ui.quote_item_intelligence import (
+    build_quote_item_intelligence_summary,
+    quote_item_intelligence_rows,
 )
 from purchase_price.ui.quote_review_contract import build_manual_quote_item
 from purchase_price.ui.quote_review_state import QuoteReviewState
