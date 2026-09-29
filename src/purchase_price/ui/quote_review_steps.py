@@ -157,6 +157,7 @@ def _store_extraction(uploaded_file, state: QuoteReviewState) -> None:
     state.track_b_db.clear()
     state.mfds_workspace.clear()
     state.mfds_identity.clear()
+    state.safety_lookup.clear()
     state.item_research_failures.clear()
     state.comparability_context.clear()
     state.approvals.clear()
