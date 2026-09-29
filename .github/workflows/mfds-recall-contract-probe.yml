@@ -1,0 +1,91 @@
+name: MFDS Recall Contract Probe
+
+on:
+  push:
+    branches:
+      - "feat/workspace-v3-phase2-retry-ux"
+    paths:
+      - ".github/workflows/mfds-recall-contract-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Probe documented recall service operation
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+          import urllib.error
+          import xml.etree.ElementTree as ET
+
+          key = os.environ.get("MFDS_SERVICE_KEY", "").strip()
+          if not key:
+              raise SystemExit("MFDS secret unavailable")
+
+          base = "https://apis.data.go.kr/1471000/MdlpRtrvlSleStpgeInfoService02"
+          candidates = [
+              "getMdlpRtrvlSleStpgeInfoInq02",
+              "getMdlpRtrvlSleStpgeInfoList02",
+              "getMdlpRtrvlSleStpgeInfoInq",
+              "getMdlpRtrvlSleStpgeInfoList",
+              "getMdlpRtrvlSleStpgeInfo",
+              "getMdlpRtrvlSleStpgeInfo01",
+          ]
+
+          def summarize(body: bytes):
+              text = body.decode("utf-8", errors="replace")
+              try:
+                  payload = json.loads(text)
+              except Exception:
+                  payload = None
+              if isinstance(payload, dict):
+                  response = payload.get("response", payload)
+                  if isinstance(response, dict):
+                      header = response.get("header")
+                      if isinstance(header, dict):
+                          return str(header.get("resultCode") or ""), str(header.get("resultMsg") or "")
+                  service = payload.get("OpenAPI_ServiceResponse")
+                  if isinstance(service, dict):
+                      header = service.get("cmmMsgHeader") or {}
+                      return str(header.get("returnReasonCode") or ""), str(header.get("errMsg") or header.get("returnAuthMsg") or "")
+              try:
+                  root = ET.fromstring(text)
+              except Exception:
+                  return "", text[:100].replace("\n", " ")
+              code = root.findtext(".//resultCode") or root.findtext(".//returnReasonCode") or ""
+              msg = root.findtext(".//resultMsg") or root.findtext(".//errMsg") or root.findtext(".//returnAuthMsg") or ""
+              return code, msg
+
+          for op in candidates:
+              params = urllib.parse.urlencode({
+                  "serviceKey": key,
+                  "pageNo": 1,
+                  "numOfRows": 1,
+                  "type": "json",
+              })
+              request = urllib.request.Request(f"{base}/{op}?{params}", method="GET")
+              try:
+                  with urllib.request.urlopen(request, timeout=12) as response:
+                      body = response.read()
+                      code, msg = summarize(body)
+                      print(f"operation={op} http={response.status} code={code!r} msg={msg[:100]!r}")
+              except urllib.error.HTTPError as exc:
+                  body = exc.read()
+                  code, msg = summarize(body)
+                  print(f"operation={op} http={exc.code} code={code!r} msg={msg[:100]!r}")
+              except Exception as exc:
+                  print(f"operation={op} transport={type(exc).__name__}")
+          PY
