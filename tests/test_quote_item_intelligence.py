@@ -5,7 +5,10 @@ from types import SimpleNamespace
 
 from purchase_price.domain import MatchGrade
 from purchase_price.evidence_domain import IdentityEvidenceStatus
-from purchase_price.services.mfds_identity_index import MfdsIdentityLookup
+from purchase_price.services.mfds_identity_index import (
+    MfdsIdentityLookup,
+    MfdsIdentityRecord,
+)
 from purchase_price.services.quote_extraction import QuoteItem
 from purchase_price.ui import quote_market_research
 from purchase_price.ui.quote_item_intelligence import (
@@ -34,12 +37,17 @@ def _identity_record(
     permit: str = "수허 12-3456",
     company: str = "필립스코리아",
     model: str = "DFM100",
-):
-    return SimpleNamespace(
-        permit_number=permit,
-        registered_company=company,
-        model_name=model,
+) -> MfdsIdentityRecord:
+    return MfdsIdentityRecord(
+        udi_di=None,
         product_name="심장충격기",
+        classification_no=None,
+        grade=None,
+        permit_number=permit,
+        permit_date=None,
+        model_name=model,
+        trade_name=None,
+        registered_company=company,
     )
 
 
@@ -68,7 +76,7 @@ def test_integrated_summary_uses_only_ab_direct_prices_and_suppliers() -> None:
         status="success",
         query="DFM100",
         match_type="model",
-        records=(_identity_record(),),  # type: ignore[arg-type]
+        records=(_identity_record(),),
     )
     mfds = SimpleNamespace(
         permit_numbers=("수허 12-3456",),
