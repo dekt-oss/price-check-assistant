@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from purchase_price.services.g2b_market_models import MarketResearchBundle
     from purchase_price.services.g2b_unmapped_discovery import G2BUnmappedDiscoveryResult
     from purchase_price.services.mfds_identity_index import MfdsIdentityLookup
+    from purchase_price.services.mfds_recall import MfdsRecallLookupResult
     from purchase_price.services.mfds_workspace import MfdsWorkspaceResult
     from purchase_price.services.quote_comparability import QuoteComparabilityContext
     from purchase_price.services.quote_comparable_approval import QuoteComparableApproval
@@ -61,6 +62,7 @@ class QuoteReviewState:
     track_b_db: dict[int, TrackBQuoteComparison] = field(default_factory=dict)
     mfds_workspace: dict[int, MfdsWorkspaceResult] = field(default_factory=dict)
     mfds_identity: dict[int, MfdsIdentityLookup] = field(default_factory=dict)
+    safety_lookup: dict[int, MfdsRecallLookupResult] = field(default_factory=dict)
     item_research_failures: dict[int, dict[str, str]] = field(default_factory=dict)
     lookback_days: int = G2B_DEFAULT_LOOKBACK_DAYS
     comparability_context: dict[int, QuoteComparabilityContext] = field(default_factory=dict)
@@ -80,6 +82,7 @@ class QuoteReviewState:
             self.track_b_db.clear()
             self.mfds_workspace.clear()
             self.mfds_identity.clear()
+            self.safety_lookup.clear()
             self.item_research_failures.clear()
         if after_step < 5:
             self.comparability_context.clear()
