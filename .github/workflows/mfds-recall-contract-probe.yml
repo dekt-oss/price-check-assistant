@@ -46,10 +46,6 @@ jobs:
 
           print("candidate_metadata_count=", len(values))
           for value in sorted(values):
-              if (
-                  "Rtrvl" in value
-                  or "SleStpge" in value
-                  or "MdlpRtrvl" in value
-              ):
+              if value.startswith("get") or "Rtrvl" in value or "SleStpge" in value:
                   print("metadata=", value[:240])
           PY
