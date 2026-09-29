@@ -119,7 +119,7 @@ def build_quote_item_intelligence_summary(
         permit_numbers=tuple(sorted(permit_numbers)),
         responsible_companies=responsible_companies,
         business_license_status=business_license_status,
-        safety_status=safety.evidence_status.value,
+        safety_status=safety.status.value,
         safety_message=safety.message,
     )
 
