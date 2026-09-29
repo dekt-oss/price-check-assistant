@@ -14,82 +14,42 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
     steps:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Probe documented recall service operation
+      - name: Extract official data.go.kr operation metadata
         shell: bash
         run: |
           python - <<'PY'
-          import json
-          import os
-          import urllib.parse
+          import html
+          import re
           import urllib.request
-          import urllib.error
-          import xml.etree.ElementTree as ET
 
-          key = os.environ.get("MFDS_SERVICE_KEY", "").strip()
-          if not key:
-              raise SystemExit("MFDS secret unavailable")
+          url = "https://www.data.go.kr/data/15056785/openapi.do"
+          req = urllib.request.Request(
+              url,
+              headers={"User-Agent": "Mozilla/5.0 price-check-assistant-contract-probe"},
+          )
+          with urllib.request.urlopen(req, timeout=20) as response:
+              text = response.read().decode("utf-8", errors="replace")
 
-          base = "https://apis.data.go.kr/1471000/MdlpRtrvlSleStpgeInfoService02"
-          candidates = [
-              "getMdlpRtrvlSleStpgeInq02",
-              "getMdlpRtrvlSleStpgeList02",
-              "getMdlpRtrvlSleStpgeInq01",
-              "getMdlpRtrvlSleStpgeList01",
-              "getMdlpRtrvlSleStpgeInq",
-              "getMdlpRtrvlSleStpgeList",
-              "getMdlpRtrvlSleStpge",
-              "getMdlpRtrvlSleStpgePrdtInq02",
-              "getMdlpRtrvlSleStpgePrdtList02",
-              "getMdlpRtrvlSleStpgeDtlInq02",
+          decoded = html.unescape(text)
+          patterns = [
+              r'https?://apis\.data\.go\.kr/1471000/[^"\'<>\\\s]+',
+              r'get[A-Za-z0-9_]{8,80}',
+              r'Mdlp[A-Za-z0-9_]{8,100}',
           ]
+          values = set()
+          for pattern in patterns:
+              values.update(re.findall(pattern, decoded))
 
-          def summarize(body: bytes):
-              text = body.decode("utf-8", errors="replace")
-              try:
-                  payload = json.loads(text)
-              except Exception:
-                  payload = None
-              if isinstance(payload, dict):
-                  response = payload.get("response", payload)
-                  if isinstance(response, dict):
-                      header = response.get("header")
-                      if isinstance(header, dict):
-                          return str(header.get("resultCode") or ""), str(header.get("resultMsg") or "")
-                  service = payload.get("OpenAPI_ServiceResponse")
-                  if isinstance(service, dict):
-                      header = service.get("cmmMsgHeader") or {}
-                      return str(header.get("returnReasonCode") or ""), str(header.get("errMsg") or header.get("returnAuthMsg") or "")
-              try:
-                  root = ET.fromstring(text)
-              except Exception:
-                  return "", text[:100].replace("\n", " ")
-              code = root.findtext(".//resultCode") or root.findtext(".//returnReasonCode") or ""
-              msg = root.findtext(".//resultMsg") or root.findtext(".//errMsg") or root.findtext(".//returnAuthMsg") or ""
-              return code, msg
-
-          for op in candidates:
-              params = urllib.parse.urlencode({
-                  "serviceKey": key,
-                  "pageNo": 1,
-                  "numOfRows": 1,
-                  "type": "json",
-              })
-              request = urllib.request.Request(f"{base}/{op}?{params}", method="GET")
-              try:
-                  with urllib.request.urlopen(request, timeout=12) as response:
-                      body = response.read()
-                      code, msg = summarize(body)
-                      print(f"operation={op} http={response.status} code={code!r} msg={msg[:100]!r}")
-              except urllib.error.HTTPError as exc:
-                  body = exc.read()
-                  code, msg = summarize(body)
-                  print(f"operation={op} http={exc.code} code={code!r} msg={msg[:100]!r}")
-              except Exception as exc:
-                  print(f"operation={op} transport={type(exc).__name__}")
+          print("candidate_metadata_count=", len(values))
+          for value in sorted(values):
+              if (
+                  "Rtrvl" in value
+                  or "SleStpge" in value
+                  or "MdlpRtrvl" in value
+              ):
+                  print("metadata=", value[:240])
           PY
