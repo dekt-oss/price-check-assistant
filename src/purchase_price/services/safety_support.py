@@ -17,6 +17,7 @@ MFDS_UDI_PORTAL_URL = "https://emedi.mfds.go.kr/msismext/udi/ima/modelMngView.do
 
 class SafetyCheckStatus(StrEnum):
     NOT_CONNECTED = "자동조회 미연결"
+    NOT_AUTHORIZED = "공식 API 인증 미승인"
     CHECK_REQUIRED = "공식 확인 필요"
     MATCH = "공식 안전조치 일치"
     NO_MATCH = "공식 안전정보 일치 미확인"
@@ -59,6 +60,7 @@ class SafetyCheckState:
             return self.semantic_status
         return {
             SafetyCheckStatus.NOT_CONNECTED: SafetyEvidenceStatus.NOT_CONNECTED,
+            SafetyCheckStatus.NOT_AUTHORIZED: SafetyEvidenceStatus.NOT_CONNECTED,
             SafetyCheckStatus.CHECK_REQUIRED: SafetyEvidenceStatus.NOT_CONNECTED,
             SafetyCheckStatus.MATCH: SafetyEvidenceStatus.RED,
             SafetyCheckStatus.NO_MATCH: SafetyEvidenceStatus.CHECKED_NONE,
@@ -259,4 +261,131 @@ def no_match_safety_state(
         permit_numbers=_unique_text(permit_numbers),
         checked_at=checked_at,
         source_url=source_url,
+    )
+
+
+def build_safety_state_from_recall_lookup(
+    lookup,
+    *,
+    model_name: str = "",
+    product_name: str = "",
+    permit_numbers: Iterable[str] = (),
+) -> SafetyCheckState:
+    """Translate the official MFDS recall lookup into fail-closed safety semantics.
+
+    Service04 currently exposes model/product recall fields but not an exact MFDS item permit
+    number in the model response schema. Positive hits therefore remain AMBER related evidence
+    until the reviewer confirms the exact item/permit scope in the official source.
+    """
+
+    model = str(model_name or "").strip()
+    product = str(product_name or "").strip()
+    permits = _unique_text(permit_numbers)
+    status = str(getattr(lookup, "status", "") or "")
+    checked_at = getattr(lookup, "checked_at", None)
+    source_url = getattr(lookup, "source_url", MFDS_RECALL_DATASET_URL)
+
+    if status == "not_configured":
+        return SafetyCheckState(
+            status=SafetyCheckStatus.NOT_CONNECTED,
+            message=(
+                "식약처 회수·판매중지 API 서비스키가 연결되지 않았습니다. "
+                "자동조회 미연결 상태는 공식 안전정보 확인 결과가 아닙니다."
+            ),
+            model_name=model,
+            permit_numbers=permits,
+            source_url=source_url,
+        )
+
+    if status == "not_authorized":
+        return SafetyCheckState(
+            status=SafetyCheckStatus.NOT_AUTHORIZED,
+            message=(
+                "식약처 회수·판매중지 API 활용승인이 현재 서비스키에 등록되지 않았습니다. "
+                "공공데이터포털에서 해당 서비스 활용신청을 승인한 뒤 자동조회가 활성화됩니다."
+            ),
+            model_name=model,
+            permit_numbers=permits,
+            checked_at=checked_at,
+            source_url=source_url,
+        )
+
+    if status == "failure":
+        return SafetyCheckState(
+            status=SafetyCheckStatus.ERROR,
+            message=(
+                "식약처 회수·판매중지 API 조회가 실패했습니다. "
+                "0건으로 해석하지 말고 공식 페이지에서 직접 확인해야 합니다."
+            ),
+            model_name=model,
+            permit_numbers=permits,
+            semantic_status=SafetyEvidenceStatus.CHECK_FAILED,
+            checked_at=checked_at,
+            source_url=source_url,
+        )
+
+    if status == "success_0":
+        basis = (
+            f"형명 '{model}'"
+            if model
+            else f"품목명 '{product}'"
+        )
+        return SafetyCheckState(
+            status=SafetyCheckStatus.NO_MATCH,
+            message=(
+                "식약처 회수·판매중지 API를 정상 조회했으며 "
+                f"{basis} exact 일치 기록을 확인하지 못했습니다. "
+                "이는 제품이 안전하다는 판정이 아니며 다른 안전정보 Source는 별도 확인합니다."
+            ),
+            model_name=model,
+            permit_numbers=permits,
+            semantic_status=SafetyEvidenceStatus.CHECKED_NONE,
+            checked_at=checked_at,
+            source_url=source_url,
+        )
+
+    records = tuple(getattr(lookup, "records", ()) or ())
+    if status == "success" and records:
+        states = _unique_text(
+            str(getattr(record, "report_state_name", "") or "")
+            for record in records
+        )
+        kinds = _unique_text(
+            str(getattr(record, "report_kind_name", "") or "")
+            for record in records
+        )
+        dates = _unique_text(
+            str(getattr(record, "report_submit_date", "") or "")
+            for record in records
+        )
+        details = []
+        if states:
+            details.append("상태 " + " / ".join(states[:3]))
+        if kinds:
+            details.append("구분 " + " / ".join(kinds[:3]))
+        if dates:
+            details.append("보고일 " + " / ".join(dates[:3]))
+        suffix = " · " + " · ".join(details) if details else ""
+        basis = (
+            f"형명 '{model}'"
+            if getattr(lookup, "query_type", "") == "model"
+            else f"품목명 '{product}'"
+        )
+        return SafetyCheckState(
+            status=SafetyCheckStatus.CHECK_REQUIRED,
+            message=(
+                f"식약처 공식 회수·판매중지 API에서 {basis} 일치 기록 {len(records)}건을 확인했습니다"
+                f"{suffix}. 현재 Service04 모델/품목 응답에는 exact 식약처 품목번호가 없어 "
+                "해당 허가제품 대상인지 원문에서 추가 확인해야 합니다."
+            ),
+            model_name=model,
+            permit_numbers=permits,
+            semantic_status=SafetyEvidenceStatus.AMBER,
+            checked_at=checked_at,
+            source_url=source_url,
+        )
+
+    return build_manual_safety_check_state(
+        model_name=model,
+        permit_numbers=permits,
     )
