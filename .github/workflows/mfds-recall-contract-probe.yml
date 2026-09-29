@@ -48,4 +48,20 @@ jobs:
           for value in sorted(values):
               if value.startswith("get") or "Rtrvl" in value or "SleStpge" in value:
                   print("metadata=", value[:240])
+
+          for operation in (
+              "getCompanyNameList04",
+              "getItemNameList04",
+              "getSerialNumList04",
+              "getTypeNameList04",
+          ):
+              pos = decoded.find(operation)
+              if pos < 0:
+                  continue
+              context = decoded[max(0, pos - 2500):pos + 7000]
+              context = re.sub(r"<script[^>]*>.*?</script>", " ", context, flags=re.I | re.S)
+              context = re.sub(r"<style[^>]*>.*?</style>", " ", context, flags=re.I | re.S)
+              context = re.sub(r"<[^>]+>", " ", context)
+              context = re.sub(r"\\s+", " ", context)
+              print(f"context[{operation}]=", context[:6000])
           PY
