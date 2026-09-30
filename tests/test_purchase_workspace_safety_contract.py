@@ -7,7 +7,7 @@ def test_purchase_workspace_integrates_official_mfds_recall_lookup() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
     assert "lookup_mfds_recall" in source
-    assert "build_safety_state_from_recall_lookup" in source
+    assert "build_safety_state_compat" in source
     assert '"safety_lookup": safety_lookup' in source
     assert "식약처 회수·판매중지 API 확인시각" in source
     assert "Service04 형명/품목 응답에는 exact 식약처 품목번호가 없어" in source
@@ -28,3 +28,16 @@ def test_unified_search_isolates_safety_source_runtime_failures() -> None:
     assert "except Exception as exc:" in source
     assert 'status="failure"' in source
     assert "safety_lookup = _lookup_mfds_recall_isolated(" in source
+
+
+def test_workspace_safety_compat_preserves_runtime_lookup_statuses() -> None:
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+    compat = Path("src/purchase_price/ui/safety_state_compat.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "safety_support_module=safety_support_service" in source
+    assert 'status == "not_authorized"' in compat
+    assert 'status == "failure"' in compat
+    assert 'status == "success_0"' in compat
+    assert "exact 식약처 품목번호가 없어" in compat
