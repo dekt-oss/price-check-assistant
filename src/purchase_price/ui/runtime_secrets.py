@@ -31,6 +31,35 @@ _R2_SECRET_ALIASES: dict[str, tuple[str, ...]] = {
 _R2_SECRET_NAMES = tuple(_R2_SECRET_ALIASES)
 _R2_NESTED_TABLE_NAMES = ("r2", "r2_read")
 
+_PUBLIC_DATA_SECRET_ALIASES: dict[str, tuple[str, ...]] = {
+    "DATA_GO_KR_SERVICE_KEY": ("DATA_GO_KR_SERVICE_KEY", "data_go_kr_service_key"),
+    "DATA_GO_KR_MARKET_SERVICE_KEY": (
+        "DATA_GO_KR_MARKET_SERVICE_KEY",
+        "data_go_kr_market_service_key",
+    ),
+    "G2B_SERVICE_KEY": ("G2B_SERVICE_KEY", "g2b_service_key"),
+    "G2B_SHOPPING_SERVICE_KEY": (
+        "G2B_SHOPPING_SERVICE_KEY",
+        "g2b_shopping_service_key",
+    ),
+    "G2B_RESEARCH_SERVICE_KEY": (
+        "G2B_RESEARCH_SERVICE_KEY",
+        "g2b_research_service_key",
+    ),
+    "G2B_CATALOG_SERVICE_KEY": ("G2B_CATALOG_SERVICE_KEY", "g2b_catalog_service_key"),
+    "G2B_LIFECYCLE_SERVICE_KEY": (
+        "G2B_LIFECYCLE_SERVICE_KEY",
+        "g2b_lifecycle_service_key",
+    ),
+    "MFDS_SERVICE_KEY": ("MFDS_SERVICE_KEY", "mfds_service_key"),
+    "MFDS_RECALL_SERVICE_KEY": (
+        "MFDS_RECALL_SERVICE_KEY",
+        "mfds_recall_service_key",
+    ),
+}
+_PUBLIC_DATA_SECRET_NAMES = tuple(_PUBLIC_DATA_SECRET_ALIASES)
+_PUBLIC_DATA_NESTED_TABLE_NAMES = ("api", "public_data", "data_go_kr")
+
 
 def _mapping_value(mapping: Mapping[str, object], *keys: str) -> object | None:
     for key in keys:
@@ -40,9 +69,12 @@ def _mapping_value(mapping: Mapping[str, object], *keys: str) -> object | None:
     return None
 
 
-def _nested_secret_tables(root: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
+def _nested_secret_tables(
+    root: Mapping[str, object],
+    names: tuple[str, ...],
+) -> tuple[Mapping[str, object], ...]:
     tables: list[Mapping[str, object]] = []
-    for name in _R2_NESTED_TABLE_NAMES:
+    for name in names:
         candidate = root.get(name)
         if isinstance(candidate, Mapping):
             tables.append(candidate)
@@ -64,27 +96,33 @@ def hydrate_streamlit_runtime_secrets() -> tuple[str, ...]:
 
     try:
         root = st.secrets
-        nested_tables = _nested_secret_tables(root)
+        r2_tables = _nested_secret_tables(root, _R2_NESTED_TABLE_NAMES)
+        public_data_tables = _nested_secret_tables(root, _PUBLIC_DATA_NESTED_TABLE_NAMES)
     except (FileNotFoundError, KeyError, TypeError, StreamlitSecretNotFoundError):
         return ()
 
     hydrated: list[str] = []
-    for env_name, aliases in _R2_SECRET_ALIASES.items():
-        if os.getenv(env_name, "").strip():
-            continue
-        try:
-            value = _mapping_value(root, *aliases)
-        except StreamlitSecretNotFoundError:
-            return ()
-        if value is None:
-            for nested in nested_tables:
-                value = _mapping_value(nested, *aliases)
-                if value is not None:
-                    break
-        if value is None:
-            continue
-        os.environ[env_name] = str(value).strip()
-        hydrated.append(env_name)
+    groups = (
+        (_R2_SECRET_ALIASES, r2_tables),
+        (_PUBLIC_DATA_SECRET_ALIASES, public_data_tables),
+    )
+    for aliases_by_env, nested_tables in groups:
+        for env_name, aliases in aliases_by_env.items():
+            if os.getenv(env_name, "").strip():
+                continue
+            try:
+                value = _mapping_value(root, *aliases)
+            except StreamlitSecretNotFoundError:
+                return tuple(hydrated)
+            if value is None:
+                for nested in nested_tables:
+                    value = _mapping_value(nested, *aliases)
+                    if value is not None:
+                        break
+            if value is None:
+                continue
+            os.environ[env_name] = str(value).strip()
+            hydrated.append(env_name)
 
     if hydrated:
         get_settings.cache_clear()
