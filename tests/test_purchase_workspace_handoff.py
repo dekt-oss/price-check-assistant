@@ -59,7 +59,7 @@ def test_quote_and_home_pages_share_purchase_workspace_handoff_contract() -> Non
 def test_home_quote_upload_auto_routes_first_item_through_unified_search() -> None:
     home_source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
-    assert 'QUOTE_AUTO_ROUTE_FILE_KEY = "quote_auto_route_file_v1"' in home_source
+    assert "QUOTE_AUTO_ROUTE_FILE_SESSION_KEY" in home_source
     assert "견적 첫 품목을 일반 통합검색과 동일하게 조사하고 있습니다" in home_source
     assert "quote_result = _execute_search(" in home_source
     assert 'search_text=(item.model_name or item.product_name)' in home_source
