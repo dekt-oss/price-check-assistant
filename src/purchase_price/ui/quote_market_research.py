@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import streamlit as st
 
+from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
@@ -357,10 +358,25 @@ def _render_compact_item_editor(state: QuoteReviewState) -> None:
             st.rerun()
 
 
-def _quote_item_unified_query(state: QuoteReviewState, index: int):
+def _quote_item_unified_query(state: QuoteReviewState, index: int) -> ProductQuery:
+    """Build the external-evidence query with the same identity scope as ordinary search.
+
+    Quote manufacturer/specification remain on the QuoteItem for commercial-condition review.
+    They are not retrieval constraints once a model is available, because ordinary one-line
+    search resolves the product/model identity without those quote-only hints.
+    """
+
     raw_query = quote_item_query(state.items[index])
     identity = state.mfds_identity.get(index)
-    return canonicalize_product_query(raw_query, identity).query
+    canonical = canonicalize_product_query(raw_query, identity).query
+    if canonical.model_name.strip():
+        return ProductQuery(
+            product_name=canonical.product_name,
+            model_name=canonical.model_name,
+        )
+    if canonical.product_name.strip():
+        return ProductQuery(product_name=canonical.product_name)
+    return canonical
 
 
 def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
