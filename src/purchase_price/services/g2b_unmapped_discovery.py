@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
-from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
+from purchase_price.clients.data_go_kr import (
+    PublicDataClientError,
+    PublicDataPortalClient,
+    PublicDataTransportError,
+)
 from purchase_price.collectors.g2b_shopping import (
     G2B_SHOPPING_BASE_URL,
     G2BShoppingCollector,
@@ -331,6 +335,7 @@ def discover_unmapped_g2b_candidates(
         service_key,
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
+        connect_circuit_breaker=True,
     )
     collector = G2BShoppingCollector(service_key, base_url=base_url, client=client)
 
@@ -346,16 +351,17 @@ def discover_unmapped_g2b_candidates(
     error_types: set[str] = set()
     error_messages: set[str] = set()
     budget_exhausted = False
+    source_unavailable = False
     candidates_by_key: dict[tuple[str, str, str], G2BDiscoveryCandidate] = {}
 
     selectors = tuple(("code", code) for code in target_codes) + tuple(
         ("name", term) for term in terms
     )
     for window_begin, window_end in windows:
-        if budget_exhausted:
+        if budget_exhausted or source_unavailable:
             break
         for selector_type, selector_value in selectors:
-            if budget_exhausted:
+            if budget_exhausted or source_unavailable:
                 break
             fetched_for_query = 0
             query_failed = False
@@ -388,6 +394,8 @@ def discover_unmapped_g2b_candidates(
                     error_types.add(type(exc).__name__)
                     error_messages.add(_safe_error_message(exc))
                     query_failed = True
+                    if isinstance(exc, PublicDataTransportError):
+                        source_unavailable = True
                     break
 
                 successful_fetches += 1
@@ -440,7 +448,12 @@ def discover_unmapped_g2b_candidates(
         reverse=True,
     )
 
-    incomplete = budget_exhausted or failed_query_count > 0 or truncated_query_count > 0
+    incomplete = (
+        budget_exhausted
+        or source_unavailable
+        or failed_query_count > 0
+        or truncated_query_count > 0
+    )
     if successful_fetches == 0 and failed_query_count > 0:
         status = "failure"
     elif incomplete:
