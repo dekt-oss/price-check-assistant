@@ -60,6 +60,7 @@ from purchase_price.services.safety_support import (
     MFDS_SAFETY_LETTER_PAGE_URL,
     build_manual_safety_check_state,
 )
+from purchase_price.services.structured_query_identity import canonicalize_product_query
 from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
@@ -175,28 +176,30 @@ def _identity_hydration(
     model_name: str,
     specification: str,
 ) -> tuple[str, str, str, str, MfdsIdentityLookup | None]:
-    if (
-        not raw_search
-        or product_name.strip()
-        or manufacturer.strip()
-        or model_name.strip()
-        or specification.strip()
-    ):
+    explicit_fields = any(
+        value.strip()
+        for value in (product_name, manufacturer, model_name, specification)
+    )
+    if raw_search and explicit_fields:
         return product_name, manufacturer, model_name, specification, None
 
-    identity = lookup_mfds_identity_from_r2(raw_search)
-    if identity.status != "success" or not identity.records:
-        return product_name, manufacturer, model_name, specification, identity
-    if identity.match_type not in {"permit", "udi", "model"}:
-        return product_name, manufacturer, model_name, specification, identity
+    lookup_key = raw_search or model_name.strip() or product_name.strip()
+    if not lookup_key:
+        return product_name, manufacturer, model_name, specification, None
 
-    products = identity.product_names
-    models = identity.model_names
+    identity = lookup_mfds_identity_from_r2(lookup_key)
+    base_query = ProductQuery(
+        product_name=product_name,
+        manufacturer=manufacturer,
+        model_name=model_name,
+        specification=specification,
+    )
+    canonical = canonicalize_product_query(base_query, identity)
     return (
-        products[0] if len(products) == 1 else product_name,
-        manufacturer,
-        models[0] if len(models) == 1 else model_name,
-        specification,
+        canonical.query.product_name,
+        canonical.query.manufacturer,
+        canonical.query.model_name,
+        canonical.query.specification,
         identity,
     )
 
