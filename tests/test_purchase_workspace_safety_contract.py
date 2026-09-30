@@ -28,3 +28,15 @@ def test_unified_search_isolates_safety_source_runtime_failures() -> None:
     assert "except Exception as exc:" in source
     assert 'status="failure"' in source
     assert "safety_lookup = _lookup_mfds_recall_isolated(" in source
+
+
+def test_safety_hot_reload_fallback_preserves_lookup_semantics() -> None:
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+
+    assert "def _build_safety_state_compat" in source
+    assert 'if status == "failure":' in source
+    assert "SafetyEvidenceStatus.CHECK_FAILED" in source
+    assert 'if status == "success_0":' in source
+    assert "SafetyEvidenceStatus.CHECKED_NONE" in source
+    assert 'if status == "success" and records:' in source
+    assert "SafetyEvidenceStatus.AMBER" in source
