@@ -45,11 +45,32 @@ def test_quote_and_home_pages_share_purchase_workspace_handoff_contract() -> Non
     )
     home_source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
-    assert "통합 구매조사 열기" in quote_source
+    assert "일반 검색과 동일한 상세결과 열기" in quote_source
     assert "PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY" in quote_source
     assert 'st.switch_page("pages/1_대시보드.py")' in quote_source
 
     assert "PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY" in home_source
     assert "parse_purchase_workspace_handoff" in home_source
     assert 'search_state["origin"] = "quote"' in home_source
-    assert "견적서 품목에서 이어진 조사" in home_source
+    assert "일반 통합검색과 동일한 구매조사 파이프라인" in home_source
+
+
+def test_home_quote_upload_auto_routes_first_item_through_unified_search() -> None:
+    home_source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+
+    assert 'QUOTE_AUTO_ROUTE_FILE_KEY = "quote_auto_route_file_v1"' in home_source
+    assert "견적 첫 품목을 일반 통합검색과 동일하게 조사하고 있습니다" in home_source
+    assert "quote_result = _execute_search(" in home_source
+    assert 'quote_result["origin"] = "quote"' in home_source
+    assert 'quote_result["quote_item_index"] = 0' in home_source
+    assert 'st.session_state[HOME_SEARCH_STATE_KEY] = quote_result' in home_source
+    assert 'st.switch_page("pages/2_견적_검토.py")' in home_source
+
+
+def test_quote_batch_page_is_explicitly_summary_not_second_search_engine() -> None:
+    quote_source = Path("src/purchase_price/ui/quote_market_research.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "다품목 견적의 빠른 요약·검증 화면" in quote_source
+    assert "일반 통합검색과 동일한 구매조사 Workspace" in quote_source
