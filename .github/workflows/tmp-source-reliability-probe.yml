@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: temp-source-reliability-probe
+  cancel-in-progress: true
+
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -29,8 +33,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install package
-        run: pip install -e .
+      - name: Install minimal probe dependencies
+        run: pip install "httpx>=0.27,<1" "tenacity>=8,<10" "pydantic>=2,<3" "pydantic-settings>=2,<3"
+
+      - name: Configure source path
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE/src" >> "$GITHUB_ENV"
 
       - name: Print configured key sources only
         run: |
