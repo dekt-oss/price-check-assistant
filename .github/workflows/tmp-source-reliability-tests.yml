@@ -50,7 +50,6 @@ jobs:
             tests/test_mfds_workspace.py \
             tests/test_purchase_workspace_safety_contract.py \
             tests/test_safety_support.py \
-            tests/test_safety_support.py \
             tests/test_unified_search_state_contract.py
 
       - name: Ruff modified files
@@ -70,6 +69,7 @@ jobs:
             tests/test_g2b_unmapped_discovery.py \
             tests/test_runtime_secrets.py \
             tests/test_mfds_workspace.py \
-            tests/test_purchase_workspace_safety_contract.py
+            tests/test_purchase_workspace_safety_contract.py \
+            tests/test_safety_support.py
 
 # rerun: 2026-09-30 source reliability final targeted set
