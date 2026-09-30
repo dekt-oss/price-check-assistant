@@ -12,6 +12,7 @@ from purchase_price.evidence_domain import (
 )
 from purchase_price.schemas import ProductQuery
 from purchase_price.services import mfds_workspace as mfds_workspace_service
+from purchase_price.services import safety_support as safety_support_service
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
