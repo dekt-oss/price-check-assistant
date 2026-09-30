@@ -60,16 +60,27 @@ jobs:
                   payload = json.loads(body)
                   response = payload.get("response") if isinstance(payload, dict) else None
                   header = response.get("header", {}) if isinstance(response, dict) else {}
-                  if not header and isinstance(payload, dict):
-                      for k, v in payload.items():
-                          if k.endswith("ResponseError") and isinstance(v, dict):
-                              header = v.get("header", {})
-                              break
+                  auth = None
+                  if isinstance(payload, dict):
+                      service = payload.get("OpenAPI_ServiceResponse")
+                      if isinstance(service, dict):
+                          common = service.get("cmmMsgHeader", {})
+                          if isinstance(common, dict):
+                              header = {
+                                  "resultCode": common.get("returnReasonCode"),
+                                  "resultMsg": common.get("errMsg"),
+                              }
+                              auth = common.get("returnAuthMsg")
+                      if not header:
+                          for k, v in payload.items():
+                              if k.endswith("ResponseError") and isinstance(v, dict):
+                                  header = v.get("header", {})
+                                  break
                   code = header.get("resultCode") if isinstance(header, dict) else None
                   msg = header.get("resultMsg") if isinstance(header, dict) else None
                   body_obj = response.get("body", {}) if isinstance(response, dict) else {}
                   total = body_obj.get("totalCount") if isinstance(body_obj, dict) else None
-                  print(label, f"http={status}", f"resultCode={code}", f"resultMsg={msg}", f"totalCount={total}")
+                  print(label, f"http={status}", f"resultCode={code}", f"resultMsg={msg}", f"auth={auth}", f"totalCount={total}")
               except Exception:
                   print(label, f"http={status}", "body=", summary)
 
