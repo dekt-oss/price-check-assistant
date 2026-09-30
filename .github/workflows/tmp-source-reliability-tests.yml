@@ -72,4 +72,4 @@ jobs:
             tests/test_purchase_workspace_safety_contract.py \
             tests/test_safety_support.py
 
-# rerun: 2026-09-30 source reliability final targeted set
+# rerun: 2026-09-30 source reliability final targeted set v2
