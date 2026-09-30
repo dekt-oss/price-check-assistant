@@ -1627,11 +1627,11 @@ if handoff is not None:
     try:
         with st.status("견적서 품목의 가격·등록·공급근거를 조사하고 있습니다...", expanded=False) as status:
             search_state = _execute_search(
-                search_text="",
-                product_name=handoff.product_name,
-                manufacturer=handoff.manufacturer,
-                model_name=handoff.model_name,
-                specification=handoff.specification,
+                search_text=(handoff.model_name or handoff.product_name),
+                product_name="",
+                manufacturer="",
+                model_name="",
+                specification="",
                 quote_text=(
                     str(handoff.quote_unit_price)
                     if handoff.quote_unit_price is not None
@@ -1769,11 +1769,11 @@ if uploaded is not None:
                     expanded=False,
                 ) as status:
                     quote_result = _execute_search(
-                        search_text="",
-                        product_name=item.product_name,
-                        manufacturer=item.manufacturer,
-                        model_name=item.model_name,
-                        specification=item.specification,
+                        search_text=(item.model_name or item.product_name),
+                        product_name="",
+                        manufacturer="",
+                        model_name="",
+                        specification="",
                         quote_text=(
                             str(item.unit_price) if item.unit_price is not None else ""
                         ),
