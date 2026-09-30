@@ -82,6 +82,7 @@ from purchase_price.ui.quote_review_state import (
 )
 from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
+from purchase_price.ui.safety_state_compat import build_safety_state_compat
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
     has_transaction_candidates,
@@ -113,33 +114,6 @@ def _parse_quote(value: str) -> Decimal | None:
         return Decimal(value.replace(",", "").strip())
     except InvalidOperation as exc:
         raise ValueError("견적 단가는 숫자로 입력하세요.") from exc
-
-
-def _build_safety_state_compat(
-    safety_lookup: object | None,
-    *,
-    model_name: str,
-    product_name: str,
-    permit_numbers: list[str],
-):
-    builder = getattr(
-        safety_support_service,
-        "build_safety_state_from_recall_lookup",
-        None,
-    )
-    if safety_lookup is not None and callable(builder):
-        return builder(
-            safety_lookup,
-            model_name=model_name,
-            product_name=product_name,
-            permit_numbers=permit_numbers,
-        )
-    return build_manual_safety_check_state(
-        model_name=model_name,
-        permit_numbers=permit_numbers,
-    )
-
-
 
 
 def _lookup_mfds_recall_isolated(*, model_name: str, product_name: str) -> object:
@@ -751,8 +725,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
         safety_permit_numbers.extend(indexed_identity.permit_numbers)
     if isinstance(mfds, MfdsWorkspaceResult):
         safety_permit_numbers.extend(mfds.permit_numbers)
-    safety_state = _build_safety_state_compat(
-        safety_lookup,
+    safety_state = build_safety_state_compat(
+        safety_support_module=safety_support_service,
+        lookup=safety_lookup,
         model_name=str(getattr(query, "model_name", "") or "").strip(),
         product_name=str(getattr(query, "product_name", "") or "").strip(),
         permit_numbers=safety_permit_numbers,
