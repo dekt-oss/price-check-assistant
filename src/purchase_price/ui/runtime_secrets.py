@@ -82,7 +82,7 @@ def _nested_secret_tables(
 
 
 def hydrate_streamlit_runtime_secrets() -> tuple[str, ...]:
-    """Expose configured Streamlit R2 read credentials to pydantic-settings safely.
+    """Expose configured Streamlit storage/public-data credentials to pydantic-settings safely.
 
     The service layer intentionally knows nothing about Streamlit. Normalize supported Streamlit
     layouts at the UI boundary before ``Settings`` is resolved. Existing environment variables
