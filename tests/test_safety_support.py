@@ -252,7 +252,7 @@ def test_safety_supplier_page_uses_official_recall_lookup_contract() -> None:
     source = Path("pages/5_의료기기_안전_공급사.py").read_text(encoding="utf-8")
 
     assert "lookup_mfds_recall" in source
-    assert "build_safety_state_from_recall_lookup" in source
+    assert "build_safety_state_compat" in source
     assert "식약처 Safety API" in source
     assert "식약처 회수·판매중지 API 확인시각" in source
     assert "exact 식약처 품목번호가 없어" in source
