@@ -237,10 +237,16 @@ def lookup_mfds_recall(
     query_type = "model" if model else "product"
     query = model or product
     settings = settings or Settings()
-    resolved_recall_key = getattr(settings, "resolved_mfds_recall_service_key", None)
-    if resolved_recall_key is None:
-        resolved_recall_key = getattr(settings, "resolved_mfds_service_key", None)
-    service_key = str(resolved_recall_key or "").strip()
+    raw_settings = getattr(settings, "__dict__", {})
+    if not isinstance(raw_settings, dict):
+        raw_settings = {}
+    service_key = str(
+        raw_settings.get("mfds_recall_service_key")
+        or raw_settings.get("mfds_service_key")
+        or raw_settings.get("data_go_kr_market_service_key")
+        or raw_settings.get("data_go_kr_service_key")
+        or ""
+    ).strip()
     if client is None and not service_key:
         return MfdsRecallLookupResult(
             status="not_configured",
@@ -250,7 +256,7 @@ def lookup_mfds_recall(
 
     client = client or MfdsRecallClient(
         service_key,
-        base_url=getattr(settings, "mfds_recall_base_url", None) or MFDS_RECALL_BASE_URL,
+        base_url=raw_settings.get("mfds_recall_base_url") or MFDS_RECALL_BASE_URL,
         timeout_seconds=settings.mfds_request_timeout_seconds,
         max_retries=settings.mfds_max_retries,
     )
