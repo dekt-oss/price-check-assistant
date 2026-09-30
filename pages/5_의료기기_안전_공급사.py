@@ -12,7 +12,6 @@ from purchase_price.services.market_research_support import (
     extract_g2b_supplier_candidates,
     extract_mfds_business_supplier_candidates,
 )
-from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.mfds_device_intelligence import (
     MFDS_BUSINESS_LICENSE_BASE_URL,
     MFDS_MODEL_INFO_BASE_URL,
@@ -20,6 +19,7 @@ from purchase_price.services.mfds_device_intelligence import (
     MfdsModelInfoClient,
     resolve_exact_model_identity,
 )
+from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.safety_support import (
     MFDS_ADMIN_SANCTION_PAGE_URL,
     MFDS_RECALL_DATASET_URL,
