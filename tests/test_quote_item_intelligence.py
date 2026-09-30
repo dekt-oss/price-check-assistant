@@ -9,6 +9,7 @@ from purchase_price.services.mfds_identity_index import (
     MfdsIdentityLookup,
     MfdsIdentityRecord,
 )
+from purchase_price.services.mfds_recall import MfdsRecallLookupResult
 from purchase_price.services.quote_extraction import QuoteItem
 from purchase_price.ui import quote_market_research
 from purchase_price.ui.quote_item_intelligence import (
@@ -241,3 +242,93 @@ def test_quote_ui_exposes_integrated_item_status_contract() -> None:
     assert '"Safety"' in source
     assert "Safety 자동조회가 미연결인 경우" in source
     assert "_ensure_mfds_identity" in source
+
+
+
+def test_integrated_summary_surfaces_recall_api_authorization_state() -> None:
+    result = build_quote_item_intelligence_summary(
+        item=_item(),
+        track_b=SimpleNamespace(candidates=(), reference_candidates=()),
+        mfds_workspace=None,
+        mfds_identity=None,
+        safety_lookup=MfdsRecallLookupResult(
+            status="not_authorized",
+            query_type="model",
+            query="DFM100",
+            error_type="PublicDataClientError",
+            error_message="SERVICE_KEY_IS_NOT_REGISTERED_ERROR code=30",
+            checked_at="2026-09-30T08:00:00+09:00",
+        ),
+    )
+
+    assert result.safety_status == "공식 API 인증 미승인"
+    assert "활용승인" in result.safety_message
+    assert "안전함" not in result.safety_message
+
+
+def test_quote_safety_lookup_is_cached(monkeypatch) -> None:
+    state = QuoteReviewState(items=[_item()])
+    calls: list[tuple[str, str]] = []
+    lookup = MfdsRecallLookupResult(
+        status="success_0",
+        query_type="model",
+        query="DFM100",
+        checked_at="2026-09-30T08:00:00+09:00",
+    )
+
+    def fake_lookup(*, model_name: str = "", product_name: str = ""):
+        calls.append((model_name, product_name))
+        return lookup
+
+    monkeypatch.setattr(quote_market_research, "lookup_mfds_recall", fake_lookup)
+
+    quote_market_research._ensure_safety_lookup(state)
+    quote_market_research._ensure_safety_lookup(state)
+
+    assert calls == [("DFM100", "심장충격기")]
+    assert state.safety_lookup[0] is lookup
+    assert 0 not in state.item_research_failures
+
+
+def test_quote_safety_failure_is_retryable_without_blocking_item() -> None:
+    state = QuoteReviewState(items=[_item()])
+    state.safety_lookup[0] = MfdsRecallLookupResult(
+        status="failure",
+        query_type="model",
+        query="DFM100",
+        error_type="PublicDataClientError",
+        error_message="synthetic",
+        checked_at="2026-09-30T08:00:00+09:00",
+    )
+    state.item_research_failures = {0: {"Safety": "PublicDataClientError"}}
+
+    quote_market_research._retry_failed_stage(state, 0, "Safety")
+
+    assert state.safety_lookup == {}
+    assert state.item_research_failures == {}
+
+
+def test_reset_downstream_clears_cached_safety_lookup() -> None:
+    state = QuoteReviewState(items=[_item()])
+    state.safety_lookup[0] = MfdsRecallLookupResult(
+        status="success_0",
+        query_type="model",
+        query="DFM100",
+    )
+
+    state.reset_downstream(after_step=3)
+
+    assert state.safety_lookup == {}
+
+
+def test_quote_ui_runs_official_safety_lookup_contract() -> None:
+    from pathlib import Path
+
+    source = Path("src/purchase_price/ui/quote_market_research.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "_ensure_safety_lookup" in source
+    assert "lookup_mfds_recall" in source
+    assert 'failures["Safety"]' in source
+    assert "safety_lookup=state.safety_lookup.get(index)" in source
