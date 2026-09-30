@@ -135,6 +135,12 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
     ):
         raise RuntimeError("Default price workspace did not render after DFM100 search")
     report["price_section_rendered"] = True
+    if "회수·판매중지 자동 API는 아직 연결하지 않았습니다" in body:
+        raise RuntimeError(
+            "Production retained legacy Safety fallback instead of live lookup status semantics"
+        )
+    if "Safety" in body:
+        report["safety_live_status_rendered"] = True
 
     supplier_section = app.get_by_text("업체·조달", exact=True)
     supplier_section.wait_for(state="visible", timeout=20_000)
