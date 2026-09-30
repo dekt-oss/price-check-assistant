@@ -18,6 +18,7 @@ from purchase_price.services.price_conditions import build_price_condition_profi
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
+    QUOTE_AUTO_ROUTE_FILE_SESSION_KEY,
     build_purchase_workspace_handoff,
 )
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
@@ -731,9 +732,30 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
         "보안: 원본은 파싱용 임시파일로만 처리 후 삭제합니다. "
         "현재 견적 추출은 로컬 파서/Tesseract를 사용하며 원문·OCR 텍스트를 외부 AI API로 전송하지 않습니다."
     )
-    if uploaded is not None and (state.file_name != uploaded.name or state.extraction is None):
+    newly_extracted = bool(
+        uploaded is not None
+        and (state.file_name != uploaded.name or state.extraction is None)
+    )
+    if newly_extracted and uploaded is not None:
         _store_extraction(uploaded, state)
         state.lookback_days = G2B_DEFAULT_LOOKBACK_DAYS
+        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY, None)
+
+        if state.items:
+            first_item = state.items[0]
+            handoff = build_purchase_workspace_handoff(
+                product_name=first_item.product_name,
+                manufacturer=first_item.manufacturer,
+                model_name=first_item.model_name,
+                specification=first_item.specification,
+                quote_unit_price=first_item.unit_price,
+            )
+            if handoff is not None:
+                st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = (
+                    handoff.to_session_payload()
+                )
+                st.session_state[QUOTE_AUTO_ROUTE_FILE_SESSION_KEY] = uploaded.name
+                st.switch_page("pages/1_대시보드.py")
 
     if state.extraction is None:
         st.caption(

@@ -52,6 +52,7 @@ from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
+    QUOTE_AUTO_ROUTE_FILE_SESSION_KEY,
     parse_purchase_workspace_handoff,
 )
 from purchase_price.services.safety_support import (
@@ -98,7 +99,6 @@ from purchase_price.ui.widgets import (
 HOME_SEARCH_STATE_KEY = "home_unified_search_result"
 HOME_SEARCH_DETAILS_KEY = "home_search_details"
 HOME_WORKSPACE_VIEW_KEY = "home_workspace_view"
-QUOTE_AUTO_ROUTE_FILE_KEY = "quote_auto_route_file_v1"
 WORKSPACE_VIEWS = {
     "price": "💰 가격 비교",
     "supplier": "🏢 업체·조달",
@@ -1696,7 +1696,7 @@ if result_mode:
     if reset_requested:
         st.session_state.pop(HOME_SEARCH_STATE_KEY, None)
         st.session_state.pop(HOME_WORKSPACE_VIEW_KEY, None)
-        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_KEY, None)
+        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY, None)
         st.query_params.clear()
         st.rerun()
 
@@ -1757,10 +1757,10 @@ if uploaded is not None:
     if newly_extracted:
         with st.spinner("견적서에서 품목을 추출하고 있습니다..."):
             _store_extraction(uploaded, quote_state)
-        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_KEY, None)
+        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY, None)
 
     if quote_state.items:
-        already_routed = st.session_state.get(QUOTE_AUTO_ROUTE_FILE_KEY) == uploaded.name
+        already_routed = st.session_state.get(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY) == uploaded.name
         if not already_routed:
             item = quote_state.items[0]
             try:
@@ -1783,7 +1783,7 @@ if uploaded is not None:
                     quote_result["quote_file_name"] = uploaded.name
                     quote_result["quote_item_index"] = 0
                     st.session_state[HOME_SEARCH_STATE_KEY] = quote_result
-                    st.session_state[QUOTE_AUTO_ROUTE_FILE_KEY] = uploaded.name
+                    st.session_state[QUOTE_AUTO_ROUTE_FILE_SESSION_KEY] = uploaded.name
                     st.session_state[HOME_SEARCH_DETAILS_KEY] = False
                     st.query_params["view"] = "price"
                     status.update(
