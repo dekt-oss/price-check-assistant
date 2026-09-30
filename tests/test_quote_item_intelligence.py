@@ -364,7 +364,30 @@ def test_quote_track_b_uses_same_canonical_model_as_unified_search(monkeypatch) 
 
     quote_market_research._ensure_track_b_comparison(state)
 
-    assert captured == [("심장충격기", "Philips", "Efficia DFM100", "")]
+    assert captured == [("심장충격기", "", "Efficia DFM100", "")]
+
+
+def test_quote_unified_query_keeps_quote_conditions_out_of_retrieval() -> None:
+    state = QuoteReviewState(items=[_item(model="DFM100")])
+    state.items[0] = state.items[0].__class__(
+        **{
+            **state.items[0].__dict__,
+            "specification": "200J / 옵션포함",
+        }
+    )
+    state.mfds_identity[0] = MfdsIdentityLookup(
+        status="success",
+        query="DFM100",
+        match_type="model",
+        records=(_identity_record(model="Efficia DFM100"),),
+    )
+
+    query = quote_market_research._quote_item_unified_query(state, 0)
+
+    assert query.product_name == "심장충격기"
+    assert query.model_name == "Efficia DFM100"
+    assert query.manufacturer == ""
+    assert query.specification == ""
 
 
 def test_quote_batch_contract_resolves_identity_before_track_b() -> None:
