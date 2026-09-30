@@ -35,6 +35,9 @@ jobs:
             src/purchase_price/services/g2b_contract_enrichment.py \
             src/purchase_price/services/g2b_unmapped_discovery.py \
             src/purchase_price/services/mfds_workspace.py \
+            src/purchase_price/services/safety_support.py \
+            src/purchase_price/evidence_domain.py \
+            "pages/5_의료기기_안전_공급사.py" \
             src/purchase_price/ui/market_research.py \
             src/purchase_price/ui/runtime_secrets.py
 
@@ -46,6 +49,8 @@ jobs:
             tests/test_runtime_secrets.py \
             tests/test_mfds_workspace.py \
             tests/test_purchase_workspace_safety_contract.py \
+            tests/test_safety_support.py \
+            tests/test_safety_support.py \
             tests/test_unified_search_state_contract.py
 
       - name: Ruff modified files
@@ -56,6 +61,9 @@ jobs:
             src/purchase_price/services/g2b_contract_enrichment.py \
             src/purchase_price/services/g2b_unmapped_discovery.py \
             src/purchase_price/services/mfds_workspace.py \
+            src/purchase_price/services/safety_support.py \
+            src/purchase_price/evidence_domain.py \
+            "pages/5_의료기기_안전_공급사.py" \
             src/purchase_price/ui/market_research.py \
             src/purchase_price/ui/runtime_secrets.py \
             tests/test_g2b_contract_lookback_policy.py \
@@ -63,3 +71,5 @@ jobs:
             tests/test_runtime_secrets.py \
             tests/test_mfds_workspace.py \
             tests/test_purchase_workspace_safety_contract.py
+
+# rerun: 2026-09-30 source reliability final targeted set
