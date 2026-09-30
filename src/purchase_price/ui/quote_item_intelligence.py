@@ -5,10 +5,8 @@ from decimal import Decimal
 from typing import Any
 
 from purchase_price.evidence_domain import IdentityEvidenceStatus
-from purchase_price.services.safety_support import (
-    build_manual_safety_check_state,
-    build_safety_state_from_recall_lookup,
-)
+from purchase_price.services import safety_support as safety_support_service
+from purchase_price.services.safety_support import build_manual_safety_check_state
 from purchase_price.ui.track_b_transactions import strict_comparison_candidates
 
 
@@ -111,14 +109,19 @@ def build_quote_item_intelligence_summary(
 
     model_name = str(getattr(item, "model_name", "") or "").strip()
     product_name = str(getattr(item, "product_name", "") or "").strip()
+    safety_builder = getattr(
+        safety_support_service,
+        "build_safety_state_from_recall_lookup",
+        None,
+    )
     safety = (
-        build_safety_state_from_recall_lookup(
+        safety_builder(
             safety_lookup,
             model_name=model_name,
             product_name=product_name,
             permit_numbers=tuple(sorted(permit_numbers)),
         )
-        if safety_lookup is not None
+        if safety_lookup is not None and callable(safety_builder)
         else build_manual_safety_check_state(
             model_name=model_name,
             permit_numbers=tuple(sorted(permit_numbers)),
