@@ -11,6 +11,7 @@ from purchase_price.evidence_domain import (
     SafetyEvidenceStatus,
 )
 from purchase_price.schemas import ProductQuery
+from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
@@ -40,7 +41,6 @@ from purchase_price.services.mfds_identity_status import (
     format_status_updated_at,
     get_mfds_identity_collection_status,
 )
-from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.mfds_workspace import (
     MfdsWorkspaceResult,
