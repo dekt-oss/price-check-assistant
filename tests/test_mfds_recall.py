@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
-from purchase_price.services import mfds_recall as module
 from purchase_price.config import Settings
+from purchase_price.services import mfds_recall as module
 from purchase_price.services.mfds_recall import (
     MFDS_RECALL_BASE_URL,
     MFDS_RECALL_MODEL_OPERATION,
