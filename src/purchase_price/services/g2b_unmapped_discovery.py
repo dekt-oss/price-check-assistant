@@ -295,6 +295,22 @@ def _safe_error_message(exc: Exception) -> str:
     return message[:500] if message else type(exc).__name__
 
 
+def _is_source_unavailable_error(exc: Exception) -> bool:
+    if isinstance(exc, PublicDataTransportError):
+        return True
+    text = str(exc).upper()
+    return any(
+        marker in text
+        for marker in (
+            "HTTP 429",
+            "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR",
+            "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+            "SERVICE_ACCESS_DENIED_ERROR",
+            "CODE=30",
+        )
+    )
+
+
 def discover_unmapped_g2b_candidates(
     query: ProductQuery,
     *,
@@ -394,7 +410,7 @@ def discover_unmapped_g2b_candidates(
                     error_types.add(type(exc).__name__)
                     error_messages.add(_safe_error_message(exc))
                     query_failed = True
-                    if isinstance(exc, PublicDataTransportError):
+                    if _is_source_unavailable_error(exc):
                         source_unavailable = True
                     break
 
