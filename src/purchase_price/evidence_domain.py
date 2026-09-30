@@ -24,6 +24,7 @@ class SafetyEvidenceStatus(StrEnum):
     """V3 semantic state for official safety-information checks."""
 
     NOT_CONNECTED = "NOT_CONNECTED"
+    NOT_AUTHORIZED = "NOT_AUTHORIZED"
     CHECK_FAILED = "CHECK_FAILED"
     CHECKED_NONE = "CHECKED_NONE"
     AMBER = "AMBER"
