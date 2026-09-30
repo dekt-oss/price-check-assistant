@@ -4,7 +4,10 @@ from dataclasses import replace
 from datetime import date, timedelta
 
 from purchase_price.clients.data_go_kr import PublicDataTransportError
-from purchase_price.services.g2b_contract_research import G2BContractResearchClient
+from purchase_price.services.g2b_contract_research import (
+    G2B_CONTRACT_MAX_WINDOW_DAYS,
+    G2BContractResearchClient,
+)
 from purchase_price.services.g2b_market_models import (
     G2BResearchRecord,
     G2BResearchSource,
@@ -96,6 +99,8 @@ def enrich_market_bundle_with_contracts(
     minimum_records_before_stop: int = 3,
     max_independent_terms: int = 1,
     max_pages_per_window: int = 1,
+    independent_max_window_days: int = G2B_CONTRACT_MAX_WINDOW_DAYS,
+    require_full_lookback: bool = False,
 ) -> MarketResearchBundle:
     """Attach contracts by bid identifier and, when sparse, by independent PPS product search.
 
@@ -109,7 +114,12 @@ def enrich_market_bundle_with_contracts(
         raise ValueError("enrichment bounds must be positive")
     if requested_lookback_days < 1:
         raise ValueError("requested_lookback_days must be positive")
-    if minimum_records_before_stop < 1 or max_independent_terms < 1 or max_pages_per_window < 1:
+    if (
+        minimum_records_before_stop < 1
+        or max_independent_terms < 1
+        or max_pages_per_window < 1
+        or independent_max_window_days < 1
+    ):
         raise ValueError("independent-search bounds must be positive")
 
     base_sources = tuple(
@@ -174,7 +184,11 @@ def enrich_market_bundle_with_contracts(
 
     # Do not amplify a transport/auth failure by immediately hammering the same endpoint with a
     # broad fallback. Independent search is for missing/sparse evidence after normal responses.
-    can_expand = not errors and len(contract_records) < minimum_records_before_stop and bool(terms)
+    can_expand = (
+        not errors
+        and bool(terms)
+        and (require_full_lookback or len(contract_records) < minimum_records_before_stop)
+    )
     if can_expand:
         end = today or date.today()
         previous_days = 0
@@ -197,6 +211,7 @@ def enrich_market_bundle_with_contracts(
                         begin_date=interval_begin,
                         end_date=interval_end,
                         max_pages_per_window=max_pages_per_window,
+                        max_window_days=independent_max_window_days,
                     )
                 except Exception as exc:
                     errors.append(exc)
@@ -211,7 +226,9 @@ def enrich_market_bundle_with_contracts(
                     seen.add(record.source_record_id)
                     contract_records.append(record)
             previous_days = stage_days
-            if transport_failed or errors or len(contract_records) >= minimum_records_before_stop:
+            if transport_failed or errors:
+                break
+            if not require_full_lookback and len(contract_records) >= minimum_records_before_stop:
                 break
 
     if errors and not contract_records:
