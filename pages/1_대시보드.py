@@ -122,6 +122,13 @@ def _build_safety_state_compat(
     product_name: str,
     permit_numbers: list[str],
 ):
+    """Translate Safety even when Streamlit retains an older safety_support module.
+
+    A stale module may not expose build_safety_state_from_recall_lookup yet. Falling back directly
+    to the manual NOT_CONNECTED state hides real API failures/successes, so preserve the lookup
+    semantics locally until the process fully reloads.
+    """
+
     builder = getattr(
         safety_support_service,
         "build_safety_state_from_recall_lookup",
@@ -134,12 +141,76 @@ def _build_safety_state_compat(
             product_name=product_name,
             permit_numbers=permit_numbers,
         )
-    return build_manual_safety_check_state(
-        model_name=model_name,
-        permit_numbers=permit_numbers,
+
+    model = str(model_name or "").strip()
+    product = str(product_name or "").strip()
+    permits = tuple(dict.fromkeys(str(value or "").strip() for value in permit_numbers if str(value or "").strip()))
+    search_keys = tuple(
+        ([f"모델명: {model}"] if model else [])
+        + [f"식약처 품목번호: {number}" for number in permits]
     )
+    if safety_lookup is not None:
+        status = str(getattr(safety_lookup, "status", "") or "")
+        checked_at = getattr(safety_lookup, "checked_at", None)
+        records = tuple(getattr(safety_lookup, "records", ()) or ())
+        if status == "failure":
+            return SimpleNamespace(
+                evidence_status=SafetyEvidenceStatus.CHECK_FAILED,
+                message=(
+                    "식약처 회수·판매중지 API 조회가 실패했습니다. "
+                    "0건으로 해석하지 말고 공식 페이지에서 직접 확인해야 합니다."
+                ),
+                checked_at=checked_at,
+                search_keys=search_keys,
+            )
+        if status == "not_authorized":
+            return SimpleNamespace(
+                evidence_status=SafetyEvidenceStatus.NOT_CONNECTED,
+                message=(
+                    "식약처 회수·판매중지 API 활용승인이 현재 서비스키에 등록되지 않았습니다. "
+                    "공공데이터포털 승인 상태를 확인해야 합니다."
+                ),
+                checked_at=checked_at,
+                search_keys=search_keys,
+            )
+        if status == "not_configured":
+            return SimpleNamespace(
+                evidence_status=SafetyEvidenceStatus.NOT_CONNECTED,
+                message=(
+                    "식약처 회수·판매중지 API 서비스키가 연결되지 않았습니다. "
+                    "자동조회 미연결 상태는 공식 안전정보 확인 결과가 아닙니다."
+                ),
+                checked_at=checked_at,
+                search_keys=search_keys,
+            )
+        if status == "success_0":
+            basis = f"형명 '{model}'" if model else f"품목명 '{product}'"
+            return SimpleNamespace(
+                evidence_status=SafetyEvidenceStatus.CHECKED_NONE,
+                message=(
+                    "식약처 회수·판매중지 API를 정상 조회했으며 "
+                    f"{basis} exact 일치 기록을 확인하지 못했습니다. "
+                    "이는 제품이 안전하다는 판정이 아닙니다."
+                ),
+                checked_at=checked_at,
+                search_keys=search_keys,
+            )
+        if status == "success" and records:
+            basis = f"형명 '{model}'" if model else f"품목명 '{product}'"
+            return SimpleNamespace(
+                evidence_status=SafetyEvidenceStatus.AMBER,
+                message=(
+                    f"식약처 공식 회수·판매중지 API에서 {basis} 일치 기록 "
+                    f"{len(records)}건을 확인했습니다. exact 품목번호 적용범위는 원문 확인이 필요합니다."
+                ),
+                checked_at=checked_at,
+                search_keys=search_keys,
+            )
 
-
+    return build_manual_safety_check_state(
+        model_name=model,
+        permit_numbers=permits,
+    )
 
 
 def _lookup_mfds_recall_isolated(*, model_name: str, product_name: str) -> object:
