@@ -271,7 +271,7 @@ if submitted:
         )
     if safety_state.evidence_status.value == "RED":
         st.error(f"{safety_state.status.value} · {safety_state.message}")
-    elif safety_state.evidence_status.value in {"AMBER", "CHECK_FAILED"}:
+    elif safety_state.evidence_status.value in {"AMBER", "CHECK_FAILED", "NOT_AUTHORIZED"}:
         st.warning(f"{safety_state.status.value} · {safety_state.message}")
     else:
         st.info(f"{safety_state.status.value} · {safety_state.message}")
