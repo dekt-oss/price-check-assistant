@@ -58,7 +58,6 @@ from purchase_price.services.safety_support import (
     MFDS_ADMIN_SANCTION_PAGE_URL,
     MFDS_RECALL_PAGE_URL,
     MFDS_SAFETY_LETTER_PAGE_URL,
-    build_manual_safety_check_state,
 )
 from purchase_price.services.structured_query_identity import canonicalize_product_query
 from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
