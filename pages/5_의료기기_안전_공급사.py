@@ -28,9 +28,9 @@ from purchase_price.services.safety_support import (
     MFDS_SAFETY_LETTER_PAGE_URL,
     MFDS_STANDARD_CODE_DATASET_URL,
     MFDS_UDI_PORTAL_URL,
-    build_manual_safety_check_state,
 )
 from purchase_price.services.search import search_all
+from purchase_price.ui.safety_state_compat import build_safety_state_compat
 
 st.set_page_config(page_title="의료기기 안전·업체·조달", page_icon="🛡️", layout="wide")
 st.title("의료기기 안전·업체·조달 확인")
@@ -248,27 +248,13 @@ if submitted:
         product_name=product_name.strip(),
         settings=settings,
     )
-    safety_builder = getattr(
-        safety_support_service,
-        "build_safety_state_from_recall_lookup",
-        None,
+    safety_state = build_safety_state_compat(
+        safety_support_module=safety_support_service,
+        lookup=safety_lookup,
+        model_name=model_name.strip(),
+        product_name=product_name.strip(),
+        permit_numbers=permit_numbers,
     )
-    if callable(safety_builder):
-        safety_state = safety_builder(
-            safety_lookup,
-            model_name=model_name.strip(),
-            product_name=product_name.strip(),
-            permit_numbers=permit_numbers,
-        )
-    else:
-        safety_state = build_manual_safety_check_state(
-            model_name=model_name.strip(),
-            permit_numbers=permit_numbers,
-        )
-        st.warning(
-            "배포 프로세스가 이전 Safety 모듈을 유지하고 있어 회수·판매중지 자동판정 표시만 "
-            "일시적으로 제한됩니다. 공식 조회 링크와 manual 확인키를 사용하세요."
-        )
     if safety_state.evidence_status.value == "RED":
         st.error(f"{safety_state.status.value} · {safety_state.message}")
     elif safety_state.evidence_status.value in {"AMBER", "CHECK_FAILED"}:
