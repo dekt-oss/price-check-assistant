@@ -181,3 +181,41 @@ def test_on_demand_business_lookup_empty_company_is_not_run() -> None:
 
     assert result.status == "not_run"
     assert result.records == ()
+
+
+def test_workspace_keeps_api_authorization_failure_distinct_from_zero() -> None:
+    class UnauthorizedModelClient:
+        def search_models(self, product_name: str, *, max_pages: int):
+            raise PublicDataClientError(
+                "Public Data Portal request failed: HTTP 403 "
+                "error=SERVICE_KEY_IS_NOT_REGISTERED_ERROR "
+                "auth=등록되지 않은 서비스키 code=30"
+            )
+
+    result = research_mfds_for_workspace(
+        ProductQuery(product_name="심장충격기", model_name="MODEL-1"),
+        _track_b(),
+        model_client=UnauthorizedModelClient(),
+    )
+
+    assert result.status == "not_authorized"
+    assert result.queried is True
+    assert result.records == ()
+    assert result.error_type == "PublicDataClientError"
+    assert "code=30" in (result.error_message or "")
+
+
+def test_workspace_generic_api_failure_remains_failure() -> None:
+    class BrokenModelClient:
+        def search_models(self, product_name: str, *, max_pages: int):
+            raise PublicDataClientError("synthetic MFDS failure")
+
+    result = research_mfds_for_workspace(
+        ProductQuery(product_name="심장충격기", model_name="MODEL-1"),
+        _track_b(),
+        model_client=BrokenModelClient(),
+    )
+
+    assert result.status == "failure"
+    assert result.queried is True
+    assert result.records == ()
