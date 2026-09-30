@@ -79,6 +79,20 @@ class MfdsBusinessLookupResult:
     error_message: str | None = None
 
 
+def is_mfds_workspace_authorization_error(exc: Exception) -> bool:
+    text = str(exc).upper()
+    return any(
+        marker in text
+        for marker in (
+            "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+            "SERVICE_ACCESS_DENIED_ERROR",
+            "PERMISSION_DENIED",
+            "CODE=30",
+            "RESULTCODE=30",
+        )
+    )
+
+
 def _candidate_detail_codes(track_b: Any) -> set[str]:
     codes: set[str] = set()
     for candidate in (*comparison_candidates(track_b), *reference_candidates(track_b)):
@@ -214,7 +228,11 @@ def research_mfds_for_workspace(
         )
     except (PublicDataClientError, ValueError) as exc:
         return MfdsWorkspaceResult(
-            status="failure",
+            status=(
+                "not_authorized"
+                if is_mfds_workspace_authorization_error(exc)
+                else "failure"
+            ),
             product_name=product_name,
             model_name=model_name,
             queried=True,
