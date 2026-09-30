@@ -165,7 +165,7 @@ def _build_safety_state_compat(
             )
         if status == "not_authorized":
             return SimpleNamespace(
-                evidence_status=SafetyEvidenceStatus.NOT_CONNECTED,
+                evidence_status=SafetyEvidenceStatus.NOT_AUTHORIZED,
                 message=(
                     "식약처 회수·판매중지 API 활용승인이 현재 서비스키에 등록되지 않았습니다. "
                     "공공데이터포털 승인 상태를 확인해야 합니다."
@@ -837,6 +837,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
             SafetyEvidenceStatus.AMBER,
             SafetyEvidenceStatus.CHECK_FAILED,
             SafetyEvidenceStatus.NOT_CONNECTED,
+            SafetyEvidenceStatus.NOT_AUTHORIZED,
         }:
             st.warning(safety_text)
         else:
