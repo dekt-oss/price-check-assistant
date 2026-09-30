@@ -74,3 +74,11 @@ def test_quote_batch_page_is_explicitly_summary_not_second_search_engine() -> No
 
     assert "다품목 견적의 빠른 요약·검증 화면" in quote_source
     assert "일반 통합검색과 동일한 구매조사 Workspace" in quote_source
+
+
+def test_home_structured_quote_fields_use_identity_canonicalization() -> None:
+    home_source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+
+    assert "lookup_key = raw_search or model_name.strip() or product_name.strip()" in home_source
+    assert "canonicalize_product_query(base_query, identity)" in home_source
+    assert "canonical.query.model_name" in home_source

@@ -332,3 +332,49 @@ def test_quote_ui_runs_official_safety_lookup_contract() -> None:
     assert "lookup_mfds_recall" in source
     assert 'failures["Safety"]' in source
     assert "safety_lookup=state.safety_lookup.get(index)" in source
+
+
+def test_quote_track_b_uses_same_canonical_model_as_unified_search(monkeypatch) -> None:
+    state = QuoteReviewState(items=[_item(model="DFM100")])
+    state.mfds_identity[0] = MfdsIdentityLookup(
+        status="success",
+        query="DFM100",
+        match_type="model",
+        records=(_identity_record(model="Efficia DFM100"),),
+    )
+    captured: list[tuple[str, str, str, str]] = []
+
+    def fake_lookup(query, *, quote_unit_price):
+        captured.append(
+            (
+                query.product_name,
+                query.manufacturer,
+                query.model_name,
+                query.specification,
+            )
+        )
+        return SimpleNamespace(
+            status="success_0",
+            candidates=(),
+            reference_candidates=(),
+            suggestions=(),
+        )
+
+    monkeypatch.setattr(quote_market_research, "lookup_track_b_quote", fake_lookup)
+
+    quote_market_research._ensure_track_b_comparison(state)
+
+    assert captured == [("심장충격기", "Philips", "Efficia DFM100", "")]
+
+
+def test_quote_batch_contract_resolves_identity_before_track_b() -> None:
+    from pathlib import Path
+
+    source = Path("src/purchase_price/ui/quote_market_research.py").read_text(
+        encoding="utf-8"
+    )
+
+    identity_pos = source.index("_ensure_mfds_identity(state)")
+    track_b_pos = source.index("_ensure_track_b_comparison(state)")
+    assert identity_pos < track_b_pos
+    assert "_quote_item_unified_query(state, index)" in source

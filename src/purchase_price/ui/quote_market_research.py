@@ -20,6 +20,7 @@ from purchase_price.services.purchase_workspace_handoff import (
     build_purchase_workspace_handoff,
 )
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
+from purchase_price.services.structured_query_identity import canonicalize_product_query
 from purchase_price.services.track_b_db_quote_comparison import (
     TrackBIdentitySuggestion,
     TrackBQuoteCandidate,
@@ -356,6 +357,12 @@ def _render_compact_item_editor(state: QuoteReviewState) -> None:
             st.rerun()
 
 
+def _quote_item_unified_query(state: QuoteReviewState, index: int):
+    raw_query = quote_item_query(state.items[index])
+    identity = state.mfds_identity.get(index)
+    return canonicalize_product_query(raw_query, identity).query
+
+
 def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
     if not state.items:
         return
@@ -364,7 +371,8 @@ def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
             continue
         try:
             state.track_b_db[index] = lookup_track_b_quote(
-                quote_item_query(item), quote_unit_price=item.unit_price
+                _quote_item_unified_query(state, index),
+                quote_unit_price=item.unit_price,
             )
         except Exception as exc:
             _record_item_failure(state, index, "나라장터 가격", exc)
@@ -383,7 +391,7 @@ def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
             continue
         try:
             state.mfds_workspace[index] = research_mfds_for_workspace(
-                quote_item_query(item),
+                _quote_item_unified_query(state, index),
                 track_b,
             )
         except Exception as exc:
@@ -441,7 +449,7 @@ def _ensure_market_research(state: QuoteReviewState) -> bool:
     total = len(missing)
     for done, index in enumerate(missing, start=1):
         item = state.items[index]
-        query = quote_item_query(item)
+        query = _quote_item_unified_query(state, index)
         progress.progress(
             (done - 1) / total,
             text=(
@@ -482,7 +490,7 @@ def _render_transaction_table(rows: list[dict[str, object]]) -> None:
 
 def _render_item_result(state: QuoteReviewState, index: int) -> None:
     item = state.items[index]
-    query = quote_item_query(item)
+    query = _quote_item_unified_query(state, index)
     run = state.search_runs.get(index)
     discovery = state.discoveries.get(index)
     market_bundle = state.market_bundles.get(index)
@@ -737,9 +745,9 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
         return
 
     _render_compact_item_editor(state)
+    _ensure_mfds_identity(state)
     _ensure_track_b_comparison(state)
     _ensure_mfds_workspace(state)
-    _ensure_mfds_identity(state)
     _ensure_safety_lookup(state)
 
     integrated_summaries = [
