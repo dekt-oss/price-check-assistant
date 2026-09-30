@@ -17,6 +17,8 @@ from purchase_price.services.g2b_market_models import (
     ResearchAmountType,
 )
 
+G2B_CONTRACT_MAX_WINDOW_DAYS = 31
+
 
 def _text(value: Any) -> str | None:
     if value in (None, ""):
@@ -152,14 +154,13 @@ def _date_windows(
     begin: date,
     end: date,
     *,
-    max_window_days: int | None = None,
+    max_window_days: int | None = G2B_CONTRACT_MAX_WINDOW_DAYS,
 ) -> tuple[tuple[date, date], ...]:
-    """Split only when the caller has an explicit source-specific window limit.
+    """Split independent contract searches into API-safe date windows.
 
-    The current PPS contract PPSSrch documentation exposes begin/end dates but does not establish
-    the 31-day restriction used by some other procurement APIs. Defaulting to one interval avoids
-    multiplying requests for 1/3/5-year adaptive research. A bounded window can still be supplied
-    explicitly if live evidence later proves such a source constraint.
+    Production live evidence on 2026-09-30 showed that a 90-day PPSSrch contract request can
+    return resultCode=07 (input range exceeded). Use 31 calendar days per request by default while
+    preserving an explicit None escape hatch for controlled diagnostics.
     """
 
     if begin > end:
@@ -294,7 +295,7 @@ class G2BContractResearchClient:
         end_date: date,
         max_pages_per_window: int = 1,
         num_of_rows: int = 100,
-        max_window_days: int | None = None,
+        max_window_days: int | None = G2B_CONTRACT_MAX_WINDOW_DAYS,
     ) -> tuple[tuple[G2BResearchRecord, ...], int]:
         """Search contracts without requiring an upstream bid notice seed."""
 
