@@ -13,6 +13,7 @@ from purchase_price.services.g2b_market_models import (
     ResearchSourceStatus,
 )
 from purchase_price.services.g2b_research_linking import normalize_bid_notice_no
+from purchase_price.services.market_research import is_g2b_research_authorization_error
 
 
 def _safe_error(exc: Exception) -> str:
@@ -161,7 +162,7 @@ def enrich_market_bundle_with_contracts(
             )
         except Exception as exc:
             errors.append(exc)
-            if isinstance(exc, PublicDataTransportError):
+            if isinstance(exc, PublicDataTransportError) or is_g2b_research_authorization_error(exc):
                 break
             continue
         request_count += max(0, requests - 1)
@@ -199,7 +200,7 @@ def enrich_market_bundle_with_contracts(
                     )
                 except Exception as exc:
                     errors.append(exc)
-                    if isinstance(exc, PublicDataTransportError):
+                    if isinstance(exc, PublicDataTransportError) or is_g2b_research_authorization_error(exc):
                         transport_failed = True
                         break
                     continue
@@ -217,7 +218,11 @@ def enrich_market_bundle_with_contracts(
         first = errors[0]
         source = ResearchSourceResult(
             source=G2BResearchSource.CONTRACT,
-            status=ResearchSourceStatus.FAILURE,
+            status=(
+                ResearchSourceStatus.NOT_AUTHORIZED
+                if is_g2b_research_authorization_error(first)
+                else ResearchSourceStatus.FAILURE
+            ),
             request_count=request_count,
             error_type=type(first).__name__,
             error_message=_safe_error(first),

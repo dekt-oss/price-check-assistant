@@ -111,7 +111,90 @@ def test_quote_market_ui_exposes_partial_failure_and_retry_contract() -> None:
     )
 
     assert "다른 품목의 결과는 유지" in source
-    assert "실패 품목만 다시 조사" in source
+    assert "실패 품목 전체 다시 조사" in source
     assert "state.item_research_failures" in source
     assert "_record_item_failure" in source
     assert "_clear_item_failure" in source
+
+
+def test_processing_counts_are_mutually_exclusive() -> None:
+    state = QuoteReviewState(
+        items=[
+            _item("품목A", "A"),
+            _item("품목B", "B"),
+            _item("품목C", "C"),
+        ]
+    )
+    state.track_b_db = {
+        0: SimpleNamespace(status="success_0"),
+        1: SimpleNamespace(status="success_0"),
+    }
+    state.item_research_failures = {
+        1: {"식약처": "RuntimeError"},
+    }
+
+    assert module._quote_processing_counts(state) == (3, 1, 1, 1)
+
+
+def test_retrying_mfds_failure_preserves_price_result() -> None:
+    state = QuoteReviewState(items=[_item("품목A", "A")])
+    price_result = SimpleNamespace(status="success_0")
+    state.track_b_db = {0: price_result}
+    state.mfds_workspace = {0: SimpleNamespace(status="failure")}
+    state.item_research_failures = {0: {"식약처": "RuntimeError"}}
+
+    module._retry_failed_stage(state, 0, "식약처")
+
+    assert state.track_b_db[0] is price_result
+    assert 0 not in state.mfds_workspace
+    assert state.item_research_failures == {}
+
+
+def test_retrying_track_b_failure_invalidates_dependent_mfds_only() -> None:
+    state = QuoteReviewState(items=[_item("품목A", "A")])
+    state.track_b_db = {0: SimpleNamespace(status="success")}
+    state.mfds_workspace = {0: SimpleNamespace(status="success")}
+    state.search_runs = {0: SimpleNamespace(results=[])}
+    state.item_research_failures = {0: {"나라장터 가격": "RuntimeError"}}
+
+    module._retry_failed_stage(state, 0, "나라장터 가격")
+
+    assert 0 not in state.track_b_db
+    assert 0 not in state.mfds_workspace
+    assert 0 in state.search_runs
+    assert state.item_research_failures == {}
+
+
+def test_retrying_external_research_preserves_track_b_and_mfds() -> None:
+    state = QuoteReviewState(items=[_item("품목A", "A")])
+    track_b = SimpleNamespace(status="success")
+    mfds = SimpleNamespace(status="success")
+    state.track_b_db = {0: track_b}
+    state.mfds_workspace = {0: mfds}
+    state.search_runs = {0: SimpleNamespace(results=[])}
+    state.discoveries = {0: object()}
+    state.market_bundles = {0: object()}
+    state.item_research_failures = {0: {"추가 공개자료": "TimeoutError"}}
+
+    module._retry_failed_stage(state, 0, "추가 공개자료")
+
+    assert state.track_b_db[0] is track_b
+    assert state.mfds_workspace[0] is mfds
+    assert 0 not in state.search_runs
+    assert 0 not in state.discoveries
+    assert 0 not in state.market_bundles
+    assert state.item_research_failures == {}
+
+
+def test_quote_market_ui_exposes_status_summary_and_source_retry() -> None:
+    from pathlib import Path
+
+    source = Path("src/purchase_price/ui/quote_market_research.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"정상 처리"' in source
+    assert '"부분 실패"' in source
+    assert '"대기"' in source
+    assert "실패 Source별 재시도" in source
+    assert "_retry_failed_stage" in source

@@ -19,6 +19,7 @@ from purchase_price.services.mfds_device_intelligence import (
     MfdsModelInfoClient,
     resolve_exact_model_identity,
 )
+from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.safety_support import (
     MFDS_ADMIN_SANCTION_PAGE_URL,
     MFDS_RECALL_DATASET_URL,
@@ -26,7 +27,7 @@ from purchase_price.services.safety_support import (
     MFDS_SAFETY_LETTER_PAGE_URL,
     MFDS_STANDARD_CODE_DATASET_URL,
     MFDS_UDI_PORTAL_URL,
-    build_manual_safety_check_state,
+    build_safety_state_from_recall_lookup,
 )
 from purchase_price.services.search import search_all
 
@@ -34,16 +35,19 @@ st.set_page_config(page_title="의료기기 안전·업체·조달", page_icon="
 st.title("의료기기 안전·업체·조달 확인")
 st.caption(
     "식약처 exact identity, 나라장터 실제 납품업체, 식약처 업 허가·신고 업체와 공식 안전정보 확인 경로를 "
-    "한 화면에서 검토합니다. 현재 회수·판매중지 API는 request contract 확인 전까지 자동조회하지 않습니다."
+    "한 화면에서 검토합니다. 의료기기 회수·판매중지정보는 식약처 공식 API를 자동조회하며, "
+    "조회 실패·미승인·0건을 서로 다른 상태로 표시합니다."
 )
 
 settings = get_settings()
 mfds_service_key = (settings.resolved_mfds_service_key or "").strip()
+mfds_recall_service_key = (settings.resolved_mfds_recall_service_key or "").strip()
 g2b_service_key = (settings.resolved_g2b_service_key or "").strip()
 
-c1, c2 = st.columns(2)
-c1.caption("식약처 API: " + ("설정됨" if mfds_service_key else "미설정"))
-c2.caption("나라장터 API: " + ("설정됨" if g2b_service_key else "미설정"))
+c1, c2, c3 = st.columns(3)
+c1.caption("식약처 Identity API: " + ("설정됨" if mfds_service_key else "미설정"))
+c2.caption("식약처 Safety API: " + ("설정됨" if mfds_recall_service_key else "미설정"))
+c3.caption("나라장터 API: " + ("설정됨" if g2b_service_key else "미설정"))
 
 with st.expander("이 화면에서 확인하는 서로 다른 근거 역할", expanded=False):
     st.markdown(
@@ -53,7 +57,7 @@ with st.expander("이 화면에서 확인하는 서로 다른 근거 역할", ex
 3. **웹 판매처 Research** — 보조 탐색이며 반드시 별도 공식 근거 확인 필요
 
 Safety는 별도 축입니다. 회수·판매중지/행정처분/안전성서한은 가격이 싸더라도 우선 확인해야 하며,
-현재 자동 API가 미연결인 상태를 `안전`으로 해석하지 않습니다.
+회수·판매중지 API의 정상조회 0건도 `안전` 판정으로 해석하지 않습니다. 행정처분·안전성서한은 별도 공식 Source로 계속 확인합니다.
         """
     )
 
@@ -238,11 +242,51 @@ if submitted:
 
     st.divider()
     st.subheader("2. 의료기기 Safety")
-    safety_state = build_manual_safety_check_state(
+    safety_lookup = lookup_mfds_recall(
         model_name=model_name.strip(),
+        product_name=product_name.strip(),
+        settings=settings,
+    )
+    safety_state = build_safety_state_from_recall_lookup(
+        safety_lookup,
+        model_name=model_name.strip(),
+        product_name=product_name.strip(),
         permit_numbers=permit_numbers,
     )
-    st.warning(f"{safety_state.status.value} · {safety_state.message}")
+    if safety_state.evidence_status.value == "RED":
+        st.error(f"{safety_state.status.value} · {safety_state.message}")
+    elif safety_state.evidence_status.value in {"AMBER", "CHECK_FAILED"}:
+        st.warning(f"{safety_state.status.value} · {safety_state.message}")
+    else:
+        st.info(f"{safety_state.status.value} · {safety_state.message}")
+
+    if safety_state.checked_at:
+        st.caption(f"식약처 회수·판매중지 API 확인시각 · {safety_state.checked_at}")
+    if getattr(safety_lookup, "records", ()):
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "모델/형명": item.model_name or "",
+                        "품목명": item.product_name or "",
+                        "분류번호": item.classification_no or "",
+                        "분류명": item.classification_name or "",
+                        "제조사": item.manufacturer_name or "",
+                        "회수상태": item.report_state_name or "",
+                        "구분": item.report_kind_name or "",
+                        "보고일": item.report_submit_date or "",
+                        "회수·판매중지 사유": item.reason or "",
+                    }
+                    for item in safety_lookup.records
+                ]
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "현재 Service04 형명/품목 응답에는 exact 식약처 품목번호가 없어 양성 결과를 곧바로 "
+            "해당 허가제품의 RED로 승격하지 않습니다. 식약처 원문에서 허가·모델 적용범위를 확인합니다."
+        )
 
     if safety_state.search_keys:
         st.markdown("**공식 안전정보 확인 키**")
@@ -270,8 +314,9 @@ if submitted:
         MFDS_RECALL_DATASET_URL,
     )
     st.caption(
-        "자동 API 조회 결과가 아닌 공식 페이지 수동 확인 경로입니다. 회수·판매중지 exact hit가 "
-        "자동으로 연결되기 전까지 `확인되지 않음`을 `안전`으로 바꾸지 않습니다."
+        "회수·판매중지는 위 공식 API 결과와 공식 페이지를 함께 확인합니다. "
+        "행정처분·안전성서한은 현재 별도 공식 페이지 확인 경로이며, 어느 Source에서도 "
+        "`확인되지 않음`을 `안전`으로 바꾸지 않습니다."
     )
 
     st.divider()
