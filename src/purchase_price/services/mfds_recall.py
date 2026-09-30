@@ -72,6 +72,20 @@ def _text(value: Any) -> str | None:
     return text or None
 
 
+def _safe_setting(settings: object, name: str, default: Any = None) -> Any:
+    """Read a settings attribute across Streamlit/Pydantic hot-reload class versions.
+
+    Streamlit can retain an instance created from the previous Settings class after a code reload.
+    Missing newly-added fields must therefore behave like absent optional configuration instead of
+    crashing the whole search path.
+    """
+
+    try:
+        return getattr(settings, name)
+    except (AttributeError, TypeError):
+        return default
+
+
 def parse_model_recall_record(record: Mapping[str, Any]) -> MfdsRecallRecord:
     return MfdsRecallRecord(
         recall_item_seq=_text(record.get("RECALL_ITEM_SEQ")),
@@ -237,14 +251,11 @@ def lookup_mfds_recall(
     query_type = "model" if model else "product"
     query = model or product
     settings = settings or Settings()
-    raw_settings = getattr(settings, "__dict__", {})
-    if not isinstance(raw_settings, dict):
-        raw_settings = {}
     service_key = str(
-        raw_settings.get("mfds_recall_service_key")
-        or raw_settings.get("mfds_service_key")
-        or raw_settings.get("data_go_kr_market_service_key")
-        or raw_settings.get("data_go_kr_service_key")
+        _safe_setting(settings, "mfds_recall_service_key")
+        or _safe_setting(settings, "mfds_service_key")
+        or _safe_setting(settings, "data_go_kr_market_service_key")
+        or _safe_setting(settings, "data_go_kr_service_key")
         or ""
     ).strip()
     if client is None and not service_key:
@@ -256,9 +267,11 @@ def lookup_mfds_recall(
 
     client = client or MfdsRecallClient(
         service_key,
-        base_url=raw_settings.get("mfds_recall_base_url") or MFDS_RECALL_BASE_URL,
-        timeout_seconds=settings.mfds_request_timeout_seconds,
-        max_retries=settings.mfds_max_retries,
+        base_url=_safe_setting(settings, "mfds_recall_base_url") or MFDS_RECALL_BASE_URL,
+        timeout_seconds=float(
+            _safe_setting(settings, "mfds_request_timeout_seconds", 20.0) or 20.0
+        ),
+        max_retries=int(_safe_setting(settings, "mfds_max_retries", 3) or 3),
     )
     try:
         records = (
