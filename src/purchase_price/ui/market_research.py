@@ -472,7 +472,12 @@ def render_market_reference_summary(
         return
     if discovery.status == "failure":
         st.warning("나라장터 쇼핑몰 Research API 조회가 실패했습니다. 이는 시장자료 0건과 다릅니다.")
+        if discovery.error_messages:
+            st.caption("실패 근거 · " + discovery.error_messages[0][:300])
         return
+    if discovery.status == "partial" and discovery.error_messages:
+        st.warning("나라장터 쇼핑몰 Research 일부 조회가 실패해 부분 결과만 표시합니다.")
+        st.caption("부분 실패 근거 · " + discovery.error_messages[0][:300])
 
     if include_model_price_summary:
         _render_model_price_summary(discovery, quote_unit_price=quote_unit_price)
