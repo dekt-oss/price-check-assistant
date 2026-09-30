@@ -18,7 +18,6 @@ from purchase_price.services.price_conditions import build_price_condition_profi
 from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
-    QUOTE_AUTO_ROUTE_FILE_SESSION_KEY,
     build_purchase_workspace_handoff,
 )
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
@@ -52,6 +51,8 @@ from purchase_price.ui.widgets import (
     render_observation_cards,
     render_source_status,
 )
+
+QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(
     r"(?:^|[\s._-]+)(?:견적서?|quotation|estimate)"
