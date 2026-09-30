@@ -82,7 +82,6 @@ def test_independent_contract_search_splits_long_ranges_without_overlap() -> Non
         begin_date=date(2026, 6, 1),
         end_date=date(2026, 8, 31),
         max_pages_per_window=1,
-        max_window_days=31,
     )
 
     assert request_count == 3
@@ -114,9 +113,11 @@ class FakeIndependentContractClient:
         begin_date: date,
         end_date: date,
         max_pages_per_window: int = 1,
+        max_window_days: int | None = None,
     ):
         del max_pages_per_window
         self.product_calls.append((product_name, begin_date, end_date))
+        self.last_max_window_days = max_window_days
         if self.fail:
             raise RuntimeError("synthetic independent contract failure")
         if len(self.product_calls) == 1:
@@ -180,6 +181,58 @@ def test_seedless_contract_enrichment_expands_from_90_days_to_one_year() -> None
     assert source.records[0].amount_type == ResearchAmountType.CONTRACT_TOTAL
     assert not source.records[0].is_direct_unit_price
     assert not isinstance(source.records[0], CollectedPrice)
+
+
+def test_three_year_contract_search_uses_31_day_windows_by_default() -> None:
+    portal = FakePortal([_page([]) for _ in range(36)])
+    client = G2BContractResearchClient("key", client=portal)  # type: ignore[arg-type]
+
+    _, request_count = client.search_by_product_name(
+        product_name="심장충격기",
+        begin_date=date(2023, 10, 2),
+        end_date=date(2026, 9, 30),
+        max_pages_per_window=1,
+    )
+
+    assert request_count == 36
+    windows = [
+        (call[2]["inqryBgnDate"], call[2]["inqryEndDate"])
+        for call in portal.calls
+    ]
+    assert windows[0] == ("20231002", "20231101")
+    assert windows[-1] == ("20260922", "20260930")
+    assert all(
+        (date.fromisoformat(end[:4] + "-" + end[4:6] + "-" + end[6:]) -
+         date.fromisoformat(begin[:4] + "-" + begin[4:6] + "-" + begin[6:])).days <= 30
+        for begin, end in windows
+    )
+
+
+def test_full_lookback_does_not_stop_after_early_contract_hit() -> None:
+    client = FakeIndependentContractClient()
+
+    enriched = enrich_market_bundle_with_contracts(
+        _empty_bundle(),
+        service_key=None,
+        client=client,  # type: ignore[arg-type]
+        independent_terms=("레이저프린터",),
+        requested_lookback_days=1095,
+        today=date(2026, 9, 30),
+        minimum_records_before_stop=1,
+        require_full_lookback=True,
+    )
+
+    source = enriched.sources[-1]
+    assert len(client.product_calls) == 3
+    assert client.product_calls[-1] == (
+        "레이저프린터",
+        date(2023, 10, 2),
+        date(2025, 10, 1),
+    )
+    assert client.last_max_window_days == 31
+    assert source.coverage_start == date(2023, 10, 2)
+    assert source.coverage_end == date(2026, 9, 30)
+    assert source.requested_lookback_days == 1095
 
 
 def test_independent_contract_failure_is_not_successful_zero() -> None:
