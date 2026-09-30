@@ -991,6 +991,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
             mfds_metric = "품목 확인"
         else:
             mfds_metric = "0건"
+    elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "not_authorized":
+        mfds_metric = "API 미승인"
     elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "failure":
         mfds_metric = "조회 실패"
     else:
@@ -1454,6 +1456,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
             st.info("현재 조달분류 기준으로 의료기기 자동조회 대상이 아닙니다.")
         elif mfds.status == "not_configured":
             st.warning("식약처 API 서비스키가 연결되지 않아 자동조회를 실행하지 못했습니다.")
+        elif mfds.status == "not_authorized":
+            st.warning(
+                "식약처 형명정보 API 활용승인이 현재 서비스키에 등록되지 않았습니다. "
+                "현재 누적 Identity Index는 별도 승인된 공식 제품정보 Source를 계속 사용합니다."
+            )
+            st.caption(
+                "미승인 상태를 등록 0건으로 해석하지 않습니다. "
+                "live 형명정보가 필요한 경우 해당 API 활용승인을 별도로 받아야 합니다."
+            )
         elif mfds.status == "failure":
             st.warning(
                 f"식약처 조회 실패 · {mfds.error_type or '오류'} · "
