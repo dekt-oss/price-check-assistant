@@ -57,7 +57,7 @@ def test_safety_supplier_page_loads_without_live_api_calls() -> None:
 
     assert not app.exception
     assert app.title[0].value == "의료기기 안전·업체·조달 확인"
-    assert any("현재 회수·판매중지 API" in item.value for item in app.caption)
+    assert any("공식 API를 자동조회" in item.value for item in app.caption)
 
 
 
@@ -246,3 +246,13 @@ def test_service04_positive_model_hit_remains_amber_without_permit_scope() -> No
     assert "일치 기록 1건" in state.message
     assert "exact 식약처 품목번호가 없어" in state.message
     assert state.evidence_status != SafetyEvidenceStatus.RED
+
+
+def test_safety_supplier_page_uses_official_recall_lookup_contract() -> None:
+    source = Path("pages/5_의료기기_안전_공급사.py").read_text(encoding="utf-8")
+
+    assert "lookup_mfds_recall" in source
+    assert "build_safety_state_from_recall_lookup" in source
+    assert "식약처 Safety API" in source
+    assert "식약처 회수·판매중지 API 확인시각" in source
+    assert "exact 식약처 품목번호가 없어" in source
