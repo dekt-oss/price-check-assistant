@@ -52,7 +52,6 @@ from purchase_price.services.pricing import assess_prices
 from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
-    QUOTE_AUTO_ROUTE_FILE_SESSION_KEY,
     parse_purchase_workspace_handoff,
 )
 from purchase_price.services.safety_support import (
@@ -99,6 +98,7 @@ from purchase_price.ui.widgets import (
 HOME_SEARCH_STATE_KEY = "home_unified_search_result"
 HOME_SEARCH_DETAILS_KEY = "home_search_details"
 HOME_WORKSPACE_VIEW_KEY = "home_workspace_view"
+QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 WORKSPACE_VIEWS = {
     "price": "💰 가격 비교",
     "supplier": "🏢 업체·조달",
