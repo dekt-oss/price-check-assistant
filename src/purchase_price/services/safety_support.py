@@ -60,7 +60,7 @@ class SafetyCheckState:
             return self.semantic_status
         return {
             SafetyCheckStatus.NOT_CONNECTED: SafetyEvidenceStatus.NOT_CONNECTED,
-            SafetyCheckStatus.NOT_AUTHORIZED: SafetyEvidenceStatus.NOT_CONNECTED,
+            SafetyCheckStatus.NOT_AUTHORIZED: SafetyEvidenceStatus.NOT_AUTHORIZED,
             SafetyCheckStatus.CHECK_REQUIRED: SafetyEvidenceStatus.NOT_CONNECTED,
             SafetyCheckStatus.MATCH: SafetyEvidenceStatus.RED,
             SafetyCheckStatus.NO_MATCH: SafetyEvidenceStatus.CHECKED_NONE,
