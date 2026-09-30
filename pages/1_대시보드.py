@@ -983,6 +983,11 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
         mfds_metric = "품목번호 확인"
+    elif (
+        isinstance(indexed_identity, MfdsIdentityLookup)
+        and indexed_identity.status == "success_0"
+    ):
+        mfds_metric = "수집범위 미확인"
     elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
         if mfds.exact_ambiguous:
             mfds_metric = "복수 품목번호"
