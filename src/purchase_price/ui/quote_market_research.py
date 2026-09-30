@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import streamlit as st
 
+from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
@@ -19,7 +20,6 @@ from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
     build_purchase_workspace_handoff,
 )
-from purchase_price.schemas import ProductQuery
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
 from purchase_price.services.structured_query_identity import canonicalize_product_query
 from purchase_price.services.track_b_db_quote_comparison import (
