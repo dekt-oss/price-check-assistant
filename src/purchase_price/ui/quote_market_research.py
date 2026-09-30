@@ -19,6 +19,7 @@ from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
     build_purchase_workspace_handoff,
 )
+from purchase_price.schemas import ProductQuery
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
 from purchase_price.services.structured_query_identity import canonicalize_product_query
 from purchase_price.services.track_b_db_quote_comparison import (
@@ -357,10 +358,25 @@ def _render_compact_item_editor(state: QuoteReviewState) -> None:
             st.rerun()
 
 
-def _quote_item_unified_query(state: QuoteReviewState, index: int):
+def _quote_item_unified_query(state: QuoteReviewState, index: int) -> ProductQuery:
+    """Build the external-evidence query with the same identity scope as ordinary search.
+
+    Quote manufacturer/specification remain on the QuoteItem for commercial-condition review.
+    They are not retrieval constraints once a model is available, because ordinary one-line
+    search resolves the product/model identity without those quote-only hints.
+    """
+
     raw_query = quote_item_query(state.items[index])
     identity = state.mfds_identity.get(index)
-    return canonicalize_product_query(raw_query, identity).query
+    canonical = canonicalize_product_query(raw_query, identity).query
+    if canonical.model_name.strip():
+        return ProductQuery(
+            product_name=canonical.product_name,
+            model_name=canonical.model_name,
+        )
+    if canonical.product_name.strip():
+        return ProductQuery(product_name=canonical.product_name)
+    return canonical
 
 
 def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
