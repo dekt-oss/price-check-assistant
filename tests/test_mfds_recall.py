@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
+from purchase_price.services import mfds_recall as module
 from purchase_price.config import Settings
 from purchase_price.services.mfds_recall import (
     MFDS_RECALL_BASE_URL,
@@ -179,3 +180,47 @@ def test_successful_empty_query_is_success_zero() -> None:
 
     assert result.status == "success_0"
     assert result.checked_at
+
+
+def test_lookup_accepts_legacy_settings_without_new_recall_fields(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class LegacySettings:
+        def __init__(self) -> None:
+            self.mfds_service_key = "legacy-mfds-key"
+            self.data_go_kr_market_service_key = None
+            self.data_go_kr_service_key = None
+            self.mfds_request_timeout_seconds = 7.0
+            self.mfds_max_retries = 1
+
+    class FakeRecallClient:
+        def __init__(
+            self,
+            service_key: str,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            max_retries: int,
+        ) -> None:
+            captured.update(
+                service_key=service_key,
+                base_url=base_url,
+                timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
+            )
+
+        def search_model(self, model_name: str):
+            return ()
+
+    monkeypatch.setattr(module, "MfdsRecallClient", FakeRecallClient)
+
+    result = module.lookup_mfds_recall(
+        model_name="DFM100",
+        settings=LegacySettings(),  # type: ignore[arg-type]
+    )
+
+    assert result.status == "success_0"
+    assert captured["service_key"] == "legacy-mfds-key"
+    assert captured["base_url"] == MFDS_RECALL_BASE_URL
+    assert captured["timeout_seconds"] == 7.0
+    assert captured["max_retries"] == 1
