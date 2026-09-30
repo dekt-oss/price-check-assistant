@@ -1,0 +1,108 @@
+name: TEMP Source Reliability Probe
+
+on:
+  push:
+    branches:
+      - fix/production-source-reliability-20260930
+    paths:
+      - ".github/workflows/tmp-source-reliability-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY || secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      MFDS_RECALL_SERVICE_KEY: ${{ secrets.MFDS_RECALL_SERVICE_KEY || secrets.MFDS_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Print configured key sources only
+        run: |
+          python - <<'PY'
+          from purchase_price.config import get_settings
+          s = get_settings()
+          print("g2b_shopping_key_source=", s.g2b_shopping_key_source)
+          print("g2b_research_key_source=", s.g2b_research_key_source)
+          print("mfds_recall_key_source=", s.mfds_recall_key_source)
+          print("mfds_service_configured=", bool((s.resolved_mfds_service_key or "").strip()))
+          PY
+
+      - name: Probe G2B Shopping 31-day and 365-day windows
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          from datetime import date, timedelta
+          from purchase_price.collectors.g2b_shopping import G2BShoppingCollector
+          from purchase_price.config import get_settings
+
+          s = get_settings()
+          key = (s.resolved_g2b_shopping_service_key or "").strip()
+          if not key:
+              raise SystemExit("G2B shopping key not configured")
+          collector = G2BShoppingCollector(key)
+          end = date(2026, 9, 30)
+          for term in ("심장충격기", "심장 충격기"):
+              for days in (31, 365):
+                  begin = end - timedelta(days=days - 1)
+                  try:
+                      page, _ = collector.fetch_specific_item_page(
+                          detail_product_name=term,
+                          begin_date=begin,
+                          end_date=end,
+                          page_no=1,
+                          num_of_rows=1,
+                      )
+                      print(f"shopping term={term!r} days={days} status=success items={len(page.items)} total={page.total_count}")
+                  except Exception as exc:
+                      print(f"shopping term={term!r} days={days} status=failure error={type(exc).__name__}: {exc}")
+          PY
+
+      - name: Probe MFDS model info with Production query terms
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          from purchase_price.config import get_settings
+          from purchase_price.services.mfds_device_intelligence import MfdsModelInfoClient
+
+          s = get_settings()
+          key = (s.resolved_mfds_service_key or "").strip()
+          if not key:
+              raise SystemExit("MFDS model-info key not configured")
+          client = MfdsModelInfoClient(key, timeout_seconds=12, max_retries=1)
+          for term in ("심장 충격기", "심장충격기"):
+              try:
+                  rows = client.search_models(term, max_pages=1, num_of_rows=10)
+                  print(f"mfds_model term={term!r} status=success rows={len(rows)}")
+                  for row in rows[:3]:
+                      print(" sample=", row.product_name, row.model_name, row.permit_number)
+              except Exception as exc:
+                  print(f"mfds_model term={term!r} status=failure error={type(exc).__name__}: {exc}")
+          PY
+
+      - name: Probe MFDS recall with Production model
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          from purchase_price.services.mfds_recall import lookup_mfds_recall
+          result = lookup_mfds_recall(model_name="Efficia DFM100")
+          print("mfds_recall status=", result.status)
+          print("mfds_recall records=", len(result.records))
+          print("mfds_recall error_type=", result.error_type or "")
+          print("mfds_recall error_message=", result.error_message or "")
+          PY
