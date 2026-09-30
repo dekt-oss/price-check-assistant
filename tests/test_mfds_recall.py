@@ -224,3 +224,51 @@ def test_lookup_accepts_legacy_settings_without_new_recall_fields(monkeypatch) -
     assert captured["base_url"] == MFDS_RECALL_BASE_URL
     assert captured["timeout_seconds"] == 7.0
     assert captured["max_retries"] == 1
+
+
+def test_lookup_does_not_require_settings_dunder_dict(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class HotReloadSettings:
+        mfds_service_key = "legacy-mfds-key"
+        data_go_kr_market_service_key = None
+        data_go_kr_service_key = None
+        mfds_request_timeout_seconds = 9.0
+        mfds_max_retries = 2
+
+        def __getattribute__(self, name: str):
+            if name == "__dict__":
+                raise AttributeError("simulated pydantic hot-reload object")
+            return object.__getattribute__(self, name)
+
+    class FakeRecallClient:
+        def __init__(
+            self,
+            service_key: str,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            max_retries: int,
+        ) -> None:
+            captured.update(
+                service_key=service_key,
+                base_url=base_url,
+                timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
+            )
+
+        def search_model(self, model_name: str):
+            return ()
+
+    monkeypatch.setattr(module, "MfdsRecallClient", FakeRecallClient)
+
+    result = module.lookup_mfds_recall(
+        model_name="DFM100",
+        settings=HotReloadSettings(),  # type: ignore[arg-type]
+    )
+
+    assert result.status == "success_0"
+    assert captured["service_key"] == "legacy-mfds-key"
+    assert captured["base_url"] == MFDS_RECALL_BASE_URL
+    assert captured["timeout_seconds"] == 9.0
+    assert captured["max_retries"] == 2

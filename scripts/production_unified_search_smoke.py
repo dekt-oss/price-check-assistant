@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from openpyxl import Workbook
+
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
@@ -209,6 +211,69 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
     raise RuntimeError("DFM100 Production unified search did not pass result + workspace-section E2E")
 
 
+
+
+def _build_dfm100_quote(path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Quote"
+    sheet.append(["품명", "제조사", "모델명", "규격", "수량", "단위", "단가", "금액"])
+    sheet.append(
+        [
+            "심장충격기",
+            "Philips",
+            "DFM100",
+            "",
+            1,
+            "대",
+            12000000,
+            12000000,
+        ]
+    )
+    workbook.save(path)
+
+
+def _verify_quote_upload_uses_unified_workspace(browser: Any, report: dict[str, object]) -> None:
+    quote_path = ARTIFACT_DIR / "synthetic-home-dfm100-quote.xlsx"
+    _build_dfm100_quote(quote_path)
+
+    page = browser.new_page(viewport={"width": 1440, "height": 1200})
+    try:
+        _wait_for_deployed_app(page, report)
+        app = _app(page)
+        uploader = app.get_by_label("견적서 업로드", exact=True).first
+        uploader.wait_for(state="visible", timeout=20_000)
+        file_input = uploader.locator('input[type="file"]')
+        file_input.wait_for(state="attached", timeout=20_000)
+        file_input.set_input_files(str(quote_path))
+
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            body = _body_text(page)
+            _assert_no_error_text(body)
+            if (
+                "구매조사 워크스페이스" in body
+                and "일반 통합검색과 동일한 구매조사 파이프라인" in body
+                and "DFM100" in body
+            ):
+                direct_match = WORKSPACE_DIRECT_PATTERN.search(body)
+                if direct_match is None or int(direct_match.group(1)) < 1:
+                    raise RuntimeError(
+                        "Quote upload reached unified workspace but did not recover DFM100 "
+                        "direct A/B evidence"
+                    )
+                report["quote_upload_unified_workspace"] = True
+                report["quote_upload_direct_count"] = int(direct_match.group(1))
+                _save_snapshot(page, report, "quote-upload-dfm100-unified-workspace")
+                return
+            page.wait_for_timeout(1_000)
+
+        raise RuntimeError(
+            "Home quote upload did not route DFM100 into the same unified purchase workspace"
+        )
+    finally:
+        page.close()
+
 def main() -> None:
     from playwright.sync_api import sync_playwright
 
@@ -227,6 +292,7 @@ def main() -> None:
             try:
                 _wait_for_deployed_app(page, report)
                 _submit_dfm100(page, report)
+                _verify_quote_upload_uses_unified_workspace(browser, report)
                 report["status"] = "pass"
             except Exception:
                 _save_snapshot(page, report, "unified-search-dfm100-failure")
