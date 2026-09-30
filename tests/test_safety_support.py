@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from streamlit.testing.v1 import AppTest
 
@@ -7,6 +8,7 @@ from purchase_price.services.safety_support import (
     MedicalDeviceRecallRecord,
     SafetyCheckStatus,
     build_manual_safety_check_state,
+    build_safety_state_from_recall_lookup,
     evaluate_official_recall_records,
     no_match_safety_state,
 )
@@ -165,3 +167,82 @@ def test_official_recall_successful_zero_is_checked_none_not_safe() -> None:
 
     assert state.evidence_status == SafetyEvidenceStatus.CHECKED_NONE
     assert "안전함" not in state.message
+
+
+
+def test_recall_lookup_not_authorized_stays_not_connected_semantically() -> None:
+    state = build_safety_state_from_recall_lookup(
+        SimpleNamespace(
+            status="not_authorized",
+            checked_at="2026-09-30T08:00:00+09:00",
+            source_url="https://www.data.go.kr/data/15056785/openapi.do",
+            records=(),
+        ),
+        model_name="DFM100",
+        permit_numbers=["수허 12-3456"],
+    )
+
+    assert state.status == SafetyCheckStatus.NOT_AUTHORIZED
+    assert state.evidence_status == SafetyEvidenceStatus.NOT_CONNECTED
+    assert "활용승인" in state.message
+    assert "안전함" not in state.message
+    assert state.checked_at == "2026-09-30T08:00:00+09:00"
+
+
+def test_recall_lookup_failure_is_check_failed_not_zero() -> None:
+    state = build_safety_state_from_recall_lookup(
+        SimpleNamespace(
+            status="failure",
+            checked_at="2026-09-30T08:00:00+09:00",
+            source_url="https://example.test/recall",
+            records=(),
+        ),
+        model_name="DFM100",
+    )
+
+    assert state.status == SafetyCheckStatus.ERROR
+    assert state.evidence_status == SafetyEvidenceStatus.CHECK_FAILED
+    assert "0건으로 해석하지" in state.message
+
+
+def test_recall_lookup_success_zero_is_checked_none_without_safe_claim() -> None:
+    state = build_safety_state_from_recall_lookup(
+        SimpleNamespace(
+            status="success_0",
+            checked_at="2026-09-30T08:00:00+09:00",
+            source_url="https://example.test/recall",
+            records=(),
+        ),
+        model_name="DFM100",
+    )
+
+    assert state.status == SafetyCheckStatus.NO_MATCH
+    assert state.evidence_status == SafetyEvidenceStatus.CHECKED_NONE
+    assert "exact 일치 기록을 확인하지 못했습니다" in state.message
+    assert "제품이 안전하다는 판정이 아니며" in state.message
+
+
+def test_service04_positive_model_hit_remains_amber_without_permit_scope() -> None:
+    state = build_safety_state_from_recall_lookup(
+        SimpleNamespace(
+            status="success",
+            query_type="model",
+            checked_at="2026-09-30T08:00:00+09:00",
+            source_url="https://example.test/recall",
+            records=(
+                SimpleNamespace(
+                    report_state_name="회수중",
+                    report_kind_name="회수",
+                    report_submit_date="20260920",
+                ),
+            ),
+        ),
+        model_name="DFM100",
+        permit_numbers=["수허 12-3456"],
+    )
+
+    assert state.status == SafetyCheckStatus.CHECK_REQUIRED
+    assert state.evidence_status == SafetyEvidenceStatus.AMBER
+    assert "일치 기록 1건" in state.message
+    assert "exact 식약처 품목번호가 없어" in state.message
+    assert state.evidence_status != SafetyEvidenceStatus.RED
