@@ -1,6 +1,6 @@
 from datetime import date
 
-from purchase_price.clients.data_go_kr import PublicDataClientError
+from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataTransportError
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_unmapped_discovery import (
     build_g2b_discovery_terms,
@@ -200,6 +200,40 @@ def test_unmapped_discovery_isolates_one_failed_research_term(monkeypatch) -> No
     assert result.error_types == ("PublicDataClientError",)
     assert len(result.candidates) == 1
     assert result.candidates[0].relevance == "모델 표기 후보"
+
+
+def test_unmapped_discovery_stops_after_transport_outage(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class TimeoutCollector:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_specific_item_page(self, **kwargs):
+            calls.append(kwargs)
+            raise PublicDataTransportError(
+                "Public Data Portal transport failure after retries: ConnectTimeout"
+            )
+
+    monkeypatch.setattr(
+        "purchase_price.services.g2b_unmapped_discovery.G2BShoppingCollector",
+        TimeoutCollector,
+    )
+
+    result = discover_unmapped_g2b_candidates(
+        ProductQuery(product_name="심장충격기", model_name="Efficia DFM100"),
+        service_key="secret-key",
+        lookback_days=1095,
+        pages_per_term_window=1,
+        curated_terms=(),
+        today=date(2026, 9, 30),
+    )
+
+    assert len(calls) == 1
+    assert result.status == "failure"
+    assert result.failed_query_count == 1
+    assert result.error_types == ("PublicDataTransportError",)
+    assert "ConnectTimeout" in result.error_messages[0]
 
 
 def test_unmapped_discovery_marks_page_cap_as_partial(monkeypatch) -> None:
