@@ -17,99 +17,118 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY || secrets.G2B_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
       G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
       MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
       MFDS_RECALL_SERVICE_KEY: ${{ secrets.MFDS_RECALL_SERVICE_KEY || secrets.MFDS_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
-      DATA_GO_KR_MARKET_SERVICE_KEY: ${{ secrets.DATA_GO_KR_MARKET_SERVICE_KEY }}
-      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
 
     steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install minimal probe dependencies
-        run: pip install "httpx>=0.27,<1" "tenacity>=8,<10" "pydantic>=2,<3" "pydantic-settings>=2,<3"
-
-      - name: Configure source path
-        run: echo "PYTHONPATH=$GITHUB_WORKSPACE/src" >> "$GITHUB_ENV"
-
-      - name: Print configured key sources only
+      - name: Probe live public-data endpoints without printing keys
         run: |
           python - <<'PY'
-          from purchase_price.config import get_settings
-          s = get_settings()
-          print("g2b_shopping_key_source=", s.g2b_shopping_key_source)
-          print("g2b_research_key_source=", s.g2b_research_key_source)
-          print("mfds_recall_key_source=", s.mfds_recall_key_source)
-          print("mfds_service_configured=", bool((s.resolved_mfds_service_key or "").strip()))
-          PY
-
-      - name: Probe G2B Shopping 31-day and 365-day windows
-        continue-on-error: true
-        run: |
-          python - <<'PY'
+          import json
+          import os
           from datetime import date, timedelta
-          from purchase_price.collectors.g2b_shopping import G2BShoppingCollector
-          from purchase_price.config import get_settings
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode, unquote
+          from urllib.request import urlopen
 
-          s = get_settings()
-          key = (s.resolved_g2b_shopping_service_key or "").strip()
-          if not key:
-              raise SystemExit("G2B shopping key not configured")
-          collector = G2BShoppingCollector(key)
-          end = date(2026, 9, 30)
-          for term in ("심장충격기", "심장 충격기"):
-              for days in (31, 365):
-                  begin = end - timedelta(days=days - 1)
-                  try:
-                      page, _ = collector.fetch_specific_item_page(
-                          detail_product_name=term,
-                          begin_date=begin,
-                          end_date=end,
-                          page_no=1,
-                          num_of_rows=1,
-                      )
-                      print(f"shopping term={term!r} days={days} status=success items={len(page.items)} total={page.total_count}")
-                  except Exception as exc:
-                      print(f"shopping term={term!r} days={days} status=failure error={type(exc).__name__}: {exc}")
-          PY
-
-      - name: Probe MFDS model info with Production query terms
-        continue-on-error: true
-        run: |
-          python - <<'PY'
-          from purchase_price.config import get_settings
-          from purchase_price.services.mfds_device_intelligence import MfdsModelInfoClient
-
-          s = get_settings()
-          key = (s.resolved_mfds_service_key or "").strip()
-          if not key:
-              raise SystemExit("MFDS model-info key not configured")
-          client = MfdsModelInfoClient(key, timeout_seconds=12, max_retries=1)
-          for term in ("심장 충격기", "심장충격기"):
+          def call(label, base, op, key, **params):
+              if not (key or "").strip():
+                  print(label, "status=not_configured")
+                  return
+              query = {"serviceKey": unquote(key.strip()), "type": "json", **params}
+              url = f"{base.rstrip('/')}/{op}?{urlencode(query)}"
               try:
-                  rows = client.search_models(term, max_pages=1, num_of_rows=10)
-                  print(f"mfds_model term={term!r} status=success rows={len(rows)}")
-                  for row in rows[:3]:
-                      print(" sample=", row.product_name, row.model_name, row.permit_number)
-              except Exception as exc:
-                  print(f"mfds_model term={term!r} status=failure error={type(exc).__name__}: {exc}")
-          PY
+                  with urlopen(url, timeout=20) as resp:
+                      body = resp.read().decode("utf-8", "replace")
+                      status = resp.status
+              except HTTPError as exc:
+                  body = exc.read().decode("utf-8", "replace")
+                  status = exc.code
+              except URLError as exc:
+                  print(label, "status=transport_failure", type(exc).__name__, str(exc)[:200])
+                  return
+              summary = body[:500].replace("\n", " ")
+              try:
+                  payload = json.loads(body)
+                  response = payload.get("response") if isinstance(payload, dict) else None
+                  header = response.get("header", {}) if isinstance(response, dict) else {}
+                  if not header and isinstance(payload, dict):
+                      for k, v in payload.items():
+                          if k.endswith("ResponseError") and isinstance(v, dict):
+                              header = v.get("header", {})
+                              break
+                  code = header.get("resultCode") if isinstance(header, dict) else None
+                  msg = header.get("resultMsg") if isinstance(header, dict) else None
+                  body_obj = response.get("body", {}) if isinstance(response, dict) else {}
+                  total = body_obj.get("totalCount") if isinstance(body_obj, dict) else None
+                  print(label, f"http={status}", f"resultCode={code}", f"resultMsg={msg}", f"totalCount={total}")
+              except Exception:
+                  print(label, f"http={status}", "body=", summary)
 
-      - name: Probe MFDS recall with Production model
-        continue-on-error: true
-        run: |
-          python - <<'PY'
-          from purchase_price.services.mfds_recall import lookup_mfds_recall
-          result = lookup_mfds_recall(model_name="Efficia DFM100")
-          print("mfds_recall status=", result.status)
-          print("mfds_recall records=", len(result.records))
-          print("mfds_recall error_type=", result.error_type or "")
-          print("mfds_recall error_message=", result.error_message or "")
+          g2b_shop = os.getenv("G2B_SHOPPING_SERVICE_KEY", "")
+          g2b_research = os.getenv("G2B_RESEARCH_SERVICE_KEY", "")
+          mfds = os.getenv("MFDS_SERVICE_KEY", "")
+          mfds_recall = os.getenv("MFDS_RECALL_SERVICE_KEY", "")
+
+          end = date(2026, 9, 30)
+          for days in (31, 365):
+              begin = end - timedelta(days=days - 1)
+              call(
+                  f"shopping_심장충격기_{days}d",
+                  "https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService",
+                  "getSpcifyPrdlstPrcureInfoList",
+                  g2b_shop,
+                  pageNo=1,
+                  numOfRows=1,
+                  inqryDiv=1,
+                  inqryBgnDate=begin.strftime("%Y%m%d"),
+                  inqryEndDate=end.strftime("%Y%m%d"),
+                  inqryPrdctDiv=2,
+                  fnlCntrctDlvrReqChgOrdYn="Y",
+                  dtilPrdctClsfcNoNm="심장충격기",
+              )
+
+          for days in (31, 90):
+              begin = end - timedelta(days=days - 1)
+              call(
+                  f"contract_심장충격기_{days}d",
+                  "https://apis.data.go.kr/1230000/ao/CntrctInfoService",
+                  "getCntrctInfoListThngPPSSrch",
+                  g2b_research,
+                  pageNo=1,
+                  numOfRows=1,
+                  inqryDiv=1,
+                  inqryBgnDate=begin.strftime("%Y%m%d"),
+                  inqryEndDate=end.strftime("%Y%m%d"),
+                  prdctClsfcNoNm="심장충격기",
+              )
+
+          for term in ("심장 충격기", "심장충격기"):
+              call(
+                  f"mfds_model_{term}",
+                  "https://apis.data.go.kr/1471000/MdeqModlInfoService01",
+                  "getMdeqModlInq01",
+                  mfds,
+                  pageNo=1,
+                  numOfRows=10,
+                  PRDLST_NM=term,
+              )
+
+          call(
+              "mfds_recall_Efficia_DFM100",
+              "https://apis.data.go.kr/1471000/MdlpRtrvlSleStpgeInfoService04",
+              "getTypeNameList04",
+              mfds_recall,
+              pageNo=1,
+              numOfRows=10,
+              type_name="Efficia DFM100",
+          )
           PY
