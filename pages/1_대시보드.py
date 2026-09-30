@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 from typing import Any
 
 import streamlit as st
@@ -136,6 +137,34 @@ def _build_safety_state_compat(
         model_name=model_name,
         permit_numbers=permit_numbers,
     )
+
+
+
+
+def _lookup_mfds_recall_isolated(*, model_name: str, product_name: str) -> object:
+    """Keep Safety source failures from aborting price/procurement search.
+
+    Streamlit Cloud hot reload can temporarily retain an older service function object. Safety is
+    an independent evidence axis, so any runtime failure must degrade to CHECK_FAILED/manual
+    verification while the price, procurement and quote workflow continues.
+    """
+
+    try:
+        return lookup_mfds_recall(
+            model_name=model_name,
+            product_name=product_name,
+        )
+    except Exception as exc:
+        return SimpleNamespace(
+            status="failure",
+            query_type="model" if model_name else "product",
+            query=model_name or product_name,
+            records=(),
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            checked_at=None,
+            source_url=None,
+        )
 
 
 def _identity_hydration(
@@ -590,7 +619,7 @@ def _execute_search(
         )
 
     mfds = research_mfds_for_workspace(query, track_b)
-    safety_lookup = lookup_mfds_recall(
+    safety_lookup = _lookup_mfds_recall_isolated(
         model_name=query.model_name,
         product_name=query.product_name,
     )
