@@ -97,7 +97,7 @@ def main() -> None:
         "status": "failure",
         "query_model": "DFM100",
         "checks": [],
-        "expected_main_sha": "8d40f82b0f26e47d1a50eaf27b190728543bd513",
+        "expected_main_sha": "de95288b7021c56780aa6c173bce4d08cdc9f121",
     }
     started = time.monotonic()
     try:
