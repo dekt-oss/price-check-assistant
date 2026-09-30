@@ -2,7 +2,6 @@ from pathlib import Path
 
 from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
-    QUOTE_AUTO_ROUTE_FILE_SESSION_KEY,
 )
 
 
@@ -26,6 +25,12 @@ def test_home_and_quote_review_share_the_same_auto_route_guard() -> None:
 
     assert "QUOTE_AUTO_ROUTE_FILE_SESSION_KEY" in dashboard
     assert "QUOTE_AUTO_ROUTE_FILE_SESSION_KEY" in quote
-    assert "quote_auto_route_file_v1" not in dashboard
-    assert QUOTE_AUTO_ROUTE_FILE_SESSION_KEY == "quote_auto_route_file_v1"
+    assert 'QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"' in dashboard
+    assert 'QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"' in quote
+    assert "QUOTE_AUTO_ROUTE_FILE_SESSION_KEY," not in dashboard.split(
+        "from purchase_price.services.purchase_workspace_handoff import (", 1
+    )[1].split(")", 1)[0]
+    assert "QUOTE_AUTO_ROUTE_FILE_SESSION_KEY," not in quote.split(
+        "from purchase_price.services.purchase_workspace_handoff import (", 1
+    )[1].split(")", 1)[0]
     assert PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY == "purchase_workspace_handoff_v1"
