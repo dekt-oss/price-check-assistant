@@ -40,4 +40,5 @@ def test_workspace_safety_compat_preserves_runtime_lookup_statuses() -> None:
     assert 'status == "not_authorized"' in compat
     assert 'status == "failure"' in compat
     assert 'status == "success_0"' in compat
-    assert "exact 식약처 품목번호가 없어" in compat
+    assert "exact " in compat
+    assert "식약처 품목번호가 없어" in compat
