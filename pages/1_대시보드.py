@@ -96,6 +96,7 @@ from purchase_price.ui.widgets import (
 HOME_SEARCH_STATE_KEY = "home_unified_search_result"
 HOME_SEARCH_DETAILS_KEY = "home_search_details"
 HOME_WORKSPACE_VIEW_KEY = "home_workspace_view"
+QUOTE_AUTO_ROUTE_FILE_KEY = "quote_auto_route_file_v1"
 WORKSPACE_VIEWS = {
     "price": "💰 가격 비교",
     "supplier": "🏢 업체·조달",
@@ -678,7 +679,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
     st.caption("구매조사 워크스페이스")
     st.subheader(heading)
     if state.get("origin") == "quote":
-        st.caption("견적서 품목에서 이어진 조사 · 견적단가를 비교기준으로 유지합니다.")
+        st.caption(
+            "견적서에서 추출한 품목을 일반 통합검색과 동일한 구매조사 파이프라인으로 조사했습니다. "
+            "견적단가는 비교기준으로 유지합니다."
+        )
+        st.page_link(
+            "pages/2_견적_검토.py",
+            label="견적 전체 품목 · 추출내용 · 상세 검증 열기",
+            icon="📋",
+        )
 
     safety_permit_numbers: list[str] = []
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
@@ -1624,6 +1633,7 @@ if result_mode:
     if reset_requested:
         st.session_state.pop(HOME_SEARCH_STATE_KEY, None)
         st.session_state.pop(HOME_WORKSPACE_VIEW_KEY, None)
+        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_KEY, None)
         st.query_params.clear()
         st.rerun()
 
@@ -1680,10 +1690,52 @@ if uploaded is not None:
     if QUOTE_REVIEW_STATE_SESSION_KEY not in st.session_state:
         st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY] = QuoteReviewState()
     quote_state: QuoteReviewState = st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY]
-    if quote_state.file_name != uploaded.name or quote_state.extraction is None:
+    newly_extracted = quote_state.file_name != uploaded.name or quote_state.extraction is None
+    if newly_extracted:
         with st.spinner("견적서에서 품목을 추출하고 있습니다..."):
             _store_extraction(uploaded, quote_state)
-    st.switch_page("pages/2_견적_검토.py")
+        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_KEY, None)
+
+    if quote_state.items:
+        already_routed = st.session_state.get(QUOTE_AUTO_ROUTE_FILE_KEY) == uploaded.name
+        if not already_routed:
+            item = quote_state.items[0]
+            try:
+                with st.status(
+                    "견적 첫 품목을 일반 통합검색과 동일하게 조사하고 있습니다...",
+                    expanded=False,
+                ) as status:
+                    quote_result = _execute_search(
+                        search_text="",
+                        product_name=item.product_name,
+                        manufacturer=item.manufacturer,
+                        model_name=item.model_name,
+                        specification=item.specification,
+                        quote_text=(
+                            str(item.unit_price) if item.unit_price is not None else ""
+                        ),
+                        lookback_days=quote_state.lookback_days,
+                    )
+                    quote_result["origin"] = "quote"
+                    quote_result["quote_file_name"] = uploaded.name
+                    quote_result["quote_item_index"] = 0
+                    st.session_state[HOME_SEARCH_STATE_KEY] = quote_result
+                    st.session_state[QUOTE_AUTO_ROUTE_FILE_KEY] = uploaded.name
+                    st.session_state[HOME_SEARCH_DETAILS_KEY] = False
+                    st.query_params["view"] = "price"
+                    status.update(
+                        label="견적 첫 품목 통합 구매조사 완료",
+                        state="complete",
+                    )
+                st.rerun()
+            except ValueError as exc:
+                st.warning(
+                    "첫 품목을 통합검색으로 자동 연결하지 못했습니다. "
+                    f"견적 검토 화면에서 추출값을 확인하세요. ({exc})"
+                )
+                st.switch_page("pages/2_견적_검토.py")
+    else:
+        st.switch_page("pages/2_견적_검토.py")
 
 if submitted:
     try:
