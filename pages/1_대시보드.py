@@ -40,10 +40,10 @@ from purchase_price.services.mfds_identity_status import (
     format_status_updated_at,
     get_mfds_identity_collection_status,
 )
+from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.mfds_workspace import (
     MfdsWorkspaceResult,
-    lookup_mfds_business_license,
     research_mfds_for_workspace,
 )
 from purchase_price.services.pricing import assess_prices
@@ -1233,9 +1233,21 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 "선택 업체 식약처 업허가 확인",
                 key=f"workspace_company_business_button::{quote_key}",
             ):
-                st.session_state[business_cache_key] = lookup_mfds_business_license(
-                    selected_company
+                business_lookup = getattr(
+                    mfds_workspace_service,
+                    "lookup_mfds_business_license",
+                    None,
                 )
+                if callable(business_lookup):
+                    st.session_state[business_cache_key] = business_lookup(
+                        selected_company
+                    )
+                else:
+                    st.session_state.pop(business_cache_key, None)
+                    st.warning(
+                        "배포 프로세스가 이전 식약처 모듈을 유지하고 있어 업체 업허가 조회만 "
+                        "일시적으로 사용할 수 없습니다. 페이지 재기동 후 다시 확인하세요."
+                    )
             selected_business_lookup = st.session_state.get(business_cache_key)
             if selected_business_lookup is not None:
                 if selected_business_lookup.status == "success":
