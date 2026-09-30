@@ -79,6 +79,8 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "식약처 품목번호 기준 모델·조달가격 연결" in source
     assert "companies[0]" not in source
     assert "식약처 품목번호" in source
+    assert "수집범위 미확인" in source
+    assert "API 미승인" in source
     assert "동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격" in source
     assert "_split_transaction_rows_compat" in source
     assert "_strict_candidates_compat" in source
