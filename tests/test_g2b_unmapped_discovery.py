@@ -236,6 +236,40 @@ def test_unmapped_discovery_stops_after_transport_outage(monkeypatch) -> None:
     assert "ConnectTimeout" in result.error_messages[0]
 
 
+def test_unmapped_discovery_stops_after_rate_limit_gate(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class RateLimitedCollector:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_specific_item_page(self, **kwargs):
+            calls.append(kwargs)
+            raise PublicDataClientError(
+                "Public Data Portal request failed: HTTP 429 "
+                "error=LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR code=22"
+            )
+
+    monkeypatch.setattr(
+        "purchase_price.services.g2b_unmapped_discovery.G2BShoppingCollector",
+        RateLimitedCollector,
+    )
+
+    result = discover_unmapped_g2b_candidates(
+        ProductQuery(product_name="심장충격기", model_name="Efficia DFM100"),
+        service_key="secret-key",
+        lookback_days=1095,
+        pages_per_term_window=1,
+        curated_terms=(),
+        today=date(2026, 9, 30),
+    )
+
+    assert len(calls) == 1
+    assert result.status == "failure"
+    assert result.failed_query_count == 1
+    assert "HTTP 429" in result.error_messages[0]
+
+
 def test_unmapped_discovery_marks_page_cap_as_partial(monkeypatch) -> None:
     calls: list[int] = []
 
