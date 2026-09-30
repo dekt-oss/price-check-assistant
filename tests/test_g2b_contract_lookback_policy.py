@@ -200,7 +200,7 @@ def test_three_year_contract_search_uses_31_day_windows_by_default() -> None:
         for call in portal.calls
     ]
     assert windows[0] == ("20231002", "20231101")
-    assert windows[-1] == ("20260922", "20260930")
+    assert windows[-1] == ("20260921", "20260930")
     assert all(
         (date.fromisoformat(end[:4] + "-" + end[4:6] + "-" + end[6:]) -
          date.fromisoformat(begin[:4] + "-" + begin[4:6] + "-" + begin[6:])).days <= 30
@@ -227,7 +227,7 @@ def test_full_lookback_does_not_stop_after_early_contract_hit() -> None:
     assert client.product_calls[-1] == (
         "레이저프린터",
         date(2023, 10, 2),
-        date(2025, 10, 1),
+        date(2025, 9, 30),
     )
     assert client.last_max_window_days == 31
     assert source.coverage_start == date(2023, 10, 2)
