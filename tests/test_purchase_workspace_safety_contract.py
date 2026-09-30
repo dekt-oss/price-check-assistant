@@ -19,3 +19,12 @@ def test_recall_api_authorization_is_configured_separately() -> None:
     assert "mfds_recall_service_key" in source
     assert "resolved_mfds_recall_service_key" in source
     assert '"MFDS_RECALL_SERVICE_KEY"' in source
+
+
+def test_unified_search_isolates_safety_source_runtime_failures() -> None:
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+
+    assert "def _lookup_mfds_recall_isolated" in source
+    assert "except Exception as exc:" in source
+    assert 'status="failure"' in source
+    assert "safety_lookup = _lookup_mfds_recall_isolated(" in source
