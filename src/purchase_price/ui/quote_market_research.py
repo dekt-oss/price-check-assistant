@@ -583,7 +583,7 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             quote_unit_price=item.unit_price,
         )
         if handoff is not None and st.button(
-            "통합 구매조사 열기",
+            "일반 검색과 동일한 상세결과 열기",
             key=f"quote_open_purchase_workspace_{index}",
             use_container_width=True,
         ):
@@ -694,8 +694,8 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
 
 def render_quote_market_research(state: QuoteReviewState) -> None:
     st.caption(
-        "견적서 품목별로 가격 · 판매처 · 구매처 · 거래일을 먼저 보여줍니다. "
-        "검증 과정과 세부 근거는 필요할 때만 펼쳐볼 수 있습니다."
+        "이 화면은 다품목 견적의 빠른 요약·검증 화면입니다. "
+        "각 품목의 전체 상세조사는 일반 통합검색과 동일한 구매조사 Workspace를 사용합니다."
     )
 
     uploaded = st.file_uploader(
