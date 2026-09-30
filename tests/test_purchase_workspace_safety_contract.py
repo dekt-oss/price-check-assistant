@@ -36,6 +36,7 @@ def test_safety_hot_reload_fallback_preserves_lookup_semantics() -> None:
     assert "def _build_safety_state_compat" in source
     assert 'if status == "failure":' in source
     assert "SafetyEvidenceStatus.CHECK_FAILED" in source
+    assert "SafetyEvidenceStatus.NOT_AUTHORIZED" in source
     assert 'if status == "success_0":' in source
     assert "SafetyEvidenceStatus.CHECKED_NONE" in source
     assert 'if status == "success" and records:' in source
