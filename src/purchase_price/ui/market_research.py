@@ -148,6 +148,7 @@ def run_market_research(
             requested_lookback_days=lookback_days,
             max_independent_terms=1,
             max_pages_per_window=1,
+            require_full_lookback=True,
         )
         market_bundle = enrich_market_bundle_with_lifecycle(
             market_bundle,
