@@ -12,6 +12,7 @@ from purchase_price.evidence_domain import (
 )
 from purchase_price.schemas import ProductQuery
 from purchase_price.services import mfds_workspace as mfds_workspace_service
+from purchase_price.services import safety_support as safety_support_service
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
@@ -57,7 +58,6 @@ from purchase_price.services.safety_support import (
     MFDS_RECALL_PAGE_URL,
     MFDS_SAFETY_LETTER_PAGE_URL,
     build_manual_safety_check_state,
-    build_safety_state_from_recall_lookup,
 )
 from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
@@ -111,6 +111,31 @@ def _parse_quote(value: str) -> Decimal | None:
         return Decimal(value.replace(",", "").strip())
     except InvalidOperation as exc:
         raise ValueError("견적 단가는 숫자로 입력하세요.") from exc
+
+
+def _build_safety_state_compat(
+    safety_lookup: object | None,
+    *,
+    model_name: str,
+    product_name: str,
+    permit_numbers: list[str],
+):
+    builder = getattr(
+        safety_support_service,
+        "build_safety_state_from_recall_lookup",
+        None,
+    )
+    if safety_lookup is not None and callable(builder):
+        return builder(
+            safety_lookup,
+            model_name=model_name,
+            product_name=product_name,
+            permit_numbers=permit_numbers,
+        )
+    return build_manual_safety_check_state(
+        model_name=model_name,
+        permit_numbers=permit_numbers,
+    )
 
 
 def _identity_hydration(
@@ -694,18 +719,12 @@ def _render_search_result(state: dict[str, Any]) -> None:
         safety_permit_numbers.extend(indexed_identity.permit_numbers)
     if isinstance(mfds, MfdsWorkspaceResult):
         safety_permit_numbers.extend(mfds.permit_numbers)
-    if safety_lookup is not None:
-        safety_state = build_safety_state_from_recall_lookup(
-            safety_lookup,
-            model_name=str(getattr(query, "model_name", "") or "").strip(),
-            product_name=str(getattr(query, "product_name", "") or "").strip(),
-            permit_numbers=safety_permit_numbers,
-        )
-    else:
-        safety_state = build_manual_safety_check_state(
-            model_name=str(getattr(query, "model_name", "") or "").strip(),
-            permit_numbers=safety_permit_numbers,
-        )
+    safety_state = _build_safety_state_compat(
+        safety_lookup,
+        model_name=str(getattr(query, "model_name", "") or "").strip(),
+        product_name=str(getattr(query, "product_name", "") or "").strip(),
+        permit_numbers=safety_permit_numbers,
+    )
     with st.container(border=True):
         st.markdown("### Safety")
         safety_text = f"{safety_state.evidence_status.value} · {safety_state.message}"

@@ -7,6 +7,7 @@ from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
+from purchase_price.services import safety_support as safety_support_service
 from purchase_price.services.market_research_support import (
     build_web_supplier_search_links,
     extract_g2b_supplier_candidates,
@@ -27,7 +28,7 @@ from purchase_price.services.safety_support import (
     MFDS_SAFETY_LETTER_PAGE_URL,
     MFDS_STANDARD_CODE_DATASET_URL,
     MFDS_UDI_PORTAL_URL,
-    build_safety_state_from_recall_lookup,
+    build_manual_safety_check_state,
 )
 from purchase_price.services.search import search_all
 
@@ -247,12 +248,27 @@ if submitted:
         product_name=product_name.strip(),
         settings=settings,
     )
-    safety_state = build_safety_state_from_recall_lookup(
-        safety_lookup,
-        model_name=model_name.strip(),
-        product_name=product_name.strip(),
-        permit_numbers=permit_numbers,
+    safety_builder = getattr(
+        safety_support_service,
+        "build_safety_state_from_recall_lookup",
+        None,
     )
+    if callable(safety_builder):
+        safety_state = safety_builder(
+            safety_lookup,
+            model_name=model_name.strip(),
+            product_name=product_name.strip(),
+            permit_numbers=permit_numbers,
+        )
+    else:
+        safety_state = build_manual_safety_check_state(
+            model_name=model_name.strip(),
+            permit_numbers=permit_numbers,
+        )
+        st.warning(
+            "배포 프로세스가 이전 Safety 모듈을 유지하고 있어 회수·판매중지 자동판정 표시만 "
+            "일시적으로 제한됩니다. 공식 조회 링크와 manual 확인키를 사용하세요."
+        )
     if safety_state.evidence_status.value == "RED":
         st.error(f"{safety_state.status.value} · {safety_state.message}")
     elif safety_state.evidence_status.value in {"AMBER", "CHECK_FAILED"}:
