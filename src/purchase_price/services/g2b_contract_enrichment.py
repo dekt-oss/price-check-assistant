@@ -96,6 +96,7 @@ def enrich_market_bundle_with_contracts(
     minimum_records_before_stop: int = 3,
     max_independent_terms: int = 1,
     max_pages_per_window: int = 1,
+    allow_independent_search: bool = True,
 ) -> MarketResearchBundle:
     """Attach contracts by bid identifier and, when sparse, by independent PPS product search.
 
@@ -140,6 +141,16 @@ def enrich_market_bundle_with_contracts(
         )
         return replace(bundle, sources=(*base_sources, source), records=base_records)
 
+    if not notices and terms and not allow_independent_search:
+        source = ResearchSourceResult(
+            source=G2BResearchSource.CONTRACT,
+            status=ResearchSourceStatus.DEFERRED,
+            request_count=0,
+            requested_lookback_days=requested_lookback_days,
+            search_strategy="independent-product-name-deferred-source-latency",
+        )
+        return replace(bundle, sources=(*base_sources, source), records=base_records)
+
     active_client = client or G2BContractResearchClient(
         service_key or "injected",
         timeout_seconds=timeout_seconds,
@@ -174,7 +185,12 @@ def enrich_market_bundle_with_contracts(
 
     # Do not amplify a transport/auth failure by immediately hammering the same endpoint with a
     # broad fallback. Independent search is for missing/sparse evidence after normal responses.
-    can_expand = not errors and len(contract_records) < minimum_records_before_stop and bool(terms)
+    can_expand = (
+        allow_independent_search
+        and not errors
+        and len(contract_records) < minimum_records_before_stop
+        and bool(terms)
+    )
     if can_expand:
         end = today or date.today()
         previous_days = 0
@@ -192,12 +208,29 @@ def enrich_market_bundle_with_contracts(
             for term in terms:
                 request_count += 1
                 try:
-                    found, requests = active_client.search_by_product_name(
-                        product_name=term,
-                        begin_date=interval_begin,
-                        end_date=interval_end,
-                        max_pages_per_window=max_pages_per_window,
+                    bounded_search = getattr(
+                        active_client,
+                        "search_by_product_name_result",
+                        None,
                     )
+                    if callable(bounded_search):
+                        result = bounded_search(
+                            product_name=term,
+                            begin_date=interval_begin,
+                            end_date=interval_end,
+                            max_pages_per_window=max_pages_per_window,
+                        )
+                        found = result.records
+                        requests = result.request_count
+                        window_errors = tuple(result.errors)
+                    else:
+                        found, requests = active_client.search_by_product_name(
+                            product_name=term,
+                            begin_date=interval_begin,
+                            end_date=interval_end,
+                            max_pages_per_window=max_pages_per_window,
+                        )
+                        window_errors = ()
                 except Exception as exc:
                     errors.append(exc)
                     if isinstance(exc, PublicDataTransportError) or is_g2b_research_authorization_error(exc):
@@ -210,6 +243,15 @@ def enrich_market_bundle_with_contracts(
                         continue
                     seen.add(record.source_record_id)
                     contract_records.append(record)
+                if window_errors:
+                    errors.extend(window_errors)
+                    if any(
+                        isinstance(exc, PublicDataTransportError)
+                        or is_g2b_research_authorization_error(exc)
+                        for exc in window_errors
+                    ):
+                        transport_failed = True
+                        break
             previous_days = stage_days
             if transport_failed or errors or len(contract_records) >= minimum_records_before_stop:
                 break
@@ -254,10 +296,13 @@ def enrich_market_bundle_with_contracts(
             ),
         )
     else:
+        deferred_independent = bool(terms) and not allow_independent_search
         source = ResearchSourceResult(
             source=G2BResearchSource.CONTRACT,
             status=(
-                ResearchSourceStatus.SUCCESS
+                ResearchSourceStatus.DEFERRED
+                if deferred_independent
+                else ResearchSourceStatus.SUCCESS
                 if contract_records
                 else ResearchSourceStatus.SUCCESS_0
             ),
@@ -269,6 +314,8 @@ def enrich_market_bundle_with_contracts(
             search_strategy=(
                 "bid-linked + adaptive independent product-name"
                 if independent_ran
+                else "bid-linked + independent-product-name-deferred-source-latency"
+                if deferred_independent
                 else "bid-linked"
             ),
         )

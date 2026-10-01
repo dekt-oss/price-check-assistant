@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -25,6 +26,7 @@ _ACCESSORY_MARKERS = frozenset(
 # The specific-item procurement operation is reliable with short inquiry ranges.
 # Keep long user lookbacks logical and partition each physical request to 31 calendar days.
 G2B_DISCOVERY_MAX_WINDOW_DAYS = 31
+G2B_DISCOVERY_MAX_WORKERS = 3
 
 
 @dataclass(frozen=True)
@@ -362,83 +364,177 @@ def discover_unmapped_g2b_candidates(
     selectors = tuple(("code", code) for code in target_codes) + tuple(
         ("name", term) for term in terms
     )
-    for window_begin, window_end in windows:
-        if budget_exhausted:
-            break
-        for selector_type, selector_value in selectors:
+    work_items = [
+        (window_begin, window_end, selector_type, selector_value)
+        for window_begin, window_end in windows
+        for selector_type, selector_value in selectors
+    ]
+
+    def apply_page(
+        *,
+        page,
+        selector_type: str,
+        selector_value: str,
+    ) -> None:
+        nonlocal records_seen, successful_fetches, truncated_query_count
+        successful_fetches += 1
+        records_seen += len(page.items)
+        for raw in page.items:
+            candidate = _candidate_from_record(
+                raw,
+                query,
+                search_term=selector_value,
+                target_detail_code=(selector_value if selector_type == "code" else ""),
+            )
+            if candidate is None:
+                continue
+            key = (
+                candidate.source_record_id,
+                candidate.title,
+                candidate.transaction_date.isoformat()
+                if candidate.transaction_date
+                else "",
+            )
+            previous = candidates_by_key.get(key)
+            if previous is None or candidate.score > previous.score:
+                candidates_by_key[key] = candidate
+
+        query_complete = (
+            not page.items
+            or (page.total_count is not None and len(page.items) >= page.total_count)
+            or len(page.items) < num_of_rows
+        )
+        if not query_complete:
+            truncated_query_count += 1
+
+    # Production broad Research uses one page per term/window. Fetch those independent 31-day
+    # requests with bounded concurrency so a 3-year logical lookback does not serialize dozens of
+    # network round trips. Multi-page calls retain the sequential pagination contract below.
+    if pages_per_term_window == 1 and len(work_items) > 3:
+        scheduled = work_items[:request_budget]
+        budget_exhausted = len(scheduled) < len(work_items)
+        request_count = len(scheduled)
+
+        def fetch_one(work):
+            window_begin, window_end, selector_type, selector_value = work
+            kwargs = {
+                "begin_date": window_begin,
+                "end_date": window_end,
+                "page_no": 1,
+                "num_of_rows": num_of_rows,
+            }
+            try:
+                if selector_type == "code":
+                    page, _ = collector.fetch_specific_item_page(
+                        detail_product_code=selector_value,
+                        **kwargs,
+                    )
+                else:
+                    page, _ = collector.fetch_specific_item_page(
+                        detail_product_name=selector_value,
+                        **kwargs,
+                    )
+                return work, page, None
+            except (PublicDataClientError, ValueError) as exc:
+                return work, None, exc
+
+        with ThreadPoolExecutor(
+            max_workers=min(G2B_DISCOVERY_MAX_WORKERS, len(scheduled))
+        ) as executor:
+            fetched_results = executor.map(fetch_one, scheduled)
+
+        for work, page, exc in fetched_results:
+            _, _, selector_type, selector_value = work
+            if exc is not None:
+                failed_query_count += 1
+                error_types.add(type(exc).__name__)
+                error_messages.add(_safe_error_message(exc))
+                continue
+            apply_page(
+                page=page,
+                selector_type=selector_type,
+                selector_value=selector_value,
+            )
+    else:
+        for window_begin, window_end in windows:
             if budget_exhausted:
                 break
-            fetched_for_query = 0
-            query_failed = False
-            query_complete = False
-            last_total_count: int | None = None
-            for page_no in range(1, pages_per_term_window + 1):
-                if request_count >= request_budget:
-                    budget_exhausted = True
+            for selector_type, selector_value in selectors:
+                if budget_exhausted:
                     break
-                request_count += 1
-                try:
-                    kwargs = {
-                        "begin_date": window_begin,
-                        "end_date": window_end,
-                        "page_no": page_no,
-                        "num_of_rows": num_of_rows,
-                    }
-                    if selector_type == "code":
-                        page, _ = collector.fetch_specific_item_page(
-                            detail_product_code=selector_value,
-                            **kwargs,
-                        )
-                    else:
-                        page, _ = collector.fetch_specific_item_page(
-                            detail_product_name=selector_value,
-                            **kwargs,
-                        )
-                except (PublicDataClientError, ValueError) as exc:
-                    failed_query_count += 1
-                    error_types.add(type(exc).__name__)
-                    error_messages.add(_safe_error_message(exc))
-                    query_failed = True
-                    break
+                fetched_for_query = 0
+                query_failed = False
+                query_complete = False
+                last_total_count: int | None = None
+                for page_no in range(1, pages_per_term_window + 1):
+                    if request_count >= request_budget:
+                        budget_exhausted = True
+                        break
+                    request_count += 1
+                    try:
+                        kwargs = {
+                            "begin_date": window_begin,
+                            "end_date": window_end,
+                            "page_no": page_no,
+                            "num_of_rows": num_of_rows,
+                        }
+                        if selector_type == "code":
+                            page, _ = collector.fetch_specific_item_page(
+                                detail_product_code=selector_value,
+                                **kwargs,
+                            )
+                        else:
+                            page, _ = collector.fetch_specific_item_page(
+                                detail_product_name=selector_value,
+                                **kwargs,
+                            )
+                    except (PublicDataClientError, ValueError) as exc:
+                        failed_query_count += 1
+                        error_types.add(type(exc).__name__)
+                        error_messages.add(_safe_error_message(exc))
+                        query_failed = True
+                        break
 
-                successful_fetches += 1
-                records_seen += len(page.items)
-                fetched_for_query += len(page.items)
-                last_total_count = page.total_count
-                for raw in page.items:
-                    candidate = _candidate_from_record(
-                        raw,
-                        query,
-                        search_term=selector_value,
-                        target_detail_code=(selector_value if selector_type == "code" else ""),
-                    )
-                    if candidate is None:
-                        continue
-                    key = (
-                        candidate.source_record_id,
-                        candidate.title,
-                        candidate.transaction_date.isoformat()
-                        if candidate.transaction_date
-                        else "",
-                    )
-                    previous = candidates_by_key.get(key)
-                    if previous is None or candidate.score > previous.score:
-                        candidates_by_key[key] = candidate
-                if not page.items:
-                    query_complete = True
-                    break
-                if page.total_count is not None and fetched_for_query >= page.total_count:
-                    query_complete = True
-                    break
-                if len(page.items) < num_of_rows:
-                    query_complete = True
-                    break
-            if query_failed or budget_exhausted:
-                continue
-            if not query_complete and (
-                last_total_count is None or fetched_for_query < last_total_count
-            ):
-                truncated_query_count += 1
+                    successful_fetches += 1
+                    records_seen += len(page.items)
+                    fetched_for_query += len(page.items)
+                    last_total_count = page.total_count
+                    for raw in page.items:
+                        candidate = _candidate_from_record(
+                            raw,
+                            query,
+                            search_term=selector_value,
+                            target_detail_code=(
+                                selector_value if selector_type == "code" else ""
+                            ),
+                        )
+                        if candidate is None:
+                            continue
+                        key = (
+                            candidate.source_record_id,
+                            candidate.title,
+                            candidate.transaction_date.isoformat()
+                            if candidate.transaction_date
+                            else "",
+                        )
+                        previous = candidates_by_key.get(key)
+                        if previous is None or candidate.score > previous.score:
+                            candidates_by_key[key] = candidate
+                    if not page.items:
+                        query_complete = True
+                        break
+                    if page.total_count is not None and fetched_for_query >= page.total_count:
+                        query_complete = True
+                        break
+                    if len(page.items) < num_of_rows:
+                        query_complete = True
+                        break
+                if query_failed or budget_exhausted:
+                    continue
+                if not query_complete and (
+                    last_total_count is None or fetched_for_query < last_total_count
+                ):
+                    truncated_query_count += 1
 
     candidates = sorted(
         candidates_by_key.values(),
