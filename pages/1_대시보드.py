@@ -819,14 +819,21 @@ def _render_search_result(state: dict[str, Any]) -> None:
     )
     with st.container(border=True):
         st.markdown("### Safety")
-        safety_text = f"{safety_state.evidence_status.value} · {safety_state.message}"
-        if safety_state.evidence_status == SafetyEvidenceStatus.RED:
+        evidence_status_value = str(
+            getattr(
+                safety_state.evidence_status,
+                "value",
+                safety_state.evidence_status,
+            )
+        )
+        safety_text = f"{evidence_status_value} · {safety_state.message}"
+        if evidence_status_value == "RED":
             st.error(safety_text)
-        elif safety_state.evidence_status in {
-            SafetyEvidenceStatus.AMBER,
-            SafetyEvidenceStatus.CHECK_FAILED,
-            SafetyEvidenceStatus.NOT_CONNECTED,
-            SafetyEvidenceStatus.NOT_AUTHORIZED,
+        elif evidence_status_value in {
+            "AMBER",
+            "CHECK_FAILED",
+            "NOT_CONNECTED",
+            "NOT_AUTHORIZED",
         }:
             st.warning(safety_text)
         else:
