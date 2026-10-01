@@ -6,12 +6,16 @@ from threading import Lock
 from time import sleep
 
 from purchase_price.collectors.g2b_shopping import G2BShoppingPage
+from purchase_price.clients.data_go_kr import PublicDataTransportError
 from purchase_price.schemas import CollectedPrice
 from purchase_price.services.g2b_contract_enrichment import (
     build_contract_lookback_stages,
     enrich_market_bundle_with_contracts,
 )
-from purchase_price.services.g2b_contract_research import G2BContractResearchClient
+from purchase_price.services.g2b_contract_research import (
+    G2BContractProductSearchResult,
+    G2BContractResearchClient,
+)
 from purchase_price.services.g2b_market_models import (
     G2BResearchRecord,
     G2BResearchSource,
@@ -218,6 +222,50 @@ def test_seedless_contract_enrichment_expands_from_90_days_to_one_year() -> None
     assert source.records[0].amount_type == ResearchAmountType.CONTRACT_TOTAL
     assert not source.records[0].is_direct_unit_price
     assert not isinstance(source.records[0], CollectedPrice)
+
+
+def test_bounded_contract_window_failure_preserves_partial_records() -> None:
+    record = G2BResearchRecord(
+        source_type=G2BResearchSource.CONTRACT,
+        source_record_id="contract:C-PARTIAL",
+        title="레이저프린터 구매 계약",
+        contract_no="C-PARTIAL",
+        product_name="레이저프린터",
+        amount=Decimal("7000000"),
+        amount_type=ResearchAmountType.CONTRACT_TOTAL,
+    )
+
+    class PartialBoundedClient(FakeIndependentContractClient):
+        def search_by_product_name_result(self, **kwargs):
+            self.product_calls.append(
+                (
+                    kwargs["product_name"],
+                    kwargs["begin_date"],
+                    kwargs["end_date"],
+                )
+            )
+            return G2BContractProductSearchResult(
+                records=(record,),
+                request_count=4,
+                failed_window_count=1,
+                errors=(PublicDataTransportError("synthetic bounded timeout"),),
+            )
+
+    enriched = enrich_market_bundle_with_contracts(
+        _empty_bundle(),
+        service_key=None,
+        client=PartialBoundedClient(),  # type: ignore[arg-type]
+        independent_terms=("레이저프린터",),
+        requested_lookback_days=365,
+        today=date(2026, 9, 8),
+    )
+
+    source = enriched.sources[-1]
+    assert source.status == ResearchSourceStatus.PARTIAL
+    assert source.records == (record,)
+    assert source.request_count == 4
+    assert source.error_type == "PublicDataTransportError"
+    assert "synthetic bounded timeout" in source.error_message
 
 
 def test_independent_contract_failure_is_not_successful_zero() -> None:
