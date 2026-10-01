@@ -73,7 +73,7 @@ def test_independent_contract_search_uses_official_product_and_date_fields() -> 
     assert "bidNtceNo" not in params
 
 
-def test_independent_contract_search_splits_long_ranges_without_overlap() -> None:
+def test_independent_contract_search_splits_long_ranges_without_overlap_by_default() -> None:
     portal = FakePortal([_page([]), _page([]), _page([])])
     client = G2BContractResearchClient("key", client=portal)  # type: ignore[arg-type]
 
@@ -82,7 +82,6 @@ def test_independent_contract_search_splits_long_ranges_without_overlap() -> Non
         begin_date=date(2026, 6, 1),
         end_date=date(2026, 8, 31),
         max_pages_per_window=1,
-        max_window_days=31,
     )
 
     assert request_count == 3
