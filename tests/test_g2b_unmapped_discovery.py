@@ -96,8 +96,8 @@ def test_unmapped_discovery_ranks_exact_model_but_keeps_category_research(monkey
     )
 
     assert result.status == "success"
-    assert result.request_count == 3
-    assert len(calls) == 3
+    assert result.request_count == 36
+    assert len(calls) == 36
     assert {call["detail_product_name"] for call in calls} == {
         "가스 마취기",
         "마취기",
