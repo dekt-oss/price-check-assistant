@@ -5,8 +5,8 @@ from decimal import Decimal
 from threading import Lock
 from time import sleep
 
-from purchase_price.collectors.g2b_shopping import G2BShoppingPage
 from purchase_price.clients.data_go_kr import PublicDataTransportError
+from purchase_price.collectors.g2b_shopping import G2BShoppingPage
 from purchase_price.schemas import CollectedPrice
 from purchase_price.services.g2b_contract_enrichment import (
     build_contract_lookback_stages,
