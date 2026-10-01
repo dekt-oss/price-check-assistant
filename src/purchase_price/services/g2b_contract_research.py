@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -20,6 +21,7 @@ from purchase_price.services.g2b_market_models import (
 # Live PPS contract PPSSrch rejects oversized inquiry ranges with code=07.
 # Keep the user-visible lookback (e.g. 3 years) while partitioning physical API calls.
 G2B_CONTRACT_MAX_WINDOW_DAYS = 31
+G2B_CONTRACT_MAX_WORKERS = 6
 
 
 def _text(value: Any) -> str | None:
@@ -298,23 +300,32 @@ class G2BContractResearchClient:
         max_pages_per_window: int = 1,
         num_of_rows: int = 100,
         max_window_days: int | None = G2B_CONTRACT_MAX_WINDOW_DAYS,
+        max_workers: int = G2B_CONTRACT_MAX_WORKERS,
     ) -> tuple[tuple[G2BResearchRecord, ...], int]:
-        """Search contracts without requiring an upstream bid notice seed."""
+        """Search contracts without requiring an upstream bid notice seed.
 
-        if max_pages_per_window < 1 or num_of_rows < 1:
-            raise ValueError("page bounds must be positive")
+        The logical lookback is preserved while independent 31-day windows can be fetched with
+        bounded concurrency. This avoids turning a 3-year search into dozens of sequential network
+        round trips while keeping each physical API request inside the validated date limit.
+        """
 
-        records: list[G2BResearchRecord] = []
-        seen: set[str] = set()
-        request_count = 0
-        for window_begin, window_end in _date_windows(
+        if max_pages_per_window < 1 or num_of_rows < 1 or max_workers < 1:
+            raise ValueError("page/concurrency bounds must be positive")
+
+        windows = _date_windows(
             begin_date,
             end_date,
             max_window_days=max_window_days,
-        ):
+        )
+
+        def fetch_window(window: tuple[date, date]) -> tuple[tuple[G2BResearchRecord, ...], int]:
+            window_begin, window_end = window
+            window_records: list[G2BResearchRecord] = []
+            window_seen: set[str] = set()
+            requests = 0
             fetched = 0
             for page_no in range(1, max_pages_per_window + 1):
-                request_count += 1
+                requests += 1
                 page = self.fetch_product_search_page(
                     product_name=product_name,
                     begin_date=window_begin,
@@ -327,12 +338,32 @@ class G2BContractResearchClient:
                 fetched += len(page.items)
                 for raw in page.items:
                     record = parse_contract_research(raw, search_term=product_name)
-                    if record.source_record_id in seen:
+                    if record.source_record_id in window_seen:
                         continue
-                    seen.add(record.source_record_id)
-                    records.append(record)
+                    window_seen.add(record.source_record_id)
+                    window_records.append(record)
                 if page.total_count is not None and fetched >= page.total_count:
                     break
                 if len(page.items) < num_of_rows:
                     break
+            return tuple(window_records), requests
+
+        # Tiny searches stay sequential to minimize executor overhead. Multi-month/year searches
+        # use bounded parallelism; map preserves logical window order in the combined result.
+        if len(windows) <= 3 or max_workers == 1:
+            window_results = [fetch_window(window) for window in windows]
+        else:
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(windows))) as executor:
+                window_results = list(executor.map(fetch_window, windows))
+
+        records: list[G2BResearchRecord] = []
+        seen: set[str] = set()
+        request_count = 0
+        for found, requests in window_results:
+            request_count += requests
+            for record in found:
+                if record.source_record_id in seen:
+                    continue
+                seen.add(record.source_record_id)
+                records.append(record)
         return tuple(records), request_count
