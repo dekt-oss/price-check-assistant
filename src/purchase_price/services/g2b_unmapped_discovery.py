@@ -26,7 +26,7 @@ _ACCESSORY_MARKERS = frozenset(
 # The specific-item procurement operation is reliable with short inquiry ranges.
 # Keep long user lookbacks logical and partition each physical request to 31 calendar days.
 G2B_DISCOVERY_MAX_WINDOW_DAYS = 31
-G2B_DISCOVERY_MAX_WORKERS = 6
+G2B_DISCOVERY_MAX_WORKERS = 3
 
 
 @dataclass(frozen=True)
