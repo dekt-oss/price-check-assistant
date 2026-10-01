@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from time import monotonic
 from types import SimpleNamespace
 from typing import Any
 
@@ -70,6 +71,11 @@ from purchase_price.ui.market_research import (
     render_market_reference_summary,
     render_procurement_research,
     run_market_research,
+)
+from purchase_price.ui.production_runtime_compat import (
+    mfds_recall_exception_result,
+    normalize_mfds_recall_lookup,
+    run_market_research_hot_reload_safe,
 )
 from purchase_price.ui.purchase_workspace_presenter import (
     build_purchase_workspace_stats,
@@ -211,21 +217,17 @@ def _lookup_mfds_recall_isolated(*, model_name: str, product_name: str) -> objec
     """
 
     try:
-        return lookup_mfds_recall(
+        result = lookup_mfds_recall(
             model_name=model_name,
             product_name=product_name,
         )
     except Exception as exc:
-        return SimpleNamespace(
-            status="failure",
-            query_type="model" if model_name else "product",
-            query=model_name or product_name,
-            records=(),
-            error_type=type(exc).__name__,
-            error_message=str(exc),
-            checked_at=None,
-            source_url=None,
+        return mfds_recall_exception_result(
+            exc,
+            model_name=model_name,
+            product_name=product_name,
         )
+    return normalize_mfds_recall_lookup(result)
 
 
 def _identity_hydration(
@@ -540,6 +542,8 @@ def _execute_search(
     selected_identity_token: str = "",
 ) -> dict[str, Any]:
     raw_search = search_text.strip()
+    search_started = monotonic()
+    search_timings: dict[str, float] = {}
     if selected_identity is None:
         (
             product_name,
@@ -628,7 +632,10 @@ def _execute_search(
         if live_identity.status == "success":
             indexed_identity = live_identity
 
+    search_timings["identity"] = round(monotonic() - search_started, 3)
+
     model_probe_used = False
+    track_b_started = monotonic()
     track_b_data_as_of: str | None = None
     track_b_index_updated_at: str | None = None
     with open_track_b_serving_snapshot() as track_b_snapshot:
@@ -688,7 +695,9 @@ def _execute_search(
             track_b_snapshot=track_b_snapshot,
             current_model=query.model_name or "",
         )
+    search_timings["track_b"] = round(monotonic() - track_b_started, 3)
 
+    mfds_started = monotonic()
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
         mfds = MfdsWorkspaceResult(
             status="not_applicable",
@@ -698,18 +707,26 @@ def _execute_search(
         )
     else:
         mfds = research_mfds_for_workspace(query, track_b)
+    search_timings["mfds"] = round(monotonic() - mfds_started, 3)
+
+    safety_started = monotonic()
     safety_lookup = _lookup_mfds_recall_isolated(
         model_name=query.model_name,
         product_name=query.product_name,
     )
+    search_timings["safety"] = round(monotonic() - safety_started, 3)
 
-    run, discovery, market_bundle = run_market_research(
+    research_started = monotonic()
+    run, discovery, market_bundle = run_market_research_hot_reload_safe(
+        run_market_research,
         query,
         lookback_days=int(lookback_days),
         research_pages_per_term=1,
         research_request_budget=18,
         procurement_detail_limit=4,
     )
+    search_timings["research"] = round(monotonic() - research_started, 3)
+    search_timings["total"] = round(monotonic() - search_started, 3)
     rows = transaction_rows(track_b)
     direct_rows, reference_rows = _split_transaction_rows_compat(track_b)
     strict_count, reference_count = candidate_counts(track_b)
@@ -743,6 +760,7 @@ def _execute_search(
         "mfds_procurement_crosslinks": mfds_procurement_crosslinks,
         "track_b_data_as_of": track_b_data_as_of,
         "track_b_index_updated_at": track_b_index_updated_at,
+        "search_timings_seconds": search_timings,
     }
 
 
@@ -811,6 +829,20 @@ def _render_search_result(state: dict[str, Any]) -> None:
     st.divider()
     st.caption("구매조사 워크스페이스")
     st.subheader(heading)
+    timings = state.get("search_timings_seconds")
+    if isinstance(timings, dict):
+        timing_attrs: list[str] = []
+        for key in ("identity", "track_b", "mfds", "safety", "research", "total"):
+            try:
+                timing_attrs.append(f'data-{key}="{float(timings.get(key, 0.0)):.3f}"')
+            except (TypeError, ValueError):
+                continue
+        st.markdown(
+            '<span id="purchase-search-timings-v1" '
+            + " ".join(timing_attrs)
+            + ' style="display:none"></span>',
+            unsafe_allow_html=True,
+        )
     if state.get("origin") == "quote":
         st.caption(
             "견적서에서 추출한 품목을 일반 통합검색과 동일한 구매조사 파이프라인으로 조사했습니다. "
@@ -1665,6 +1697,7 @@ st.markdown(
     '<span id="unified-search-runtime-v4" style="display:none">unified-search-runtime-v4</span>'
     '<span id="purchase-workspace-runtime-v1" style="display:none">purchase-workspace-runtime-v1</span>'
     '<span id="purchase-workspace-runtime-v2" style="display:none">purchase-workspace-runtime-v2</span>'
+    '<span id="purchase-workspace-runtime-v5" style="display:none">purchase-workspace-runtime-v5</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

@@ -29,5 +29,6 @@ def test_unified_search_isolates_safety_source_runtime_failures() -> None:
 
     assert "def _lookup_mfds_recall_isolated" in source
     assert "except Exception as exc:" in source
-    assert 'status="failure"' in source
+    assert "mfds_recall_exception_result(" in source
+    assert "normalize_mfds_recall_lookup(result)" in source
     assert "safety_lookup = _lookup_mfds_recall_isolated(" in source
