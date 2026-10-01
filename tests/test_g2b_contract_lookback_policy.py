@@ -287,6 +287,23 @@ def test_independent_contract_failure_is_not_successful_zero() -> None:
     assert "synthetic independent contract failure" in source.error_message
 
 
+def test_synchronous_workspace_can_defer_slow_independent_contract_scan() -> None:
+    enriched = enrich_market_bundle_with_contracts(
+        _empty_bundle(),
+        service_key="configured",
+        independent_terms=("레이저프린터",),
+        requested_lookback_days=1095,
+        allow_independent_search=False,
+    )
+
+    source = enriched.sources[-1]
+    assert source.status == ResearchSourceStatus.DEFERRED
+    assert source.records == ()
+    assert source.request_count == 0
+    assert source.requested_lookback_days == 1095
+    assert "deferred-source-latency" in source.search_strategy
+
+
 def test_no_seed_and_no_independent_term_is_not_run_not_zero() -> None:
     enriched = enrich_market_bundle_with_contracts(
         _empty_bundle(),
