@@ -12,7 +12,7 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v6"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v7"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
 WORKSPACE_DIRECT_PATTERN = re.compile(r"직접 동일성 확인 거래\s*(\d+)건")
 ERROR_TEXTS = (
@@ -83,6 +83,13 @@ def _safety_diagnostic(page: Any) -> dict[str, str]:
     }
 
 
+def _research_status(page: Any) -> str:
+    marker = _app(page).locator("#purchase-research-deferred-v1").first
+    if marker.count() == 0:
+        return ""
+    return str(marker.get_attribute("data-status") or "")
+
+
 def _save_snapshot(page: Any, report: dict[str, object], label: str) -> None:
     try:
         report[f"{label}_body"] = _body_text(page)[:12000]
@@ -146,7 +153,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-runtime-v6 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-runtime-v7 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -245,6 +252,15 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
             report["direct_server_search_timings_seconds"] = _search_timings(page)
             report["direct_research_stage_timings_seconds"] = _research_stage_timings(page)
             report["direct_safety_diagnostic"] = _safety_diagnostic(page)
+            report["direct_research_status"] = _research_status(page)
+            if report["direct_research_status"] != "pending":
+                raise RuntimeError(
+                    "Initial DFM100 workspace did not defer C/Research after A/B result"
+                )
+            if report["direct_search_first_result_seconds"] > 25:
+                raise RuntimeError(
+                    "Initial DFM100 A/B workspace exceeded 25 second latency gate"
+                )
             attempts.append(
                 {
                     "attempt": attempt,
@@ -338,6 +354,15 @@ def _verify_quote_upload_uses_unified_workspace(browser: Any, report: dict[str, 
                 report["quote_server_search_timings_seconds"] = _search_timings(page)
                 report["quote_research_stage_timings_seconds"] = _research_stage_timings(page)
                 report["quote_safety_diagnostic"] = _safety_diagnostic(page)
+                report["quote_research_status"] = _research_status(page)
+                if report["quote_research_status"] != "pending":
+                    raise RuntimeError(
+                        "Quote DFM100 workspace did not defer C/Research after A/B result"
+                    )
+                if report["quote_upload_workspace_seconds"] > 35:
+                    raise RuntimeError(
+                        "Quote DFM100 A/B workspace exceeded 35 second latency gate"
+                    )
                 _save_snapshot(page, report, "quote-upload-dfm100-unified-workspace")
                 return
             page.wait_for_timeout(1_000)
