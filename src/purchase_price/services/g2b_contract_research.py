@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from purchase_price.clients.data_go_kr import PublicDataPortalClient
+from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
 from purchase_price.collectors.g2b_shopping import G2BShoppingPage, unwrap_g2b_page
 from purchase_price.services.g2b_contract_evidence import (
     G2B_CONTRACT_BASE_URL,
@@ -21,7 +22,15 @@ from purchase_price.services.g2b_market_models import (
 # Live PPS contract PPSSrch rejects oversized inquiry ranges with code=07.
 # Keep the user-visible lookback (e.g. 3 years) while partitioning physical API calls.
 G2B_CONTRACT_MAX_WINDOW_DAYS = 31
-G2B_CONTRACT_MAX_WORKERS = 6
+G2B_CONTRACT_MAX_WORKERS = 3
+
+
+@dataclass(frozen=True)
+class G2BContractProductSearchResult:
+    records: tuple[G2BResearchRecord, ...]
+    request_count: int
+    failed_window_count: int = 0
+    errors: tuple[Exception, ...] = ()
 
 
 def _text(value: Any) -> str | None:
@@ -291,6 +300,98 @@ class G2BContractResearchClient:
                 break
         return tuple(records), request_count
 
+    def search_by_product_name_result(
+        self,
+        *,
+        product_name: str,
+        begin_date: date,
+        end_date: date,
+        max_pages_per_window: int = 1,
+        num_of_rows: int = 100,
+        max_window_days: int | None = G2B_CONTRACT_MAX_WINDOW_DAYS,
+        max_workers: int = G2B_CONTRACT_MAX_WORKERS,
+    ) -> G2BContractProductSearchResult:
+        """Search API-safe windows with bounded concurrency and per-window failure isolation."""
+
+        if max_pages_per_window < 1 or num_of_rows < 1 or max_workers < 1:
+            raise ValueError("page/concurrency bounds must be positive")
+
+        windows = _date_windows(
+            begin_date,
+            end_date,
+            max_window_days=max_window_days,
+        )
+
+        def fetch_window(
+            window: tuple[date, date],
+        ) -> tuple[tuple[G2BResearchRecord, ...], int, Exception | None]:
+            window_begin, window_end = window
+            window_records: list[G2BResearchRecord] = []
+            window_seen: set[str] = set()
+            requests = 0
+            fetched = 0
+            try:
+                for page_no in range(1, max_pages_per_window + 1):
+                    requests += 1
+                    page = self.fetch_product_search_page(
+                        product_name=product_name,
+                        begin_date=window_begin,
+                        end_date=window_end,
+                        page_no=page_no,
+                        num_of_rows=num_of_rows,
+                    )
+                    if not page.items:
+                        break
+                    fetched += len(page.items)
+                    for raw in page.items:
+                        record = parse_contract_research(raw, search_term=product_name)
+                        if record.source_record_id in window_seen:
+                            continue
+                        window_seen.add(record.source_record_id)
+                        window_records.append(record)
+                    if page.total_count is not None and fetched >= page.total_count:
+                        break
+                    if len(page.items) < num_of_rows:
+                        break
+            except Exception as exc:
+                return tuple(window_records), requests, exc
+            return tuple(window_records), requests, None
+
+        # Preflight the first window before fan-out. Invalid authorization/request contracts fail
+        # once rather than being multiplied across every 31-day window.
+        first_result = fetch_window(windows[0])
+        remaining = windows[1:]
+        window_results = [first_result]
+        if first_result[2] is None and remaining:
+            if len(remaining) <= 2 or max_workers == 1:
+                window_results.extend(fetch_window(window) for window in remaining)
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=min(max_workers, len(remaining))
+                ) as executor:
+                    window_results.extend(executor.map(fetch_window, remaining))
+
+        records: list[G2BResearchRecord] = []
+        seen: set[str] = set()
+        request_count = 0
+        errors: list[Exception] = []
+        for found, requests, error in window_results:
+            request_count += requests
+            if error is not None:
+                errors.append(error)
+            for record in found:
+                if record.source_record_id in seen:
+                    continue
+                seen.add(record.source_record_id)
+                records.append(record)
+
+        return G2BContractProductSearchResult(
+            records=tuple(records),
+            request_count=request_count,
+            failed_window_count=len(errors),
+            errors=tuple(errors),
+        )
+
     def search_by_product_name(
         self,
         *,
@@ -302,68 +403,20 @@ class G2BContractResearchClient:
         max_window_days: int | None = G2B_CONTRACT_MAX_WINDOW_DAYS,
         max_workers: int = G2B_CONTRACT_MAX_WORKERS,
     ) -> tuple[tuple[G2BResearchRecord, ...], int]:
-        """Search contracts without requiring an upstream bid notice seed.
+        """Compatibility wrapper that remains strict when any physical window fails."""
 
-        The logical lookback is preserved while independent 31-day windows can be fetched with
-        bounded concurrency. This avoids turning a 3-year search into dozens of sequential network
-        round trips while keeping each physical API request inside the validated date limit.
-        """
-
-        if max_pages_per_window < 1 or num_of_rows < 1 or max_workers < 1:
-            raise ValueError("page/concurrency bounds must be positive")
-
-        windows = _date_windows(
-            begin_date,
-            end_date,
+        result = self.search_by_product_name_result(
+            product_name=product_name,
+            begin_date=begin_date,
+            end_date=end_date,
+            max_pages_per_window=max_pages_per_window,
+            num_of_rows=num_of_rows,
             max_window_days=max_window_days,
+            max_workers=max_workers,
         )
-
-        def fetch_window(window: tuple[date, date]) -> tuple[tuple[G2BResearchRecord, ...], int]:
-            window_begin, window_end = window
-            window_records: list[G2BResearchRecord] = []
-            window_seen: set[str] = set()
-            requests = 0
-            fetched = 0
-            for page_no in range(1, max_pages_per_window + 1):
-                requests += 1
-                page = self.fetch_product_search_page(
-                    product_name=product_name,
-                    begin_date=window_begin,
-                    end_date=window_end,
-                    page_no=page_no,
-                    num_of_rows=num_of_rows,
-                )
-                if not page.items:
-                    break
-                fetched += len(page.items)
-                for raw in page.items:
-                    record = parse_contract_research(raw, search_term=product_name)
-                    if record.source_record_id in window_seen:
-                        continue
-                    window_seen.add(record.source_record_id)
-                    window_records.append(record)
-                if page.total_count is not None and fetched >= page.total_count:
-                    break
-                if len(page.items) < num_of_rows:
-                    break
-            return tuple(window_records), requests
-
-        # Tiny searches stay sequential to minimize executor overhead. Multi-month/year searches
-        # use bounded parallelism; map preserves logical window order in the combined result.
-        if len(windows) <= 3 or max_workers == 1:
-            window_results = [fetch_window(window) for window in windows]
-        else:
-            with ThreadPoolExecutor(max_workers=min(max_workers, len(windows))) as executor:
-                window_results = list(executor.map(fetch_window, windows))
-
-        records: list[G2BResearchRecord] = []
-        seen: set[str] = set()
-        request_count = 0
-        for found, requests in window_results:
-            request_count += requests
-            for record in found:
-                if record.source_record_id in seen:
-                    continue
-                seen.add(record.source_record_id)
-                records.append(record)
-        return tuple(records), request_count
+        if result.errors:
+            first = result.errors[0]
+            if isinstance(first, Exception):
+                raise first
+            raise PublicDataClientError("G2B contract product search window failed")
+        return result.records, result.request_count
