@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from inspect import signature
 from time import monotonic
 from types import SimpleNamespace
 from typing import Any
@@ -50,6 +51,7 @@ from purchase_price.services.mfds_workspace import (
     research_mfds_for_workspace,
 )
 from purchase_price.services.pricing import assess_prices
+from purchase_price.services.search import SearchRun
 from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
@@ -73,7 +75,6 @@ from purchase_price.ui.market_research import (
     run_market_research,
 )
 from purchase_price.ui.production_runtime_compat import (
-    mfds_recall_error_kind,
     mfds_recall_exception_result,
     normalize_mfds_recall_lookup,
     run_market_research_hot_reload_safe,
@@ -136,6 +137,75 @@ def _safety_evidence_token(name: str, *, fallback: str = "CHECK_FAILED") -> obje
 
 def _safety_evidence_value(status: object) -> str:
     return str(getattr(status, "value", status) or "").strip()
+
+
+def _mfds_recall_error_kind_compat(result: object | None) -> str:
+    """Classify Safety failures without importing a newly-added helper after hot reload."""
+
+    if result is None:
+        return ""
+    status = str(getattr(result, "status", "") or "")
+    if status not in {"failure", "not_authorized"}:
+        return ""
+
+    error_type = str(getattr(result, "error_type", "") or "")
+    error_message = str(getattr(result, "error_message", "") or "").upper()
+    if any(
+        marker in error_message
+        for marker in (
+            "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+            "SERVICE_ACCESS_DENIED_ERROR",
+            "PERMISSION_DENIED",
+            "CODE=30",
+        )
+    ):
+        return "authorization"
+
+    token = error_type.casefold()
+    if any(marker in token for marker in ("transport", "timeout", "connect")):
+        return "transport"
+    if "typeerror" in token:
+        return "type_error"
+    if "valueerror" in token:
+        return "value_error"
+    if "publicdataclienterror" in token:
+        return "api_error"
+    return "other"
+
+
+def _run_market_research_runtime_compatible(
+    query: ProductQuery,
+    *,
+    lookback_days: int,
+    stage_timings: dict[str, float],
+):
+    """Call the hot-reload guard without assuming its newest signature is loaded."""
+
+    kwargs = {
+        "lookback_days": int(lookback_days),
+        "research_pages_per_term": 1,
+        "research_request_budget": 18,
+        "procurement_detail_limit": 4,
+    }
+    try:
+        supports_stage_timings = (
+            "stage_timings" in signature(run_market_research_hot_reload_safe).parameters
+        )
+    except (TypeError, ValueError):
+        supports_stage_timings = False
+
+    if supports_stage_timings:
+        return run_market_research_hot_reload_safe(
+            run_market_research,
+            query,
+            stage_timings=stage_timings,
+            **kwargs,
+        )
+    return run_market_research_hot_reload_safe(
+        run_market_research,
+        query,
+        **kwargs,
+    )
 
 
 def _build_safety_state_compat(
@@ -717,18 +787,13 @@ def _execute_search(
     )
     search_timings["safety"] = round(monotonic() - safety_started, 3)
 
-    research_started = monotonic()
+    # Return the fast A/B + identity workspace first. Broad C/Research is intentionally
+    # deferred so external procurement APIs cannot block the primary price result.
     research_stage_timings: dict[str, float] = {}
-    run, discovery, market_bundle = run_market_research_hot_reload_safe(
-        run_market_research,
-        query,
-        stage_timings=research_stage_timings,
-        lookback_days=int(lookback_days),
-        research_pages_per_term=1,
-        research_request_budget=18,
-        procurement_detail_limit=4,
-    )
-    search_timings["research"] = round(monotonic() - research_started, 3)
+    run = SearchRun()
+    discovery = None
+    market_bundle = None
+    search_timings["research"] = 0.0
     search_timings["total"] = round(monotonic() - search_started, 3)
     rows = transaction_rows(track_b)
     direct_rows, reference_rows = _split_transaction_rows_compat(track_b)
@@ -765,7 +830,38 @@ def _execute_search(
         "track_b_index_updated_at": track_b_index_updated_at,
         "search_timings_seconds": search_timings,
         "research_stage_timings_seconds": research_stage_timings,
+        "research_status": "pending",
+        "research_lookback_days": int(lookback_days),
     }
+
+
+def _execute_deferred_research(state: dict[str, Any]) -> dict[str, Any]:
+    """Enrich an already-renderable A/B workspace with C/Research evidence."""
+
+    query = state.get("query")
+    if not isinstance(query, ProductQuery):
+        raise ValueError("심화 Research를 실행할 검색조건이 없습니다.")
+
+    started = monotonic()
+    stage_timings: dict[str, float] = {}
+    run, discovery, market_bundle = _run_market_research_runtime_compatible(
+        query,
+        lookback_days=int(state.get("research_lookback_days") or G2B_DEFAULT_LOOKBACK_DAYS),
+        stage_timings=stage_timings,
+    )
+    elapsed = round(monotonic() - started, 3)
+
+    updated = dict(state)
+    updated["run"] = run
+    updated["discovery"] = discovery
+    updated["market_bundle"] = market_bundle
+    updated["research_status"] = "complete"
+    updated["research_stage_timings_seconds"] = stage_timings
+    timings = dict(updated.get("search_timings_seconds") or {})
+    timings["research"] = elapsed
+    updated["search_timings_seconds"] = timings
+    updated.pop("research_error_type", None)
+    return updated
 
 
 def _render_search_interpretation(
@@ -811,9 +907,12 @@ def _render_search_result(state: dict[str, Any]) -> None:
         direct_rows, reference_rows = _split_transaction_rows_compat(track_b)
     strict_count = len(direct_rows)
     reference_count = len(reference_rows)
-    run = state["run"]
-    discovery = state["discovery"]
-    market_bundle = state["market_bundle"]
+    run = state.get("run")
+    if not isinstance(run, SearchRun):
+        run = SearchRun()
+    discovery = state.get("discovery")
+    market_bundle = state.get("market_bundle")
+    research_status = str(state.get("research_status") or "complete")
     mfds = state.get("mfds")
     safety_lookup = state.get("safety_lookup")
     indexed_identity = state.get("mfds_identity")
@@ -896,7 +995,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         permit_numbers=safety_permit_numbers,
     )
     safety_lookup_status = str(getattr(safety_lookup, "status", "") or "")
-    safety_error_kind = mfds_recall_error_kind(safety_lookup)
+    safety_error_kind = _mfds_recall_error_kind_compat(safety_lookup)
     raw_safety_error_type = str(getattr(safety_lookup, "error_type", "") or "")
     safety_error_type = "".join(
         char for char in raw_safety_error_type if char.isalnum() or char in "_-"
@@ -1079,7 +1178,59 @@ def _render_search_result(state: dict[str, Any]) -> None:
     else:
         mfds_metric = "대상 아님"
     c4.metric("식약처 품목정보", mfds_metric)
-    c5.metric("공개조달 Research", f"{stats.research_count}건")
+    if research_status == "pending":
+        c5.metric("공개조달 Research", "후속 조회")
+    elif research_status == "failure":
+        c5.metric("공개조달 Research", "조회 실패")
+    else:
+        c5.metric("공개조달 Research", f"{stats.research_count}건")
+
+    st.markdown(
+        '<span id="purchase-research-deferred-v1" '
+        + f'data-status="{research_status}" '
+        + 'style="display:none"></span>',
+        unsafe_allow_html=True,
+    )
+    if research_status in {"pending", "failure"}:
+        if research_status == "pending":
+            st.info(
+                "A/B 직접가격·공급업체·식약처 등록정보를 먼저 표시했습니다. "
+                "입찰·낙찰·사전규격·계약 등 심화 Research는 아래 버튼으로 후속 조회합니다."
+            )
+            research_button_label = "심화 Research 불러오기"
+        else:
+            st.warning(
+                "A/B 직접가격 결과는 유지됩니다. 심화 Research만 별도 조회에 실패했습니다."
+            )
+            research_button_label = "심화 Research 다시 조회"
+
+        if st.button(
+            research_button_label,
+            key=f"workspace_research_load::{quote_key}",
+            type="secondary",
+        ):
+            try:
+                with st.status(
+                    "A/B 결과는 유지한 채 공개조달 심화자료를 조회하고 있습니다...",
+                    expanded=False,
+                ) as research_progress:
+                    enriched_state = _execute_deferred_research(state)
+                    st.session_state[HOME_SEARCH_STATE_KEY] = enriched_state
+                    research_progress.update(
+                        label="심화 Research 조회 완료",
+                        state="complete",
+                    )
+                st.rerun()
+            except Exception as exc:
+                failed_state = dict(state)
+                failed_state["research_status"] = "failure"
+                failed_state["research_error_type"] = type(exc).__name__
+                st.session_state[HOME_SEARCH_STATE_KEY] = failed_state
+                st.warning(
+                    "심화 Research 조회에 실패했습니다. A/B 직접가격 결과는 그대로 사용할 수 있습니다. "
+                    f"({type(exc).__name__})"
+                )
+
     if track_b_data_as_of:
         st.caption(f"나라장터 직접가격 데이터 기준일 · {track_b_data_as_of}")
     elif track_b_index_updated_at:
@@ -1343,24 +1494,33 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
         st.divider()
         st.markdown("#### 참고근거 · Research")
-        st.markdown("#### 공개조달 Research·근거")
-        render_market_reference_summary(
-            discovery,
-            query=query,
-            quote_unit_price=review_input.quote_unit_price,
-        )
-        render_procurement_research(market_bundle)
-        render_source_status(run)
-        if run.results:
-            assessment = assess_prices(run.results, review_input.quote_unit_price)
-            m1, m2, m3 = st.columns(3)
-            m1.metric("직접가격 근거", f"{assessment.observed_count}건")
-            m2.metric("독립 출처", f"{assessment.source_count}개")
-            m3.metric("근거 신뢰도", assessment.confidence)
-            render_observation_cards(run.results)
-            render_evidence_table(run.results)
+        if research_status == "pending":
+            st.caption(
+                "심화 Research는 아직 실행하지 않았습니다. 위의 A/B 직접가격은 이 조회와 독립된 직접근거입니다."
+            )
+        elif research_status == "failure":
+            st.warning(
+                "심화 Research를 불러오지 못했습니다. A/B 직접가격·공급업체·식약처 정보는 영향을 받지 않습니다."
+            )
         else:
-            st.caption("엄격한 동일제품 직접가격은 현재 조사 범위에서 확인되지 않았습니다.")
+            st.markdown("#### 공개조달 Research·근거")
+            render_market_reference_summary(
+                discovery,
+                query=query,
+                quote_unit_price=review_input.quote_unit_price,
+            )
+            render_procurement_research(market_bundle)
+            render_source_status(run)
+            if run.results:
+                assessment = assess_prices(run.results, review_input.quote_unit_price)
+                m1, m2, m3 = st.columns(3)
+                m1.metric("직접가격 근거", f"{assessment.observed_count}건")
+                m2.metric("독립 출처", f"{assessment.source_count}개")
+                m3.metric("근거 신뢰도", assessment.confidence)
+                render_observation_cards(run.results)
+                render_evidence_table(run.results)
+            else:
+                st.caption("엄격한 동일제품 직접가격은 현재 조사 범위에서 확인되지 않았습니다.")
 
     elif selected_view == "supplier":
         st.markdown("#### 식약처 품목 등록업체 · 품목 책임주체")
@@ -1743,6 +1903,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v2" style="display:none">purchase-workspace-runtime-v2</span>'
     '<span id="purchase-workspace-runtime-v5" style="display:none">purchase-workspace-runtime-v5</span>'
     '<span id="purchase-workspace-runtime-v6" style="display:none">purchase-workspace-runtime-v6</span>'
+    '<span id="purchase-workspace-runtime-v7" style="display:none">purchase-workspace-runtime-v7</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
