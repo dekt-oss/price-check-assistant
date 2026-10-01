@@ -115,7 +115,7 @@ def test_unmapped_discovery_ranks_exact_model_but_keeps_category_research(monkey
     assert not hasattr(result, "raw_payload")
 
 
-def test_unmapped_discovery_searches_multi_year_period_in_year_bounded_windows(monkeypatch) -> None:
+def test_unmapped_discovery_partitions_multi_year_period_into_31_day_windows(monkeypatch) -> None:
     windows: list[tuple[date, date]] = []
 
     class EmptyCollector:
@@ -145,11 +145,12 @@ def test_unmapped_discovery_searches_multi_year_period_in_year_bounded_windows(m
         today=date(2026, 9, 5),
     )
 
-    assert result.status == "success_0"
-    # Five one-year windows x three research terms, one request each.
-    assert result.request_count == 15
-    assert len(windows) == 15
-    assert all((end - begin).days <= 364 for begin, end in windows)
+    # The 5-year logical lookback stays intact, but the bounded request budget prevents
+    # hammering the API after 80 physical 31-day requests.
+    assert result.status == "partial"
+    assert result.request_count == 80
+    assert len(windows) == 80
+    assert all((end - begin).days <= 30 for begin, end in windows)
 
 
 def test_unmapped_discovery_isolates_one_failed_research_term(monkeypatch) -> None:
