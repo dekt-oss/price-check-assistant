@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable
 from dataclasses import is_dataclass, replace
 from inspect import signature
 from threading import Lock
 from types import FunctionType, SimpleNamespace
-from typing import Any, Callable
+from typing import Any
 
 _MFDS_AUTH_MARKERS = (
     "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
