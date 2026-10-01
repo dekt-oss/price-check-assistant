@@ -22,6 +22,10 @@ _ACCESSORY_MARKERS = frozenset(
     {"accessory", "accessories", "액세서리", "부속품", "부속", "부품"}
 )
 
+# The specific-item procurement operation is reliable with short inquiry ranges.
+# Keep long user lookbacks logical and partition each physical request to 31 calendar days.
+G2B_DISCOVERY_MAX_WINDOW_DAYS = 31
+
 
 @dataclass(frozen=True)
 class G2BDiscoveryCandidate:
@@ -276,11 +280,18 @@ def _candidate_from_record(
     )
 
 
-def _year_bounded_windows(start: date, end: date) -> tuple[tuple[date, date], ...]:
+def _bounded_windows(
+    start: date,
+    end: date,
+    *,
+    max_window_days: int = G2B_DISCOVERY_MAX_WINDOW_DAYS,
+) -> tuple[tuple[date, date], ...]:
+    if max_window_days < 1:
+        raise ValueError("max_window_days must be positive")
     windows: list[tuple[date, date]] = []
     cursor_end = end
     while cursor_end >= start:
-        cursor_start = max(start, cursor_end - timedelta(days=364))
+        cursor_start = max(start, cursor_end - timedelta(days=max_window_days - 1))
         windows.append((cursor_start, cursor_end))
         cursor_end = cursor_start - timedelta(days=1)
     return tuple(windows)
@@ -336,7 +347,7 @@ def discover_unmapped_g2b_candidates(
 
     end = today or date.today()
     start = end - timedelta(days=lookback_days - 1)
-    windows = _year_bounded_windows(start, end)
+    windows = _bounded_windows(start, end)
 
     request_count = 0
     records_seen = 0
