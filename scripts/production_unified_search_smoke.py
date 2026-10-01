@@ -12,7 +12,7 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-v3-shell"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v5"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
 WORKSPACE_DIRECT_PATTERN = re.compile(r"직접 동일성 확인 거래\s*(\d+)건")
 ERROR_TEXTS = (
@@ -28,6 +28,23 @@ def _app(page: Any) -> Any:
 
 def _body_text(page: Any) -> str:
     return _app(page).locator("body").inner_text(timeout=10_000)
+
+
+def _search_timings(page: Any) -> dict[str, float]:
+    marker = _app(page).locator("#purchase-search-timings-v1").first
+    if marker.count() == 0:
+        return {}
+
+    timings: dict[str, float] = {}
+    for key in ("identity", "track_b", "mfds", "safety", "research", "total"):
+        raw = marker.get_attribute(f"data-{key}")
+        if raw is None:
+            continue
+        try:
+            timings[key] = float(raw)
+        except ValueError:
+            continue
+    return timings
 
 
 def _save_snapshot(page: Any, report: dict[str, object], label: str) -> None:
@@ -93,7 +110,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-v3-shell in time")
+    raise RuntimeError("Production did not expose purchase-workspace-runtime-v5 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -125,6 +142,7 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
 
 
 def _verify_workspace_sections_persist_result(page: Any, report: dict[str, object]) -> None:
+    started = time.monotonic()
     app = _app(page)
 
     body = _body_text(page)
@@ -161,6 +179,10 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
         _assert_no_error_text(body)
         if "동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격" in body:
             report["comparison_section_rendered"] = True
+            report["direct_workspace_sections_seconds"] = round(
+                time.monotonic() - started,
+                2,
+            )
             _save_snapshot(page, report, "unified-search-dfm100-workspace")
             return
         page.wait_for_timeout(1_000)
@@ -177,8 +199,14 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
             search = app.get_by_label("통합 검색", exact=True)
             search.wait_for(state="visible", timeout=20_000)
             search.fill("DFM100")
+            direct_started = time.monotonic()
             app.get_by_role("button", name="검색", exact=True).click()
             strict_count, reference_count = _wait_for_nonzero_result(page)
+            report["direct_search_first_result_seconds"] = round(
+                time.monotonic() - direct_started,
+                2,
+            )
+            report["direct_server_search_timings_seconds"] = _search_timings(page)
             attempts.append(
                 {
                     "attempt": attempt,
@@ -245,6 +273,7 @@ def _verify_quote_upload_uses_unified_workspace(browser: Any, report: dict[str, 
         uploader.wait_for(state="visible", timeout=20_000)
         file_input = uploader.locator('input[type="file"]')
         file_input.wait_for(state="attached", timeout=20_000)
+        quote_started = time.monotonic()
         file_input.set_input_files(str(quote_path))
 
         deadline = time.monotonic() + 90
@@ -264,6 +293,11 @@ def _verify_quote_upload_uses_unified_workspace(browser: Any, report: dict[str, 
                     )
                 report["quote_upload_unified_workspace"] = True
                 report["quote_upload_direct_count"] = int(direct_match.group(1))
+                report["quote_upload_workspace_seconds"] = round(
+                    time.monotonic() - quote_started,
+                    2,
+                )
+                report["quote_server_search_timings_seconds"] = _search_timings(page)
                 _save_snapshot(page, report, "quote-upload-dfm100-unified-workspace")
                 return
             page.wait_for_timeout(1_000)
