@@ -170,7 +170,7 @@ def test_official_recall_successful_zero_is_checked_none_not_safe() -> None:
 
 
 
-def test_recall_lookup_not_authorized_stays_not_connected_semantically() -> None:
+def test_recall_lookup_not_authorized_is_explicit_semantically() -> None:
     state = build_safety_state_from_recall_lookup(
         SimpleNamespace(
             status="not_authorized",
@@ -183,7 +183,7 @@ def test_recall_lookup_not_authorized_stays_not_connected_semantically() -> None
     )
 
     assert state.status == SafetyCheckStatus.NOT_AUTHORIZED
-    assert state.evidence_status == SafetyEvidenceStatus.NOT_CONNECTED
+    assert state.evidence_status == SafetyEvidenceStatus.NOT_AUTHORIZED
     assert "활용승인" in state.message
     assert "안전함" not in state.message
     assert state.checked_at == "2026-09-30T08:00:00+09:00"
