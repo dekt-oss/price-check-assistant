@@ -115,6 +115,22 @@ def _parse_quote(value: str) -> Decimal | None:
         raise ValueError("견적 단가는 숫자로 입력하세요.") from exc
 
 
+def _safety_evidence_token(name: str, *, fallback: str = "CHECK_FAILED") -> object:
+    """Return a Safety status without requiring a newly-added enum member after hot reload."""
+
+    member = getattr(SafetyEvidenceStatus, name, None)
+    if member is not None:
+        return member
+    fallback_member = getattr(SafetyEvidenceStatus, fallback, None)
+    if name == fallback and fallback_member is not None:
+        return fallback_member
+    return SimpleNamespace(value=name)
+
+
+def _safety_evidence_value(status: object) -> str:
+    return str(getattr(status, "value", status) or "").strip()
+
+
 def _build_safety_state_compat(
     safety_lookup: object | None,
     *,
@@ -153,7 +169,7 @@ def _build_safety_state_compat(
         )
     if status == "not_authorized":
         return SimpleNamespace(
-            evidence_status=SafetyEvidenceStatus.NOT_AUTHORIZED,
+            evidence_status=_safety_evidence_token("NOT_AUTHORIZED"),
             message=(
                 "식약처 회수·판매중지 API 호출은 연결됐지만 현재 서비스키의 활용승인이 확인되지 않았습니다. "
                 "안전정보 0건으로 해석하지 않습니다."
@@ -819,14 +835,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
     )
     with st.container(border=True):
         st.markdown("### Safety")
-        safety_text = f"{safety_state.evidence_status.value} · {safety_state.message}"
-        if safety_state.evidence_status == SafetyEvidenceStatus.RED:
+        safety_status_value = _safety_evidence_value(safety_state.evidence_status)
+        safety_text = f"{safety_status_value} · {safety_state.message}"
+        if safety_status_value == "RED":
             st.error(safety_text)
-        elif safety_state.evidence_status in {
-            SafetyEvidenceStatus.AMBER,
-            SafetyEvidenceStatus.CHECK_FAILED,
-            SafetyEvidenceStatus.NOT_CONNECTED,
-            SafetyEvidenceStatus.NOT_AUTHORIZED,
+        elif safety_status_value in {
+            "AMBER",
+            "CHECK_FAILED",
+            "NOT_CONNECTED",
+            "NOT_AUTHORIZED",
         }:
             st.warning(safety_text)
         else:
