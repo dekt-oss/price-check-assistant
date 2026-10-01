@@ -4,7 +4,7 @@ from pathlib import Path
 def test_production_unified_search_smoke_uses_user_visible_result_contract() -> None:
     script = Path("scripts/production_unified_search_smoke.py").read_text(encoding="utf-8")
 
-    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v6"' in script
+    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v7"' in script
     assert 'fill("DFM100")' in script
     assert "동일성 확인 (\\d+)건 · 검색 참고 (\\d+)건" in script
     assert 'WORKSPACE_DIRECT_PATTERN = re.compile(r"직접 동일성 확인 거래\\s*(\\d+)건")' in script
@@ -16,6 +16,9 @@ def test_production_unified_search_smoke_uses_user_visible_result_contract() -> 
     assert 'get_by_text("동일품목 비교", exact=True)' in script
     assert 'report["comparison_section_rendered"] = True' in script
     assert 'report["price_section_rendered"] = True' in script
+    assert 'report["direct_research_status"] = _research_status(page)' in script
+    assert 'report["quote_research_status"] = _research_status(page)' in script
+    assert "Initial DFM100 A/B workspace exceeded 25 second latency gate" in script
     assert "AttributeError" in script
     assert "This app has encountered an error" in script
     assert 'data-testid="stDataFrame"' not in script
