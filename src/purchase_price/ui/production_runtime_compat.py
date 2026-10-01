@@ -126,16 +126,12 @@ def _fresh_discovery_function(
     with _DISCOVERY_RELOAD_LOCK:
         try:
             importlib.invalidate_caches()
-            data_go_kr = importlib.import_module("purchase_price.clients.data_go_kr")
-            g2b_shopping = importlib.import_module(
-                "purchase_price.collectors.g2b_shopping"
-            )
             module = importlib.import_module(
                 "purchase_price.services.g2b_unmapped_discovery"
             )
             if not hasattr(module, "G2B_DISCOVERY_MAX_WORKERS"):
-                importlib.reload(data_go_kr)
-                importlib.reload(g2b_shopping)
+                # Reload only the leaf Research module. Reloading shared transport modules can
+                # replace exception-class objects that older Streamlit imports still reference.
                 module = importlib.reload(module)
             refreshed = getattr(module, "discover_unmapped_g2b_candidates", None)
             return refreshed if callable(refreshed) else original
