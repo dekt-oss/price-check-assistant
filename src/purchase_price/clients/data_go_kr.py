@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from threading import Lock
 from typing import Any
 from urllib.parse import quote, unquote
 from xml.etree import ElementTree
@@ -216,16 +217,20 @@ class PublicDataPortalClient:
         self.max_retries = max_retries
         self.connect_circuit_breaker = connect_circuit_breaker
         self._client: httpx.Client | None = None
+        self._client_lock = Lock()
         self._connect_circuit_error: str | None = None
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
-            self._client = httpx.Client(timeout=self.timeout_seconds)
+            with self._client_lock:
+                if self._client is None:
+                    self._client = httpx.Client(timeout=self.timeout_seconds)
         return self._client
 
     def close(self) -> None:
-        client = self._client
-        self._client = None
+        with self._client_lock:
+            client = self._client
+            self._client = None
         self._connect_circuit_error = None
         if client is not None:
             close = getattr(client, "close", None)
