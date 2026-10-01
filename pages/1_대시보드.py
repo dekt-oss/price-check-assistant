@@ -51,7 +51,6 @@ from purchase_price.services.mfds_workspace import (
     research_mfds_for_workspace,
 )
 from purchase_price.services.pricing import assess_prices
-from purchase_price.services.search import SearchRun
 from purchase_price.services.purchase_review import build_purchase_review_input
 from purchase_price.services.purchase_workspace_handoff import (
     PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
@@ -63,6 +62,7 @@ from purchase_price.services.safety_support import (
     MFDS_SAFETY_LETTER_PAGE_URL,
     build_manual_safety_check_state,
 )
+from purchase_price.services.search import SearchRun
 from purchase_price.services.structured_query_identity import canonicalize_product_query
 from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
