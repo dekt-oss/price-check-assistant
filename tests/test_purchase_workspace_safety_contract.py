@@ -8,7 +8,9 @@ def test_purchase_workspace_integrates_official_mfds_recall_lookup() -> None:
 
     assert "lookup_mfds_recall" in source
     assert "def _build_safety_state_compat" in source
-    assert "SafetyEvidenceStatus.NOT_AUTHORIZED" in source
+    assert 'evidence_status=_safety_evidence_token("NOT_AUTHORIZED")' in source
+    assert 'safety_status_value == "RED"' in source
+    assert '"NOT_AUTHORIZED",' in source
     assert '"safety_lookup": safety_lookup' in source
     assert "식약처 회수·판매중지 API 확인시각" in source
     assert "Service04 형명/품목 응답에는 exact 식약처 품목번호가 없어" in source
