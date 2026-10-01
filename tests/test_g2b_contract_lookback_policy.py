@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from threading import Lock
+from time import sleep
 
+from purchase_price.collectors.g2b_shopping import G2BShoppingPage
 from purchase_price.schemas import CollectedPrice
 from purchase_price.services.g2b_contract_enrichment import (
     build_contract_lookback_stages,
@@ -94,6 +97,42 @@ def test_independent_contract_search_splits_long_ranges_without_overlap_by_defau
         ("20260702", "20260801"),
         ("20260802", "20260831"),
     ]
+
+def test_independent_contract_search_parallelizes_many_bounded_windows() -> None:
+    lock = Lock()
+    active = 0
+    max_active = 0
+
+    class ConcurrentClient(G2BContractResearchClient):
+        def __init__(self) -> None:
+            pass
+
+        def fetch_product_search_page(self, **kwargs):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                sleep(0.04)
+                return G2BShoppingPage((), 0, 1, 100)
+            finally:
+                with lock:
+                    active -= 1
+
+    client = ConcurrentClient()
+
+    records, request_count = client.search_by_product_name(
+        product_name="레이저프린터",
+        begin_date=date(2026, 1, 1),
+        end_date=date(2026, 6, 30),
+        max_pages_per_window=1,
+        max_workers=4,
+    )
+
+    assert records == ()
+    assert request_count == 6
+    assert max_active >= 2
+
 
 
 class FakeIndependentContractClient:
