@@ -170,7 +170,7 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
         if (
             workspace_match is not None
             and "구매조사 워크스페이스" in body
-            and "동일제품 거래" in body
+            and "나라장터 동일제품 직접거래" in body
         ):
             strict_count = int(workspace_match.group(1))
             reference_count = int(legacy_match.group(2)) if legacy_match is not None else 0
