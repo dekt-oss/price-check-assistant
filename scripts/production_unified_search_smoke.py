@@ -12,7 +12,7 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v5"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v6"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
 WORKSPACE_DIRECT_PATTERN = re.compile(r"직접 동일성 확인 거래\s*(\d+)건")
 ERROR_TEXTS = (
@@ -30,21 +30,57 @@ def _body_text(page: Any) -> str:
     return _app(page).locator("body").inner_text(timeout=10_000)
 
 
-def _search_timings(page: Any) -> dict[str, float]:
-    marker = _app(page).locator("#purchase-search-timings-v1").first
+def _float_attributes(page: Any, selector: str, keys: tuple[str, ...]) -> dict[str, float]:
+    marker = _app(page).locator(selector).first
     if marker.count() == 0:
         return {}
 
-    timings: dict[str, float] = {}
-    for key in ("identity", "track_b", "mfds", "safety", "research", "total"):
+    values: dict[str, float] = {}
+    for key in keys:
         raw = marker.get_attribute(f"data-{key}")
         if raw is None:
             continue
         try:
-            timings[key] = float(raw)
+            values[key] = float(raw)
         except ValueError:
             continue
-    return timings
+    return values
+
+
+def _search_timings(page: Any) -> dict[str, float]:
+    return _float_attributes(
+        page,
+        "#purchase-search-timings-v1",
+        ("identity", "track_b", "mfds", "safety", "research", "total"),
+    )
+
+
+def _research_stage_timings(page: Any) -> dict[str, float]:
+    return _float_attributes(
+        page,
+        "#purchase-research-stage-timings-v1",
+        (
+            "direct_search_all",
+            "classification",
+            "procurement_research",
+            "bid_items",
+            "contracts",
+            "lifecycle",
+            "shopping_discovery",
+            "catalog",
+            "runner_total",
+        ),
+    )
+
+
+def _safety_diagnostic(page: Any) -> dict[str, str]:
+    marker = _app(page).locator("#purchase-safety-diagnostic-v1").first
+    if marker.count() == 0:
+        return {}
+    return {
+        key: str(marker.get_attribute(f"data-{key}") or "")
+        for key in ("status", "error-kind", "error-type")
+    }
 
 
 def _save_snapshot(page: Any, report: dict[str, object], label: str) -> None:
@@ -110,7 +146,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-runtime-v5 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-runtime-v6 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -207,6 +243,8 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
                 2,
             )
             report["direct_server_search_timings_seconds"] = _search_timings(page)
+            report["direct_research_stage_timings_seconds"] = _research_stage_timings(page)
+            report["direct_safety_diagnostic"] = _safety_diagnostic(page)
             attempts.append(
                 {
                     "attempt": attempt,
@@ -298,6 +336,8 @@ def _verify_quote_upload_uses_unified_workspace(browser: Any, report: dict[str, 
                     2,
                 )
                 report["quote_server_search_timings_seconds"] = _search_timings(page)
+                report["quote_research_stage_timings_seconds"] = _research_stage_timings(page)
+                report["quote_safety_diagnostic"] = _safety_diagnostic(page)
                 _save_snapshot(page, report, "quote-upload-dfm100-unified-workspace")
                 return
             page.wait_for_timeout(1_000)

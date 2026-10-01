@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import is_dataclass, replace
 from inspect import signature
 from threading import Lock
+from time import monotonic
 from types import FunctionType, SimpleNamespace
 from typing import Any
 
@@ -72,6 +73,49 @@ def mfds_recall_exception_result(
         checked_at=None,
         source_url=None,
     )
+
+
+def mfds_recall_error_kind(result: object | None) -> str:
+    """Return a secret-safe diagnostic class for Production Safety failures."""
+
+    if result is None:
+        return ""
+    status = str(getattr(result, "status", "") or "")
+    if status not in {"failure", "not_authorized"}:
+        return ""
+
+    error_type = str(getattr(result, "error_type", "") or "")
+    error_message = str(getattr(result, "error_message", "") or "")
+    error_text = f"{error_type} {error_message}"
+    if _is_authorization_error_text(error_text):
+        return "authorization"
+
+    token = error_type.casefold()
+    if any(marker in token for marker in ("transport", "timeout", "connect")):
+        return "transport"
+    if "typeerror" in token:
+        return "type_error"
+    if "valueerror" in token:
+        return "value_error"
+    if "publicdataclienterror" in token:
+        return "api_error"
+    return "other"
+
+
+def _timed_callable(
+    name: str,
+    original: Callable[..., Any],
+    timings: dict[str, float],
+) -> Callable[..., Any]:
+    def timed(*args: Any, **kwargs: Any) -> Any:
+        started = monotonic()
+        try:
+            return original(*args, **kwargs)
+        finally:
+            elapsed = monotonic() - started
+            timings[name] = round(timings.get(name, 0.0) + elapsed, 3)
+
+    return timed
 
 
 def _supports_keyword(function: Callable[..., Any], keyword: str) -> bool:
@@ -160,6 +204,8 @@ def _guard_discovery(
 def run_market_research_hot_reload_safe(
     runner: Callable[..., Any],
     query: Any,
+    *,
+    stage_timings: dict[str, float] | None = None,
     **kwargs: Any,
 ) -> Any:
     """Run the synchronous Research path without trusting cached helper function objects.
@@ -170,8 +216,13 @@ def run_market_research_hot_reload_safe(
     bounded-concurrency module chain rather than reloading evidence-domain enums globally.
     """
 
+    timings = stage_timings if stage_timings is not None else {}
     if not isinstance(runner, FunctionType):
-        return runner(query, **kwargs)
+        started = monotonic()
+        try:
+            return runner(query, **kwargs)
+        finally:
+            timings["runner_total"] = round(monotonic() - started, 3)
 
     runtime_globals = dict(runner.__globals__)
     contract = runtime_globals.get("enrich_market_bundle_with_contracts")
@@ -184,6 +235,25 @@ def run_market_research_hot_reload_safe(
     if callable(discovery):
         runtime_globals["discover_unmapped_g2b_candidates"] = _guard_discovery(discovery)
 
+    timed_globals = {
+        "search_all": "direct_search_all",
+        "resolve_classification_research": "classification",
+        "research_g2b_market": "procurement_research",
+        "enrich_market_bundle_with_bid_items": "bid_items",
+        "enrich_market_bundle_with_contracts": "contracts",
+        "enrich_market_bundle_with_lifecycle": "lifecycle",
+        "discover_unmapped_g2b_candidates": "shopping_discovery",
+        "enrich_discovery_with_catalog": "catalog",
+    }
+    for global_name, timing_name in timed_globals.items():
+        function = runtime_globals.get(global_name)
+        if callable(function):
+            runtime_globals[global_name] = _timed_callable(
+                timing_name,
+                function,
+                timings,
+            )
+
     compatible = FunctionType(
         runner.__code__,
         runtime_globals,
@@ -193,4 +263,8 @@ def run_market_research_hot_reload_safe(
     )
     compatible.__kwdefaults__ = getattr(runner, "__kwdefaults__", None)
     compatible.__annotations__ = getattr(runner, "__annotations__", {})
-    return compatible(query, **kwargs)
+    started = monotonic()
+    try:
+        return compatible(query, **kwargs)
+    finally:
+        timings["runner_total"] = round(monotonic() - started, 3)
