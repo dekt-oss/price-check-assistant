@@ -1,0 +1,64 @@
+name: MFDS Product Info Contract Probe
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/purchase_price/scripts/probe_mfds_product_info.py"
+      - "tests/test_mfds_product_info_probe.py"
+      - ".github/workflows/mfds-product-info-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Verify MFDS secret
+        shell: bash
+        run: |
+          if [ -z "$MFDS_SERVICE_KEY" ]; then
+            echo "MFDS service key must be configured"
+            exit 2
+          fi
+
+      - name: Probe documented product-info model filter candidate
+        run: >-
+          python -m purchase_price.scripts.probe_mfds_product_info
+          --model-name "DAVINCI 83"
+          --expect-hit
+          --output artifacts/mfds-product-info-contract.json
+
+      - name: Probe DFM100 without making it a gate
+        run: >-
+          python -m purchase_price.scripts.probe_mfds_product_info
+          --model-name "DFM100"
+          --output artifacts/mfds-product-info-dfm100.json
+
+      - name: Upload sanitized probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfds-product-info-contract-probe
+          path: artifacts/mfds-product-info-*.json
+          retention-days: 14
+          if-no-files-found: warn
