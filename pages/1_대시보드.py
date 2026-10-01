@@ -73,6 +73,7 @@ from purchase_price.ui.market_research import (
     run_market_research,
 )
 from purchase_price.ui.production_runtime_compat import (
+    mfds_recall_error_kind,
     mfds_recall_exception_result,
     normalize_mfds_recall_lookup,
     run_market_research_hot_reload_safe,
@@ -717,9 +718,11 @@ def _execute_search(
     search_timings["safety"] = round(monotonic() - safety_started, 3)
 
     research_started = monotonic()
+    research_stage_timings: dict[str, float] = {}
     run, discovery, market_bundle = run_market_research_hot_reload_safe(
         run_market_research,
         query,
+        stage_timings=research_stage_timings,
         lookback_days=int(lookback_days),
         research_pages_per_term=1,
         research_request_budget=18,
@@ -761,6 +764,7 @@ def _execute_search(
         "track_b_data_as_of": track_b_data_as_of,
         "track_b_index_updated_at": track_b_index_updated_at,
         "search_timings_seconds": search_timings,
+        "research_stage_timings_seconds": research_stage_timings,
     }
 
 
@@ -843,6 +847,32 @@ def _render_search_result(state: dict[str, Any]) -> None:
             + ' style="display:none"></span>',
             unsafe_allow_html=True,
         )
+    research_stage_timings = state.get("research_stage_timings_seconds")
+    if isinstance(research_stage_timings, dict):
+        stage_attrs: list[str] = []
+        for key in (
+            "direct_search_all",
+            "classification",
+            "procurement_research",
+            "bid_items",
+            "contracts",
+            "lifecycle",
+            "shopping_discovery",
+            "catalog",
+            "runner_total",
+        ):
+            try:
+                stage_attrs.append(
+                    f'data-{key}="{float(research_stage_timings.get(key, 0.0)):.3f}"'
+                )
+            except (TypeError, ValueError):
+                continue
+        st.markdown(
+            '<span id="purchase-research-stage-timings-v1" '
+            + " ".join(stage_attrs)
+            + ' style="display:none"></span>',
+            unsafe_allow_html=True,
+        )
     if state.get("origin") == "quote":
         st.caption(
             "견적서에서 추출한 품목을 일반 통합검색과 동일한 구매조사 파이프라인으로 조사했습니다. "
@@ -864,6 +894,20 @@ def _render_search_result(state: dict[str, Any]) -> None:
         model_name=str(getattr(query, "model_name", "") or "").strip(),
         product_name=str(getattr(query, "product_name", "") or "").strip(),
         permit_numbers=safety_permit_numbers,
+    )
+    safety_lookup_status = str(getattr(safety_lookup, "status", "") or "")
+    safety_error_kind = mfds_recall_error_kind(safety_lookup)
+    raw_safety_error_type = str(getattr(safety_lookup, "error_type", "") or "")
+    safety_error_type = "".join(
+        char for char in raw_safety_error_type if char.isalnum() or char in "_-"
+    )[:80]
+    st.markdown(
+        '<span id="purchase-safety-diagnostic-v1" '
+        + f'data-status="{safety_lookup_status}" '
+        + f'data-error-kind="{safety_error_kind}" '
+        + f'data-error-type="{safety_error_type}" '
+        + 'style="display:none"></span>',
+        unsafe_allow_html=True,
     )
     with st.container(border=True):
         st.markdown("### Safety")
