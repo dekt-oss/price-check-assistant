@@ -122,21 +122,65 @@ def _build_safety_state_compat(
     product_name: str,
     permit_numbers: list[str],
 ):
-    builder = getattr(
-        safety_support_service,
-        "build_safety_state_from_recall_lookup",
-        None,
+    """Normalize Safety locally so Streamlit hot reload cannot fall back to stale manual UI."""
+
+    model = str(model_name or "").strip()
+    permits = tuple(dict.fromkeys(str(value or "").strip() for value in permit_numbers if str(value or "").strip()))
+    search_keys = tuple(
+        ([f"모델명: {model}"] if model else [])
+        + [f"식약처 품목번호: {value}" for value in permits]
     )
-    if safety_lookup is not None and callable(builder):
-        return builder(
-            safety_lookup,
-            model_name=model_name,
-            product_name=product_name,
-            permit_numbers=permit_numbers,
+    status = str(getattr(safety_lookup, "status", "") or "") if safety_lookup is not None else ""
+    checked_at = getattr(safety_lookup, "checked_at", None) if safety_lookup is not None else None
+    records = tuple(getattr(safety_lookup, "records", ()) or ()) if safety_lookup is not None else ()
+
+    if status == "success" and records:
+        return SimpleNamespace(
+            evidence_status=SafetyEvidenceStatus.AMBER,
+            message=(
+                "식약처 회수·판매중지 공식 API에서 모델/품목 관련 안전정보가 확인되었습니다. "
+                "Service04 응답만으로 exact 품목번호 적용범위를 확정하지 않고 원문 확인이 필요합니다."
+            ),
+            checked_at=checked_at,
+            search_keys=search_keys,
+        )
+    if status in {"success", "success_0"}:
+        return SimpleNamespace(
+            evidence_status=SafetyEvidenceStatus.CHECKED_NONE,
+            message="현재 연결된 식약처 회수·판매중지 공식 API에서 일치 항목을 확인하지 못했습니다.",
+            checked_at=checked_at,
+            search_keys=search_keys,
+        )
+    if status == "not_authorized":
+        return SimpleNamespace(
+            evidence_status=SafetyEvidenceStatus.NOT_CONNECTED,
+            message=(
+                "식약처 회수·판매중지 API 호출은 연결됐지만 현재 서비스키의 활용승인이 확인되지 않았습니다. "
+                "안전정보 0건으로 해석하지 않습니다."
+            ),
+            checked_at=checked_at,
+            search_keys=search_keys,
+        )
+    if status == "failure":
+        return SimpleNamespace(
+            evidence_status=SafetyEvidenceStatus.CHECK_FAILED,
+            message="식약처 회수·판매중지 공식 API 조회가 실패했습니다. 0건으로 해석하지 않습니다.",
+            checked_at=checked_at,
+            search_keys=search_keys,
+        )
+    if status == "not_configured":
+        return SimpleNamespace(
+            evidence_status=SafetyEvidenceStatus.NOT_CONNECTED,
+            message=(
+                "식약처 회수·판매중지 API 서비스키가 현재 Production 런타임에 연결되지 않았습니다. "
+                "자동조회 미연결 상태는 공식 안전정보 확인 결과가 아닙니다."
+            ),
+            checked_at=None,
+            search_keys=search_keys,
         )
     return build_manual_safety_check_state(
-        model_name=model_name,
-        permit_numbers=permit_numbers,
+        model_name=model,
+        permit_numbers=permits,
     )
 
 
