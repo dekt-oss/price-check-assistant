@@ -28,6 +28,7 @@ from purchase_price.services.mfds_identity_index import (
     MfdsIdentityLookup,
     MfdsIdentityRecord,
 )
+from purchase_price.services.mfds_identity_live import lookup_mfds_model_identity_live
 from purchase_price.services.mfds_identity_presenter import (
     MFDS_PRODUCT_INFO_DATASET_URL,
     mfds_identity_status,
@@ -603,6 +604,14 @@ def _execute_search(
         raise ValueError("검색조건을 확인하세요.")
     query = review_input.to_product_query()
 
+    if (
+        (not isinstance(indexed_identity, MfdsIdentityLookup) or indexed_identity.status != "success")
+        and (query.model_name or "").strip()
+    ):
+        live_identity = lookup_mfds_model_identity_live(query.model_name)
+        if live_identity.status == "success":
+            indexed_identity = live_identity
+
     model_probe_used = False
     track_b_data_as_of: str | None = None
     track_b_index_updated_at: str | None = None
@@ -664,7 +673,15 @@ def _execute_search(
             current_model=query.model_name or "",
         )
 
-    mfds = research_mfds_for_workspace(query, track_b)
+    if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
+        mfds = MfdsWorkspaceResult(
+            status="not_applicable",
+            product_name=query.product_name or "",
+            model_name=query.model_name or "",
+            queried=False,
+        )
+    else:
+        mfds = research_mfds_for_workspace(query, track_b)
     safety_lookup = _lookup_mfds_recall_isolated(
         model_name=query.model_name,
         product_name=query.product_name,
