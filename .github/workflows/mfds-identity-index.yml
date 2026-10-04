@@ -184,6 +184,11 @@ jobs:
                   "::warning::MFDS returned an empty page before the known source end; "
                   "the cursor was kept and the page will be retried next run."
               )
+          if any(item.get("status") == "SOURCE_TRANSPORT_ERROR" for item in reports):
+              print(
+                  "::warning::MFDS transport failed mid-chunk; collected pages were published "
+                  "and the next run resumes from the failed page."
+              )
           if any(item.get("status") == "SOURCE_NOT_AUTHORIZED" for item in reports):
               print("::warning::MFDS product-info API utilization approval is required for this service key.")
           PY

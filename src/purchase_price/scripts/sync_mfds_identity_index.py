@@ -11,7 +11,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
+from purchase_price.clients.data_go_kr import (
+    PublicDataClientError,
+    PublicDataPortalClient,
+    PublicDataTransportError,
+)
 from purchase_price.config import Settings
 from purchase_price.services.mfds_device_intelligence import unwrap_mfds_page
 from purchase_price.services.mfds_identity_index import (
@@ -101,6 +105,12 @@ def _load_pipeline(state_store: R2OperationalStateStore) -> dict[str, Any]:
         "cycle_rows_seen": payload.get("cycle_rows_seen"),
         "rows_per_page": payload.get("rows_per_page"),
     }
+
+
+_ANOMALY_STATUS = {
+    "EMPTY_PAGE_BEFORE_SOURCE_END": "SOURCE_EMPTY_PAGE",
+    "TRANSPORT_ERROR": "SOURCE_TRANSPORT_ERROR",
+}
 
 
 def _positive_int(value: object) -> int | None:
@@ -221,6 +231,11 @@ def _sync_without_lock(
                                 },
                             )
                             return 0
+                        if pages_collected > 0 and isinstance(exc, PublicDataTransportError):
+                            # Publish the pages already collected in this run; the next run
+                            # resumes from this page instead of redoing the whole chunk.
+                            source_anomaly = "TRANSPORT_ERROR"
+                            break
                         raise
 
                     page = unwrap_mfds_page(payload)
@@ -338,7 +353,7 @@ def _sync_without_lock(
                 pass
 
         report = {
-            "status": "SOURCE_EMPTY_PAGE" if source_anomaly else "SUCCESS",
+            "status": _ANOMALY_STATUS.get(source_anomaly, "SUCCESS"),
             "source_anomaly": source_anomaly,
             "pages_collected": pages_collected,
             "rows_seen": rows_seen,
