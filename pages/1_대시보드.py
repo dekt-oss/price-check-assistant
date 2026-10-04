@@ -16,6 +16,7 @@ from purchase_price.evidence_domain import (
     SafetyEvidenceStatus,
 )
 from purchase_price.schemas import ProductQuery
+from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
@@ -38,7 +39,6 @@ from purchase_price.services.mfds_identity_presenter import (
     mfds_identity_status,
     mfds_item_authorization_type,
 )
-from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services.mfds_identity_status import (
     MfdsIdentityCollectionStatus,
     format_status_updated_at,
