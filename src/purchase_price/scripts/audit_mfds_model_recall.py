@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import sqlite3
 from collections import Counter
 from collections.abc import Iterable, Sequence
@@ -20,12 +21,20 @@ from pathlib import Path
 from typing import Any
 
 from purchase_price.services.matching import normalize_text
-from purchase_price.services.product_matching import equivalent_model_keys
+from purchase_price.services.product_matching import (
+    canonical_manufacturer,
+    equivalent_model_keys,
+    load_manufacturer_aliases,
+)
 
 MIN_AFFIX_KEY_LENGTH = 4
 DEFAULT_SAMPLE_SIZE = 2000
 DEFAULT_SEED = 20261004
 ALWAYS_INCLUDE = ("DFM100",)
+# Proposed policy: an exact normalized model match only confirms identity on its own when the
+# key is distinctive. Weak keys additionally need manufacturer/importer agreement.
+WEAK_KEY_SHAPES = ("digits_only", "unit_like", "short")
+_UNIT_KEY = re.compile(r"^\d+(ml|cc|cm|mm|g|kg|l|ea|매|개|본)$")
 
 
 @dataclass(frozen=True)
@@ -64,11 +73,41 @@ def company_agrees(manufacturer: str | None, candidates: Iterable[MfdsCandidate]
     maker = normalize_text(manufacturer)
     if len(maker) < 2:
         return None
+    aliases = _manufacturer_aliases()
+    maker_canonical = normalize_text(canonical_manufacturer(manufacturer, aliases))
     for candidate in candidates:
         company = normalize_text(candidate.registered_company)
-        if company and (maker in company or company in maker):
-            return True
+        if not company:
+            continue
+        company_canonical = normalize_text(
+            canonical_manufacturer(candidate.registered_company, aliases)
+        )
+        for left, right in ((maker, company), (maker_canonical, company_canonical)):
+            if left and right and (left in right or right in left):
+                return True
     return False
+
+
+_MANUFACTURER_ALIASES: dict[str, str] | None = None
+
+
+def _manufacturer_aliases() -> dict[str, str]:
+    global _MANUFACTURER_ALIASES
+    if _MANUFACTURER_ALIASES is None:
+        _MANUFACTURER_ALIASES = load_manufacturer_aliases()
+    return _MANUFACTURER_ALIASES
+
+
+def model_key_shape(key: str) -> str:
+    if key.isdigit():
+        return "digits_only"
+    if _UNIT_KEY.match(key):
+        return "unit_like"
+    if len(key) <= 4:
+        return "short"
+    if len(key) <= 6:
+        return "length_5_6"
+    return "distinctive"
 
 
 def load_track_b_models(
@@ -188,6 +227,9 @@ def audit(
     candidate_counts: dict[str, list[int]] = {}
     company: dict[str, Counter[str]] = {}
     examples: dict[str, list[dict[str, Any]]] = {}
+    policy_counts: dict[str, Counter[str]] = {}
+    policy_lines: dict[str, Counter[str]] = {}
+    policy_examples: dict[str, list[dict[str, Any]]] = {}
     for model in sample:
         result = classify_model(mfds, model)
         category = result["category"]
@@ -198,6 +240,29 @@ def audit(
             len({candidate.model_key for candidate in candidates})
         )
         agreement = company_agrees(model.manufacturer, candidates) if candidates else None
+        if category == "exact":
+            shape = model_key_shape(model.model_key)
+            verdict = "unknown" if agreement is None else "agree" if agreement else "disagree"
+            policy_counts.setdefault(shape, Counter())[verdict] += 1
+            policy_lines.setdefault(shape, Counter())[verdict] += model.line_count
+            shape_examples = policy_examples.setdefault(shape, [])
+            if verdict != "agree" and len(shape_examples) < sample_limit:
+                shape_examples.append(
+                    {
+                        "track_b_model": model.model_name,
+                        "track_b_manufacturer": model.manufacturer,
+                        "track_b_lines": model.line_count,
+                        "verdict": verdict,
+                        "mfds": [
+                            {
+                                "model": c.model_name,
+                                "company": c.registered_company,
+                                "product": c.product_name,
+                            }
+                            for c in candidates[:3]
+                        ],
+                    }
+                )
         company.setdefault(category, Counter())[
             "unknown" if agreement is None else "agree" if agreement else "disagree"
         ] += 1
@@ -247,6 +312,31 @@ def audit(
             for name, count in categories.most_common()
         },
         "examples": examples,
+        "exact_match_policy": _exact_policy_summary(policy_counts, policy_lines, policy_examples),
+    }
+
+
+def _exact_policy_summary(
+    counts: dict[str, Counter[str]],
+    lines: dict[str, Counter[str]],
+    examples: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    exact_total = sum(sum(c.values()) for c in counts.values())
+    downgraded = sum(
+        counts.get(shape, Counter())[verdict]
+        for shape in WEAK_KEY_SHAPES
+        for verdict in ("disagree", "unknown")
+    )
+    return {
+        "weak_key_shapes": list(WEAK_KEY_SHAPES),
+        "exact_models": exact_total,
+        "would_downgrade_to_needs_review": downgraded,
+        "would_downgrade_share_of_exact": round(downgraded / exact_total, 4) if exact_total else 0.0,
+        "by_shape": {
+            shape: {"models": dict(counts[shape]), "lines": dict(lines.get(shape, Counter()))}
+            for shape in sorted(counts)
+        },
+        "non_agreeing_examples": examples,
     }
 
 
