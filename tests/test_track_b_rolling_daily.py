@@ -79,7 +79,7 @@ def test_next_rolling_window_catches_up_from_historical_endpoint_without_gap() -
 
     assert daily._next_rolling_window(state, today=date(2026, 9, 20)) == (
         date(2026, 9, 12),
-        date(2026, 9, 18),
+        date(2026, 9, 20),
         "catch_up",
     )
 
@@ -90,7 +90,25 @@ def test_next_rolling_window_continues_catch_up_from_last_completed_cycle() -> N
 
     assert daily._next_rolling_window(state, today=date(2026, 9, 27)) == (
         date(2026, 9, 19),
-        date(2026, 9, 25),
+        date(2026, 9, 27),
+        "catch_up",
+    )
+
+
+def test_catch_up_window_is_capped_at_31_days_and_never_skips_a_day() -> None:
+    state = _historical_complete_state()
+    state.rolling_covered_through = "2026-09-18"
+
+    # Production state on 2026-10-04: covered through 09-18, next run on 10-05 KST.
+    assert daily._next_rolling_window(state, today=date(2026, 10, 5)) == (
+        date(2026, 9, 19),
+        date(2026, 10, 5),
+        "catch_up",
+    )
+    # Far behind: one cycle advances at most 31 days from the first uncovered day.
+    assert daily._next_rolling_window(state, today=date(2026, 12, 1)) == (
+        date(2026, 9, 19),
+        date(2026, 10, 19),
         "catch_up",
     )
 
@@ -177,7 +195,7 @@ def test_delayed_rolling_runner_opens_catch_up_window_from_first_uncovered_date(
             start=ROLLING_BOOTSTRAP_CURSOR,
             next_cursor=CollectionCursor(800, 1),
             begin_date="2026-09-12",
-            end_date="2026-09-18",
+            end_date="2026-09-20",
         )
 
     monkeypatch.setattr(daily, "collect_track_b_batch", fake_collect)
@@ -196,7 +214,7 @@ def test_delayed_rolling_runner_opens_catch_up_window_from_first_uncovered_date(
 
     assert rc == 0
     assert captured["begin"] == date(2026, 9, 12)
-    assert captured["end"] == date(2026, 9, 18)
+    assert captured["end"] == date(2026, 9, 20)
     report = json.loads(summary_path.read_text(encoding="utf-8"))
     assert report["rolling_window_strategy"] == "catch_up"
     assert report["rolling_covered_through"] == "2026-09-11"

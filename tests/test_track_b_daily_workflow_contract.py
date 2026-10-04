@@ -27,6 +27,7 @@ def test_completed_backfill_switches_to_gap_safe_locked_rolling_window() -> None
 
     assert '"ALREADY_COMPLETE"' not in text
     assert "ROLLING_WINDOW_DAYS = 7" in text
+    assert "ROLLING_CATCH_UP_MAX_DAYS = 31" in text
     assert 'ZoneInfo("Asia/Seoul")' in text
     assert "_next_rolling_window" in text
     assert '"catch_up"' in text
