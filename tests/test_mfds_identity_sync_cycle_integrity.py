@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from purchase_price.clients.data_go_kr import PublicDataTransportError
 from purchase_price.scripts import sync_mfds_identity_index as sync_module
 from purchase_price.storage.r2_mfds_identity_index import MfdsIdentityIndexRef
 
@@ -73,9 +74,15 @@ def _payload(items: list[dict[str, str]], total_count: int) -> dict[str, Any]:
 class FakeSource:
     """Serves `total` rows in pages; `empty_pages` return a glitch page with totalCount=0."""
 
-    def __init__(self, total: int, empty_pages: set[int] | None = None) -> None:
+    def __init__(
+        self,
+        total: int,
+        empty_pages: set[int] | None = None,
+        failing_pages: set[int] | None = None,
+    ) -> None:
         self.total = total
         self.empty_pages = empty_pages or set()
+        self.failing_pages = failing_pages or set()
         self.requested: list[int] = []
 
     def __call__(self, *args: Any, **kwargs: Any) -> FakeSource:
@@ -89,6 +96,8 @@ class FakeSource:
 
     def get_json(self, base_url: str, operation: str, *, pageNo: int, numOfRows: int) -> Any:
         self.requested.append(pageNo)
+        if pageNo in self.failing_pages:
+            raise PublicDataTransportError("ConnectTimeout: timed out")
         if pageNo in self.empty_pages:
             return _payload([], 0)
         start = (pageNo - 1) * numOfRows
@@ -228,3 +237,25 @@ def test_sync_report_shape_is_unchanged_for_workflow(harness: SimpleNamespace) -
     for key in ("status", "cycle_completed", "next_page", "row_count", "source_total_count"):
         assert key in report
     assert report["status"] == "SUCCESS"
+
+
+def test_transport_error_mid_run_publishes_collected_pages(harness: SimpleNamespace) -> None:
+    report = harness.run(FakeSource(total=100, failing_pages={4}), max_pages=10)
+
+    assert report["status"] == "SOURCE_TRANSPORT_ERROR"
+    assert report["source_anomaly"] == "TRANSPORT_ERROR"
+    assert report["next_page"] == 4
+    assert report["cycle_completed"] is False
+    assert harness.index_rows() == 30
+    assert harness.states[sync_module.PIPELINE_STATE]["cycle_rows_seen"] == 30
+
+    resumed = harness.run(FakeSource(total=100), max_pages=20)
+    assert resumed["cycle_verified"] is True
+    assert harness.index_rows() == 100
+
+
+def test_transport_error_on_first_page_still_fails_loudly(harness: SimpleNamespace) -> None:
+    with pytest.raises(PublicDataTransportError):
+        harness.run(FakeSource(total=100, failing_pages={1}), max_pages=10)
+
+    assert sync_module.PIPELINE_STATE not in harness.states
