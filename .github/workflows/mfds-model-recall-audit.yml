@@ -1,0 +1,63 @@
+name: MFDS Model Recall Audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/mfds-model-recall-audit.yml"
+      - "src/purchase_price/scripts/audit_mfds_model_recall.py"
+      - "tests/test_mfds_model_recall_audit.py"
+  workflow_dispatch:
+    inputs:
+      sample_size:
+        description: Distinct Track B models to sample
+        required: true
+        default: "2000"
+
+concurrency:
+  group: mfds-model-recall-audit
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: src
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Unit tests
+        run: pytest -q tests/test_mfds_model_recall_audit.py
+      - name: Read-only MFDS model recall audit (all Track B models)
+        run: >-
+          python -m purchase_price.scripts.audit_mfds_model_recall
+          --sample-size "${{ inputs.sample_size || '2000' }}"
+          --output artifacts/mfds-model-recall.json
+      - name: Read-only MFDS model recall audit (medical equipment detail codes)
+        run: >-
+          python -m purchase_price.scripts.audit_mfds_model_recall
+          --sample-size "${{ inputs.sample_size || '2000' }}"
+          --detail-prefix 42
+          --output artifacts/mfds-model-recall-medical.json
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfds-model-recall
+          path: artifacts/mfds-model-recall*.json
+          retention-days: 14
+          if-no-files-found: warn
