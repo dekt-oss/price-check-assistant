@@ -173,16 +173,16 @@ def test_importer_pairs_need_two_distinctive_models(tmp_path: Path) -> None:
                 {"FOML_INFO": model, "MNFT_IPRT_ENTP_NM": company, "PRDLST_NM": product}
             )
             for model, company, product in (
-                ("B105M Patient Monitor", "지이헬스케어코리아(주)", "환자감시장치"),
-                ("B125M Patient Monitor", "지이헬스케어코리아(주)", "환자감시장치"),
+                ("B105M Patient Monitor", "애크미코리아(주)", "환자감시장치"),
+                ("B125M Patient Monitor", "애크미코리아(주)", "환자감시장치"),
                 ("Accu-Chek Guide meter", "한국로슈진단(주)", "혈당측정기"),
             )
         ],
     )
     connection.commit()
     models = [
-        _model("B105M Patient Monitor", "GE medical systems"),
-        _model("B125M Patient Monitor", "GE medical systems"),
+        _model("B105M Patient Monitor", "Acme medical"),
+        _model("B125M Patient Monitor", "Acme medical"),
         _model("Accu-Chek Guide meter", "Roche diabetes care"),
     ]
 
@@ -191,7 +191,7 @@ def test_importer_pairs_need_two_distinctive_models(tmp_path: Path) -> None:
 
     pairs = report["importer_pair_candidates"]
     assert [(p["manufacturer"], p["mfds_registered_company"], p["distinct_models"]) for p in pairs] == [
-        ("GE medical systems", "지이헬스케어코리아(주)", 2)
+        ("Acme medical", "애크미코리아(주)", 2)
     ]
 
 
