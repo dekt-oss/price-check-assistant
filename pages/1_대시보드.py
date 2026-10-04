@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib
 from decimal import Decimal, InvalidOperation
 from inspect import signature
+from threading import Lock
 from time import monotonic
 from types import SimpleNamespace
 from typing import Any
@@ -14,6 +16,7 @@ from purchase_price.evidence_domain import (
     SafetyEvidenceStatus,
 )
 from purchase_price.schemas import ProductQuery
+from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
@@ -35,10 +38,6 @@ from purchase_price.services.mfds_identity_presenter import (
     MFDS_PRODUCT_INFO_DATASET_URL,
     mfds_identity_status,
     mfds_item_authorization_type,
-)
-from purchase_price.services.mfds_identity_r2 import (
-    lookup_mfds_identity_from_r2,
-    lookup_same_mfds_product_from_r2,
 )
 from purchase_price.services.mfds_identity_status import (
     MfdsIdentityCollectionStatus,
@@ -102,6 +101,36 @@ from purchase_price.ui.widgets import (
     render_observation_cards,
     render_source_status,
 )
+
+_MFDS_IDENTITY_R2_RELOAD_LOCK = Lock()
+
+
+def _mfds_identity_r2_runtime():
+    """Refresh only the leaf R2 adapter when Streamlit retained its pre-cache version."""
+
+    module = mfds_identity_r2_service
+    if hasattr(module, "_LOCAL_INDEX_PATH_CACHE"):
+        return module
+
+    with _MFDS_IDENTITY_R2_RELOAD_LOCK:
+        if hasattr(module, "_LOCAL_INDEX_PATH_CACHE"):
+            return module
+        try:
+            importlib.invalidate_caches()
+            return importlib.reload(module)
+        except Exception:
+            return module
+
+
+def _lookup_mfds_identity_runtime(query: str):
+    module = _mfds_identity_r2_runtime()
+    return module.lookup_mfds_identity_from_r2(query)
+
+
+def _lookup_same_mfds_product_runtime(product_name: str):
+    module = _mfds_identity_r2_runtime()
+    return module.lookup_same_mfds_product_from_r2(product_name)
+
 
 HOME_SEARCH_STATE_KEY = "home_unified_search_result"
 HOME_SEARCH_DETAILS_KEY = "home_search_details"
@@ -320,7 +349,7 @@ def _identity_hydration(
     if not lookup_key:
         return product_name, manufacturer, model_name, specification, None
 
-    identity = lookup_mfds_identity_from_r2(lookup_key)
+    identity = _lookup_mfds_identity_runtime(lookup_key)
     base_query = ProductQuery(
         product_name=product_name,
         manufacturer=manufacturer,
@@ -759,7 +788,7 @@ def _execute_search(
             current_model=query.model_name or "",
         )
         same_product_identity = (
-            lookup_same_mfds_product_from_r2(identity_product) if identity_product else ()
+            _lookup_same_mfds_product_runtime(identity_product) if identity_product else ()
         )
         mfds_procurement_crosslinks = _build_mfds_procurement_crosslinks(
             same_product_identity,
@@ -1904,6 +1933,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v5" style="display:none">purchase-workspace-runtime-v5</span>'
     '<span id="purchase-workspace-runtime-v6" style="display:none">purchase-workspace-runtime-v6</span>'
     '<span id="purchase-workspace-runtime-v7" style="display:none">purchase-workspace-runtime-v7</span>'
+    '<span id="purchase-workspace-runtime-v8" style="display:none">purchase-workspace-runtime-v8</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
