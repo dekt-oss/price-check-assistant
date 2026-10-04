@@ -25,6 +25,8 @@ def test_mfds_identity_workflow_uses_checkpointed_stable_backfill_mode() -> None
     assert 'cycle_completed="$(python -c' in text
     assert 'if [ "$cycle_completed" = "true" ]; then' in text
     assert "cancel-in-progress: false" in text
+    assert "format('mfds-identity-pr-{0}', github.event.pull_request.number)" in text
+    assert "|| 'mfds-identity-index' }}" in text
     assert "timeout-minutes: 120" in text
 
 

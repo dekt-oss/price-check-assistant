@@ -50,7 +50,9 @@ on:
         default: "100"
 
 concurrency:
-  group: mfds-identity-index
+  # Collection runs serialize on one group. PR contract checks get their own group: GitHub keeps
+  # only one *pending* run per group, so a queued PR check used to cancel a pending collection run.
+  group: ${{ github.event_name == 'pull_request' && format('mfds-identity-pr-{0}', github.event.pull_request.number) || 'mfds-identity-index' }}
   cancel-in-progress: false
 
 permissions:
