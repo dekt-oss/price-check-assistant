@@ -7,6 +7,11 @@ from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.config import Settings
 from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_product_mapping import resolve_verified_g2b_mapping
+from purchase_price.services.mfds_api_keys import (
+    mfds_json_client,
+    mfds_model_info_json_client,
+    mfds_service_key_candidates,
+)
 from purchase_price.services.mfds_device_intelligence import (
     MFDS_BUSINESS_LICENSE_BASE_URL,
     MFDS_MODEL_INFO_BASE_URL,
@@ -117,12 +122,13 @@ def lookup_mfds_business_license(
         return MfdsBusinessLookupResult(status="not_run", query="")
 
     settings = settings or Settings()
-    service_key = (settings.resolved_mfds_service_key or "").strip()
+    service_key = (mfds_service_key_candidates(settings) or ("",))[0]
     if business_client is None and not service_key:
         return MfdsBusinessLookupResult(status="not_configured", query=query)
 
     business_client = business_client or MfdsBusinessLicenseClient(
         service_key,
+        client=mfds_json_client(settings),
         base_url=settings.mfds_business_license_base_url or MFDS_BUSINESS_LICENSE_BASE_URL,
         timeout_seconds=settings.mfds_request_timeout_seconds,
         max_retries=settings.mfds_max_retries,
@@ -162,7 +168,7 @@ def research_mfds_for_workspace(
         )
 
     settings = settings or Settings()
-    service_key = (settings.resolved_mfds_service_key or "").strip()
+    service_key = (mfds_service_key_candidates(settings) or ("",))[0]
     if model_client is None and not service_key:
         return MfdsWorkspaceResult(
             status="not_configured",
@@ -173,6 +179,7 @@ def research_mfds_for_workspace(
 
     model_client = model_client or MfdsModelInfoClient(
         service_key,
+        client=mfds_model_info_json_client(settings),
         base_url=settings.mfds_model_info_base_url or MFDS_MODEL_INFO_BASE_URL,
         timeout_seconds=settings.mfds_request_timeout_seconds,
         max_retries=settings.mfds_max_retries,
@@ -189,6 +196,7 @@ def research_mfds_for_workspace(
             if business_client is None and service_key:
                 business_client = MfdsBusinessLicenseClient(
                     service_key,
+                    client=mfds_json_client(settings),
                     base_url=(
                         settings.mfds_business_license_base_url
                         or MFDS_BUSINESS_LICENSE_BASE_URL

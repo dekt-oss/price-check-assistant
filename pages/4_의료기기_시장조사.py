@@ -17,6 +17,11 @@ from purchase_price.services.market_research_support import (
     build_web_supplier_search_links,
     extract_g2b_supplier_candidates,
 )
+from purchase_price.services.mfds_api_keys import (
+    mfds_json_client,
+    mfds_model_info_json_client,
+    mfds_service_key_candidates,
+)
 from purchase_price.services.mfds_device_intelligence import (
     MFDS_BUSINESS_LICENSE_BASE_URL,
     MFDS_MODEL_INFO_BASE_URL,
@@ -34,7 +39,7 @@ st.caption(
 )
 
 settings = get_settings()
-mfds_service_key = (settings.resolved_mfds_service_key or "").strip()
+mfds_service_key = (mfds_service_key_candidates(settings) or ("",))[0]
 g2b_service_key = (settings.resolved_g2b_service_key or "").strip()
 
 quote_prefill = parse_device_research_prefill(
@@ -152,6 +157,7 @@ if submitted:
         st.subheader("1. 식약처 동일 품목 등록장비")
         model_client = MfdsModelInfoClient(
             mfds_service_key,
+            client=mfds_model_info_json_client(settings),
             base_url=settings.mfds_model_info_base_url or MFDS_MODEL_INFO_BASE_URL,
             timeout_seconds=settings.mfds_request_timeout_seconds,
             max_retries=settings.mfds_max_retries,
@@ -373,6 +379,7 @@ if submitted:
         st.subheader("4. 식약처 업체 업허가 확인")
         business_client = MfdsBusinessLicenseClient(
             mfds_service_key,
+            client=mfds_json_client(settings),
             base_url=settings.mfds_business_license_base_url or MFDS_BUSINESS_LICENSE_BASE_URL,
             timeout_seconds=settings.mfds_request_timeout_seconds,
             max_retries=settings.mfds_max_retries,

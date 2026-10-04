@@ -13,6 +13,11 @@ from purchase_price.services.market_research_support import (
     extract_g2b_supplier_candidates,
     extract_mfds_business_supplier_candidates,
 )
+from purchase_price.services.mfds_api_keys import (
+    mfds_json_client,
+    mfds_model_info_json_client,
+    mfds_service_key_candidates,
+)
 from purchase_price.services.mfds_device_intelligence import (
     MFDS_BUSINESS_LICENSE_BASE_URL,
     MFDS_MODEL_INFO_BASE_URL,
@@ -41,7 +46,7 @@ st.caption(
 )
 
 settings = get_settings()
-mfds_service_key = (settings.resolved_mfds_service_key or "").strip()
+mfds_service_key = (mfds_service_key_candidates(settings) or ("",))[0]
 mfds_recall_service_key = (settings.resolved_mfds_recall_service_key or "").strip()
 g2b_service_key = (settings.resolved_g2b_service_key or "").strip()
 
@@ -101,6 +106,7 @@ if submitted:
     if product_name.strip() and mfds_service_key:
         model_client = MfdsModelInfoClient(
             mfds_service_key,
+            client=mfds_model_info_json_client(settings),
             base_url=settings.mfds_model_info_base_url or MFDS_MODEL_INFO_BASE_URL,
             timeout_seconds=settings.mfds_request_timeout_seconds,
             max_retries=settings.mfds_max_retries,
@@ -180,6 +186,7 @@ if submitted:
     if company_name.strip() and mfds_service_key:
         business_client = MfdsBusinessLicenseClient(
             mfds_service_key,
+            client=mfds_json_client(settings),
             base_url=settings.mfds_business_license_base_url or MFDS_BUSINESS_LICENSE_BASE_URL,
             timeout_seconds=settings.mfds_request_timeout_seconds,
             max_retries=settings.mfds_max_retries,

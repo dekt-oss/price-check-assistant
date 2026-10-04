@@ -14,6 +14,11 @@ from purchase_price.services.market_research_support import (
     extract_g2b_supplier_candidates,
     extract_mfds_business_supplier_candidates,
 )
+from purchase_price.services.mfds_api_keys import (
+    mfds_json_client,
+    mfds_model_info_json_client,
+    mfds_service_key_candidates,
+)
 from purchase_price.services.mfds_device_intelligence import (
     MFDS_BUSINESS_LICENSE_BASE_URL,
     MFDS_MODEL_INFO_BASE_URL,
@@ -44,7 +49,7 @@ st.caption(
 )
 
 settings = get_settings()
-mfds_key = (settings.resolved_mfds_service_key or "").strip()
+mfds_key = (mfds_service_key_candidates(settings) or ("",))[0]
 g2b_key = (settings.resolved_g2b_service_key or "").strip()
 st.caption(
     "API 연결 · 식약처: " + ("설정됨" if mfds_key else "미설정") + " · 나라장터: " + (
@@ -79,6 +84,7 @@ with market_tab:
         else:
             model_client = MfdsModelInfoClient(
                 mfds_key,
+                client=mfds_model_info_json_client(settings),
                 base_url=settings.mfds_model_info_base_url or MFDS_MODEL_INFO_BASE_URL,
                 timeout_seconds=settings.mfds_request_timeout_seconds,
                 max_retries=settings.mfds_max_retries,
@@ -127,6 +133,7 @@ with market_tab:
                 if manufacturer.strip():
                     business_client = MfdsBusinessLicenseClient(
                         mfds_key,
+                        client=mfds_json_client(settings),
                         base_url=(
                             settings.mfds_business_license_base_url
                             or MFDS_BUSINESS_LICENSE_BASE_URL
@@ -258,6 +265,7 @@ with safety_tab:
         else:
             client = MfdsBusinessLicenseClient(
                 mfds_key,
+                client=mfds_json_client(settings),
                 base_url=settings.mfds_business_license_base_url or MFDS_BUSINESS_LICENSE_BASE_URL,
                 timeout_seconds=settings.mfds_request_timeout_seconds,
                 max_retries=settings.mfds_max_retries,
@@ -301,6 +309,7 @@ with udi_tab:
         else:
             client = MfdsUdiCodeClient(
                 mfds_key,
+                client=mfds_json_client(settings),
                 base_url=settings.mfds_udi_code_base_url or MFDS_UDI_CODE_BASE_URL,
                 timeout_seconds=settings.mfds_request_timeout_seconds,
                 max_retries=settings.mfds_max_retries,
