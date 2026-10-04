@@ -27,6 +27,12 @@ def test_legacy_comparison_without_reference_candidates_does_not_crash() -> None
     assert rows == [
         {
             "가격": "2,981,000원",
+            "단가구분": "원문 단가",
+            "단가근거": "Source 원문 단가",
+            "단위": "미확인",
+            "포장입수": "미확인",
+            "수량": "미확인",
+            "VAT": "미확인",
             "총액": "미확인",
             "금액검증": "미확인",
             "제조사": "미확인",
@@ -39,7 +45,11 @@ def test_legacy_comparison_without_reference_candidates_does_not_crash() -> None
             "구매처": "미확인",
             "거래일": "미확인",
             "수량/단위": "미확인",
+            "매칭등급": "A",
+            "매칭근거": "미확인",
             "거래기록": "나라장터 납품요구",
+            "Source": "나라장터 납품요구",
+            "원문근거키": "미확인",
             "품목/모델": "레이저프린터, Fujifilm, ApeosPrint C5570 GK",
             "비교수준": "동일 모델",
         }
@@ -151,6 +161,11 @@ def test_transaction_row_exposes_unit_price_total_and_identity_details() -> None
     row = transaction_rows(comparison)[0]
 
     assert row["가격"] == "13,200,000원"
+    assert row["단가구분"] == "원문 단가"
+    assert row["단위"] == "대"
+    assert row["포장입수"] == "미확인"
+    assert row["수량"] == "2"
+    assert row["VAT"] == "미확인"
     assert row["총액"] == "26,400,000원"
     assert row["금액검증"] == "consistent"
     assert row["수량/단위"] == "2 대"

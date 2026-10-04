@@ -7,12 +7,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+from openpyxl import Workbook
+
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-quote-v1"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v9"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
-WORKSPACE_DIRECT_PATTERN = re.compile(r"동일제품 거래\s*(\d+)건")
+WORKSPACE_DIRECT_PATTERN = re.compile(r"직접 동일성 확인 거래\s*(\d+)건")
 ERROR_TEXTS = (
     "AttributeError",
     "This app has encountered an error",
@@ -26,6 +28,66 @@ def _app(page: Any) -> Any:
 
 def _body_text(page: Any) -> str:
     return _app(page).locator("body").inner_text(timeout=10_000)
+
+
+def _float_attributes(page: Any, selector: str, keys: tuple[str, ...]) -> dict[str, float]:
+    marker = _app(page).locator(selector).first
+    if marker.count() == 0:
+        return {}
+
+    values: dict[str, float] = {}
+    for key in keys:
+        raw = marker.get_attribute(f"data-{key}")
+        if raw is None:
+            continue
+        try:
+            values[key] = float(raw)
+        except ValueError:
+            continue
+    return values
+
+
+def _search_timings(page: Any) -> dict[str, float]:
+    return _float_attributes(
+        page,
+        "#purchase-search-timings-v1",
+        ("identity", "track_b", "mfds", "safety", "research", "total"),
+    )
+
+
+def _research_stage_timings(page: Any) -> dict[str, float]:
+    return _float_attributes(
+        page,
+        "#purchase-research-stage-timings-v1",
+        (
+            "direct_search_all",
+            "classification",
+            "procurement_research",
+            "bid_items",
+            "contracts",
+            "lifecycle",
+            "shopping_discovery",
+            "catalog",
+            "runner_total",
+        ),
+    )
+
+
+def _safety_diagnostic(page: Any) -> dict[str, str]:
+    marker = _app(page).locator("#purchase-safety-diagnostic-v1").first
+    if marker.count() == 0:
+        return {}
+    return {
+        key: str(marker.get_attribute(f"data-{key}") or "")
+        for key in ("status", "error-kind", "error-type")
+    }
+
+
+def _research_status(page: Any) -> str:
+    marker = _app(page).locator("#purchase-research-deferred-v1").first
+    if marker.count() == 0:
+        return ""
+    return str(marker.get_attribute("data-status") or "")
 
 
 def _save_snapshot(page: Any, report: dict[str, object], label: str) -> None:
@@ -91,7 +153,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-quote-v1 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-runtime-v9 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -108,7 +170,7 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
         if (
             workspace_match is not None
             and "구매조사 워크스페이스" in body
-            and "동일제품 거래" in body
+            and "나라장터 동일제품 직접거래" in body
         ):
             strict_count = int(workspace_match.group(1))
             reference_count = int(legacy_match.group(2)) if legacy_match is not None else 0
@@ -122,52 +184,52 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
     raise RuntimeError("DFM100 Production unified search did not render a non-zero result summary")
 
 
-def _verify_workspace_tabs_persist_result(page: Any, report: dict[str, object]) -> None:
+def _verify_workspace_sections_persist_result(page: Any, report: dict[str, object]) -> None:
+    started = time.monotonic()
     app = _app(page)
 
-    research_tab = app.get_by_role("tab", name="Research·근거")
-    research_tab.wait_for(state="visible", timeout=20_000)
-    research_tab.click()
+    body = _body_text(page)
+    _assert_no_error_text(body)
+    if (
+        "나라장터 동일제품 직접거래" not in body
+        or "참고근거 · Research" not in body
+    ):
+        raise RuntimeError("Default price workspace did not render after DFM100 search")
+    report["price_section_rendered"] = True
 
+    supplier_section = app.get_by_text("업체·조달", exact=True)
+    supplier_section.wait_for(state="visible", timeout=20_000)
+    supplier_section.click()
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
         if (
-            "구매조사 워크스페이스" in body
-            and "공개조달 Research·근거" in body
-            and "동일제품 거래" in body
+            "식약처 품목·Identity" in body
+            and "실제 조달 공급업체" in body
         ):
+            report["supplier_section_rendered"] = True
             break
         page.wait_for_timeout(1_000)
     else:
-        raise RuntimeError("Research workspace tab did not preserve DFM100 search result")
+        raise RuntimeError("Supplier/procurement section did not preserve DFM100 result")
 
-    mfds_tab = app.get_by_role("tab", name="식약처·업체")
-    mfds_tab.click()
+    compare_section = app.get_by_text("동일품목 비교", exact=True)
+    compare_section.click()
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
-        if "식약처 등록정보" in body:
-            report["mfds_tab_rendered"] = True
-            break
-        page.wait_for_timeout(1_000)
-    else:
-        raise RuntimeError("MFDS workspace tab did not render after DFM100 search")
-
-    price_tab = app.get_by_role("tab", name="거래가격")
-    price_tab.click()
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        body = _body_text(page)
-        _assert_no_error_text(body)
-        if "나라장터 실제 거래" in body and WORKSPACE_DIRECT_PATTERN.search(body) is not None:
-            report["workspace_tabs_persisted"] = True
+        if "동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격" in body:
+            report["comparison_section_rendered"] = True
+            report["direct_workspace_sections_seconds"] = round(
+                time.monotonic() - started,
+                2,
+            )
             _save_snapshot(page, report, "unified-search-dfm100-workspace")
             return
         page.wait_for_timeout(1_000)
-    raise RuntimeError("Price workspace tab did not preserve DFM100 transaction results")
+    raise RuntimeError("Same-item comparison section did not preserve DFM100 result")
 
 
 def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
@@ -180,8 +242,25 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
             search = app.get_by_label("통합 검색", exact=True)
             search.wait_for(state="visible", timeout=20_000)
             search.fill("DFM100")
+            direct_started = time.monotonic()
             app.get_by_role("button", name="검색", exact=True).click()
             strict_count, reference_count = _wait_for_nonzero_result(page)
+            report["direct_search_first_result_seconds"] = round(
+                time.monotonic() - direct_started,
+                2,
+            )
+            report["direct_server_search_timings_seconds"] = _search_timings(page)
+            report["direct_research_stage_timings_seconds"] = _research_stage_timings(page)
+            report["direct_safety_diagnostic"] = _safety_diagnostic(page)
+            report["direct_research_status"] = _research_status(page)
+            if report["direct_research_status"] != "pending":
+                raise RuntimeError(
+                    "Initial DFM100 workspace did not defer C/Research after A/B result"
+                )
+            if report["direct_search_first_result_seconds"] > 25:
+                raise RuntimeError(
+                    "Initial DFM100 A/B workspace exceeded 25 second latency gate"
+                )
             attempts.append(
                 {
                     "attempt": attempt,
@@ -194,7 +273,7 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
             report["reference_count"] = reference_count
             report["total_track_b_results"] = strict_count + reference_count
             _save_snapshot(page, report, "unified-search-dfm100-success")
-            _verify_workspace_tabs_persist_result(page, report)
+            _verify_workspace_sections_persist_result(page, report)
             return
         except Exception as exc:
             attempts.append(
@@ -211,8 +290,88 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
         if attempt < 3:
             _wait_for_deployed_app(page, report)
 
-    raise RuntimeError("DFM100 Production unified search did not pass result + workspace-tab E2E")
+    raise RuntimeError("DFM100 Production unified search did not pass result + workspace-section E2E")
 
+
+
+
+def _build_dfm100_quote(path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Quote"
+    sheet.append(["품명", "제조사", "모델명", "규격", "수량", "단위", "단가", "금액"])
+    sheet.append(
+        [
+            "심장충격기",
+            "Philips",
+            "DFM100",
+            "",
+            1,
+            "대",
+            12000000,
+            12000000,
+        ]
+    )
+    workbook.save(path)
+
+
+def _verify_quote_upload_uses_unified_workspace(browser: Any, report: dict[str, object]) -> None:
+    quote_path = ARTIFACT_DIR / "synthetic-home-dfm100-quote.xlsx"
+    _build_dfm100_quote(quote_path)
+
+    page = browser.new_page(viewport={"width": 1440, "height": 1200})
+    try:
+        _wait_for_deployed_app(page, report)
+        app = _app(page)
+        uploader = app.get_by_label("견적서 업로드", exact=True).first
+        uploader.wait_for(state="visible", timeout=20_000)
+        file_input = uploader.locator('input[type="file"]')
+        file_input.wait_for(state="attached", timeout=20_000)
+        quote_started = time.monotonic()
+        file_input.set_input_files(str(quote_path))
+
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            body = _body_text(page)
+            _assert_no_error_text(body)
+            if (
+                "구매조사 워크스페이스" in body
+                and "일반 통합검색과 동일한 구매조사 파이프라인" in body
+                and "DFM100" in body
+            ):
+                direct_match = WORKSPACE_DIRECT_PATTERN.search(body)
+                if direct_match is None or int(direct_match.group(1)) < 1:
+                    raise RuntimeError(
+                        "Quote upload reached unified workspace but did not recover DFM100 "
+                        "direct A/B evidence"
+                    )
+                report["quote_upload_unified_workspace"] = True
+                report["quote_upload_direct_count"] = int(direct_match.group(1))
+                report["quote_upload_workspace_seconds"] = round(
+                    time.monotonic() - quote_started,
+                    2,
+                )
+                report["quote_server_search_timings_seconds"] = _search_timings(page)
+                report["quote_research_stage_timings_seconds"] = _research_stage_timings(page)
+                report["quote_safety_diagnostic"] = _safety_diagnostic(page)
+                report["quote_research_status"] = _research_status(page)
+                if report["quote_research_status"] != "pending":
+                    raise RuntimeError(
+                        "Quote DFM100 workspace did not defer C/Research after A/B result"
+                    )
+                if report["quote_upload_workspace_seconds"] > 35:
+                    raise RuntimeError(
+                        "Quote DFM100 A/B workspace exceeded 35 second latency gate"
+                    )
+                _save_snapshot(page, report, "quote-upload-dfm100-unified-workspace")
+                return
+            page.wait_for_timeout(1_000)
+
+        raise RuntimeError(
+            "Home quote upload did not route DFM100 into the same unified purchase workspace"
+        )
+    finally:
+        page.close()
 
 def main() -> None:
     from playwright.sync_api import sync_playwright
@@ -232,6 +391,7 @@ def main() -> None:
             try:
                 _wait_for_deployed_app(page, report)
                 _submit_dfm100(page, report)
+                _verify_quote_upload_uses_unified_workspace(browser, report)
                 report["status"] = "pass"
             except Exception:
                 _save_snapshot(page, report, "unified-search-dfm100-failure")

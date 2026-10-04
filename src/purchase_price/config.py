@@ -34,8 +34,9 @@ class Settings(BaseSettings):
     # Shared key alias used for approved market/public-data APIs.
     data_go_kr_market_service_key: str | None = None
 
-    # MFDS key. Source-specific wins over shared/legacy.
+    # MFDS keys. Source-specific wins over shared/legacy.
     mfds_service_key: str | None = None
+    mfds_recall_service_key: str | None = None
 
     # Historical G2B key name. Existing deployments often used this for ShoppingMall API.
     # Research APIs can be approved under a different data.go.kr service subscription, so the
@@ -59,6 +60,8 @@ class Settings(BaseSettings):
     mfds_model_info_base_url: str | None = None
     mfds_business_license_base_url: str | None = None
     mfds_udi_code_base_url: str | None = None
+    mfds_product_info_base_url: str | None = None
+    mfds_recall_base_url: str | None = None
     mfds_request_timeout_seconds: float = 20.0
     mfds_max_retries: int = 3
 
@@ -106,6 +109,32 @@ class Settings(BaseSettings):
             self.mfds_service_key
             or self.data_go_kr_market_service_key
             or self.data_go_kr_service_key
+        )
+
+    @property
+    def resolved_mfds_recall_service_key(self) -> str | None:
+        """Resolve the key for the MFDS recall/sale-stop service.
+
+        data.go.kr authorization is service-subscription specific. A general MFDS key may exist
+        while the recall service is still unapproved, so deployments can provide a dedicated key.
+        """
+
+        return (
+            self.mfds_recall_service_key
+            or self.mfds_service_key
+            or self.data_go_kr_market_service_key
+            or self.data_go_kr_service_key
+        )
+
+    @property
+    def mfds_recall_key_source(self) -> str:
+        return self._key_source(
+            (
+                ("MFDS_RECALL_SERVICE_KEY", self.mfds_recall_service_key),
+                ("MFDS_SERVICE_KEY", self.mfds_service_key),
+                ("DATA_GO_KR_MARKET_SERVICE_KEY", self.data_go_kr_market_service_key),
+                ("DATA_GO_KR_SERVICE_KEY", self.data_go_kr_service_key),
+            )
         )
 
     @property

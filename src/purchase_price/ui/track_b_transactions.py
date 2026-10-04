@@ -74,6 +74,20 @@ def _money_text(value: Any) -> str:
         return str(value)
 
 
+def _text_or_unknown(value: Any) -> str:
+    text = str(value or "").strip()
+    return text or "미확인"
+
+
+def _quantity_text(value: Any) -> str:
+    if value is None:
+        return "미확인"
+    try:
+        return f"{value:g}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _quantity_unit(quantity: Any, unit: str | None) -> str:
     if quantity is None and not unit:
         return "미확인"
@@ -88,6 +102,37 @@ def _quantity_unit(quantity: Any, unit: str | None) -> str:
 
 
 
+def _unit_price_basis_text(candidate: Any) -> str:
+    sentinel = object()
+    basis = getattr(candidate, "unit_price_basis", sentinel)
+    if basis is sentinel:
+        # Backward compatibility: legacy Track B candidates predate the explicit basis field,
+        # but their price was already sourced only from explicit prdctUprc.
+        return "원문 단가"
+    value = str(getattr(basis, "value", basis) or "").strip()
+    if value == "calculated_unit_price":
+        return "계산단가"
+    if value == "source_unit_price":
+        return "원문 단가"
+    return "미확인"
+
+
+def _unit_price_basis_detail(candidate: Any) -> str:
+    basis = str(
+        getattr(getattr(candidate, "unit_price_basis", None), "value", "")
+        or ""
+    ).strip()
+    if basis == "calculated_unit_price":
+        total_amount = getattr(candidate, "total_amount", None)
+        quantity = getattr(candidate, "quantity", None)
+        if total_amount is not None and quantity is not None:
+            return f"거래총액 {_money_text(total_amount)} ÷ 수량 {_quantity_text(quantity)}"
+        return "거래총액 ÷ 수량 계산값"
+    if basis == "source_unit_price" or not basis:
+        return "Source 원문 단가"
+    return "미확인"
+
+
 def _condition_text(candidate: Any) -> str:
     parts = [
         str(value).strip()
@@ -100,71 +145,82 @@ def _condition_text(candidate: Any) -> str:
     ]
     return " · ".join(dict.fromkeys(parts)) if parts else "미확인"
 
-def transaction_rows(track_b: Any) -> list[dict[str, object]]:
-    """Build the purchase-facing transaction table from direct and Research-only evidence.
+def _transaction_row(candidate: Any, *, comparison_level: str) -> dict[str, object]:
+    quantity = getattr(candidate, "quantity", None)
+    unit = getattr(candidate, "unit", None)
+    grade = _grade_value(candidate) or "미확인"
+    match_note = str(
+        getattr(candidate, "match_note", None)
+        or getattr(candidate, "reference_reason", None)
+        or ""
+    ).strip() or "미확인"
+    return {
+        "가격": _money_text(candidate.price),
+        "단가구분": _unit_price_basis_text(candidate),
+        "단가근거": _unit_price_basis_detail(candidate),
+        "단위": _text_or_unknown(unit),
+        "포장입수": "미확인",
+        "수량": _quantity_text(quantity),
+        "VAT": "미확인",
+        "총액": _money_text(getattr(candidate, "total_amount", None))
+        if getattr(candidate, "total_amount", None) is not None
+        else "미확인",
+        "금액검증": getattr(candidate, "amount_check", None) or "미확인",
+        "제조사": getattr(candidate, "manufacturer", None) or "미확인",
+        "모델": getattr(candidate, "model_name", None) or "미확인",
+        "규격": getattr(candidate, "specification", None) or "미확인",
+        "품목식별번호": getattr(candidate, "product_id", None) or "미확인",
+        "세부품명번호": getattr(candidate, "detail_code", None) or "미확인",
+        "거래조건": _condition_text(candidate),
+        "판매처": getattr(candidate, "supplier", None) or "미확인",
+        "구매처": getattr(candidate, "demand_institution", None) or "미확인",
+        "거래일": getattr(candidate, "transaction_date", None) or "미확인",
+        "수량/단위": _quantity_unit(quantity, unit),
+        "매칭등급": grade,
+        "매칭근거": match_note,
+        "거래기록": getattr(candidate, "transaction_type", None)
+        or "나라장터 납품요구",
+        "Source": "나라장터 납품요구",
+        "원문근거키": getattr(candidate, "raw_object_key", None) or "미확인",
+        "품목/모델": candidate.product_title,
+        "비교수준": comparison_level,
+    }
 
-    Optional transaction metadata is accessed defensively so a rolling deploy cannot turn a
-    harmless schema difference into a full-page AttributeError.
+
+def direct_transaction_rows(track_b: Any) -> list[dict[str, object]]:
+    """Rows eligible for the purchasing workspace's direct-price section.
+
+    This must stay aligned with the summary's A/B direct count. C-grade and broad
+    Research/reference candidates are deliberately excluded.
     """
 
-    rows: list[dict[str, object]] = []
-    for candidate in comparison_candidates(track_b):
-        grade_value = _grade_value(candidate)
-        rows.append(
-            {
-                "가격": _money_text(candidate.price),
-                "총액": _money_text(getattr(candidate, "total_amount", None))
-                if getattr(candidate, "total_amount", None) is not None
-                else "미확인",
-                "금액검증": getattr(candidate, "amount_check", None) or "미확인",
-                "제조사": getattr(candidate, "manufacturer", None) or "미확인",
-                "모델": getattr(candidate, "model_name", None) or "미확인",
-                "규격": getattr(candidate, "specification", None) or "미확인",
-                "품목식별번호": getattr(candidate, "product_id", None) or "미확인",
-                "세부품명번호": getattr(candidate, "detail_code", None) or "미확인",
-                "거래조건": _condition_text(candidate),
-                "판매처": getattr(candidate, "supplier", None) or "미확인",
-                "구매처": getattr(candidate, "demand_institution", None) or "미확인",
-                "거래일": getattr(candidate, "transaction_date", None) or "미확인",
-                "수량/단위": _quantity_unit(
-                    getattr(candidate, "quantity", None),
-                    getattr(candidate, "unit", None),
-                ),
-                "거래기록": getattr(candidate, "transaction_type", None)
-                or "나라장터 납품요구",
-                "품목/모델": candidate.product_title,
-                "비교수준": "동일 모델" if grade_value in {"A", "B"} else "동일 품목 참고",
-            }
-        )
+    return [
+        _transaction_row(candidate, comparison_level="동일 모델")
+        for candidate in strict_comparison_candidates(track_b)
+    ]
 
-    for candidate in reference_candidates(track_b):
-        rows.append(
-            {
-                "가격": _money_text(candidate.price),
-                "총액": _money_text(getattr(candidate, "total_amount", None))
-                if getattr(candidate, "total_amount", None) is not None
-                else "미확인",
-                "금액검증": getattr(candidate, "amount_check", None) or "미확인",
-                "제조사": getattr(candidate, "manufacturer", None) or "미확인",
-                "모델": getattr(candidate, "model_name", None) or "미확인",
-                "규격": getattr(candidate, "specification", None) or "미확인",
-                "품목식별번호": getattr(candidate, "product_id", None) or "미확인",
-                "세부품명번호": getattr(candidate, "detail_code", None) or "미확인",
-                "거래조건": _condition_text(candidate),
-                "판매처": getattr(candidate, "supplier", None) or "미확인",
-                "구매처": getattr(candidate, "demand_institution", None) or "미확인",
-                "거래일": getattr(candidate, "transaction_date", None) or "미확인",
-                "수량/단위": _quantity_unit(
-                    getattr(candidate, "quantity", None),
-                    getattr(candidate, "unit", None),
-                ),
-                "거래기록": getattr(candidate, "transaction_type", None)
-                or "나라장터 납품요구",
-                "품목/모델": candidate.product_title,
-                "비교수준": getattr(candidate, "reference_reason", None) or "검색 참고",
-            }
+
+def reference_transaction_rows(track_b: Any) -> list[dict[str, object]]:
+    """Rows that are observable transactions but not verified direct-price evidence."""
+
+    rows = [
+        _transaction_row(candidate, comparison_level="동일 품목 참고")
+        for candidate in category_reference_candidates(track_b)
+    ]
+    rows.extend(
+        _transaction_row(
+            candidate,
+            comparison_level=getattr(candidate, "reference_reason", None) or "검색 참고",
         )
+        for candidate in reference_candidates(track_b)
+    )
     return rows
+
+
+def transaction_rows(track_b: Any) -> list[dict[str, object]]:
+    """Backward-compatible combined rows for callers that intentionally want both tiers."""
+
+    return [*direct_transaction_rows(track_b), *reference_transaction_rows(track_b)]
 
 
 

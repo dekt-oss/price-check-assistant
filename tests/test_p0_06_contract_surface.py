@@ -33,11 +33,14 @@ def test_procurement_ui_exposes_actual_contract_coverage_and_not_run_state() -> 
     assert "0건 검색 결과가 아니라 **미조회** 상태" in text
 
 
-def test_contract_research_does_not_assume_undocumented_31_day_window() -> None:
+def test_contract_research_uses_production_validated_31_day_window() -> None:
     text = (
         REPO_ROOT / "src" / "purchase_price" / "services" / "g2b_contract_research.py"
     ).read_text(encoding="utf-8")
 
-    assert "max_window_days: int | None = None" in text
-    assert "if max_window_days is None:" in text
-    assert "return ((begin, end),)" in text
+    assert "G2B_CONTRACT_MAX_WINDOW_DAYS = 31" in text
+    assert (
+        "max_window_days: int | None = G2B_CONTRACT_MAX_WINDOW_DAYS"
+        in text
+    )
+    assert "cursor + timedelta(days=max_window_days - 1)" in text

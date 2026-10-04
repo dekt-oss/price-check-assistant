@@ -2,13 +2,20 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from threading import Lock
+from time import sleep
 
+from purchase_price.clients.data_go_kr import PublicDataTransportError
+from purchase_price.collectors.g2b_shopping import G2BShoppingPage
 from purchase_price.schemas import CollectedPrice
 from purchase_price.services.g2b_contract_enrichment import (
     build_contract_lookback_stages,
     enrich_market_bundle_with_contracts,
 )
-from purchase_price.services.g2b_contract_research import G2BContractResearchClient
+from purchase_price.services.g2b_contract_research import (
+    G2BContractProductSearchResult,
+    G2BContractResearchClient,
+)
 from purchase_price.services.g2b_market_models import (
     G2BResearchRecord,
     G2BResearchSource,
@@ -73,7 +80,7 @@ def test_independent_contract_search_uses_official_product_and_date_fields() -> 
     assert "bidNtceNo" not in params
 
 
-def test_independent_contract_search_splits_long_ranges_without_overlap() -> None:
+def test_independent_contract_search_splits_long_ranges_without_overlap_by_default() -> None:
     portal = FakePortal([_page([]), _page([]), _page([])])
     client = G2BContractResearchClient("key", client=portal)  # type: ignore[arg-type]
 
@@ -82,7 +89,6 @@ def test_independent_contract_search_splits_long_ranges_without_overlap() -> Non
         begin_date=date(2026, 6, 1),
         end_date=date(2026, 8, 31),
         max_pages_per_window=1,
-        max_window_days=31,
     )
 
     assert request_count == 3
@@ -95,6 +101,42 @@ def test_independent_contract_search_splits_long_ranges_without_overlap() -> Non
         ("20260702", "20260801"),
         ("20260802", "20260831"),
     ]
+
+def test_independent_contract_search_parallelizes_many_bounded_windows() -> None:
+    lock = Lock()
+    active = 0
+    max_active = 0
+
+    class ConcurrentClient(G2BContractResearchClient):
+        def __init__(self) -> None:
+            pass
+
+        def fetch_product_search_page(self, **kwargs):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                sleep(0.04)
+                return G2BShoppingPage((), 0, 1, 100)
+            finally:
+                with lock:
+                    active -= 1
+
+    client = ConcurrentClient()
+
+    records, request_count = client.search_by_product_name(
+        product_name="레이저프린터",
+        begin_date=date(2026, 1, 1),
+        end_date=date(2026, 6, 30),
+        max_pages_per_window=1,
+        max_workers=4,
+    )
+
+    assert records == ()
+    assert request_count == 6
+    assert max_active >= 2
+
 
 
 class FakeIndependentContractClient:
@@ -182,6 +224,50 @@ def test_seedless_contract_enrichment_expands_from_90_days_to_one_year() -> None
     assert not isinstance(source.records[0], CollectedPrice)
 
 
+def test_bounded_contract_window_failure_preserves_partial_records() -> None:
+    record = G2BResearchRecord(
+        source_type=G2BResearchSource.CONTRACT,
+        source_record_id="contract:C-PARTIAL",
+        title="레이저프린터 구매 계약",
+        contract_no="C-PARTIAL",
+        product_name="레이저프린터",
+        amount=Decimal("7000000"),
+        amount_type=ResearchAmountType.CONTRACT_TOTAL,
+    )
+
+    class PartialBoundedClient(FakeIndependentContractClient):
+        def search_by_product_name_result(self, **kwargs):
+            self.product_calls.append(
+                (
+                    kwargs["product_name"],
+                    kwargs["begin_date"],
+                    kwargs["end_date"],
+                )
+            )
+            return G2BContractProductSearchResult(
+                records=(record,),
+                request_count=4,
+                failed_window_count=1,
+                errors=(PublicDataTransportError("synthetic bounded timeout"),),
+            )
+
+    enriched = enrich_market_bundle_with_contracts(
+        _empty_bundle(),
+        service_key=None,
+        client=PartialBoundedClient(),  # type: ignore[arg-type]
+        independent_terms=("레이저프린터",),
+        requested_lookback_days=365,
+        today=date(2026, 9, 8),
+    )
+
+    source = enriched.sources[-1]
+    assert source.status == ResearchSourceStatus.PARTIAL
+    assert source.records == (record,)
+    assert source.request_count == 4
+    assert source.error_type == "PublicDataTransportError"
+    assert "synthetic bounded timeout" in source.error_message
+
+
 def test_independent_contract_failure_is_not_successful_zero() -> None:
     client = FakeIndependentContractClient(fail=True)
 
@@ -199,6 +285,23 @@ def test_independent_contract_failure_is_not_successful_zero() -> None:
     assert source.request_count == 1
     assert source.error_type == "RuntimeError"
     assert "synthetic independent contract failure" in source.error_message
+
+
+def test_synchronous_workspace_can_defer_slow_independent_contract_scan() -> None:
+    enriched = enrich_market_bundle_with_contracts(
+        _empty_bundle(),
+        service_key="configured",
+        independent_terms=("레이저프린터",),
+        requested_lookback_days=1095,
+        allow_independent_search=False,
+    )
+
+    source = enriched.sources[-1]
+    assert source.status == ResearchSourceStatus.DEFERRED
+    assert source.records == ()
+    assert source.request_count == 0
+    assert source.requested_lookback_days == 1095
+    assert "deferred-source-latency" in source.search_strategy
 
 
 def test_no_seed_and_no_independent_term_is_not_run_not_zero() -> None:

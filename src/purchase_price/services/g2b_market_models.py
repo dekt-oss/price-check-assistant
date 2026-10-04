@@ -40,6 +40,7 @@ class ResearchSourceStatus(StrEnum):
     FAILURE = "failure"
     NOT_CONFIGURED = "not_configured"
     NOT_AUTHORIZED = "not_authorized"
+    DEFERRED = "deferred"
     NOT_RUN = "not_run"
 
 

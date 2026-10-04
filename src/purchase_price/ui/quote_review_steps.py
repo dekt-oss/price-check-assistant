@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import html
-import tempfile
 from dataclasses import replace
-from pathlib import Path
 
 import streamlit as st
 
@@ -32,6 +30,7 @@ from purchase_price.services.quote_extraction_diagnostics import (
     diagnose_quote_extraction,
     diagnose_quote_extraction_error,
 )
+from purchase_price.services.quote_upload_security import temporary_quote_upload
 from purchase_price.services.runtime_readiness import ocr_runtime_readiness
 from purchase_price.ui.mapping_requests import register_mapping_request
 from purchase_price.ui.quote_review_contract import (
@@ -122,24 +121,26 @@ def render_path_card(state: QuoteReviewState) -> None:
 
 
 def _store_extraction(uploaded_file, state: QuoteReviewState) -> None:
-    suffix = Path(uploaded_file.name).suffix.casefold()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
-        handle.write(uploaded_file.getvalue())
-        temp_path = Path(handle.name)
+    suffix = uploaded_file.name.rsplit(".", 1)[-1].casefold() if "." in uploaded_file.name else ""
     try:
-        result = extract_quote_file(temp_path)
-        diagnostics = diagnose_quote_extraction(temp_path, result)
-    except QuoteExtractionError as exc:
-        state.diagnostics = diagnose_quote_extraction_error(temp_path, exc)
+        with temporary_quote_upload(uploaded_file) as temp_path:
+            try:
+                result = extract_quote_file(temp_path)
+                diagnostics = diagnose_quote_extraction(temp_path, result)
+            except QuoteExtractionError as exc:
+                state.diagnostics = diagnose_quote_extraction_error(temp_path, exc)
+                state.extraction = None
+                state.items = []
+                st.error(str(exc))
+                return
+    except ValueError as exc:
         state.extraction = None
         state.items = []
         st.error(str(exc))
         return
-    finally:
-        temp_path.unlink(missing_ok=True)
 
     state.file_name = uploaded_file.name
-    state.file_kind = suffix.lstrip(".")
+    state.file_kind = suffix
     state.extraction = result
     state.diagnostics = diagnostics
     state.items = list(result.items)
@@ -152,7 +153,12 @@ def _store_extraction(uploaded_file, state: QuoteReviewState) -> None:
     state.identity.clear()
     state.search_runs.clear()
     state.discoveries.clear()
+    state.market_bundles.clear()
     state.track_b_db.clear()
+    state.mfds_workspace.clear()
+    state.mfds_identity.clear()
+    state.safety_lookup.clear()
+    state.item_research_failures.clear()
     state.comparability_context.clear()
     state.approvals.clear()
     state.step = 1
