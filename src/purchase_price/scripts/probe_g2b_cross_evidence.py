@@ -18,7 +18,6 @@ from purchase_price.config import get_settings
 from purchase_price.services.g2b_contract_evidence import G2B_CONTRACT_BASE_URL
 from purchase_price.services.g2b_contract_research import (
     G2BContractResearchClient,
-    parse_contract_research,
 )
 
 DEFAULT_PRODUCT_NAMES = ("레이저프린터", "인공호흡기", "전신가스마취기")
@@ -149,21 +148,24 @@ def _measure_case(
 
     contract_report: dict[str, Any]
     try:
-        page = contract_client.fetch_product_search_page(
+        # The contract operation rejects windows longer than ~31 days (resultCode 07), so the
+        # bounded lookback is searched in API-safe windows, one page per window.
+        result = contract_client.search_by_product_name_result(
             product_name=product_name,
             begin_date=begin,
             end_date=end,
-            page_no=1,
-            num_of_rows=100,
+            max_pages_per_window=1,
         )
-        parsed = [
-            parse_contract_research(record, search_term=product_name) for record in page.items
-        ]
+        if result.errors and not result.records and result.failed_window_count:
+            raise result.errors[0]
+        parsed = list(result.records)
         unique, duplicates, unkeyed = _dedupe_by_record_id(parsed)
         contract_report = {
-            "status": _source_status(len(page.items)),
-            "reported_total_count": page.total_count,
-            "raw_record_count": len(page.items),
+            "status": _source_status(len(parsed)),
+            "reported_total_count": None,
+            "raw_record_count": len(parsed),
+            "request_count": result.request_count,
+            "failed_window_count": result.failed_window_count,
             "unique_contract_record_count": len(unique),
             "duplicates_removed": duplicates,
             "unkeyed_record_count": unkeyed,

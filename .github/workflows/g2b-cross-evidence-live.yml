@@ -43,7 +43,7 @@ jobs:
           python -m purchase_price.scripts.probe_g2b_cross_evidence \
             --product-names "${{ inputs.product_names }}" \
             --lookback-days "${{ inputs.lookback_days }}" \
-            --timeout-seconds 15 \
+            --timeout-seconds 45 \
             --max-retries 1 \
             --output artifacts/g2b-cross-evidence/report.json
 

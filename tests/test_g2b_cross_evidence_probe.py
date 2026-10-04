@@ -7,6 +7,10 @@ from purchase_price.collectors.g2b_shopping import G2BShoppingPage
 from purchase_price.domain import ComparisonScope, EvidenceType, MatchGrade, SourceType
 from purchase_price.schemas import CollectedPrice
 from purchase_price.scripts.probe_g2b_cross_evidence import build_report
+from purchase_price.services.g2b_contract_research import (
+    G2BContractProductSearchResult,
+    parse_contract_research,
+)
 
 
 def _price(record_id: str, amount: str = "100000") -> CollectedPrice:
@@ -52,15 +56,17 @@ class FakeContractClient:
     def __init__(self, cases):
         self.cases = cases
 
-    def fetch_product_search_page(self, **kwargs):
+    def search_by_product_name_result(self, **kwargs):
         value = self.cases[kwargs["product_name"]]
         if isinstance(value, Exception):
-            raise value
-        return G2BShoppingPage(
-            items=tuple(value),
-            total_count=len(value),
-            page_no=1,
-            num_of_rows=100,
+            return G2BContractProductSearchResult(
+                records=(), request_count=1, failed_window_count=1, errors=(value,)
+            )
+        return G2BContractProductSearchResult(
+            records=tuple(
+                parse_contract_research(item, search_term=kwargs["product_name"]) for item in value
+            ),
+            request_count=1,
         )
 
 
