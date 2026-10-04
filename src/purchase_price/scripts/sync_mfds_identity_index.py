@@ -57,6 +57,17 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+_QUOTA_EXCEEDED_MARKERS = (
+    "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR",
+    "code=22",
+)
+
+
+def _is_quota_exceeded(exc: PublicDataClientError) -> bool:
+    message = str(exc)
+    return any(marker in message for marker in _QUOTA_EXCEEDED_MARKERS)
+
+
 def _is_source_not_authorized(exc: PublicDataClientError) -> bool:
     message = str(exc)
     return any(marker in message for marker in _SOURCE_NOT_AUTHORIZED_MARKERS)
@@ -110,6 +121,7 @@ def _load_pipeline(state_store: R2OperationalStateStore) -> dict[str, Any]:
 _ANOMALY_STATUS = {
     "EMPTY_PAGE_BEFORE_SOURCE_END": "SOURCE_EMPTY_PAGE",
     "TRANSPORT_ERROR": "SOURCE_TRANSPORT_ERROR",
+    "QUOTA_EXCEEDED": "SOURCE_QUOTA_EXCEEDED",
 }
 
 
@@ -235,6 +247,9 @@ def _sync_without_lock(
                             # Publish the pages already collected in this run; the next run
                             # resumes from this page instead of redoing the whole chunk.
                             source_anomaly = "TRANSPORT_ERROR"
+                            break
+                        if pages_collected > 0 and _is_quota_exceeded(exc):
+                            source_anomaly = "QUOTA_EXCEEDED"
                             break
                         raise
 

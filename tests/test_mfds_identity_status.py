@@ -160,3 +160,32 @@ def test_falsely_completed_cycle_stays_in_backfill_until_coverage_is_verified() 
         )
         assert plan.mode == "backfill"
         assert plan.chunks == 5
+
+
+def test_all_four_daily_slots_backfill_until_verified_then_only_primary_refreshes() -> None:
+    slots = ("23 0 * * *", "23 6 * * *", "23 12 * * *", "23 18 * * *")
+    for slot in slots:
+        plan = choose_mfds_collection_plan(
+            complete_cycles=1,
+            verified_complete_cycles=0,
+            event_name="schedule",
+            schedule=slot,
+        )
+        assert plan.mode == "backfill"
+        assert plan.chunks == 5
+
+    modes = {
+        slot: choose_mfds_collection_plan(
+            complete_cycles=2,
+            verified_complete_cycles=1,
+            event_name="schedule",
+            schedule=slot,
+        ).mode
+        for slot in slots
+    }
+    assert modes == {
+        "23 0 * * *": "rolling_refresh",
+        "23 6 * * *": "maintenance_skip",
+        "23 12 * * *": "maintenance_skip",
+        "23 18 * * *": "maintenance_skip",
+    }

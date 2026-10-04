@@ -6,6 +6,8 @@ def test_mfds_identity_workflow_uses_checkpointed_stable_backfill_mode() -> None
 
     assert 'cron: "23 0 * * *"' in text
     assert 'cron: "23 12 * * *"' in text
+    assert 'cron: "23 6 * * *"' in text
+    assert 'cron: "23 18 * * *"' in text
     assert 'default: "5"' in text
     assert 'default: "200"' in text
     assert 'default: "100"' in text

@@ -28,9 +28,12 @@ on:
       - "src/purchase_price/scripts/plan_mfds_identity_collection.py"
       - "src/purchase_price/services/mfds_identity_status.py"
   schedule:
-    # Backfill: both slots run. After the first full source cycle, only the primary slot refreshes.
+    # Backfill: all four slots run (~70 min each, serialized by the concurrency group).
+    # After a coverage-verified cycle, only the primary 00:23 UTC slot refreshes.
     - cron: "23 0 * * *"
+    - cron: "23 6 * * *"
     - cron: "23 12 * * *"
+    - cron: "23 18 * * *"
   workflow_dispatch:
     inputs:
       chunks:
@@ -188,6 +191,11 @@ jobs:
               print(
                   "::warning::MFDS transport failed mid-chunk; collected pages were published "
                   "and the next run resumes from the failed page."
+              )
+          if any(item.get("status") == "SOURCE_QUOTA_EXCEEDED" for item in reports):
+              print(
+                  "::warning::MFDS daily request quota was exhausted; collected pages were "
+                  "published and the next run resumes from the failed page."
               )
           if any(item.get("status") == "SOURCE_NOT_AUTHORIZED" for item in reports):
               print("::warning::MFDS product-info API utilization approval is required for this service key.")

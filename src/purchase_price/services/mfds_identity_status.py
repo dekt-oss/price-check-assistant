@@ -163,6 +163,9 @@ def get_mfds_identity_collection_status(
         )
 
 
+PRIMARY_COLLECTION_SCHEDULE = "23 0 * * *"
+
+
 def choose_mfds_collection_plan(
     *,
     status: str = "available",
@@ -201,7 +204,7 @@ def choose_mfds_collection_plan(
             ),
         )
 
-    if event_name == "schedule" and schedule == "23 12 * * *":
+    if event_name == "schedule" and schedule != PRIMARY_COLLECTION_SCHEDULE:
         return MfdsCollectionPlan(
             mode="maintenance_skip",
             chunks=0,

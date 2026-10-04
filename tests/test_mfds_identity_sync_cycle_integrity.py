@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from purchase_price.clients.data_go_kr import PublicDataTransportError
+from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataTransportError
 from purchase_price.scripts import sync_mfds_identity_index as sync_module
 from purchase_price.storage.r2_mfds_identity_index import MfdsIdentityIndexRef
 
@@ -79,10 +79,12 @@ class FakeSource:
         total: int,
         empty_pages: set[int] | None = None,
         failing_pages: set[int] | None = None,
+        quota_pages: set[int] | None = None,
     ) -> None:
         self.total = total
         self.empty_pages = empty_pages or set()
         self.failing_pages = failing_pages or set()
+        self.quota_pages = quota_pages or set()
         self.requested: list[int] = []
 
     def __call__(self, *args: Any, **kwargs: Any) -> FakeSource:
@@ -98,6 +100,10 @@ class FakeSource:
         self.requested.append(pageNo)
         if pageNo in self.failing_pages:
             raise PublicDataTransportError("ConnectTimeout: timed out")
+        if pageNo in self.quota_pages:
+            raise PublicDataClientError(
+                "Public Data Portal error code=22 LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR"
+            )
         if pageNo in self.empty_pages:
             return _payload([], 0)
         start = (pageNo - 1) * numOfRows
@@ -259,3 +265,12 @@ def test_transport_error_on_first_page_still_fails_loudly(harness: SimpleNamespa
         harness.run(FakeSource(total=100, failing_pages={1}), max_pages=10)
 
     assert sync_module.PIPELINE_STATE not in harness.states
+
+
+def test_quota_exhaustion_mid_run_publishes_collected_pages(harness: SimpleNamespace) -> None:
+    report = harness.run(FakeSource(total=100, quota_pages={5}), max_pages=10)
+
+    assert report["status"] == "SOURCE_QUOTA_EXCEEDED"
+    assert report["next_page"] == 5
+    assert report["cycle_completed"] is False
+    assert harness.index_rows() == 40
