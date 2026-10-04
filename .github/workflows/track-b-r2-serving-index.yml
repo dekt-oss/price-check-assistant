@@ -6,6 +6,7 @@ on:
       - ".github/workflows/track-b-r2-serving-index.yml"
       - "src/purchase_price/scripts/sync_g2b_track_b_r2_index.py"
       - "src/purchase_price/scripts/audit_track_b_transition.py"
+      - "src/purchase_price/scripts/audit_track_b_serving_conflicts.py"
       - "src/purchase_price/services/track_b_pipeline_state.py"
       - "src/purchase_price/services/track_b_supplemental_state.py"
       - "src/purchase_price/services/track_b_db_quote_comparison.py"
@@ -131,11 +132,33 @@ jobs:
           print("rolling=", report.get("rolling"))
           print("serving_index=", report.get("serving_index"))
           PY
+      - name: Audit current serving-index conflict quarantine
+        run: >-
+          python -m purchase_price.scripts.audit_track_b_serving_conflicts
+          --sample-limit 30
+          --output artifacts/track-b-serving-conflicts.json
+      - name: Print serving conflict summary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/track-b-serving-conflicts.json").read_text())
+          print("status=", report.get("status"))
+          print("conflict_row_count=", report.get("conflict_row_count"))
+          print("conflict_event_count=", report.get("conflict_event_count"))
+          print("max_conflicts_for_one_identity=", report.get("max_conflicts_for_one_identity"))
+          print("priced_conflict_row_count=", report.get("priced_conflict_row_count"))
+          print("top_detail_codes=", report.get("top_detail_codes"))
+          print("transaction_months=", report.get("transaction_months"))
+          PY
       - name: Upload read-only transition audit
         uses: actions/upload-artifact@v4
         with:
           name: track-b-transition-readonly
-          path: artifacts/track-b-transition-pr.json
+          path: |
+            artifacts/track-b-transition-pr.json
+            artifacts/track-b-serving-conflicts.json
           retention-days: 14
           if-no-files-found: error
 
