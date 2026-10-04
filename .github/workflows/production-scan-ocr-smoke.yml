@@ -2,6 +2,9 @@ name: Production Scan OCR Smoke
 
 on:
   workflow_dispatch:
+  schedule:
+    # Weekly guard so a broken Production OCR runtime is not only noticed on OCR-related pushes.
+    - cron: "40 22 * * 0"
   pull_request:
     paths:
       - "scripts/production_scan_ocr_smoke.py"
