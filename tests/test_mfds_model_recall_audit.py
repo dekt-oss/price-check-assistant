@@ -8,6 +8,7 @@ from purchase_price.scripts.audit_mfds_model_recall import (
     audit,
     classify_affix,
     load_track_b_models,
+    model_key_shape,
 )
 from purchase_price.services.matching import normalize_text
 from purchase_price.services.mfds_identity_index import (
@@ -115,3 +116,48 @@ def test_load_track_b_models_groups_by_key_and_skips_conflicts(tmp_path: Path) -
 
     assert sorted((m.model_key, m.line_count) for m in models) == [("dfm100", 2), ("lamp1", 1)]
     assert [(m.model_key, m.line_count) for m in medical] == [("dfm100", 2)]
+
+
+def test_model_key_shape() -> None:
+    assert model_key_shape("021255") == "digits_only"
+    assert model_key_shape("100ml") == "unit_like"
+    assert model_key_shape("1015cm") == "unit_like"
+    assert model_key_shape("rs30") == "short"
+    assert model_key_shape("pads16") == "length_5_6"
+    assert model_key_shape("sjdfm100") == "distinctive"
+
+
+def test_exact_policy_counts_weak_keys_without_company_agreement(tmp_path: Path) -> None:
+    path = tmp_path / "mfds.sqlite"
+    connection = sqlite3.connect(path)
+    upsert_identity_records(
+        connection,
+        [
+            parse_mfds_product_info_record(
+                {"FOML_INFO": model, "MNFT_IPRT_ENTP_NM": company, "PRDLST_NM": product}
+            )
+            for model, company, product in (
+                ("02-1255", "(주)레이언스", "교정용브라켓"),
+                ("RS-30", "디메드", "지혈용품"),
+                ("MK-PL50", "(주)엠케이티", "플라즈마멸균기"),
+                ("125", "월드바이오텍", "교정용겸자"),
+            )
+        ],
+    )
+    connection.commit()
+    models = [
+        _model("02-1255", "솔고바이오메디칼"),  # digits-only, other company -> downgrade
+        _model("RS30", "시우라이팅"),  # short, other company -> downgrade
+        _model("MK-PL50", "엠케이티"),  # length 5-6 -> not a weak shape, unaffected
+        _model("125", "월드바이오텍"),  # digits-only but company agrees -> stays confirmed
+    ]
+
+    report = audit(connection, models, sample_size=10, seed=1)
+    connection.close()
+
+    policy = report["exact_match_policy"]
+    assert policy["exact_models"] == 4
+    assert policy["would_downgrade_to_needs_review"] == 2
+    assert policy["by_shape"]["digits_only"]["models"] == {"disagree": 1, "agree": 1}
+    assert policy["by_shape"]["short"]["models"] == {"disagree": 1}
+    assert policy["by_shape"]["length_5_6"]["models"] == {"agree": 1}
