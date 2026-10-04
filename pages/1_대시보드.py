@@ -34,6 +34,7 @@ from purchase_price.services.mfds_identity_index import (
     MfdsIdentityRecord,
 )
 from purchase_price.services.mfds_identity_live import lookup_mfds_model_identity_live
+from purchase_price.services.mfds_identity_live_policy import should_query_live_mfds_identity
 from purchase_price.services.mfds_identity_presenter import (
     MFDS_PRODUCT_INFO_DATASET_URL,
     mfds_identity_status,
@@ -727,6 +728,7 @@ def _execute_search(
     if (
         (not isinstance(indexed_identity, MfdsIdentityLookup) or indexed_identity.status != "success")
         and (query.model_name or "").strip()
+        and should_query_live_mfds_identity(_load_mfds_collection_status)
     ):
         live_identity = lookup_mfds_model_identity_live(query.model_name)
         if live_identity.status == "success":
@@ -1934,6 +1936,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v6" style="display:none">purchase-workspace-runtime-v6</span>'
     '<span id="purchase-workspace-runtime-v7" style="display:none">purchase-workspace-runtime-v7</span>'
     '<span id="purchase-workspace-runtime-v8" style="display:none">purchase-workspace-runtime-v8</span>'
+    '<span id="purchase-workspace-runtime-v9" style="display:none">purchase-workspace-runtime-v9</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

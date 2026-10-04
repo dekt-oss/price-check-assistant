@@ -44,3 +44,4 @@ def test_dashboard_refreshes_stale_mfds_identity_r2_adapter() -> None:
     assert "_lookup_mfds_identity_runtime(lookup_key)" in source
     assert "_lookup_same_mfds_product_runtime(identity_product)" in source
     assert 'id="purchase-workspace-runtime-v8"' in source
+    assert 'id="purchase-workspace-runtime-v9"' in source
