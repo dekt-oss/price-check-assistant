@@ -97,17 +97,21 @@ def test_load_track_b_models_groups_by_key_and_skips_conflicts(tmp_path: Path) -
     connection.executescript(
         """
         CREATE TABLE track_b_delivery_lines (
-            model_key TEXT, model_name TEXT, manufacturer TEXT, identity_conflict INTEGER
+            model_key TEXT, model_name TEXT, manufacturer TEXT, identity_conflict INTEGER,
+            detail_code TEXT
         );
         INSERT INTO track_b_delivery_lines VALUES
-            ('dfm100', 'DFM100', '세종', 0),
-            ('dfm100', 'DFM-100', '세종', 0),
-            ('bad', 'BAD', 'x', 1),
-            ('', '', 'x', 0);
+            ('dfm100', 'DFM100', '세종', 0, '4221150101'),
+            ('dfm100', 'DFM-100', '세종', 0, '4221150101'),
+            ('lamp1', 'LAMP-1', '조명', 0, '3910110101'),
+            ('bad', 'BAD', 'x', 1, '4221150101'),
+            ('', '', 'x', 0, '4221150101');
         """
     )
 
     models = load_track_b_models(connection)
+    medical = load_track_b_models(connection, detail_prefix="42")
     connection.close()
 
-    assert [(m.model_key, m.line_count) for m in models] == [("dfm100", 2)]
+    assert sorted((m.model_key, m.line_count) for m in models) == [("dfm100", 2), ("lamp1", 1)]
+    assert [(m.model_key, m.line_count) for m in medical] == [("dfm100", 2)]

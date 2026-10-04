@@ -71,7 +71,11 @@ def company_agrees(manufacturer: str | None, candidates: Iterable[MfdsCandidate]
     return False
 
 
-def load_track_b_models(connection: sqlite3.Connection) -> list[TrackBModel]:
+def load_track_b_models(
+    connection: sqlite3.Connection,
+    *,
+    detail_prefix: str | None = None,
+) -> list[TrackBModel]:
     tables = {
         row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
@@ -79,13 +83,21 @@ def load_track_b_models(connection: sqlite3.Connection) -> list[TrackBModel]:
         raise RuntimeError(f"Track B serving index has no track_b_delivery_lines: {sorted(tables)}")
     columns = {row[1] for row in connection.execute("PRAGMA table_info(track_b_delivery_lines)")}
     conflict_filter = "AND COALESCE(identity_conflict, 0) = 0" if "identity_conflict" in columns else ""
+    params: tuple[str, ...] = ()
+    detail_filter = ""
+    if detail_prefix:
+        if "detail_code" not in columns:
+            raise RuntimeError("Track B serving index has no detail_code column")
+        detail_filter = "AND detail_code LIKE ?"
+        params = (f"{detail_prefix}%",)
     rows = connection.execute(
         f"""
         SELECT model_key, MAX(model_name), MAX(manufacturer), COUNT(*)
         FROM track_b_delivery_lines
-        WHERE model_key IS NOT NULL AND model_key <> '' {conflict_filter}
+        WHERE model_key IS NOT NULL AND model_key <> '' {conflict_filter} {detail_filter}
         GROUP BY model_key
-        """
+        """,
+        params,
     ).fetchall()
     return [TrackBModel(str(r[0]), str(r[1] or ""), r[2], int(r[3])) for r in rows]
 
@@ -243,6 +255,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-size", type=int, default=DEFAULT_SAMPLE_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--sample-limit", type=int, default=25)
+    parser.add_argument(
+        "--detail-prefix",
+        default=None,
+        help="Only Track B lines whose G2B detail code starts with this (42 = medical equipment)",
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
@@ -262,7 +279,7 @@ def main() -> int:
     status = get_mfds_identity_collection_status(settings=settings)
     track_b = sqlite3.connect(f"file:{track_b_path}?mode=ro", uri=True)
     try:
-        models = load_track_b_models(track_b)
+        models = load_track_b_models(track_b, detail_prefix=args.detail_prefix)
     finally:
         track_b.close()
 
@@ -277,6 +294,7 @@ def main() -> int:
         )
     finally:
         mfds.close()
+    report["detail_prefix"] = args.detail_prefix
     report["mfds_index"] = {
         "row_count": status.row_count,
         "source_total_count": status.source_total_count,
