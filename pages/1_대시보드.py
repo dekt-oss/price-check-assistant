@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import importlib
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from inspect import signature
 from threading import Lock
 from time import monotonic
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
+from purchase_price.clients.data_go_kr import PublicDataPortalClient
+from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL
+from purchase_price.config import get_settings
 from purchase_price.evidence_domain import (
     IdentityEvidenceStatus,
     PriceEvidenceStatus,
@@ -66,6 +71,13 @@ from purchase_price.services.safety_support import (
 )
 from purchase_price.services.search import SearchRun
 from purchase_price.services.structured_query_identity import canonicalize_product_query
+from purchase_price.services.track_b_live_gap_fill import (
+    TrackBLiveGapFill,
+    fetch_live_gap,
+    indexed_detail_codes,
+    live_gap_window,
+    merge_live_gap,
+)
 from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
@@ -133,6 +145,43 @@ def _lookup_mfds_identity_runtime(query: str):
 def _lookup_same_mfds_product_runtime(product_name: str):
     module = _mfds_identity_r2_runtime()
     return module.lookup_same_mfds_product_from_r2(product_name)
+
+
+def _track_b_live_gap_fill(
+    query: ProductQuery,
+    *,
+    detail_codes: tuple[str, ...],
+    data_as_of: str | None,
+    quote_unit_price: Decimal | None,
+) -> TrackBLiveGapFill:
+    """Live G2B lookup for the days after the collected index; never raises."""
+
+    window = live_gap_window(data_as_of, datetime.now(ZoneInfo("Asia/Seoul")).date())
+    if window is None:
+        return TrackBLiveGapFill("up_to_date" if data_as_of else "not_applicable")
+    if not detail_codes:
+        return TrackBLiveGapFill(
+            "not_applicable",
+            "수집 이력에 이 모델의 세부품명번호가 없음",
+            begin_date=window[0].isoformat(),
+            end_date=window[1].isoformat(),
+        )
+    settings = get_settings()
+    service_key = (settings.resolved_g2b_shopping_service_key or "").strip()
+    if not service_key:
+        return TrackBLiveGapFill("not_applicable", "나라장터 서비스키 미설정")
+    try:
+        with PublicDataPortalClient(service_key, timeout_seconds=8.0, max_retries=0) as client:
+            return fetch_live_gap(
+                query,
+                detail_codes=detail_codes,
+                window=window,
+                client=client,
+                quote_unit_price=quote_unit_price,
+                base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
+            )
+    except Exception as exc:
+        return TrackBLiveGapFill("failure", "실시간 조회 실패", error_type=type(exc).__name__)
 
 
 HOME_SEARCH_STATE_KEY = "home_unified_search_result"
@@ -793,6 +842,13 @@ def _execute_search(
                     query = model_probe_query
                     model_probe_used = True
 
+        live_detail_codes: tuple[str, ...] = ()
+        if getattr(track_b_snapshot, "session", None) is not None and (query.model_name or "").strip():
+            try:
+                live_detail_codes = indexed_detail_codes(track_b_snapshot.session, query)
+            except Exception:
+                live_detail_codes = ()
+
         identity_product = (
             indexed_identity.product_names[0]
             if isinstance(indexed_identity, MfdsIdentityLookup)
@@ -820,6 +876,16 @@ def _execute_search(
             current_model=query.model_name or "",
         )
     search_timings["track_b"] = round(monotonic() - track_b_started, 3)
+
+    live_started = monotonic()
+    track_b_live = _track_b_live_gap_fill(
+        query,
+        detail_codes=live_detail_codes,
+        data_as_of=track_b_data_as_of,
+        quote_unit_price=review_input.quote_unit_price,
+    )
+    track_b = merge_live_gap(track_b, track_b_live)
+    search_timings["track_b_live"] = round(monotonic() - live_started, 3)
 
     mfds_started = monotonic()
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
@@ -880,6 +946,7 @@ def _execute_search(
         "same_product_identity": same_product_identity,
         "mfds_procurement_crosslinks": mfds_procurement_crosslinks,
         "track_b_data_as_of": track_b_data_as_of,
+        "track_b_live": track_b_live,
         "track_b_index_updated_at": track_b_index_updated_at,
         "search_timings_seconds": search_timings,
         "research_stage_timings_seconds": research_stage_timings,
@@ -1286,6 +1353,22 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
     if track_b_data_as_of:
         st.caption(f"나라장터 직접가격 데이터 기준일 · {track_b_data_as_of}")
+        live = state.get("track_b_live")
+        live_status = str(getattr(live, "status", "") or "")
+        live_window = f"{getattr(live, 'begin_date', '')} ~ {getattr(live, 'end_date', '')}"
+        if live_status == "success":
+            st.caption(
+                f"나라장터 실시간 보강 · {live_window} · 수집 전 거래 "
+                f"{len(getattr(live, 'candidates', ()) or ())}건을 같은 동일성 기준으로 추가했습니다."
+            )
+        elif live_status == "success_0":
+            st.caption(f"나라장터 실시간 보강 · {live_window} · 이 기간에 조회된 이 모델의 신규 납품요구 0건")
+        elif live_status == "failure":
+            st.caption("나라장터 실시간 보강 조회에 실패해 수집 데이터 기준 결과만 표시합니다.")
+        elif live_status == "not_applicable" and getattr(live, "reason", ""):
+            st.caption(f"나라장터 실시간 보강 안 함 · {live.reason}")
+        if getattr(live, "truncated_window", False):
+            st.caption("수집 데이터 기준일이 오래되어 실시간 보강은 최근 62일만 조회했습니다.")
     elif track_b_index_updated_at:
         st.caption(
             f"나라장터 serving index 갱신시각 · {track_b_index_updated_at} · "
@@ -1988,6 +2071,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v7" style="display:none">purchase-workspace-runtime-v7</span>'
     '<span id="purchase-workspace-runtime-v8" style="display:none">purchase-workspace-runtime-v8</span>'
     '<span id="purchase-workspace-runtime-v9" style="display:none">purchase-workspace-runtime-v9</span>'
+    '<span id="purchase-workspace-runtime-v10" style="display:none">purchase-workspace-runtime-v10</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

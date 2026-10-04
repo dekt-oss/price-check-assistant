@@ -198,7 +198,7 @@ def test_dashboard_uses_runtime_compat_and_emits_latency_marker() -> None:
     assert "run_market_research_hot_reload_safe(" in source
     assert "normalize_mfds_recall_lookup(result)" in source
     assert "mfds_recall_exception_result(" in source
-    assert 'id="purchase-workspace-runtime-v9"' in source
+    assert 'id="purchase-workspace-runtime-v10"' in source
     assert 'id="purchase-search-timings-v1"' in source
     assert 'id="purchase-research-stage-timings-v1"' in source
     assert 'id="purchase-safety-diagnostic-v1"' in source
@@ -211,7 +211,7 @@ def test_dashboard_uses_runtime_compat_and_emits_latency_marker() -> None:
 def test_production_smoke_requires_new_runtime_and_records_stage_latency() -> None:
     source = Path("scripts/production_unified_search_smoke.py").read_text(encoding="utf-8")
 
-    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v9"' in source
+    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v10"' in source
     assert '"direct_search_first_result_seconds"' in source
     assert '"direct_server_search_timings_seconds"' in source
     assert '"direct_workspace_sections_seconds"' in source
