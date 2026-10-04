@@ -6,6 +6,8 @@ on:
       - ".github/workflows/mfds-model-recall-audit.yml"
       - "src/purchase_price/scripts/audit_mfds_model_recall.py"
       - "tests/test_mfds_model_recall_audit.py"
+      - "src/purchase_price/services/mfds_identity_corroboration.py"
+      - "data/mfds_importer_relations.csv"
   workflow_dispatch:
     inputs:
       sample_size:

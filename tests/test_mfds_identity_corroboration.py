@@ -141,3 +141,22 @@ def test_dashboard_routes_weak_keys_to_candidate_confirmation() -> None:
     assert 'state.get("review_reason") == "weak_model_key"' in source
     live = source.index("live_identity = lookup_mfds_model_identity_live(query.model_name)")
     assert "identity_needs_review(\n            live_identity," in source[live : live + 400]
+
+
+def test_importer_relations_are_evidenced_and_not_manufacturer_aliases() -> None:
+    import csv
+
+    from purchase_price.services.matching import normalize_text
+    from purchase_price.services.product_matching import load_manufacturer_aliases
+
+    with Path("data/mfds_importer_relations.csv").open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    aliases = load_manufacturer_aliases()
+
+    assert rows
+    for row in rows:
+        assert len(normalize_text(row["manufacturer"])) >= 3
+        assert len(normalize_text(row["mfds_registered_company"])) >= 3
+        assert "audit" in row["evidence_note"]
+        # Importers must stay out of the Track B manufacturer alias registry.
+        assert normalize_text(row["mfds_registered_company"]) not in aliases
