@@ -83,3 +83,4 @@ def test_dashboard_gates_live_identity_on_verified_index() -> None:
     gate = source.index("should_query_live_mfds_identity(_load_mfds_collection_status)")
     assert gate < source.index("lookup_mfds_model_identity_live(query.model_name)")
     assert 'id="purchase-workspace-runtime-v9"' in source
+    assert 'id="purchase-workspace-runtime-v10"' in source
