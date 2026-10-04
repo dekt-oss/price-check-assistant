@@ -12,8 +12,8 @@ jobs:
       # Exercise the same apt-independent fallback required by Streamlit Community Cloud.
       PRICE_CHECK_TESSERACT_MODE: bundled
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install project and test dependencies only

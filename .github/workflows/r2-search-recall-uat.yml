@@ -50,8 +50,8 @@ jobs:
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -136,7 +136,7 @@ jobs:
           fi
       - name: Upload recall evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: r2-search-recall-uat
           path: artifacts/r2-search-recall/
