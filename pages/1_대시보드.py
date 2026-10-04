@@ -505,7 +505,7 @@ def _render_mfds_collection_status() -> None:
             )
         else:
             st.caption(
-                "현재는 하루 2회, 실행당 최대 100,000행을 20,000행 checkpoint 단위로 저장합니다."
+                "현재는 하루 4회, 실행당 최대 100,000행을 20,000행 checkpoint 단위로 저장합니다."
             )
 
 
