@@ -31,10 +31,13 @@ class MfdsIdentityCollectionStatus:
     updated_at: str | None
     stored_bytes: int
     mode: str
+    verified_complete_cycles: int = 0
 
     @property
     def first_backfill_complete(self) -> bool:
-        return self.complete_cycles >= 1
+        # Only a cycle that actually covered the source totalCount counts. An early empty page
+        # once ended cycle 1 at ~53% coverage, so complete_cycles alone is not trustworthy.
+        return self.verified_complete_cycles >= 1
 
     @property
     def progress_fraction(self) -> float | None:
@@ -43,7 +46,8 @@ class MfdsIdentityCollectionStatus:
             return None
         if self.first_backfill_complete:
             return 1.0
-        return min(max(self.cycle_rows_seen / total, 0.0), 1.0)
+        covered = max(self.cycle_rows_seen, self.row_count)
+        return min(max(covered / total, 0.0), 1.0)
 
     @property
     def progress_percent(self) -> float | None:
@@ -75,6 +79,7 @@ def build_mfds_identity_collection_status(
     pointer = pointer or {}
     pipeline = pipeline or {}
     complete_cycles = max(_int(pipeline.get("complete_cycles")), 0)
+    verified_complete_cycles = max(_int(pipeline.get("verified_complete_cycles")), 0)
     next_page = max(_int(pipeline.get("next_page"), 1), 1) if pipeline else None
     persisted_rows_per_page = pipeline.get("rows_per_page")
     rows_per_page = (
@@ -106,7 +111,8 @@ def build_mfds_identity_collection_status(
         updated_at=str(pointer.get("updated_at") or pipeline.get("updated_at") or "").strip()
         or None,
         stored_bytes=max(_int(pointer.get("stored_bytes")), 0),
-        mode="rolling_refresh" if complete_cycles >= 1 else "backfill",
+        mode="rolling_refresh" if verified_complete_cycles >= 1 else "backfill",
+        verified_complete_cycles=verified_complete_cycles,
     )
 
 
@@ -161,6 +167,7 @@ def choose_mfds_collection_plan(
     *,
     status: str = "available",
     complete_cycles: int,
+    verified_complete_cycles: int | None = None,
     event_name: str,
     schedule: str | None,
     requested_chunks: int = 5,
@@ -180,13 +187,18 @@ def choose_mfds_collection_plan(
             reason="MFDS operational state is unavailable; fail closed without collection",
         )
 
-    if complete_cycles < 1:
+    verified = complete_cycles if verified_complete_cycles is None else verified_complete_cycles
+    if verified < 1:
         return MfdsCollectionPlan(
             mode="backfill",
             chunks=chunks,
             pages_per_chunk=pages,
             rows_per_page=rows,
-            reason="first full MFDS source cycle is still in progress",
+            reason=(
+                "first full MFDS source cycle is still in progress"
+                if complete_cycles < 1
+                else "no MFDS cycle has verified full source coverage yet; keep backfilling"
+            ),
         )
 
     if event_name == "schedule" and schedule == "23 12 * * *":

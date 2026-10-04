@@ -5,11 +5,14 @@ from dataclasses import replace
 
 import streamlit as st
 
+from purchase_price.schemas import ProductQuery
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
     g2b_lookback_label,
 )
+from purchase_price.services.mfds_identity_r2 import lookup_mfds_identity_from_r2
+from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.mfds_workspace import research_mfds_for_workspace
 from purchase_price.services.price_conditions import build_price_condition_profile
 from purchase_price.services.pricing import assess_prices
@@ -18,6 +21,7 @@ from purchase_price.services.purchase_workspace_handoff import (
     build_purchase_workspace_handoff,
 )
 from purchase_price.services.quote_extraction import parse_quote_decimal, quote_item_query
+from purchase_price.services.structured_query_identity import canonicalize_product_query
 from purchase_price.services.track_b_db_quote_comparison import (
     TrackBIdentitySuggestion,
     TrackBQuoteCandidate,
@@ -32,6 +36,10 @@ from purchase_price.ui.market_research import (
     render_procurement_research,
     run_market_research,
 )
+from purchase_price.ui.quote_item_intelligence import (
+    build_quote_item_intelligence_summary,
+    quote_item_intelligence_rows,
+)
 from purchase_price.ui.quote_review_contract import build_manual_quote_item
 from purchase_price.ui.quote_review_state import QuoteReviewState
 from purchase_price.ui.quote_review_steps import _store_extraction
@@ -43,6 +51,8 @@ from purchase_price.ui.widgets import (
     render_observation_cards,
     render_source_status,
 )
+
+QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(
     r"(?:^|[\s._-]+)(?:견적서?|quotation|estimate)"
@@ -159,8 +169,59 @@ def _clear_research(state: QuoteReviewState) -> None:
     state.market_bundles.clear()
     state.track_b_db.clear()
     state.mfds_workspace.clear()
+    state.mfds_identity.clear()
+    state.safety_lookup.clear()
+    state.item_research_failures.clear()
     state.comparability_context.clear()
     state.approvals.clear()
+
+
+def _record_item_failure(
+    state: QuoteReviewState,
+    index: int,
+    stage: str,
+    exc: Exception,
+) -> None:
+    failures = state.item_research_failures.setdefault(index, {})
+    failures[stage] = type(exc).__name__
+
+
+def _clear_item_failure(state: QuoteReviewState, index: int, stage: str) -> None:
+    failures = state.item_research_failures.get(index)
+    if not failures:
+        return
+    failures.pop(stage, None)
+    if not failures:
+        state.item_research_failures.pop(index, None)
+
+
+def _quote_processing_counts(state: QuoteReviewState) -> tuple[int, int, int, int]:
+    total = len(state.items)
+    partial_failure = len(state.item_research_failures)
+    completed = sum(
+        1
+        for index in range(total)
+        if index in state.track_b_db and index not in state.item_research_failures
+    )
+    pending = max(total - completed - partial_failure, 0)
+    return total, completed, partial_failure, pending
+
+
+def _retry_failed_stage(state: QuoteReviewState, index: int, stage: str) -> None:
+    if stage == "나라장터 가격":
+        state.track_b_db.pop(index, None)
+        state.mfds_workspace.pop(index, None)
+    elif stage == "식약처":
+        state.mfds_workspace.pop(index, None)
+    elif stage == "추가 공개자료":
+        state.search_runs.pop(index, None)
+        state.discoveries.pop(index, None)
+        state.market_bundles.pop(index, None)
+    elif stage == "Safety":
+        state.safety_lookup.pop(index, None)
+    else:
+        return
+    _clear_item_failure(state, index, stage)
 
 
 def _invalidate_item_review(state: QuoteReviewState, index: int) -> None:
@@ -299,14 +360,42 @@ def _render_compact_item_editor(state: QuoteReviewState) -> None:
             st.rerun()
 
 
+def _quote_item_unified_query(state: QuoteReviewState, index: int) -> ProductQuery:
+    """Build the external-evidence query with the same identity scope as ordinary search.
+
+    Quote manufacturer/specification remain on the QuoteItem for commercial-condition review.
+    They are not retrieval constraints once a model is available, because ordinary one-line
+    search resolves the product/model identity without those quote-only hints.
+    """
+
+    raw_query = quote_item_query(state.items[index])
+    identity = state.mfds_identity.get(index)
+    canonical = canonicalize_product_query(raw_query, identity).query
+    if canonical.model_name.strip():
+        return ProductQuery(
+            product_name=canonical.product_name,
+            model_name=canonical.model_name,
+        )
+    if canonical.product_name.strip():
+        return ProductQuery(product_name=canonical.product_name)
+    return canonical
+
+
 def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
     if not state.items:
         return
     for index, item in enumerate(state.items):
-        if index not in state.track_b_db:
+        if index in state.track_b_db:
+            continue
+        try:
             state.track_b_db[index] = lookup_track_b_quote(
-                quote_item_query(item), quote_unit_price=item.unit_price
+                _quote_item_unified_query(state, index),
+                quote_unit_price=item.unit_price,
             )
+        except Exception as exc:
+            _record_item_failure(state, index, "나라장터 가격", exc)
+            continue
+        _clear_item_failure(state, index, "나라장터 가격")
 
 
 def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
@@ -318,10 +407,53 @@ def _ensure_mfds_workspace(state: QuoteReviewState) -> None:
         track_b = state.track_b_db.get(index)
         if track_b is None:
             continue
-        state.mfds_workspace[index] = research_mfds_for_workspace(
-            quote_item_query(item),
-            track_b,
-        )
+        try:
+            state.mfds_workspace[index] = research_mfds_for_workspace(
+                _quote_item_unified_query(state, index),
+                track_b,
+            )
+        except Exception as exc:
+            _record_item_failure(state, index, "식약처", exc)
+            continue
+        _clear_item_failure(state, index, "식약처")
+
+
+def _ensure_mfds_identity(state: QuoteReviewState) -> None:
+    if not state.items:
+        return
+    for index, item in enumerate(state.items):
+        if index in state.mfds_identity:
+            continue
+        lookup_key = (item.model_name or item.product_name or "").strip()
+        if not lookup_key:
+            continue
+        state.mfds_identity[index] = lookup_mfds_identity_from_r2(lookup_key)
+
+
+def _ensure_safety_lookup(state: QuoteReviewState) -> None:
+    if not state.items:
+        return
+    for index, item in enumerate(state.items):
+        if index in state.safety_lookup:
+            continue
+        model_name = (item.model_name or "").strip()
+        product_name = (item.product_name or "").strip()
+        if not model_name and not product_name:
+            continue
+        try:
+            lookup = lookup_mfds_recall(
+                model_name=model_name,
+                product_name=product_name,
+            )
+        except Exception as exc:
+            _record_item_failure(state, index, "Safety", exc)
+            continue
+        state.safety_lookup[index] = lookup
+        if lookup.status == "failure":
+            failures = state.item_research_failures.setdefault(index, {})
+            failures["Safety"] = lookup.error_type or "SafetyLookupError"
+        else:
+            _clear_item_failure(state, index, "Safety")
 
 
 def _ensure_market_research(state: QuoteReviewState) -> bool:
@@ -335,7 +467,7 @@ def _ensure_market_research(state: QuoteReviewState) -> bool:
     total = len(missing)
     for done, index in enumerate(missing, start=1):
         item = state.items[index]
-        query = quote_item_query(item)
+        query = _quote_item_unified_query(state, index)
         progress.progress(
             (done - 1) / total,
             text=(
@@ -343,16 +475,25 @@ def _ensure_market_research(state: QuoteReviewState) -> bool:
                 f"{item.product_name or item.model_name or '미확인 품목'} 조사 중"
             ),
         )
-        run, discovery, market_bundle = run_market_research(
-            query,
-            lookback_days=state.lookback_days,
-            research_pages_per_term=1,
-            research_request_budget=18,
-            procurement_detail_limit=4,
-        )
+        try:
+            run, discovery, market_bundle = run_market_research(
+                query,
+                lookback_days=state.lookback_days,
+                research_pages_per_term=1,
+                research_request_budget=18,
+                procurement_detail_limit=4,
+            )
+        except Exception as exc:
+            _record_item_failure(state, index, "추가 공개자료", exc)
+            progress.progress(
+                done / total,
+                text=f"{index + 1}/{len(state.items)} · 조사 실패 · 다른 품목 계속 진행",
+            )
+            continue
         state.search_runs[index] = run
         state.discoveries[index] = discovery
         state.market_bundles[index] = market_bundle
+        _clear_item_failure(state, index, "추가 공개자료")
     progress.progress(1.0, text="추가 공개자료 조사를 완료했습니다.")
     return True
 
@@ -367,12 +508,21 @@ def _render_transaction_table(rows: list[dict[str, object]]) -> None:
 
 def _render_item_result(state: QuoteReviewState, index: int) -> None:
     item = state.items[index]
-    query = quote_item_query(item)
+    query = _quote_item_unified_query(state, index)
     run = state.search_runs.get(index)
     discovery = state.discoveries.get(index)
     market_bundle = state.market_bundles.get(index)
     track_b = state.track_b_db.get(index)
     mfds = state.mfds_workspace.get(index)
+    mfds_identity = state.mfds_identity.get(index)
+    safety_lookup = state.safety_lookup.get(index)
+    intelligence = build_quote_item_intelligence_summary(
+        item=item,
+        track_b=track_b,
+        mfds_workspace=mfds,
+        mfds_identity=mfds_identity,
+        safety_lookup=safety_lookup,
+    )
 
     with st.container(border=True):
         title = item.product_name or item.model_name or f"품목 {index + 1}"
@@ -382,12 +532,57 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
         )
         st.caption(identity_text or "추가 식별정보 없음")
 
+        status_cols = st.columns(5)
+        status_cols[0].metric("직접가격", f"{intelligence.direct_count}건")
+        status_cols[1].metric("식약처 Identity", intelligence.identity_status)
+        status_cols[2].metric(
+            "품목 책임주체",
+            f"{len(intelligence.responsible_companies)}개"
+            if intelligence.responsible_companies
+            else "미확인",
+        )
+        status_cols[3].metric(
+            "실제 조달 공급업체",
+            f"{len(intelligence.supplier_names)}개",
+        )
+        status_cols[4].metric("Safety", intelligence.safety_status)
+        if intelligence.responsible_companies:
+            st.caption(
+                "품목 책임주체 · " + " / ".join(intelligence.responsible_companies[:5])
+                + " · "
+                + intelligence.business_license_status
+            )
+        if intelligence.supplier_names:
+            st.caption("실제 조달 공급업체 · " + " / ".join(intelligence.supplier_names[:5]))
+        if intelligence.permit_numbers:
+            st.caption("식약처 품목번호 · " + " / ".join(intelligence.permit_numbers[:5]))
+        if safety_lookup is not None and safety_lookup.status in {
+            "success",
+            "not_authorized",
+            "failure",
+        }:
+            st.warning(intelligence.safety_message)
+        else:
+            st.caption(
+                "Safety 자동조회가 미연결인 경우 공식 확인이 완료된 것으로 해석하지 않습니다."
+            )
+
         price_col, info_col = st.columns([1.25, 3.75])
         price_col.metric("견적 단가", _money(item.unit_price))
         info_col.caption(
             "아래 표는 실제 수집된 거래가격을 우선 보여줍니다. 동일성이 충분하지 않은 행은 "
             "'검색 참고'로 표시하며 견적 적정성 판정에는 자동 사용하지 않습니다."
         )
+
+        failures = state.item_research_failures.get(index, {})
+        if failures:
+            failure_text = " · ".join(
+                f"{stage}: {error_type}" for stage, error_type in failures.items()
+            )
+            st.warning(
+                "이 품목의 일부 조사 단계가 실패했습니다. 다른 품목의 결과는 유지하며 "
+                f"실패 단계만 다시 시도할 수 있습니다. {failure_text}"
+            )
 
         if mfds is not None and mfds.status in {"success", "success_0"}:
             if mfds.exact_ambiguous:
@@ -414,7 +609,7 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             quote_unit_price=item.unit_price,
         )
         if handoff is not None and st.button(
-            "통합 구매조사 열기",
+            "일반 검색과 동일한 상세결과 열기",
             key=f"quote_open_purchase_workspace_{index}",
             use_container_width=True,
         ):
@@ -525,8 +720,8 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
 
 def render_quote_market_research(state: QuoteReviewState) -> None:
     st.caption(
-        "견적서 품목별로 가격 · 판매처 · 구매처 · 거래일을 먼저 보여줍니다. "
-        "검증 과정과 세부 근거는 필요할 때만 펼쳐볼 수 있습니다."
+        "이 화면은 다품목 견적의 빠른 요약·검증 화면입니다. "
+        "각 품목의 전체 상세조사는 일반 통합검색과 동일한 구매조사 Workspace를 사용합니다."
     )
 
     uploaded = st.file_uploader(
@@ -538,9 +733,30 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
         "보안: 원본은 파싱용 임시파일로만 처리 후 삭제합니다. "
         "현재 견적 추출은 로컬 파서/Tesseract를 사용하며 원문·OCR 텍스트를 외부 AI API로 전송하지 않습니다."
     )
-    if uploaded is not None and (state.file_name != uploaded.name or state.extraction is None):
+    newly_extracted = bool(
+        uploaded is not None
+        and (state.file_name != uploaded.name or state.extraction is None)
+    )
+    if newly_extracted and uploaded is not None:
         _store_extraction(uploaded, state)
         state.lookback_days = G2B_DEFAULT_LOOKBACK_DAYS
+        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY, None)
+
+        if state.items:
+            first_item = state.items[0]
+            handoff = build_purchase_workspace_handoff(
+                product_name=first_item.product_name,
+                manufacturer=first_item.manufacturer,
+                model_name=first_item.model_name,
+                specification=first_item.specification,
+                quote_unit_price=first_item.unit_price,
+            )
+            if handoff is not None:
+                st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = (
+                    handoff.to_session_payload()
+                )
+                st.session_state[QUOTE_AUTO_ROUTE_FILE_SESSION_KEY] = uploaded.name
+                st.switch_page("pages/1_대시보드.py")
 
     if state.extraction is None:
         st.caption(
@@ -568,9 +784,52 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
         return
 
     _render_compact_item_editor(state)
+    _ensure_mfds_identity(state)
     _ensure_track_b_comparison(state)
     _ensure_mfds_workspace(state)
+    _ensure_safety_lookup(state)
+
+    integrated_summaries = [
+        (
+            index,
+            state.items[index].product_name
+            or state.items[index].model_name
+            or f"품목 {index + 1}",
+            build_quote_item_intelligence_summary(
+                item=state.items[index],
+                track_b=state.track_b_db.get(index),
+                mfds_workspace=state.mfds_workspace.get(index),
+                mfds_identity=state.mfds_identity.get(index),
+                safety_lookup=state.safety_lookup.get(index),
+            ),
+        )
+        for index in range(len(state.items))
+    ]
+    with st.container(border=True):
+        st.markdown("### 통합 품목 상태")
+        st.caption(
+            "견적 품목별로 A/B 직접가격, 식약처 Identity·품목 책임주체, 실제 조달 공급업체, "
+            "Safety 확인상태를 한 번에 봅니다. 각 근거의 의미는 서로 합치지 않습니다."
+        )
+        st.dataframe(
+            quote_item_intelligence_rows(integrated_summaries),
+            use_container_width=True,
+            hide_index=True,
+        )
+
     render_purchase_review_summary(state)
+
+    total, completed, partial_failure, pending = _quote_processing_counts(state)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("전체 품목", f"{total}건")
+    c2.metric("정상 처리", f"{completed}건")
+    c3.metric("부분 실패", f"{partial_failure}건")
+    c4.metric("대기", f"{pending}건")
+    if partial_failure:
+        st.caption(
+            "부분 실패 품목이 있어도 성공한 품목 결과는 유지됩니다. "
+            "아래에서 실패 Source만 선택해 다시 조사할 수 있습니다."
+        )
 
     st.subheader("가격 · 거래 이력")
     for index in range(len(state.items)):
@@ -620,4 +879,37 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
             st.rerun()
         if st.button("가격 다시 검색", key="quote_auto_research_again"):
             _clear_research(state)
+            st.rerun()
+
+    failed_items = sorted(state.item_research_failures)
+    if failed_items:
+        st.warning(
+            "일부 품목 조사에 실패했지만 성공한 품목의 결과는 유지했습니다. "
+            "실패 품목: " + ", ".join(str(index + 1) for index in failed_items)
+        )
+        with st.expander("실패 Source별 재시도", expanded=True):
+            for index in failed_items:
+                item = state.items[index]
+                label = item.product_name or item.model_name or f"품목 {index + 1}"
+                st.markdown(f"**{index + 1}. {label}**")
+                failures = dict(state.item_research_failures.get(index, {}))
+                retry_columns = st.columns(max(len(failures), 1))
+                for column, (stage, error_type) in zip(retry_columns, failures.items()):
+                    column.caption(f"{stage} · {error_type}")
+                    if column.button(
+                        f"{stage} 다시 조사",
+                        key=f"quote_retry_{index}_{stage}",
+                        use_container_width=True,
+                    ):
+                        _retry_failed_stage(state, index, stage)
+                        st.rerun()
+        if st.button("실패 품목 전체 다시 조사", key="quote_retry_failed_items"):
+            for index in failed_items:
+                state.track_b_db.pop(index, None)
+                state.mfds_workspace.pop(index, None)
+                state.safety_lookup.pop(index, None)
+                state.search_runs.pop(index, None)
+                state.discoveries.pop(index, None)
+                state.market_bundles.pop(index, None)
+            state.item_research_failures.clear()
             st.rerun()

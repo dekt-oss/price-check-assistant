@@ -142,12 +142,13 @@ def run_market_research(
             service_key=research_key,
             max_bid_notices=procurement_detail_limit,
             max_pages_per_bid=1,
-            timeout_seconds=settings.g2b_request_timeout_seconds,
-            max_retries=min(settings.g2b_max_retries, 2),
+            timeout_seconds=min(settings.g2b_request_timeout_seconds, 12.0),
+            max_retries=1,
             independent_terms=research_terms,
             requested_lookback_days=lookback_days,
             max_independent_terms=1,
             max_pages_per_window=1,
+            allow_independent_search=False,
         )
         market_bundle = enrich_market_bundle_with_lifecycle(
             market_bundle,
@@ -165,8 +166,8 @@ def run_market_research(
             service_key=shopping_key,
             lookback_days=lookback_days,
             base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
-            timeout_seconds=settings.g2b_request_timeout_seconds,
-            max_retries=settings.g2b_max_retries,
+            timeout_seconds=min(settings.g2b_request_timeout_seconds, 12.0),
+            max_retries=1,
             pages_per_term_window=research_pages_per_term,
             request_budget=research_request_budget,
             curated_terms=research_terms,
@@ -471,7 +472,15 @@ def render_market_reference_summary(
         return
     if discovery.status == "failure":
         st.warning("나라장터 쇼핑몰 Research API 조회가 실패했습니다. 이는 시장자료 0건과 다릅니다.")
+        if discovery.error_messages:
+            st.caption(" · ".join(discovery.error_messages[:2]))
         return
+    if discovery.status == "partial" and discovery.error_messages:
+        st.warning(
+            "나라장터 쇼핑몰 Research 일부 요청이 실패하거나 조회 한도에 도달했습니다. "
+            "확보된 후보만 부분 결과로 표시합니다."
+        )
+        st.caption(" · ".join(discovery.error_messages[:2]))
 
     if include_model_price_summary:
         _render_model_price_summary(discovery, quote_unit_price=quote_unit_price)

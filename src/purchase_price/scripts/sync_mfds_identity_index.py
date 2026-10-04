@@ -11,7 +11,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataPortalClient
+from purchase_price.clients.data_go_kr import (
+    PublicDataClientError,
+    PublicDataPortalClient,
+    PublicDataTransportError,
+)
 from purchase_price.config import Settings
 from purchase_price.services.mfds_device_intelligence import unwrap_mfds_page
 from purchase_price.services.mfds_identity_index import (
@@ -38,6 +42,9 @@ PIPELINE_STATE = "mfds-identity-pipeline"
 PIPELINE_SCHEMA = "mfds-identity-pipeline-v1"
 COLLECTION_LOCK_STATE = "mfds-identity-collection-lock"
 COLLECTION_LOCK_TTL_SECONDS = 3 * 60 * 60
+# A cycle only counts as complete (and may purge rows) once it has seen this share of the
+# source totalCount. Small drift is allowed because the source changes while a cycle runs.
+CYCLE_COVERAGE_RATIO = 0.99
 _SOURCE_NOT_AUTHORIZED_MARKERS = (
     "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
     "SERVICE_ACCESS_DENIED_ERROR",
@@ -78,6 +85,7 @@ def _load_pipeline(state_store: R2OperationalStateStore) -> dict[str, Any]:
             "next_page": 1,
             "cycle": 1,
             "complete_cycles": 0,
+            "verified_complete_cycles": 0,
             "last_total_count": None,
             "cycle_rows_seen": None,
             "rows_per_page": None,
@@ -92,10 +100,29 @@ def _load_pipeline(state_store: R2OperationalStateStore) -> dict[str, Any]:
         "next_page": next_page,
         "cycle": max(int(payload.get("cycle") or 1), 1),
         "complete_cycles": max(int(payload.get("complete_cycles") or 0), 0),
+        "verified_complete_cycles": max(int(payload.get("verified_complete_cycles") or 0), 0),
         "last_total_count": payload.get("last_total_count"),
         "cycle_rows_seen": payload.get("cycle_rows_seen"),
         "rows_per_page": payload.get("rows_per_page"),
     }
+
+
+_ANOMALY_STATUS = {
+    "EMPTY_PAGE_BEFORE_SOURCE_END": "SOURCE_EMPTY_PAGE",
+    "TRANSPORT_ERROR": "SOURCE_TRANSPORT_ERROR",
+}
+
+
+def _positive_int(value: object) -> int | None:
+    try:
+        number = int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _covers_source(rows_seen_in_cycle: int, total_count: int | None) -> bool:
+    return bool(total_count) and rows_seen_in_cycle >= total_count * CYCLE_COVERAGE_RATIO
 
 
 def _write_report(output: Path, payload: Mapping[str, Any]) -> None:
@@ -162,12 +189,14 @@ def _sync_without_lock(
         else:
             cycle_rows_seen = max(int(stored_cycle_rows_seen), 0)
         cycle_completed = False
+        cycle_verified = False
+        source_anomaly: str | None = None
         purged_stale_rows = 0
         pages_collected = 0
         rows_seen = 0
         upserted = 0
         new_raw_objects = 0
-        total_count: int | None = None
+        total_count = _positive_int(pipeline.get("last_total_count"))
         last_raw_key: str | None = None
 
         try:
@@ -202,10 +231,17 @@ def _sync_without_lock(
                                 },
                             )
                             return 0
+                        if pages_collected > 0 and isinstance(exc, PublicDataTransportError):
+                            # Publish the pages already collected in this run; the next run
+                            # resumes from this page instead of redoing the whole chunk.
+                            source_anomaly = "TRANSPORT_ERROR"
+                            break
                         raise
 
                     page = unwrap_mfds_page(payload)
-                    total_count = page.total_count if page.total_count is not None else total_count
+                    # A transient response can report totalCount=0; never let it erase a
+                    # known source size.
+                    total_count = _positive_int(page.total_count) or total_count
                     raw_ref = raw_store.put_public_json(
                         source_operation=MFDS_PRODUCT_INFO_RAW_OPERATION,
                         payload=payload,
@@ -228,21 +264,31 @@ def _sync_without_lock(
                     pages_collected += 1
 
                     if not page.items:
+                        if not _covers_source(cycle_rows_seen + rows_seen, total_count):
+                            # An empty page before the known end is a source glitch, not the
+                            # end of the cycle. Keep page_no so the next run retries it.
+                            source_anomaly = "EMPTY_PAGE_BEFORE_SOURCE_END"
+                            break
                         page_no = 1
                         cycle_completed = True
-                        pipeline["complete_cycles"] = int(pipeline["complete_cycles"]) + 1
-                        pipeline["cycle"] = active_cycle + 1
                         break
 
                     page_no += 1
                     if total_count is not None and (page_no - 1) * rows_per_page >= total_count:
                         page_no = 1
                         cycle_completed = True
-                        pipeline["complete_cycles"] = int(pipeline["complete_cycles"]) + 1
-                        pipeline["cycle"] = active_cycle + 1
                         break
 
             if cycle_completed:
+                cycle_verified = _covers_source(cycle_rows_seen + rows_seen, total_count)
+                pipeline["complete_cycles"] = int(pipeline["complete_cycles"]) + 1
+                pipeline["cycle"] = active_cycle + 1
+                if cycle_verified:
+                    pipeline["verified_complete_cycles"] = (
+                        int(pipeline.get("verified_complete_cycles") or 0) + 1
+                    )
+
+            if cycle_verified:
                 purged_stale_rows = purge_identity_records_not_seen_in_cycle(
                     connection,
                     active_cycle,
@@ -307,7 +353,8 @@ def _sync_without_lock(
                 pass
 
         report = {
-            "status": "SUCCESS",
+            "status": _ANOMALY_STATUS.get(source_anomaly, "SUCCESS"),
+            "source_anomaly": source_anomaly,
             "pages_collected": pages_collected,
             "rows_seen": rows_seen,
             "rows_upserted": upserted,
@@ -316,6 +363,8 @@ def _sync_without_lock(
             "next_page": page_no,
             "cycle": pipeline["cycle"],
             "complete_cycles": pipeline["complete_cycles"],
+            "verified_complete_cycles": pipeline.get("verified_complete_cycles", 0),
+            "cycle_verified": cycle_verified,
             "cycle_rows_seen": pipeline["cycle_rows_seen"],
             "rows_per_page": pipeline["rows_per_page"],
             "cycle_completed": cycle_completed,

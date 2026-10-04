@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY = "purchase_workspace_handoff_v1"
+QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 _MAX_TEXT = 500
 
 

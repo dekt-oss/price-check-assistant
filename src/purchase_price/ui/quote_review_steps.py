@@ -153,7 +153,12 @@ def _store_extraction(uploaded_file, state: QuoteReviewState) -> None:
     state.identity.clear()
     state.search_runs.clear()
     state.discoveries.clear()
+    state.market_bundles.clear()
     state.track_b_db.clear()
+    state.mfds_workspace.clear()
+    state.mfds_identity.clear()
+    state.safety_lookup.clear()
+    state.item_research_failures.clear()
     state.comparability_context.clear()
     state.approvals.clear()
     state.step = 1

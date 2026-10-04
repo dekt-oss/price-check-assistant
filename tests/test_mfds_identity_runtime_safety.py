@@ -32,3 +32,16 @@ def test_dashboard_reuses_one_track_b_snapshot_for_crosslinks() -> None:
     assert "with open_track_b_serving_snapshot() as track_b_snapshot:" in source
     assert "track_b_snapshot.lookup(" in source
     assert "lookup_track_b_quote_from_r2" not in source
+
+
+def test_dashboard_refreshes_stale_mfds_identity_r2_adapter() -> None:
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+
+    assert "from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service" in source
+    assert "def _mfds_identity_r2_runtime(" in source
+    assert 'hasattr(module, "_LOCAL_INDEX_PATH_CACHE")' in source
+    assert "importlib.reload(module)" in source
+    assert "_lookup_mfds_identity_runtime(lookup_key)" in source
+    assert "_lookup_same_mfds_product_runtime(identity_product)" in source
+    assert 'id="purchase-workspace-runtime-v8"' in source
+    assert 'id="purchase-workspace-runtime-v9"' in source

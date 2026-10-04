@@ -81,7 +81,14 @@ def _coverage_caption(bundle: MarketResearchBundle) -> str:
             coverage = f"{source.coverage_start.isoformat()} 이후"
         elif source.coverage_end:
             coverage = f"{source.coverage_end.isoformat()}까지"
-        strategy = source.search_strategy.replace("adaptive independent product-name", "단계적 독립 품명검색")
+        strategy = source.search_strategy.replace(
+            "adaptive independent product-name",
+            "단계적 독립 품명검색",
+        )
+        strategy = strategy.replace(
+            "independent-product-name-deferred-source-latency",
+            "독립 장기 품명검색 동기 미실행",
+        )
         strategy = strategy.replace("bid-linked", "공고번호 연결")
         detail = " · ".join(part for part in (coverage, strategy) if part)
         if source.requested_lookback_days:
@@ -111,6 +118,11 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             column.metric(label, f"{len(source.records)}건")
         elif source.status == ResearchSourceStatus.PARTIAL:
             column.metric(label, f"{len(source.records)}건 · 부분")
+        elif source.status == ResearchSourceStatus.DEFERRED:
+            column.metric(
+                label,
+                f"{len(source.records)}건 · 심화대기" if source.records else "심화대기",
+            )
         elif source.status == ResearchSourceStatus.NOT_RUN:
             column.metric(label, "미조회")
         elif source.status == ResearchSourceStatus.NOT_CONFIGURED:
@@ -134,6 +146,9 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             ResearchSourceStatus.NOT_AUTHORIZED,
         }
     ]
+    deferred = [
+        source for source in bundle.sources if source.status == ResearchSourceStatus.DEFERRED
+    ]
     not_run = [source for source in bundle.sources if source.status == ResearchSourceStatus.NOT_RUN]
 
     for source in failures:
@@ -150,6 +165,14 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
                 f"{source.error_type}: {source.error_message}"
             )
 
+    for source in deferred:
+        label = _SOURCE_LABELS[source.source]
+        st.info(
+            f"{label}: 공고번호로 직접 연결되는 계약은 표시하되, 독립 품명 장기검색은 "
+            "공공데이터 API가 31일 범위만 허용하고 단일 요청 응답이 느려 메인 검색에서 동기 실행하지 않습니다. "
+            "이 상태는 0건이나 조회실패가 아닙니다. 3년 직접가격·납품근거는 Track B에서 계속 조회합니다."
+        )
+
     for source in not_run:
         label = _SOURCE_LABELS[source.source]
         st.info(
@@ -163,12 +186,12 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
         reverse=True,
     )
     if not records:
-        if not failures and not not_run:
+        if not failures and not not_run and not deferred:
             st.info("API는 정상 응답했지만 현재 조사 기준·기간에서 유의미한 Research 결과가 0건입니다.")
-        elif not_run and not failures:
+        elif (not_run or deferred) and not failures:
             st.info(
-                "실행된 1차 검색에서 연결 가능한 자료를 찾지 못해 일부 후속 조회가 미실행 상태입니다. "
-                "미조회 source를 정상 0건으로 해석하지 마세요."
+                "실행된 1차 검색에서 일부 후속 조회가 미실행 또는 심화대기 상태입니다. "
+                "미조회·심화대기를 정상 0건으로 해석하지 마세요."
             )
         return
 

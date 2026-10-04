@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import importlib
 from decimal import Decimal, InvalidOperation
+from inspect import signature
+from threading import Lock
+from time import monotonic
+from types import SimpleNamespace
 from typing import Any
 
 import streamlit as st
 
-from purchase_price.evidence_domain import IdentityEvidenceStatus, PriceEvidenceStatus
+from purchase_price.evidence_domain import (
+    IdentityEvidenceStatus,
+    PriceEvidenceStatus,
+    SafetyEvidenceStatus,
+)
 from purchase_price.schemas import ProductQuery
+from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
+from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
@@ -14,24 +25,27 @@ from purchase_price.services.g2b_search_policy import (
 )
 from purchase_price.services.market_survey_export import build_market_survey_workbook
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.mfds_company_summary import (
+    build_registered_company_summaries,
+    company_identity_rows,
+)
 from purchase_price.services.mfds_identity_index import (
     MfdsIdentityLookup,
     MfdsIdentityRecord,
 )
+from purchase_price.services.mfds_identity_live import lookup_mfds_model_identity_live
+from purchase_price.services.mfds_identity_live_policy import should_query_live_mfds_identity
 from purchase_price.services.mfds_identity_presenter import (
     MFDS_PRODUCT_INFO_DATASET_URL,
     mfds_identity_status,
     mfds_item_authorization_type,
-)
-from purchase_price.services.mfds_identity_r2 import (
-    lookup_mfds_identity_from_r2,
-    lookup_same_mfds_product_from_r2,
 )
 from purchase_price.services.mfds_identity_status import (
     MfdsIdentityCollectionStatus,
     format_status_updated_at,
     get_mfds_identity_collection_status,
 )
+from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.mfds_workspace import (
     MfdsWorkspaceResult,
     research_mfds_for_workspace,
@@ -48,6 +62,8 @@ from purchase_price.services.safety_support import (
     MFDS_SAFETY_LETTER_PAGE_URL,
     build_manual_safety_check_state,
 )
+from purchase_price.services.search import SearchRun
+from purchase_price.services.structured_query_identity import canonicalize_product_query
 from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
@@ -57,6 +73,11 @@ from purchase_price.ui.market_research import (
     render_market_reference_summary,
     render_procurement_research,
     run_market_research,
+)
+from purchase_price.ui.production_runtime_compat import (
+    mfds_recall_exception_result,
+    normalize_mfds_recall_lookup,
+    run_market_research_hot_reload_safe,
 )
 from purchase_price.ui.purchase_workspace_presenter import (
     build_purchase_workspace_stats,
@@ -82,9 +103,40 @@ from purchase_price.ui.widgets import (
     render_source_status,
 )
 
+_MFDS_IDENTITY_R2_RELOAD_LOCK = Lock()
+
+
+def _mfds_identity_r2_runtime():
+    """Refresh only the leaf R2 adapter when Streamlit retained its pre-cache version."""
+
+    module = mfds_identity_r2_service
+    if hasattr(module, "_LOCAL_INDEX_PATH_CACHE"):
+        return module
+
+    with _MFDS_IDENTITY_R2_RELOAD_LOCK:
+        if hasattr(module, "_LOCAL_INDEX_PATH_CACHE"):
+            return module
+        try:
+            importlib.invalidate_caches()
+            return importlib.reload(module)
+        except Exception:
+            return module
+
+
+def _lookup_mfds_identity_runtime(query: str):
+    module = _mfds_identity_r2_runtime()
+    return module.lookup_mfds_identity_from_r2(query)
+
+
+def _lookup_same_mfds_product_runtime(product_name: str):
+    module = _mfds_identity_r2_runtime()
+    return module.lookup_same_mfds_product_from_r2(product_name)
+
+
 HOME_SEARCH_STATE_KEY = "home_unified_search_result"
 HOME_SEARCH_DETAILS_KEY = "home_search_details"
 HOME_WORKSPACE_VIEW_KEY = "home_workspace_view"
+QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 WORKSPACE_VIEWS = {
     "price": "💰 가격 비교",
     "supplier": "🏢 업체·조달",
@@ -101,6 +153,184 @@ def _parse_quote(value: str) -> Decimal | None:
         raise ValueError("견적 단가는 숫자로 입력하세요.") from exc
 
 
+def _safety_evidence_token(name: str, *, fallback: str = "CHECK_FAILED") -> object:
+    """Return a Safety status without requiring a newly-added enum member after hot reload."""
+
+    member = getattr(SafetyEvidenceStatus, name, None)
+    if member is not None:
+        return member
+    fallback_member = getattr(SafetyEvidenceStatus, fallback, None)
+    if name == fallback and fallback_member is not None:
+        return fallback_member
+    return SimpleNamespace(value=name)
+
+
+def _safety_evidence_value(status: object) -> str:
+    return str(getattr(status, "value", status) or "").strip()
+
+
+def _mfds_recall_error_kind_compat(result: object | None) -> str:
+    """Classify Safety failures without importing a newly-added helper after hot reload."""
+
+    if result is None:
+        return ""
+    status = str(getattr(result, "status", "") or "")
+    if status not in {"failure", "not_authorized"}:
+        return ""
+
+    error_type = str(getattr(result, "error_type", "") or "")
+    error_message = str(getattr(result, "error_message", "") or "").upper()
+    if any(
+        marker in error_message
+        for marker in (
+            "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+            "SERVICE_ACCESS_DENIED_ERROR",
+            "PERMISSION_DENIED",
+            "CODE=30",
+        )
+    ):
+        return "authorization"
+
+    token = error_type.casefold()
+    if any(marker in token for marker in ("transport", "timeout", "connect")):
+        return "transport"
+    if "typeerror" in token:
+        return "type_error"
+    if "valueerror" in token:
+        return "value_error"
+    if "publicdataclienterror" in token:
+        return "api_error"
+    return "other"
+
+
+def _run_market_research_runtime_compatible(
+    query: ProductQuery,
+    *,
+    lookback_days: int,
+    stage_timings: dict[str, float],
+):
+    """Call the hot-reload guard without assuming its newest signature is loaded."""
+
+    kwargs = {
+        "lookback_days": int(lookback_days),
+        "research_pages_per_term": 1,
+        "research_request_budget": 18,
+        "procurement_detail_limit": 4,
+    }
+    try:
+        supports_stage_timings = (
+            "stage_timings" in signature(run_market_research_hot_reload_safe).parameters
+        )
+    except (TypeError, ValueError):
+        supports_stage_timings = False
+
+    if supports_stage_timings:
+        return run_market_research_hot_reload_safe(
+            run_market_research,
+            query,
+            stage_timings=stage_timings,
+            **kwargs,
+        )
+    return run_market_research_hot_reload_safe(
+        run_market_research,
+        query,
+        **kwargs,
+    )
+
+
+def _build_safety_state_compat(
+    safety_lookup: object | None,
+    *,
+    model_name: str,
+    product_name: str,
+    permit_numbers: list[str],
+):
+    """Normalize Safety locally so Streamlit hot reload cannot fall back to stale manual UI."""
+
+    model = str(model_name or "").strip()
+    permits = tuple(dict.fromkeys(str(value or "").strip() for value in permit_numbers if str(value or "").strip()))
+    search_keys = tuple(
+        ([f"모델명: {model}"] if model else [])
+        + [f"식약처 품목번호: {value}" for value in permits]
+    )
+    status = str(getattr(safety_lookup, "status", "") or "") if safety_lookup is not None else ""
+    checked_at = getattr(safety_lookup, "checked_at", None) if safety_lookup is not None else None
+    records = tuple(getattr(safety_lookup, "records", ()) or ()) if safety_lookup is not None else ()
+
+    if status == "success" and records:
+        return SimpleNamespace(
+            evidence_status=SafetyEvidenceStatus.AMBER,
+            message=(
+                "식약처 회수·판매중지 공식 API에서 모델/품목 관련 안전정보가 확인되었습니다. "
+                "Service04 응답만으로 exact 품목번호 적용범위를 확정하지 않고 원문 확인이 필요합니다."
+            ),
+            checked_at=checked_at,
+            search_keys=search_keys,
+        )
+    if status in {"success", "success_0"}:
+        return SimpleNamespace(
+            evidence_status=SafetyEvidenceStatus.CHECKED_NONE,
+            message="현재 연결된 식약처 회수·판매중지 공식 API에서 일치 항목을 확인하지 못했습니다.",
+            checked_at=checked_at,
+            search_keys=search_keys,
+        )
+    if status == "not_authorized":
+        return SimpleNamespace(
+            evidence_status=_safety_evidence_token("NOT_AUTHORIZED"),
+            message=(
+                "식약처 회수·판매중지 API 호출은 연결됐지만 현재 서비스키의 활용승인이 확인되지 않았습니다. "
+                "안전정보 0건으로 해석하지 않습니다."
+            ),
+            checked_at=checked_at,
+            search_keys=search_keys,
+        )
+    if status == "failure":
+        return SimpleNamespace(
+            evidence_status=SafetyEvidenceStatus.CHECK_FAILED,
+            message="식약처 회수·판매중지 공식 API 조회가 실패했습니다. 0건으로 해석하지 않습니다.",
+            checked_at=checked_at,
+            search_keys=search_keys,
+        )
+    if status == "not_configured":
+        return SimpleNamespace(
+            evidence_status=SafetyEvidenceStatus.NOT_CONNECTED,
+            message=(
+                "식약처 회수·판매중지 API 서비스키가 현재 Production 런타임에 연결되지 않았습니다. "
+                "자동조회 미연결 상태는 공식 안전정보 확인 결과가 아닙니다."
+            ),
+            checked_at=None,
+            search_keys=search_keys,
+        )
+    return build_manual_safety_check_state(
+        model_name=model,
+        permit_numbers=permits,
+    )
+
+
+
+
+def _lookup_mfds_recall_isolated(*, model_name: str, product_name: str) -> object:
+    """Keep Safety source failures from aborting price/procurement search.
+
+    Streamlit Cloud hot reload can temporarily retain an older service function object. Safety is
+    an independent evidence axis, so any runtime failure must degrade to CHECK_FAILED/manual
+    verification while the price, procurement and quote workflow continues.
+    """
+
+    try:
+        result = lookup_mfds_recall(
+            model_name=model_name,
+            product_name=product_name,
+        )
+    except Exception as exc:
+        return mfds_recall_exception_result(
+            exc,
+            model_name=model_name,
+            product_name=product_name,
+        )
+    return normalize_mfds_recall_lookup(result)
+
+
 def _identity_hydration(
     raw_search: str,
     *,
@@ -109,28 +339,30 @@ def _identity_hydration(
     model_name: str,
     specification: str,
 ) -> tuple[str, str, str, str, MfdsIdentityLookup | None]:
-    if (
-        not raw_search
-        or product_name.strip()
-        or manufacturer.strip()
-        or model_name.strip()
-        or specification.strip()
-    ):
+    explicit_fields = any(
+        value.strip()
+        for value in (product_name, manufacturer, model_name, specification)
+    )
+    if raw_search and explicit_fields:
         return product_name, manufacturer, model_name, specification, None
 
-    identity = lookup_mfds_identity_from_r2(raw_search)
-    if identity.status != "success" or not identity.records:
-        return product_name, manufacturer, model_name, specification, identity
-    if identity.match_type not in {"permit", "udi", "model"}:
-        return product_name, manufacturer, model_name, specification, identity
+    lookup_key = raw_search or model_name.strip() or product_name.strip()
+    if not lookup_key:
+        return product_name, manufacturer, model_name, specification, None
 
-    products = identity.product_names
-    models = identity.model_names
+    identity = _lookup_mfds_identity_runtime(lookup_key)
+    base_query = ProductQuery(
+        product_name=product_name,
+        manufacturer=manufacturer,
+        model_name=model_name,
+        specification=specification,
+    )
+    canonical = canonicalize_product_query(base_query, identity)
     return (
-        products[0] if len(products) == 1 else product_name,
-        manufacturer,
-        models[0] if len(models) == 1 else model_name,
-        specification,
+        canonical.query.product_name,
+        canonical.query.manufacturer,
+        canonical.query.model_name,
+        canonical.query.specification,
         identity,
     )
 
@@ -411,6 +643,8 @@ def _execute_search(
     selected_identity_token: str = "",
 ) -> dict[str, Any]:
     raw_search = search_text.strip()
+    search_started = monotonic()
+    search_timings: dict[str, float] = {}
     if selected_identity is None:
         (
             product_name,
@@ -491,7 +725,19 @@ def _execute_search(
         raise ValueError("검색조건을 확인하세요.")
     query = review_input.to_product_query()
 
+    if (
+        (not isinstance(indexed_identity, MfdsIdentityLookup) or indexed_identity.status != "success")
+        and (query.model_name or "").strip()
+        and should_query_live_mfds_identity(_load_mfds_collection_status)
+    ):
+        live_identity = lookup_mfds_model_identity_live(query.model_name)
+        if live_identity.status == "success":
+            indexed_identity = live_identity
+
+    search_timings["identity"] = round(monotonic() - search_started, 3)
+
     model_probe_used = False
+    track_b_started = monotonic()
     track_b_data_as_of: str | None = None
     track_b_index_updated_at: str | None = None
     with open_track_b_serving_snapshot() as track_b_snapshot:
@@ -544,23 +790,42 @@ def _execute_search(
             current_model=query.model_name or "",
         )
         same_product_identity = (
-            lookup_same_mfds_product_from_r2(identity_product) if identity_product else ()
+            _lookup_same_mfds_product_runtime(identity_product) if identity_product else ()
         )
         mfds_procurement_crosslinks = _build_mfds_procurement_crosslinks(
             same_product_identity,
             track_b_snapshot=track_b_snapshot,
             current_model=query.model_name or "",
         )
+    search_timings["track_b"] = round(monotonic() - track_b_started, 3)
 
-    mfds = research_mfds_for_workspace(query, track_b)
+    mfds_started = monotonic()
+    if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
+        mfds = MfdsWorkspaceResult(
+            status="not_applicable",
+            product_name=query.product_name or "",
+            model_name=query.model_name or "",
+            queried=False,
+        )
+    else:
+        mfds = research_mfds_for_workspace(query, track_b)
+    search_timings["mfds"] = round(monotonic() - mfds_started, 3)
 
-    run, discovery, market_bundle = run_market_research(
-        query,
-        lookback_days=int(lookback_days),
-        research_pages_per_term=1,
-        research_request_budget=18,
-        procurement_detail_limit=4,
+    safety_started = monotonic()
+    safety_lookup = _lookup_mfds_recall_isolated(
+        model_name=query.model_name,
+        product_name=query.product_name,
     )
+    search_timings["safety"] = round(monotonic() - safety_started, 3)
+
+    # Return the fast A/B + identity workspace first. Broad C/Research is intentionally
+    # deferred so external procurement APIs cannot block the primary price result.
+    research_stage_timings: dict[str, float] = {}
+    run = SearchRun()
+    discovery = None
+    market_bundle = None
+    search_timings["research"] = 0.0
+    search_timings["total"] = round(monotonic() - search_started, 3)
     rows = transaction_rows(track_b)
     direct_rows, reference_rows = _split_transaction_rows_compat(track_b)
     strict_count, reference_count = candidate_counts(track_b)
@@ -587,13 +852,47 @@ def _execute_search(
         "discovery": discovery,
         "market_bundle": market_bundle,
         "mfds": mfds,
+        "safety_lookup": safety_lookup,
         "mfds_identity": indexed_identity,
         "exact_identity_crosslinks": exact_identity_crosslinks,
         "same_product_identity": same_product_identity,
         "mfds_procurement_crosslinks": mfds_procurement_crosslinks,
         "track_b_data_as_of": track_b_data_as_of,
         "track_b_index_updated_at": track_b_index_updated_at,
+        "search_timings_seconds": search_timings,
+        "research_stage_timings_seconds": research_stage_timings,
+        "research_status": "pending",
+        "research_lookback_days": int(lookback_days),
     }
+
+
+def _execute_deferred_research(state: dict[str, Any]) -> dict[str, Any]:
+    """Enrich an already-renderable A/B workspace with C/Research evidence."""
+
+    query = state.get("query")
+    if not isinstance(query, ProductQuery):
+        raise ValueError("심화 Research를 실행할 검색조건이 없습니다.")
+
+    started = monotonic()
+    stage_timings: dict[str, float] = {}
+    run, discovery, market_bundle = _run_market_research_runtime_compatible(
+        query,
+        lookback_days=int(state.get("research_lookback_days") or G2B_DEFAULT_LOOKBACK_DAYS),
+        stage_timings=stage_timings,
+    )
+    elapsed = round(monotonic() - started, 3)
+
+    updated = dict(state)
+    updated["run"] = run
+    updated["discovery"] = discovery
+    updated["market_bundle"] = market_bundle
+    updated["research_status"] = "complete"
+    updated["research_stage_timings_seconds"] = stage_timings
+    timings = dict(updated.get("search_timings_seconds") or {})
+    timings["research"] = elapsed
+    updated["search_timings_seconds"] = timings
+    updated.pop("research_error_type", None)
+    return updated
 
 
 def _render_search_interpretation(
@@ -639,10 +938,14 @@ def _render_search_result(state: dict[str, Any]) -> None:
         direct_rows, reference_rows = _split_transaction_rows_compat(track_b)
     strict_count = len(direct_rows)
     reference_count = len(reference_rows)
-    run = state["run"]
-    discovery = state["discovery"]
-    market_bundle = state["market_bundle"]
+    run = state.get("run")
+    if not isinstance(run, SearchRun):
+        run = SearchRun()
+    discovery = state.get("discovery")
+    market_bundle = state.get("market_bundle")
+    research_status = str(state.get("research_status") or "complete")
     mfds = state.get("mfds")
+    safety_lookup = state.get("safety_lookup")
     indexed_identity = state.get("mfds_identity")
     exact_identity_crosslinks = list(state.get("exact_identity_crosslinks") or [])
     same_product_identity = tuple(state.get("same_product_identity") or ())
@@ -660,23 +963,123 @@ def _render_search_result(state: dict[str, Any]) -> None:
     st.divider()
     st.caption("구매조사 워크스페이스")
     st.subheader(heading)
+    timings = state.get("search_timings_seconds")
+    if isinstance(timings, dict):
+        timing_attrs: list[str] = []
+        for key in ("identity", "track_b", "mfds", "safety", "research", "total"):
+            try:
+                timing_attrs.append(f'data-{key}="{float(timings.get(key, 0.0)):.3f}"')
+            except (TypeError, ValueError):
+                continue
+        st.markdown(
+            '<span id="purchase-search-timings-v1" '
+            + " ".join(timing_attrs)
+            + ' style="display:none"></span>',
+            unsafe_allow_html=True,
+        )
+    research_stage_timings = state.get("research_stage_timings_seconds")
+    if isinstance(research_stage_timings, dict):
+        stage_attrs: list[str] = []
+        for key in (
+            "direct_search_all",
+            "classification",
+            "procurement_research",
+            "bid_items",
+            "contracts",
+            "lifecycle",
+            "shopping_discovery",
+            "catalog",
+            "runner_total",
+        ):
+            try:
+                stage_attrs.append(
+                    f'data-{key}="{float(research_stage_timings.get(key, 0.0)):.3f}"'
+                )
+            except (TypeError, ValueError):
+                continue
+        st.markdown(
+            '<span id="purchase-research-stage-timings-v1" '
+            + " ".join(stage_attrs)
+            + ' style="display:none"></span>',
+            unsafe_allow_html=True,
+        )
     if state.get("origin") == "quote":
-        st.caption("견적서 품목에서 이어진 조사 · 견적단가를 비교기준으로 유지합니다.")
+        st.caption(
+            "견적서에서 추출한 품목을 일반 통합검색과 동일한 구매조사 파이프라인으로 조사했습니다. "
+            "견적단가는 비교기준으로 유지합니다."
+        )
+        st.page_link(
+            "pages/2_견적_검토.py",
+            label="견적 전체 품목 · 추출내용 · 상세 검증 열기",
+            icon="📋",
+        )
 
     safety_permit_numbers: list[str] = []
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
         safety_permit_numbers.extend(indexed_identity.permit_numbers)
     if isinstance(mfds, MfdsWorkspaceResult):
         safety_permit_numbers.extend(mfds.permit_numbers)
-    safety_state = build_manual_safety_check_state(
+    safety_state = _build_safety_state_compat(
+        safety_lookup,
         model_name=str(getattr(query, "model_name", "") or "").strip(),
+        product_name=str(getattr(query, "product_name", "") or "").strip(),
         permit_numbers=safety_permit_numbers,
+    )
+    safety_lookup_status = str(getattr(safety_lookup, "status", "") or "")
+    safety_error_kind = _mfds_recall_error_kind_compat(safety_lookup)
+    raw_safety_error_type = str(getattr(safety_lookup, "error_type", "") or "")
+    safety_error_type = "".join(
+        char for char in raw_safety_error_type if char.isalnum() or char in "_-"
+    )[:80]
+    st.markdown(
+        '<span id="purchase-safety-diagnostic-v1" '
+        + f'data-status="{safety_lookup_status}" '
+        + f'data-error-kind="{safety_error_kind}" '
+        + f'data-error-type="{safety_error_type}" '
+        + 'style="display:none"></span>',
+        unsafe_allow_html=True,
     )
     with st.container(border=True):
         st.markdown("### Safety")
-        st.warning(f"{safety_state.evidence_status.value} · {safety_state.message}")
+        safety_status_value = _safety_evidence_value(safety_state.evidence_status)
+        safety_text = f"{safety_status_value} · {safety_state.message}"
+        if safety_status_value == "RED":
+            st.error(safety_text)
+        elif safety_status_value in {
+            "AMBER",
+            "CHECK_FAILED",
+            "NOT_CONNECTED",
+            "NOT_AUTHORIZED",
+        }:
+            st.warning(safety_text)
+        else:
+            st.info(safety_text)
+        if safety_state.checked_at:
+            st.caption(f"식약처 회수·판매중지 API 확인시각 · {safety_state.checked_at}")
         if safety_state.search_keys:
             st.caption("공식 안전정보 확인키 · " + " / ".join(safety_state.search_keys))
+        recall_records = tuple(getattr(safety_lookup, "records", ()) or ())
+        if recall_records:
+            st.dataframe(
+                [
+                    {
+                        "모델": item.model_name or "",
+                        "제조원": item.manufacturer_name or "",
+                        "보고상태": item.report_state_name or "",
+                        "회수구분": item.report_kind_name or "",
+                        "보고일": item.report_submit_date or "",
+                        "회수사유": item.reason or "",
+                        "회수품목일련번호": item.recall_item_seq or "",
+                    }
+                    for item in recall_records
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "Service04 형명/품목 응답에는 exact 식약처 품목번호가 없어 관련 안전정보로 표시합니다. "
+                "허가제품·제조번호 적용범위는 원문에서 확인해야 합니다."
+            )
         safety_cols = st.columns(3)
         safety_cols[0].link_button(
             "회수·판매중지 확인",
@@ -806,7 +1209,59 @@ def _render_search_result(state: dict[str, Any]) -> None:
     else:
         mfds_metric = "대상 아님"
     c4.metric("식약처 품목정보", mfds_metric)
-    c5.metric("공개조달 Research", f"{stats.research_count}건")
+    if research_status == "pending":
+        c5.metric("공개조달 Research", "후속 조회")
+    elif research_status == "failure":
+        c5.metric("공개조달 Research", "조회 실패")
+    else:
+        c5.metric("공개조달 Research", f"{stats.research_count}건")
+
+    st.markdown(
+        '<span id="purchase-research-deferred-v1" '
+        + f'data-status="{research_status}" '
+        + 'style="display:none"></span>',
+        unsafe_allow_html=True,
+    )
+    if research_status in {"pending", "failure"}:
+        if research_status == "pending":
+            st.info(
+                "A/B 직접가격·공급업체·식약처 등록정보를 먼저 표시했습니다. "
+                "입찰·낙찰·사전규격·계약 등 심화 Research는 아래 버튼으로 후속 조회합니다."
+            )
+            research_button_label = "심화 Research 불러오기"
+        else:
+            st.warning(
+                "A/B 직접가격 결과는 유지됩니다. 심화 Research만 별도 조회에 실패했습니다."
+            )
+            research_button_label = "심화 Research 다시 조회"
+
+        if st.button(
+            research_button_label,
+            key=f"workspace_research_load::{quote_key}",
+            type="secondary",
+        ):
+            try:
+                with st.status(
+                    "A/B 결과는 유지한 채 공개조달 심화자료를 조회하고 있습니다...",
+                    expanded=False,
+                ) as research_progress:
+                    enriched_state = _execute_deferred_research(state)
+                    st.session_state[HOME_SEARCH_STATE_KEY] = enriched_state
+                    research_progress.update(
+                        label="심화 Research 조회 완료",
+                        state="complete",
+                    )
+                st.rerun()
+            except Exception as exc:
+                failed_state = dict(state)
+                failed_state["research_status"] = "failure"
+                failed_state["research_error_type"] = type(exc).__name__
+                st.session_state[HOME_SEARCH_STATE_KEY] = failed_state
+                st.warning(
+                    "심화 Research 조회에 실패했습니다. A/B 직접가격 결과는 그대로 사용할 수 있습니다. "
+                    f"({type(exc).__name__})"
+                )
+
     if track_b_data_as_of:
         st.caption(f"나라장터 직접가격 데이터 기준일 · {track_b_data_as_of}")
     elif track_b_index_updated_at:
@@ -1070,26 +1525,170 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
         st.divider()
         st.markdown("#### 참고근거 · Research")
-        st.markdown("#### 공개조달 Research·근거")
-        render_market_reference_summary(
-            discovery,
-            query=query,
-            quote_unit_price=review_input.quote_unit_price,
-        )
-        render_procurement_research(market_bundle)
-        render_source_status(run)
-        if run.results:
-            assessment = assess_prices(run.results, review_input.quote_unit_price)
-            m1, m2, m3 = st.columns(3)
-            m1.metric("직접가격 근거", f"{assessment.observed_count}건")
-            m2.metric("독립 출처", f"{assessment.source_count}개")
-            m3.metric("근거 신뢰도", assessment.confidence)
-            render_observation_cards(run.results)
-            render_evidence_table(run.results)
+        if research_status == "pending":
+            st.caption(
+                "심화 Research는 아직 실행하지 않았습니다. 위의 A/B 직접가격은 이 조회와 독립된 직접근거입니다."
+            )
+        elif research_status == "failure":
+            st.warning(
+                "심화 Research를 불러오지 못했습니다. A/B 직접가격·공급업체·식약처 정보는 영향을 받지 않습니다."
+            )
         else:
-            st.caption("엄격한 동일제품 직접가격은 현재 조사 범위에서 확인되지 않았습니다.")
+            st.markdown("#### 공개조달 Research·근거")
+            render_market_reference_summary(
+                discovery,
+                query=query,
+                quote_unit_price=review_input.quote_unit_price,
+            )
+            render_procurement_research(market_bundle)
+            render_source_status(run)
+            if run.results:
+                assessment = assess_prices(run.results, review_input.quote_unit_price)
+                m1, m2, m3 = st.columns(3)
+                m1.metric("직접가격 근거", f"{assessment.observed_count}건")
+                m2.metric("독립 출처", f"{assessment.source_count}개")
+                m3.metric("근거 신뢰도", assessment.confidence)
+                render_observation_cards(run.results)
+                render_evidence_table(run.results)
+            else:
+                st.caption("엄격한 동일제품 직접가격은 현재 조사 범위에서 확인되지 않았습니다.")
 
     elif selected_view == "supplier":
+        st.markdown("#### 식약처 품목 등록업체 · 품목 책임주체")
+        company_active_keys: set[tuple[str, str]] | None = None
+        if isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
+            company_active_keys = {
+                (
+                    normalize_text(item.permit_number),
+                    normalize_text(item.model_name),
+                )
+                for item in mfds.active_records
+                if item.permit_number and item.model_name
+            }
+
+        company_summaries = build_registered_company_summaries(
+            same_product_identity,
+            procurement_crosslinks=mfds_procurement_crosslinks,
+            active_live_keys=company_active_keys,
+        )
+        if company_summaries:
+            company_metric_cols = st.columns(3)
+            company_metric_cols[0].metric("품목 책임주체", f"{len(company_summaries)}개")
+            company_metric_cols[1].metric(
+                "나라장터 직접가격 보유 업체",
+                f"{sum(item.direct_price_model_count > 0 for item in company_summaries)}개",
+            )
+            company_metric_cols[2].metric(
+                (
+                    "국내 정상 등록모델"
+                    if company_active_keys is not None
+                    else "등록모델 · 상태 미확인"
+                ),
+                f"{sum(item.registered_model_count for item in company_summaries)}건",
+            )
+            st.dataframe(
+                [
+                    {
+                        "품목 책임주체": item.company_name,
+                        "등록모델": item.registered_model_count,
+                        "허가건수": item.permit_count,
+                        "최근 식약처 처리일": item.latest_permit_date or "",
+                        "대표모델": " / ".join(item.representative_models),
+                        "나라장터 직접가격 모델": item.direct_price_model_count,
+                        "실제 조달 공급업체": " / ".join(item.procurement_suppliers),
+                        "상태": item.live_status,
+                    }
+                    for item in company_summaries
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "식약처 제품정보의 품목 책임주체를 업체별로 집계합니다. "
+                "나라장터 실제 납품업체는 별도 근거이며 동일 회사라고 자동 간주하지 않습니다."
+            )
+
+            selected_company = st.selectbox(
+                "품목 책임주체 상세보기",
+                options=[item.company_name for item in company_summaries],
+                key=f"workspace_company_drilldown::{quote_key}",
+            )
+            detail_rows = company_identity_rows(
+                same_product_identity,
+                selected_company,
+                active_live_keys=company_active_keys,
+            )
+            if detail_rows:
+                st.dataframe(detail_rows, use_container_width=True, hide_index=True)
+
+            business_cache_key = (
+                "workspace_company_business_lookup::"
+                + normalize_text(selected_company)
+            )
+            if st.button(
+                "선택 업체 식약처 업허가 확인",
+                key=f"workspace_company_business_button::{quote_key}",
+            ):
+                business_lookup = getattr(
+                    mfds_workspace_service,
+                    "lookup_mfds_business_license",
+                    None,
+                )
+                if callable(business_lookup):
+                    st.session_state[business_cache_key] = business_lookup(
+                        selected_company
+                    )
+                else:
+                    st.session_state.pop(business_cache_key, None)
+                    st.warning(
+                        "배포 프로세스가 이전 식약처 모듈을 유지하고 있어 업체 업허가 조회만 "
+                        "일시적으로 사용할 수 없습니다. 페이지 재기동 후 다시 확인하세요."
+                    )
+            selected_business_lookup = st.session_state.get(business_cache_key)
+            if selected_business_lookup is not None:
+                if selected_business_lookup.status == "success":
+                    st.dataframe(
+                        [
+                            {
+                                "업체": item.company_name or "",
+                                "업종": item.industry_type or "",
+                                "영업상태": item.business_status or "",
+                                "업 허가·신고 번호": item.business_permit_number or "",
+                                "허가일": item.permit_date.isoformat() if item.permit_date else "",
+                                "주소": item.address or "",
+                                "현재사용가능": item.is_active,
+                            }
+                            for item in selected_business_lookup.records
+                        ],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    st.caption(
+                        "선택 업체명의 식약처 업허가 조회 결과입니다. "
+                        "업허가가 확인되어도 특정 모델의 판매점·총판 관계를 의미하지 않습니다."
+                    )
+                elif selected_business_lookup.status == "success_0":
+                    st.info("선택한 업체명으로 확인된 식약처 업허가 결과가 0건입니다.")
+                elif selected_business_lookup.status == "not_configured":
+                    st.warning("식약처 업허가 API 서비스키가 연결되지 않아 조회하지 못했습니다.")
+                elif selected_business_lookup.status == "failure":
+                    st.warning(
+                        "식약처 업허가 조회 실패 · "
+                        f"{selected_business_lookup.error_type or '오류'} · "
+                        f"{selected_business_lookup.error_message or '상세 미확인'}"
+                    )
+        elif same_product_identity and company_active_keys is not None:
+            st.info(
+                "같은 식약처 품목의 Identity는 확인됐지만 국내 정상 상태가 확인된 품목 책임주체·모델이 없습니다."
+            )
+        elif same_product_identity:
+            st.info(
+                "품목 책임주체는 확인됐지만 식약처 live 상태를 확인하지 못해 활성 업체로 추정하지 않습니다."
+            )
+        else:
+            st.caption("같은 식약처 품목의 Identity가 확인되면 품목 책임주체를 업체별로 집계합니다.")
+
+        st.divider()
         st.markdown("#### 식약처 품목·Identity")
         if isinstance(indexed_identity, MfdsIdentityLookup):
             if indexed_identity.status == "success" and indexed_identity.records:
@@ -1233,27 +1832,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
         else:
             st.info("직접 동일성 확인 거래 기준 조달 납품업체 0개입니다.")
 
-        if isinstance(mfds, MfdsWorkspaceResult) and mfds.business_records:
-            st.markdown("#### 식약처 업허가 교차확인")
-            st.dataframe(
-                [
-                    {
-                        "업체": item.company_name or "",
-                        "업종": item.industry_type or "",
-                        "상태": item.business_status or "",
-                        "업 허가·신고 번호": item.business_permit_number or "",
-                        "근거": "식약처 업허가 · 모델 공급관계 미확정",
-                    }
-                    for item in mfds.business_records
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.caption(
-                "식약처 제조·수입 업체명 자동 연결은 company-bearing 제품 Source의 "
-                "공식 역검색 계약 확인 후 추가합니다."
-            )
+        st.caption(
+            "업체별 업허가는 위 품목 책임주체 상세보기에서 필요할 때만 조회합니다. "
+            "실제 조달 공급업체와 식약처 품목 책임주체·업허가 업체는 서로 다른 근거입니다."
+        )
 
     else:
         if (
@@ -1350,6 +1932,11 @@ st.markdown(
     '<span id="unified-search-runtime-v4" style="display:none">unified-search-runtime-v4</span>'
     '<span id="purchase-workspace-runtime-v1" style="display:none">purchase-workspace-runtime-v1</span>'
     '<span id="purchase-workspace-runtime-v2" style="display:none">purchase-workspace-runtime-v2</span>'
+    '<span id="purchase-workspace-runtime-v5" style="display:none">purchase-workspace-runtime-v5</span>'
+    '<span id="purchase-workspace-runtime-v6" style="display:none">purchase-workspace-runtime-v6</span>'
+    '<span id="purchase-workspace-runtime-v7" style="display:none">purchase-workspace-runtime-v7</span>'
+    '<span id="purchase-workspace-runtime-v8" style="display:none">purchase-workspace-runtime-v8</span>'
+    '<span id="purchase-workspace-runtime-v9" style="display:none">purchase-workspace-runtime-v9</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
@@ -1390,11 +1977,11 @@ if handoff is not None:
     try:
         with st.status("견적서 품목의 가격·등록·공급근거를 조사하고 있습니다...", expanded=False) as status:
             search_state = _execute_search(
-                search_text="",
-                product_name=handoff.product_name,
-                manufacturer=handoff.manufacturer,
-                model_name=handoff.model_name,
-                specification=handoff.specification,
+                search_text=(handoff.model_name or handoff.product_name),
+                product_name="",
+                manufacturer="",
+                model_name="",
+                specification="",
                 quote_text=(
                     str(handoff.quote_unit_price)
                     if handoff.quote_unit_price is not None
@@ -1459,6 +2046,7 @@ if result_mode:
     if reset_requested:
         st.session_state.pop(HOME_SEARCH_STATE_KEY, None)
         st.session_state.pop(HOME_WORKSPACE_VIEW_KEY, None)
+        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY, None)
         st.query_params.clear()
         st.rerun()
 
@@ -1515,10 +2103,52 @@ if uploaded is not None:
     if QUOTE_REVIEW_STATE_SESSION_KEY not in st.session_state:
         st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY] = QuoteReviewState()
     quote_state: QuoteReviewState = st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY]
-    if quote_state.file_name != uploaded.name or quote_state.extraction is None:
+    newly_extracted = quote_state.file_name != uploaded.name or quote_state.extraction is None
+    if newly_extracted:
         with st.spinner("견적서에서 품목을 추출하고 있습니다..."):
             _store_extraction(uploaded, quote_state)
-    st.switch_page("pages/2_견적_검토.py")
+        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY, None)
+
+    if quote_state.items:
+        already_routed = st.session_state.get(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY) == uploaded.name
+        if not already_routed:
+            item = quote_state.items[0]
+            try:
+                with st.status(
+                    "견적 첫 품목을 일반 통합검색과 동일하게 조사하고 있습니다...",
+                    expanded=False,
+                ) as status:
+                    quote_result = _execute_search(
+                        search_text=(item.model_name or item.product_name),
+                        product_name="",
+                        manufacturer="",
+                        model_name="",
+                        specification="",
+                        quote_text=(
+                            str(item.unit_price) if item.unit_price is not None else ""
+                        ),
+                        lookback_days=quote_state.lookback_days,
+                    )
+                    quote_result["origin"] = "quote"
+                    quote_result["quote_file_name"] = uploaded.name
+                    quote_result["quote_item_index"] = 0
+                    st.session_state[HOME_SEARCH_STATE_KEY] = quote_result
+                    st.session_state[QUOTE_AUTO_ROUTE_FILE_SESSION_KEY] = uploaded.name
+                    st.session_state[HOME_SEARCH_DETAILS_KEY] = False
+                    st.query_params["view"] = "price"
+                    status.update(
+                        label="견적 첫 품목 통합 구매조사 완료",
+                        state="complete",
+                    )
+                st.rerun()
+            except ValueError as exc:
+                st.warning(
+                    "첫 품목을 통합검색으로 자동 연결하지 못했습니다. "
+                    f"견적 검토 화면에서 추출값을 확인하세요. ({exc})"
+                )
+                st.switch_page("pages/2_견적_검토.py")
+    else:
+        st.switch_page("pages/2_견적_검토.py")
 
 if submitted:
     try:
