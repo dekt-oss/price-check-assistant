@@ -36,6 +36,7 @@ def test_collection_status_reports_completed_backfill_as_rolling_refresh() -> No
             "next_page": 1,
             "cycle": 2,
             "complete_cycles": 1,
+            "verified_complete_cycles": 1,
             "last_total_count": 2704269,
             "cycle_rows_seen": 0,
             "rows_per_page": 100,
@@ -129,3 +130,33 @@ def test_collection_plan_fails_closed_when_operational_state_is_unavailable() ->
     assert plan.mode == "state_unknown"
     assert plan.chunks == 0
     assert "fail closed" in plan.reason
+
+
+def test_falsely_completed_cycle_stays_in_backfill_until_coverage_is_verified() -> None:
+    # Production state after an early empty page ended cycle 1 at ~53% coverage.
+    status = build_mfds_identity_collection_status(
+        pointer={"row_count": 1443124},
+        pipeline={
+            "next_page": 401,
+            "cycle": 2,
+            "complete_cycles": 1,
+            "last_total_count": 2708719,
+            "cycle_rows_seen": 40000,
+            "rows_per_page": 100,
+        },
+    )
+
+    assert status.mode == "backfill"
+    assert status.first_backfill_complete is False
+    assert status.progress_percent is not None
+    assert 53.2 < status.progress_percent < 53.3
+
+    for schedule in ("23 0 * * *", "23 12 * * *"):
+        plan = choose_mfds_collection_plan(
+            complete_cycles=status.complete_cycles,
+            verified_complete_cycles=status.verified_complete_cycles,
+            event_name="schedule",
+            schedule=schedule,
+        )
+        assert plan.mode == "backfill"
+        assert plan.chunks == 5

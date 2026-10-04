@@ -22,6 +22,7 @@ def build_plan(
     plan = choose_mfds_collection_plan(
         status=status.status,
         complete_cycles=status.complete_cycles,
+        verified_complete_cycles=status.verified_complete_cycles,
         event_name=event_name,
         schedule=schedule,
         requested_chunks=requested_chunks,
@@ -31,6 +32,7 @@ def build_plan(
     return {
         "status": status.status,
         "complete_cycles": status.complete_cycles,
+        "verified_complete_cycles": status.verified_complete_cycles,
         "row_count": status.row_count,
         "source_total_count": status.source_total_count,
         "next_page": status.next_page,

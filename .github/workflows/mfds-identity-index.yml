@@ -177,7 +177,13 @@ jobs:
           print("row_count=", latest.get("row_count"))
           print("next_page=", latest.get("next_page"))
           print("complete_cycles=", latest.get("complete_cycles"))
+          print("verified_complete_cycles=", latest.get("verified_complete_cycles"))
           print("source_total_count=", latest.get("source_total_count"))
+          if any(item.get("status") == "SOURCE_EMPTY_PAGE" for item in reports):
+              print(
+                  "::warning::MFDS returned an empty page before the known source end; "
+                  "the cursor was kept and the page will be retried next run."
+              )
           if any(item.get("status") == "SOURCE_NOT_AUTHORIZED" for item in reports):
               print("::warning::MFDS product-info API utilization approval is required for this service key.")
           PY
