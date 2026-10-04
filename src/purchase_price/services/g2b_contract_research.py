@@ -163,6 +163,22 @@ def parse_contract_research(
     )
 
 
+def _same_day_next_month(value: date) -> date:
+    """Latest end date the contract operation accepts for a window starting on `value`.
+
+    The operation's limit is one calendar month, not 31 days: 2026-02-07..2026-03-07 and
+    2026-01-31..2026-02-28 pass, 2026-02-07..2026-03-08 and 2026-01-31..2026-03-02 return
+    code=07 (verified live 2026-10-05).
+    """
+
+    year = value.year + (1 if value.month == 12 else 0)
+    month = 1 if value.month == 12 else value.month + 1
+    next_month_first = date(year, month, 1)
+    following_first = date(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1)
+    last_day = (following_first - timedelta(days=1)).day
+    return next_month_first.replace(day=min(value.day, last_day))
+
+
 def _date_windows(
     begin: date,
     end: date,
@@ -173,7 +189,8 @@ def _date_windows(
 
     Production live evidence on 2026-09-30 showed code=07 (input range exceeded) when the
     independent PPSSrch fallback sent a long date interval. The user-facing lookback remains
-    unchanged; only physical requests are split into at most 31 calendar days.
+    unchanged; only physical requests are split into windows of at most 31 days that also end
+    no later than the same day of the next calendar month.
     """
 
     if begin > end:
@@ -186,7 +203,11 @@ def _date_windows(
     windows: list[tuple[date, date]] = []
     cursor = begin
     while cursor <= end:
-        window_end = min(end, cursor + timedelta(days=max_window_days - 1))
+        window_end = min(
+            end,
+            cursor + timedelta(days=max_window_days - 1),
+            _same_day_next_month(cursor),
+        )
         windows.append((cursor, window_end))
         cursor = window_end + timedelta(days=1)
     return tuple(windows)
