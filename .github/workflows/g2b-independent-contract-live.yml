@@ -42,7 +42,7 @@ jobs:
           python -m purchase_price.scripts.probe_g2b_independent_contract \
             --product-name "${{ inputs.product_name }}" \
             --lookback-days "${{ inputs.lookback_days }}" \
-            --timeout-seconds 15 \
+            --timeout-seconds 45 \
             --max-retries 1 \
             --output artifacts/g2b-independent-contract/report.json
 

@@ -14,7 +14,7 @@ def test_cross_evidence_live_workflow_is_manual_bounded_and_two_source() -> None
     assert "pull_request:" not in text
     assert "push:" not in text
     assert "probe_g2b_cross_evidence" in text
-    assert "--timeout-seconds 15" in text
+    assert "--timeout-seconds 45" in text
     assert "--max-retries 1" in text
     assert "G2B_SHOPPING_SERVICE_KEY" in text
     assert "G2B_RESEARCH_SERVICE_KEY" in text
