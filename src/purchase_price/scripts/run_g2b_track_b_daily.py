@@ -36,6 +36,11 @@ from purchase_price.storage.r2_state import R2OperationalStateStore
 
 TRACK_B_PAGE_OPERATION = f"{TRACK_B_OPERATION}-page"
 ROLLING_WINDOW_DAYS = 7
+# One request per target code covers any window up to the API's ~1-year limit, and most codes
+# return only a handful of rows per month. A 7-day catch-up step meant one capped cycle (six runs,
+# about two weeks at three runs per week) covered only seven days, so the lag grew every week.
+# Catch-up windows may therefore span up to 31 days for the same request budget.
+ROLLING_CATCH_UP_MAX_DAYS = 31
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -63,7 +68,7 @@ def _next_rolling_window(
 
     A normal cycle uses a recent seven-day overlap so delayed corrections can be replayed. If the
     collector has fallen behind far enough that this recent window would skip dates, catch-up starts
-    on the day after the last fully covered endpoint and advances at most seven days. Coverage only
+    on the day after the last fully covered endpoint and advances at most 31 days. Coverage only
     moves after all 5,208 target codes finish that locked window.
     """
 
@@ -79,7 +84,7 @@ def _next_rolling_window(
     first_uncovered = covered_through + timedelta(days=1)
     if recent_begin > first_uncovered:
         begin = first_uncovered
-        end = min(today, begin + timedelta(days=ROLLING_WINDOW_DAYS - 1))
+        end = min(today, begin + timedelta(days=ROLLING_CATCH_UP_MAX_DAYS - 1))
         return begin, end, "catch_up"
     return recent_begin, today, "recent_overlap"
 
@@ -245,6 +250,8 @@ def _run_rolling_collection(
         "mode": "rolling_incremental",
         "rolling_window_days": ROLLING_WINDOW_DAYS,
         "rolling_window_strategy": window_strategy,
+        "rolling_window_begin": begin.isoformat(),
+        "rolling_window_end": end.isoformat(),
         "rolling_covered_through": state.rolling_covered_through,
         "rolling_cycles_completed": state.rolling_cycles_completed,
         "pending_object_count": len(state.pending_object_keys),
