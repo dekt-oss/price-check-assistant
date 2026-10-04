@@ -8,6 +8,10 @@ import streamlit as st
 from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.config import get_settings
 from purchase_price.services.g2b_product_mapping import resolve_verified_g2b_mapping
+from purchase_price.services.mfds_api_keys import (
+    mfds_model_info_json_client,
+    mfds_service_key_candidates,
+)
 from purchase_price.services.mfds_device_intelligence import (
     MfdsModelInfoClient,
     resolve_exact_model_identity,
@@ -398,7 +402,7 @@ def render_s2(state: QuoteReviewState, index: int) -> None:
 
 def _mfds_exact_confirmed(item: QuoteItem) -> tuple[bool, str]:
     settings = get_settings()
-    service_key = (settings.resolved_mfds_service_key or "").strip()
+    service_key = (mfds_service_key_candidates(settings) or ("",))[0]
     if not service_key:
         return False, "MFDS 인증이 설정되지 않아 exact 모델 확인을 실행할 수 없습니다."
     if not item.product_name.strip() or not item.model_name.strip():
@@ -409,7 +413,7 @@ def _mfds_exact_confirmed(item: QuoteItem) -> tuple[bool, str]:
     }
     if settings.mfds_model_info_base_url:
         kwargs["base_url"] = settings.mfds_model_info_base_url
-    client = MfdsModelInfoClient(service_key, **kwargs)
+    client = MfdsModelInfoClient(service_key, client=mfds_model_info_json_client(settings), **kwargs)
     try:
         records = client.search_models(item.product_name)
     except (PublicDataClientError, ValueError) as exc:

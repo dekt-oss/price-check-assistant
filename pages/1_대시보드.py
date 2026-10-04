@@ -30,10 +30,19 @@ from purchase_price.services.g2b_search_policy import (
 )
 from purchase_price.services.market_survey_export import build_market_survey_workbook
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.mfds_api_keys import (
+    mfds_json_client,
+    mfds_model_info_json_client,
+    mfds_service_key_candidates,
+)
 from purchase_price.services.mfds_business_license_view import build_business_license_view
 from purchase_price.services.mfds_company_summary import (
     build_registered_company_summaries,
     company_identity_rows,
+)
+from purchase_price.services.mfds_device_intelligence import (
+    MfdsBusinessLicenseClient,
+    MfdsModelInfoClient,
 )
 from purchase_price.services.mfds_identity_corroboration import identity_needs_review
 from purchase_price.services.mfds_identity_index import (
@@ -182,6 +191,40 @@ def _track_b_live_gap_fill(
             )
     except Exception as exc:
         return TrackBLiveGapFill("failure", "실시간 조회 실패", error_type=type(exc).__name__)
+
+
+_MFDS_MODEL_INFO_CACHE: dict[tuple[str, str], MfdsWorkspaceResult] = {}
+
+
+def _run_deferred_mfds_model_info(state: dict[str, Any]) -> MfdsWorkspaceResult:
+    """User-initiated 형명 lookup with key fallback; successful results are cached in-process."""
+
+    mfds = state.get("mfds")
+    product_name = str(getattr(mfds, "product_name", "") or "")
+    model_name = str(getattr(mfds, "model_name", "") or "")
+    cache_key = (normalize_text(product_name), normalize_text(model_name))
+    cached = _MFDS_MODEL_INFO_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    settings = get_settings()
+    keys = mfds_service_key_candidates(settings)
+    if not keys:
+        return MfdsWorkspaceResult(
+            status="not_configured",
+            product_name=product_name,
+            model_name=model_name,
+            queried=False,
+        )
+    result = research_mfds_for_workspace(
+        ProductQuery(product_name=product_name, model_name=model_name),
+        state.get("track_b"),
+        settings=settings,
+        model_client=MfdsModelInfoClient(keys[0], client=mfds_model_info_json_client(settings)),
+        business_client=MfdsBusinessLicenseClient(keys[0], client=mfds_json_client(settings)),
+    )
+    if result.status in {"success", "success_0"}:
+        _MFDS_MODEL_INFO_CACHE[cache_key] = result
+    return result
 
 
 HOME_SEARCH_STATE_KEY = "home_unified_search_result"
@@ -896,7 +939,21 @@ def _execute_search(
             queried=False,
         )
     else:
-        mfds = research_mfds_for_workspace(query, track_b)
+        # The official model-info (형명) API takes ~30-60 s per page, so it is no longer called
+        # during search. The workspace offers it as an explicit, cached follow-up lookup.
+        should_query = getattr(mfds_workspace_service, "should_query_mfds", None)
+        mfds = MfdsWorkspaceResult(
+            status=(
+                "deferred"
+                if (query.product_name or "").strip()
+                and callable(should_query)
+                and should_query(query, track_b)
+                else "not_applicable"
+            ),
+            product_name=query.product_name or "",
+            model_name=query.model_name or "",
+            queried=False,
+        )
     search_timings["mfds"] = round(monotonic() - mfds_started, 3)
 
     safety_started = monotonic()
@@ -1295,6 +1352,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
             mfds_metric = "0건"
     elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "failure":
         mfds_metric = "조회 실패"
+    elif isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "deferred":
+        mfds_metric = "조회 대기"
     else:
         mfds_metric = "대상 아님"
     c4.metric("식약처 품목정보", mfds_metric)
@@ -1740,8 +1799,17 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     None,
                 )
                 if callable(business_lookup):
+                    license_keys = mfds_service_key_candidates(get_settings())
                     st.session_state[business_cache_key] = business_lookup(
-                        selected_company
+                        selected_company,
+                        business_client=(
+                            MfdsBusinessLicenseClient(
+                                license_keys[0],
+                                client=mfds_json_client(get_settings()),
+                            )
+                            if license_keys
+                            else None
+                        ),
                     )
                 else:
                     st.session_state.pop(business_cache_key, None)
@@ -1853,6 +1921,24 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
         if not isinstance(mfds, MfdsWorkspaceResult):
             st.info("식약처 조회 상태를 확인할 수 없습니다.")
+        elif mfds.status == "deferred":
+            st.info(
+                "식약처 형명정보(국내 정상·취소 상태, 같은 품목의 등록모델)는 공식 API 응답이 "
+                "느려(1회 약 30초~1분) 검색과 분리했습니다. 필요할 때 아래 버튼으로 조회하세요."
+            )
+            if st.button(
+                "식약처 형명정보 조회 (약 30초~2분)",
+                key=f"workspace_mfds_model_info::{quote_key}",
+            ):
+                with st.status(
+                    "식약처 형명정보를 조회하고 있습니다. 가격 결과는 그대로 유지됩니다...",
+                    expanded=False,
+                ) as mfds_progress:
+                    refreshed = dict(state)
+                    refreshed["mfds"] = _run_deferred_mfds_model_info(state)
+                    st.session_state[HOME_SEARCH_STATE_KEY] = refreshed
+                    mfds_progress.update(label="식약처 형명정보 조회 완료", state="complete")
+                st.rerun()
         elif mfds.status == "not_applicable":
             st.info("현재 조달분류 기준으로 의료기기 자동조회 대상이 아닙니다.")
         elif mfds.status == "not_configured":

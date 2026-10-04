@@ -5,6 +5,10 @@ import streamlit as st
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.config import get_settings
+from purchase_price.services.mfds_api_keys import (
+    mfds_json_client,
+    mfds_service_key_candidates,
+)
 from purchase_price.services.mfds_udi import MFDS_UDI_CODE_BASE_URL, MfdsUdiCodeClient
 from purchase_price.services.safety_support import (
     MFDS_STANDARD_CODE_DATASET_URL,
@@ -19,7 +23,7 @@ st.caption(
 )
 
 settings = get_settings()
-mfds_service_key = (settings.resolved_mfds_service_key or "").strip()
+mfds_service_key = (mfds_service_key_candidates(settings) or ("",))[0]
 
 if not mfds_service_key:
     st.warning(
@@ -46,6 +50,7 @@ if submitted:
 
     client = MfdsUdiCodeClient(
         mfds_service_key,
+        client=mfds_json_client(settings),
         base_url=settings.mfds_udi_code_base_url or MFDS_UDI_CODE_BASE_URL,
         timeout_seconds=settings.mfds_request_timeout_seconds,
         max_retries=settings.mfds_max_retries,
