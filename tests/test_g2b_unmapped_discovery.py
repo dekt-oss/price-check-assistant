@@ -1,4 +1,6 @@
 from datetime import date
+from threading import Lock
+from time import sleep
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.schemas import ProductQuery
@@ -96,8 +98,8 @@ def test_unmapped_discovery_ranks_exact_model_but_keeps_category_research(monkey
     )
 
     assert result.status == "success"
-    assert result.request_count == 3
-    assert len(calls) == 3
+    assert result.request_count == 36
+    assert len(calls) == 36
     assert {call["detail_product_name"] for call in calls} == {
         "가스 마취기",
         "마취기",
@@ -115,7 +117,7 @@ def test_unmapped_discovery_ranks_exact_model_but_keeps_category_research(monkey
     assert not hasattr(result, "raw_payload")
 
 
-def test_unmapped_discovery_searches_multi_year_period_in_year_bounded_windows(monkeypatch) -> None:
+def test_unmapped_discovery_partitions_multi_year_period_into_31_day_windows(monkeypatch) -> None:
     windows: list[tuple[date, date]] = []
 
     class EmptyCollector:
@@ -145,12 +147,59 @@ def test_unmapped_discovery_searches_multi_year_period_in_year_bounded_windows(m
         today=date(2026, 9, 5),
     )
 
-    assert result.status == "success_0"
-    # Five one-year windows x three research terms, one request each.
-    assert result.request_count == 15
-    assert len(windows) == 15
-    assert all((end - begin).days <= 364 for begin, end in windows)
+    # The 5-year logical lookback stays intact, but the bounded request budget prevents
+    # hammering the API after 80 physical 31-day requests.
+    assert result.status == "partial"
+    assert result.request_count == 80
+    assert len(windows) == 80
+    assert all((end - begin).days <= 30 for begin, end in windows)
 
+
+
+def test_unmapped_discovery_parallelizes_single_page_windows(monkeypatch) -> None:
+    lock = Lock()
+    active = 0
+    max_active = 0
+
+    class ConcurrentCollector:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_specific_item_page(self, **kwargs):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                sleep(0.04)
+
+                class Page:
+                    items = ()
+                    total_count = 0
+
+                return Page(), {}
+            finally:
+                with lock:
+                    active -= 1
+
+    monkeypatch.setattr(
+        "purchase_price.services.g2b_unmapped_discovery.G2BShoppingCollector",
+        ConcurrentCollector,
+    )
+
+    result = discover_unmapped_g2b_candidates(
+        ProductQuery(product_name="마취기"),
+        service_key="secret-key",
+        lookback_days=124,
+        pages_per_term_window=1,
+        request_budget=10,
+        curated_terms=(),
+        today=date(2026, 9, 5),
+    )
+
+    assert result.status == "success_0"
+    assert result.request_count == 4
+    assert max_active >= 2
 
 def test_unmapped_discovery_isolates_one_failed_research_term(monkeypatch) -> None:
     class PartialCollector:

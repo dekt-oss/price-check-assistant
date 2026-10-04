@@ -59,19 +59,20 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     assert "상세 검색조건" in page_text
     assert "home_quote_upload" in page_text
     assert 'st.switch_page("pages/2_견적_검토.py")' in page_text
-    assert "lookup_track_b_quote_from_r2" in page_text
-    assert "나라장터 실제 거래" in page_text
+    assert "open_track_b_serving_snapshot" in page_text
+    assert "나라장터 동일제품 직접거래" in page_text
+    assert "검색 참고거래" in page_text
     assert "transaction_rows(track_b)" in page_text
     assert "candidate_counts(track_b)" in page_text
     assert '"판매처"' in transaction_text
     assert '"구매처"' in transaction_text
     assert '"거래기록"' in transaction_text
-    assert '"요약"' in page_text
-    assert '"거래가격"' in page_text
-    assert '"식약처·업체"' in page_text
-    assert '"공급사"' in page_text
-    assert '"경쟁장비"' in page_text
-    assert '"Research·근거"' in page_text
+    assert "st.segmented_control(" in page_text
+    assert '"💰 가격 비교"' in page_text
+    assert '"🏢 업체·조달"' in page_text
+    assert '"🔁 동일품목 비교"' in page_text
+    assert '"📌 요약"' not in page_text
+    assert '"📚 Research·근거"' not in page_text
     assert "model_probe_query = model_probe_input.to_product_query()" in page_text
     assert "query = model_probe_query" in page_text
 
@@ -87,3 +88,13 @@ def test_r2_serving_index_run_audits_historical_to_rolling_transition() -> None:
     assert "issue_157_acceptance=" in text
     assert "historical_remaining_codes=" in text
     assert "rolling_cycles_completed=" in text
+
+
+def test_serving_pointer_publishes_coverage_date_only_after_backfill_complete() -> None:
+    text = Path("src/purchase_price/scripts/sync_g2b_track_b_r2_index.py").read_text()
+
+    assert '"data_as_of"' in text
+    assert "def _data_as_of(pipeline: TrackBPipelineState)" in text
+    assert "pipeline.rolling_covered_through if pipeline.backfill_complete else None" in text
+    assert 'refreshed_pointer["data_as_of"] = _data_as_of(pipeline)' in text
+    assert "state_store.write_json(SERVING_INDEX_STATE_NAME, refreshed_pointer)" in text

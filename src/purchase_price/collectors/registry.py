@@ -6,6 +6,11 @@ from .g2b_shopping import G2B_SHOPPING_BASE_URL
 from .g2b_verified_search import VerifiedG2BShoppingSearchCollector
 from .manufacturer_public_catalog import ManufacturerPublicCatalogCollector
 from .mock_public import MockPublicCollector
+from .web_public_catalog import (
+    DEFAULT_WEB_CATALOG_PATH,
+    WebPublicCatalogCollector,
+    web_public_catalog_has_rows,
+)
 
 
 def build_collectors(
@@ -13,6 +18,7 @@ def build_collectors(
     include_mock: bool = False,
     include_manufacturer_public: bool = True,
     include_g2b: bool = True,
+    include_web_public: bool = True,
     g2b_lookback_days: int = G2B_DEFAULT_LOOKBACK_DAYS,
 ) -> list[PriceCollector]:
     """Build the user-facing collector set.
@@ -25,6 +31,9 @@ def build_collectors(
     collectors: list[PriceCollector] = []
     if include_manufacturer_public:
         collectors.append(ManufacturerPublicCatalogCollector())
+
+    if include_web_public and web_public_catalog_has_rows(DEFAULT_WEB_CATALOG_PATH):
+        collectors.append(WebPublicCatalogCollector())
 
     settings = get_settings()
     service_key = (settings.resolved_g2b_shopping_service_key or "").strip()

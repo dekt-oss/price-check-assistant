@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 
 from purchase_price.config import Settings
 from purchase_price.schemas import ProductQuery
@@ -48,11 +50,13 @@ def _remember_validated_cache(path: Path, sha256: str) -> None:
     _VALIDATED_CACHE_FILES[sha256] = _file_fingerprint(path)
 
 
-def _local_index_path(settings: Settings) -> Path | None:
+def _local_index_snapshot(
+    settings: Settings,
+) -> tuple[Path | None, dict[str, object] | None]:
     state_store = R2OperationalStateStore.from_settings(settings)
     pointer = state_store.read_json(SERVING_INDEX_STATE_NAME)
     if pointer is None:
-        return None
+        return None, None
     if pointer.get("schema") != POINTER_SCHEMA:
         raise R2IntegrityError("Track B serving-index pointer schema mismatch")
     key = str(pointer.get("key") or "").strip()
@@ -63,7 +67,7 @@ def _local_index_path(settings: Settings) -> Path | None:
     destination = _CACHE_DIR / f"{sha256}.sqlite"
     if destination.exists():
         if _cache_file_is_valid(destination, sha256):
-            return destination
+            return destination, dict(pointer)
         _VALIDATED_CACHE_FILES.pop(sha256, None)
         try:
             destination.unlink()
@@ -85,42 +89,118 @@ def _local_index_path(settings: Settings) -> Path | None:
                 stale.unlink()
             except OSError:
                 pass
-    return destination
+    return destination, dict(pointer)
 
 
-def lookup_track_b_quote_from_r2(query: ProductQuery, *, quote_unit_price):
-    # Local imports avoid a module cycle: the DB comparison module calls this function as its
-    # preferred production lookup, while compare_track_b_quote remains the shared strict matcher.
-    from purchase_price.services.track_b_db_quote_comparison import (
-        TrackBQuoteComparison,
-        compare_track_b_quote,
-    )
-    from purchase_price.services.track_b_reference_quality import (
-        refine_track_b_reference_quality,
-    )
+def _local_index_path(settings: Settings) -> Path | None:
+    path, _pointer = _local_index_snapshot(settings)
+    return path
 
-    settings = Settings()
+
+
+
+@dataclass
+class TrackBServingSnapshot:
+    """One immutable serving-index snapshot reused for all lookups in one user search."""
+
+    status: str
+    path: Path | None = None
+    engine: Engine | None = None
+    session: Session | None = None
+    data_as_of: str | None = None
+    index_updated_at: str | None = None
+
+    def __enter__(self) -> TrackBServingSnapshot:
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self.session is not None:
+            self.session.close()
+            self.session = None
+        if self.engine is not None:
+            self.engine.dispose()
+            self.engine = None
+
+    def lookup(self, query: ProductQuery, *, quote_unit_price):
+        from purchase_price.services.track_b_db_quote_comparison import (
+            TrackBQuoteComparison,
+            compare_track_b_quote,
+        )
+        from purchase_price.services.track_b_reference_quality import (
+            refine_track_b_reference_quality,
+        )
+
+        if self.status in {"unavailable", "not_ingested"} or self.session is None:
+            return TrackBQuoteComparison(self.status, (), 0)
+
+        result = compare_track_b_quote(
+            self.session,
+            query,
+            quote_unit_price=quote_unit_price,
+        )
+        return refine_track_b_reference_quality(self.session, query, result)
+
+    def lookup_model_summaries(
+        self,
+        queries: tuple[ProductQuery, ...],
+        *,
+        quote_unit_prices=None,
+        limit_per_model: int = 50,
+    ):
+        """Return first-shell model summaries without N per-model SQL lookups."""
+
+        from purchase_price.services.track_b_db_quote_comparison import (
+            TrackBQuoteComparison,
+            compare_track_b_models_batch,
+        )
+
+        queries = tuple(queries)
+        if self.status in {"unavailable", "not_ingested"} or self.session is None:
+            return tuple(TrackBQuoteComparison(self.status, (), 0) for _ in queries)
+        prices = (
+            tuple(quote_unit_prices)
+            if quote_unit_prices is not None
+            else tuple(None for _ in queries)
+        )
+        return compare_track_b_models_batch(
+            self.session,
+            queries,
+            quote_unit_prices=prices,
+            limit_per_model=limit_per_model,
+        )
+
+
+def open_track_b_serving_snapshot(
+    *,
+    settings: Settings | None = None,
+) -> TrackBServingSnapshot:
+    """Open the current Track B pointer once and reuse one engine/session."""
+
+    settings = settings or Settings()
     if not settings.r2_configured:
-        return TrackBQuoteComparison("unavailable", (), 0)
+        return TrackBServingSnapshot("unavailable")
     try:
-        path = _local_index_path(settings)
+        path, pointer = _local_index_snapshot(settings)
         if path is None:
-            return TrackBQuoteComparison("not_ingested", (), 0)
+            return TrackBServingSnapshot("not_ingested")
+        pointer = pointer or {}
+        data_as_of = str(pointer.get("data_as_of") or "").strip() or None
+        index_updated_at = str(pointer.get("updated_at") or "").strip() or None
         engine = create_engine(
             f"sqlite+pysqlite:///{path}",
             connect_args={"check_same_thread": False},
         )
-        session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-        try:
-            with session_factory() as session:
-                result = compare_track_b_quote(
-                    session,
-                    query,
-                    quote_unit_price=quote_unit_price,
-                )
-                return refine_track_b_reference_quality(session, query, result)
-        finally:
-            engine.dispose()
+        return TrackBServingSnapshot(
+            status="available",
+            path=path,
+            engine=engine,
+            session=Session(bind=engine, autoflush=False, expire_on_commit=False),
+            data_as_of=data_as_of,
+            index_updated_at=index_updated_at,
+        )
     except (
         BotoCoreError,
         ClientError,
@@ -130,4 +210,11 @@ def lookup_track_b_quote_from_r2(query: ProductQuery, *, quote_unit_price):
         R2IntegrityError,
         ValueError,
     ):
-        return TrackBQuoteComparison("unavailable", (), 0)
+        return TrackBServingSnapshot("unavailable")
+
+
+def lookup_track_b_quote_from_r2(query: ProductQuery, *, quote_unit_price):
+    """Single-query compatibility wrapper over a reusable serving-index snapshot."""
+
+    with open_track_b_serving_snapshot() as snapshot:
+        return snapshot.lookup(query, quote_unit_price=quote_unit_price)

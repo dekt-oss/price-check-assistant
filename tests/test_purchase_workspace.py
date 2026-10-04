@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from purchase_price.domain import MatchGrade
 from purchase_price.ui.purchase_workspace import (
     build_purchase_workspace_stats,
+    build_quote_position_message,
     supplier_rows,
 )
 
@@ -111,5 +112,75 @@ def test_supplier_rows_are_based_on_direct_procurement_only() -> None:
             "최고단가": Decimal("120"),
             "최근거래일": "2026-08-02",
             "근거": "나라장터 실제 납품요구 · A/B 직접근거",
+            "Source": "나라장터 납품요구",
+            "원문근거키": "미확인",
         }
     ]
+
+
+def test_quote_position_message_never_makes_adequacy_verdict() -> None:
+    stats = build_purchase_workspace_stats(
+        track_b=SimpleNamespace(
+            candidates=(
+                _candidate(
+                    price="100",
+                    supplier="공급사A",
+                    institution="병원1",
+                    date="2026-08-01",
+                ),
+                _candidate(
+                    price="120",
+                    supplier="공급사B",
+                    institution="병원2",
+                    date="2026-08-02",
+                    grade=MatchGrade.B,
+                ),
+            ),
+            reference_candidates=(),
+        ),
+        market_bundle=SimpleNamespace(records=()),
+        quote_unit_price=Decimal("130"),
+    )
+
+    message = build_quote_position_message(
+        quote_unit_price=Decimal("130"),
+        stats=stats,
+        unit="개",
+        vat_status="포함",
+        conditions="배송 포함",
+    )
+
+    assert "상단 대비 +8.3%" in message
+    assert "단위 개" in message
+    assert "VAT 포함" in message
+    assert "조건 배송 포함" in message
+    assert "적정" not in message
+    assert "부적정" not in message
+    assert "권고" not in message
+
+
+def test_quote_position_message_marks_single_direct_record_as_insufficient() -> None:
+    stats = build_purchase_workspace_stats(
+        track_b=SimpleNamespace(
+            candidates=(
+                _candidate(
+                    price="450",
+                    supplier="공급사A",
+                    institution="병원1",
+                    date="2025-12-09",
+                ),
+            ),
+            reference_candidates=(),
+        ),
+        market_bundle=SimpleNamespace(records=()),
+        quote_unit_price=Decimal("500"),
+    )
+
+    message = build_quote_position_message(
+        quote_unit_price=Decimal("500"),
+        stats=stats,
+    )
+
+    assert "직접 비교자료 1건 대비 +11.1%" in message
+    assert "가격대 판단근거가 부족" in message
+    assert "단위 미확인" in message
