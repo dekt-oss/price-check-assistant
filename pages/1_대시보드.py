@@ -25,6 +25,7 @@ from purchase_price.services.g2b_search_policy import (
 )
 from purchase_price.services.market_survey_export import build_market_survey_workbook
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.mfds_business_license_view import build_business_license_view
 from purchase_price.services.mfds_company_summary import (
     build_registered_company_summaries,
     company_identity_rows,
@@ -1668,25 +1669,49 @@ def _render_search_result(state: dict[str, Any]) -> None:
             selected_business_lookup = st.session_state.get(business_cache_key)
             if selected_business_lookup is not None:
                 if selected_business_lookup.status == "success":
-                    st.dataframe(
-                        [
-                            {
-                                "업체": item.company_name or "",
-                                "업종": item.industry_type or "",
-                                "영업상태": item.business_status or "",
-                                "업 허가·신고 번호": item.business_permit_number or "",
-                                "허가일": item.permit_date.isoformat() if item.permit_date else "",
-                                "주소": item.address or "",
-                                "현재사용가능": item.is_active,
-                            }
-                            for item in selected_business_lookup.records
-                        ],
-                        use_container_width=True,
-                        hide_index=True,
+                    filter_left, filter_right = st.columns(2)
+                    include_inactive = filter_left.checkbox(
+                        "폐업·휴업·취소 업허가 포함",
+                        value=False,
+                        key=f"workspace_company_business_inactive::{quote_key}",
                     )
+                    include_partial = filter_right.checkbox(
+                        "이름 일부만 같은 다른 업체 포함",
+                        value=False,
+                        key=f"workspace_company_business_partial::{quote_key}",
+                    )
+                    license_view = build_business_license_view(
+                        selected_business_lookup.records,
+                        selected_company,
+                        include_inactive=include_inactive,
+                        include_partial=include_partial,
+                    )
+                    if license_view.showing_partial_only:
+                        st.warning(
+                            "선택 업체와 이름이 정확히 같은 업허가가 없어 이름 일부가 같은 업체를 "
+                            "표시합니다. 다른 회사일 수 있으니 주소·허가번호로 확인하세요."
+                        )
+                    if license_view.rows:
+                        st.dataframe(
+                            list(license_view.rows),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        st.info("현재 필터 조건에 맞는 식약처 업허가가 없습니다.")
+                    hidden_notes = []
+                    if license_view.hidden_inactive_count:
+                        hidden_notes.append(
+                            f"폐업·휴업·취소 {license_view.hidden_inactive_count}건"
+                        )
+                    if license_view.hidden_partial_count:
+                        hidden_notes.append(
+                            f"이름 일부만 같은 다른 업체 {license_view.hidden_partial_count}건"
+                        )
                     st.caption(
                         "선택 업체명의 식약처 업허가 조회 결과입니다. "
                         "업허가가 확인되어도 특정 모델의 판매점·총판 관계를 의미하지 않습니다."
+                        + (f" 숨긴 결과 · {', '.join(hidden_notes)}" if hidden_notes else "")
                     )
                 elif selected_business_lookup.status == "success_0":
                     st.info("선택한 업체명으로 확인된 식약처 업허가 결과가 0건입니다.")
@@ -1794,24 +1819,29 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
             if mfds.business_records:
                 st.markdown("##### 업체명 힌트 업허가 교차확인")
-                st.dataframe(
-                    [
-                        {
-                            "업체": item.company_name or "",
-                            "업종": item.industry_type or "",
-                            "상태": item.business_status or "",
-                            "업 허가·신고 번호": item.business_permit_number or "",
-                            "주소": item.address or "",
-                            "현재사용가능": item.is_active,
-                        }
-                        for item in mfds.business_records
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
+                hint_view = build_business_license_view(
+                    mfds.business_records,
+                    str(getattr(mfds, "business_query", "") or ""),
                 )
+                if hint_view.showing_partial_only:
+                    st.warning(
+                        "업체명 힌트와 이름이 정확히 같은 업허가가 없어 이름 일부가 같은 업체를 표시합니다."
+                    )
+                if hint_view.rows:
+                    st.dataframe(
+                        list(hint_view.rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                hint_hidden = []
+                if hint_view.hidden_inactive_count:
+                    hint_hidden.append(f"폐업·휴업·취소 {hint_view.hidden_inactive_count}건")
+                if hint_view.hidden_partial_count:
+                    hint_hidden.append(f"이름 일부만 같은 다른 업체 {hint_view.hidden_partial_count}건")
                 st.caption(
                     "사용자/견적의 제조사·업체명 힌트에 대한 업허가 확인입니다. "
                     "해당 모델의 공식 제조·수입업체 관계를 자동 확정하지 않습니다."
+                    + (f" 숨긴 결과 · {', '.join(hint_hidden)}" if hint_hidden else "")
                 )
 
         st.page_link("pages/4_의료기기_조회.py", label="의료기기 상세 조회 화면 열기", icon="🏥")
