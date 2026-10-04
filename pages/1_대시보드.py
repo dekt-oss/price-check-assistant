@@ -29,6 +29,7 @@ from purchase_price.services.mfds_company_summary import (
     build_registered_company_summaries,
     company_identity_rows,
 )
+from purchase_price.services.mfds_identity_corroboration import identity_needs_review
 from purchase_price.services.mfds_identity_index import (
     MfdsIdentityLookup,
     MfdsIdentityRecord,
@@ -580,9 +581,17 @@ def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
     st.divider()
     st.caption("검색 후보 선택")
     st.subheader(state.get("heading") or state.get("search_text") or "검색 결과")
-    st.warning(
-        "동일 모델명이 여러 식약처 품목번호 또는 품목 책임주체에 연결되어 자동으로 하나를 선택하지 않습니다."
-    )
+    if state.get("review_reason") == "weak_model_key":
+        st.warning(
+            "모델명이 짧거나 숫자 위주라 다른 제품의 모델명과 겹칠 수 있습니다. "
+            "제조사나 품목명으로 확인되지 않아 식약처 제품을 자동으로 연결하지 않았습니다. "
+            "아래 후보가 찾는 제품이 맞는지 확인하세요."
+        )
+        st.caption("찾는 제품이 아니면 제조사나 품목명을 함께 입력해 다시 검색하세요.")
+    else:
+        st.warning(
+            "동일 모델명이 여러 식약처 품목번호 또는 품목 책임주체에 연결되어 자동으로 하나를 선택하지 않습니다."
+        )
     if not isinstance(identity, MfdsIdentityLookup) or not identity.records:
         st.info("후보 identity를 표시할 수 없습니다.")
         return
@@ -682,16 +691,24 @@ def _execute_search(
             "model",
             (selected_identity,),
         )
-    if (
-        isinstance(indexed_identity, MfdsIdentityLookup)
-        and mfds_identity_status(indexed_identity) == IdentityEvidenceStatus.AMBIGUOUS
-        and indexed_identity.match_type == "model"
+    weak_key_review = (
+        selected_identity is None
+        and isinstance(indexed_identity, MfdsIdentityLookup)
+        and identity_needs_review(
+            indexed_identity,
+            manufacturer=manufacturer,
+            product_name=product_name,
+        )
+    )
+    if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.match_type == "model" and (
+        mfds_identity_status(indexed_identity) == IdentityEvidenceStatus.AMBIGUOUS or weak_key_review
     ):
         return {
             "route": "candidate_selection",
             "search_text": raw_search,
             "heading": raw_search,
             "mfds_identity": indexed_identity,
+            "review_reason": "weak_model_key" if weak_key_review else "ambiguous",
         }
 
     interpretation = interpret_unified_search(
@@ -731,7 +748,11 @@ def _execute_search(
         and should_query_live_mfds_identity(_load_mfds_collection_status)
     ):
         live_identity = lookup_mfds_model_identity_live(query.model_name)
-        if live_identity.status == "success":
+        if live_identity.status == "success" and not identity_needs_review(
+            live_identity,
+            manufacturer=query.manufacturer,
+            product_name=query.product_name,
+        ):
             indexed_identity = live_identity
 
     search_timings["identity"] = round(monotonic() - search_started, 3)

@@ -70,6 +70,7 @@ def test_audit_buckets_exact_alias_affix_and_none_on_read_only_index(tmp_path: P
     assert categories["verified_alias"]["models"] == 1
     assert categories["mixed_affix"]["models"] == 1
     assert categories["mixed_affix"]["company"] == {"agree": 1}
+    assert report["importer_pair_candidates"] == []
     assert categories["mixed_affix"]["candidate_models"]["two_to_five"] == 1
     assert categories["none"]["models"] == 1
     assert categories["none_short_key"]["models"] == 1
@@ -158,6 +159,57 @@ def test_exact_policy_counts_weak_keys_without_company_agreement(tmp_path: Path)
     policy = report["exact_match_policy"]
     assert policy["exact_models"] == 4
     assert policy["would_downgrade_to_needs_review"] == 2
-    assert policy["by_shape"]["digits_only"]["models"] == {"disagree": 1, "agree": 1}
+    assert policy["by_shape"]["digits_only"]["models"] == {"disagree": 1, "agree_company": 1}
     assert policy["by_shape"]["short"]["models"] == {"disagree": 1}
-    assert policy["by_shape"]["length_5_6"]["models"] == {"agree": 1}
+    assert policy["by_shape"]["length_5_6"]["models"] == {"agree_company": 1}
+
+
+def test_importer_pairs_need_two_distinctive_models(tmp_path: Path) -> None:
+    connection = sqlite3.connect(tmp_path / "mfds.sqlite")
+    upsert_identity_records(
+        connection,
+        [
+            parse_mfds_product_info_record(
+                {"FOML_INFO": model, "MNFT_IPRT_ENTP_NM": company, "PRDLST_NM": product}
+            )
+            for model, company, product in (
+                ("B105M Patient Monitor", "지이헬스케어코리아(주)", "환자감시장치"),
+                ("B125M Patient Monitor", "지이헬스케어코리아(주)", "환자감시장치"),
+                ("Accu-Chek Guide meter", "한국로슈진단(주)", "혈당측정기"),
+            )
+        ],
+    )
+    connection.commit()
+    models = [
+        _model("B105M Patient Monitor", "GE medical systems"),
+        _model("B125M Patient Monitor", "GE medical systems"),
+        _model("Accu-Chek Guide meter", "Roche diabetes care"),
+    ]
+
+    report = audit(connection, models, sample_size=10, seed=1)
+    connection.close()
+
+    pairs = report["importer_pair_candidates"]
+    assert [(p["manufacturer"], p["mfds_registered_company"], p["distinct_models"]) for p in pairs] == [
+        ("GE medical systems", "지이헬스케어코리아(주)", 2)
+    ]
+
+
+def test_product_name_agreement_counts_as_corroboration(tmp_path: Path) -> None:
+    connection = sqlite3.connect(tmp_path / "mfds.sqlite")
+    upsert_identity_records(
+        connection,
+        [
+            parse_mfds_product_info_record(
+                {"FOML_INFO": "3150", "MNFT_IPRT_ENTP_NM": "주식회사 유유메디컬스", "PRDLST_NM": "펄스 옥시미터"}
+            )
+        ],
+    )
+    connection.commit()
+    model = TrackBModel(normalize_text("3150"), "3150", "Nonin medical", 1, "펄스옥시미터")
+
+    report = audit(connection, [model], sample_size=10, seed=1)
+    connection.close()
+
+    assert report["exact_match_policy"]["by_shape"]["digits_only"]["models"] == {"agree_product": 1}
+    assert report["exact_match_policy"]["would_downgrade_to_needs_review"] == 0

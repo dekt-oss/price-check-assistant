@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from purchase_price.evidence_domain import IdentityEvidenceStatus
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.mfds_identity_corroboration import identity_needs_review
 from purchase_price.services.mfds_identity_index import MfdsIdentityLookup
 
 
@@ -36,6 +37,15 @@ def canonicalize_product_query(
         return CanonicalQueryIdentity(query, identity, False, False)
 
     if identity.identity_status == IdentityEvidenceStatus.AMBIGUOUS:
+        return CanonicalQueryIdentity(query, identity, False, True)
+
+    # A short or numeric model key that neither the manufacturer nor the product name
+    # corroborates is not allowed to rewrite the query; it is surfaced as a candidate.
+    if identity_needs_review(
+        identity,
+        manufacturer=query.manufacturer,
+        product_name=query.product_name,
+    ):
         return CanonicalQueryIdentity(query, identity, False, True)
 
     models = identity.model_names

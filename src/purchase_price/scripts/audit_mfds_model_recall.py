@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import re
 import sqlite3
 from collections import Counter
 from collections.abc import Iterable, Sequence
@@ -21,6 +20,12 @@ from pathlib import Path
 from typing import Any
 
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.mfds_identity_corroboration import (
+    WEAK_KEY_SHAPES,
+    company_corroborates,
+    model_key_shape,
+    product_corroborates,
+)
 from purchase_price.services.product_matching import (
     canonical_manufacturer,
     equivalent_model_keys,
@@ -31,10 +36,7 @@ MIN_AFFIX_KEY_LENGTH = 4
 DEFAULT_SAMPLE_SIZE = 2000
 DEFAULT_SEED = 20261004
 ALWAYS_INCLUDE = ("DFM100",)
-# Proposed policy: an exact normalized model match only confirms identity on its own when the
-# key is distinctive. Weak keys additionally need manufacturer/importer agreement.
-WEAK_KEY_SHAPES = ("digits_only", "unit_like", "short")
-_UNIT_KEY = re.compile(r"^\d+(ml|cc|cm|mm|g|kg|l|ea|매|개|본)$")
+IMPORTER_PAIR_MIN_MODELS = 2
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,7 @@ class TrackBModel:
     model_name: str
     manufacturer: str | None
     line_count: int
+    product_class: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,50 +67,25 @@ def classify_affix(query_key: str, candidate_key: str) -> str:
 
 
 def company_agrees(manufacturer: str | None, candidates: Iterable[MfdsCandidate]) -> bool | None:
-    """True/False when Track B names a manufacturer, None when it does not.
+    """True/False when Track B names a manufacturer, None when it does not."""
 
-    Agreement is a containment check on normalized names because MFDS lists the
-    registered manufacturer *or importer*, while procurement lists the maker.
-    """
-
-    maker = normalize_text(manufacturer)
-    if len(maker) < 2:
+    if len(normalize_text(manufacturer)) < 2:
         return None
-    aliases = _manufacturer_aliases()
-    maker_canonical = normalize_text(canonical_manufacturer(manufacturer, aliases))
-    for candidate in candidates:
-        company = normalize_text(candidate.registered_company)
-        if not company:
-            continue
-        company_canonical = normalize_text(
-            canonical_manufacturer(candidate.registered_company, aliases)
-        )
-        for left, right in ((maker, company), (maker_canonical, company_canonical)):
-            if left and right and (left in right or right in left):
-                return True
-    return False
+    return any(
+        company_corroborates(manufacturer, candidate.registered_company) for candidate in candidates
+    )
 
 
-_MANUFACTURER_ALIASES: dict[str, str] | None = None
+def identity_verdict(model: TrackBModel, candidates: Sequence[MfdsCandidate]) -> str:
+    """Same corroboration rule as the app: company, importer relation, or product name."""
 
-
-def _manufacturer_aliases() -> dict[str, str]:
-    global _MANUFACTURER_ALIASES
-    if _MANUFACTURER_ALIASES is None:
-        _MANUFACTURER_ALIASES = load_manufacturer_aliases()
-    return _MANUFACTURER_ALIASES
-
-
-def model_key_shape(key: str) -> str:
-    if key.isdigit():
-        return "digits_only"
-    if _UNIT_KEY.match(key):
-        return "unit_like"
-    if len(key) <= 4:
-        return "short"
-    if len(key) <= 6:
-        return "length_5_6"
-    return "distinctive"
+    if company_agrees(model.manufacturer, candidates):
+        return "agree_company"
+    if any(product_corroborates(model.product_class, c.product_name) for c in candidates):
+        return "agree_product"
+    if len(normalize_text(model.manufacturer)) < 2 and not normalize_text(model.product_class):
+        return "unknown"
+    return "disagree"
 
 
 def load_track_b_models(
@@ -129,16 +107,17 @@ def load_track_b_models(
             raise RuntimeError("Track B serving index has no detail_code column")
         detail_filter = "AND detail_code LIKE ?"
         params = (f"{detail_prefix}%",)
+    product_class = "MAX(product_class)" if "product_class" in columns else "NULL"
     rows = connection.execute(
         f"""
-        SELECT model_key, MAX(model_name), MAX(manufacturer), COUNT(*)
+        SELECT model_key, MAX(model_name), MAX(manufacturer), COUNT(*), {product_class}
         FROM track_b_delivery_lines
         WHERE model_key IS NOT NULL AND model_key <> '' {conflict_filter} {detail_filter}
         GROUP BY model_key
         """,
         params,
     ).fetchall()
-    return [TrackBModel(str(r[0]), str(r[1] or ""), r[2], int(r[3])) for r in rows]
+    return [TrackBModel(str(r[0]), str(r[1] or ""), r[2], int(r[3]), r[4]) for r in rows]
 
 
 def prepare_mfds_lookup(connection: sqlite3.Connection) -> None:
@@ -230,6 +209,7 @@ def audit(
     policy_counts: dict[str, Counter[str]] = {}
     policy_lines: dict[str, Counter[str]] = {}
     policy_examples: dict[str, list[dict[str, Any]]] = {}
+    importer_pairs: dict[tuple[str, str], dict[str, Any]] = {}
     for model in sample:
         result = classify_model(mfds, model)
         category = result["category"]
@@ -242,11 +222,27 @@ def audit(
         agreement = company_agrees(model.manufacturer, candidates) if candidates else None
         if category == "exact":
             shape = model_key_shape(model.model_key)
-            verdict = "unknown" if agreement is None else "agree" if agreement else "disagree"
+            verdict = identity_verdict(model, candidates)
+            if shape == "distinctive" and verdict in {"disagree", "agree_product"}:
+                maker_key = normalize_text(
+                    canonical_manufacturer(model.manufacturer, _manufacturer_aliases())
+                )
+                for candidate in candidates:
+                    company_key = normalize_text(candidate.registered_company)
+                    if len(maker_key) >= 2 and company_key:
+                        pair = importer_pairs.setdefault(
+                            (maker_key, company_key),
+                            {
+                                "manufacturer": model.manufacturer,
+                                "mfds_registered_company": candidate.registered_company,
+                                "models": set(),
+                            },
+                        )
+                        pair["models"].add(model.model_name)
             policy_counts.setdefault(shape, Counter())[verdict] += 1
             policy_lines.setdefault(shape, Counter())[verdict] += model.line_count
             shape_examples = policy_examples.setdefault(shape, [])
-            if verdict != "agree" and len(shape_examples) < sample_limit:
+            if not verdict.startswith("agree") and len(shape_examples) < sample_limit:
                 shape_examples.append(
                     {
                         "track_b_model": model.model_name,
@@ -313,6 +309,7 @@ def audit(
         },
         "examples": examples,
         "exact_match_policy": _exact_policy_summary(policy_counts, policy_lines, policy_examples),
+        "importer_pair_candidates": _importer_pair_candidates(importer_pairs),
     }
 
 
@@ -324,11 +321,11 @@ def _exact_policy_summary(
     exact_total = sum(sum(c.values()) for c in counts.values())
     downgraded = sum(
         counts.get(shape, Counter())[verdict]
-        for shape in WEAK_KEY_SHAPES
+        for shape in sorted(WEAK_KEY_SHAPES)
         for verdict in ("disagree", "unknown")
     )
     return {
-        "weak_key_shapes": list(WEAK_KEY_SHAPES),
+        "weak_key_shapes": sorted(WEAK_KEY_SHAPES),
         "exact_models": exact_total,
         "would_downgrade_to_needs_review": downgraded,
         "would_downgrade_share_of_exact": round(downgraded / exact_total, 4) if exact_total else 0.0,
@@ -338,6 +335,32 @@ def _exact_policy_summary(
         },
         "non_agreeing_examples": examples,
     }
+
+
+_MANUFACTURER_ALIASES: dict[str, str] | None = None
+
+
+def _manufacturer_aliases() -> dict[str, str]:
+    global _MANUFACTURER_ALIASES
+    if _MANUFACTURER_ALIASES is None:
+        _MANUFACTURER_ALIASES = load_manufacturer_aliases()
+    return _MANUFACTURER_ALIASES
+
+
+def _importer_pair_candidates(pairs: dict[tuple[str, str], dict[str, Any]]) -> list[dict[str, Any]]:
+    """Maker -> MFDS registered company pairs seen on >=2 distinctive exact-model matches."""
+
+    rows = [
+        {
+            "manufacturer": value["manufacturer"],
+            "mfds_registered_company": value["mfds_registered_company"],
+            "distinct_models": len(value["models"]),
+            "example_models": sorted(value["models"])[:5],
+        }
+        for value in pairs.values()
+        if len(value["models"]) >= IMPORTER_PAIR_MIN_MODELS
+    ]
+    return sorted(rows, key=lambda row: (-row["distinct_models"], row["manufacturer"] or ""))
 
 
 def _parse_args() -> argparse.Namespace:
