@@ -11,8 +11,10 @@ New module so a Streamlit hot reload that keeps older modules never sees a half-
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from purchase_price.services.matching import normalize_text
@@ -21,7 +23,10 @@ STATUS_ACTIVE = "국내 정상"
 STATUS_CANCELLED = "취소·취하"
 STATUS_EXPORT = "수출용"
 STATUS_UNKNOWN = "상태 미확인"
-_INACTIVE = {STATUS_CANCELLED, STATUS_EXPORT}
+_INACTIVE = {STATUS_CANCELLED, STATUS_EXPORT, f"{STATUS_CANCELLED}(품목)", f"{STATUS_EXPORT}(품목)"}
+# Runtime marker: the dashboard reloads a retained older copy of this module (hot reload).
+ITEM_STATUS_AWARE = True
+PRICE_GAP_FACTOR = Decimal("3")
 
 
 def _key(permit: object, model: object) -> tuple[str, str]:
@@ -61,6 +66,8 @@ class SameItemView:
     status_loaded: bool
     unknown_status_count: int = 0
     current_present: bool = True
+    price_gap_count: int = 0
+    reference_price: Decimal | None = None
 
 
 def _direct_count(row: Mapping[str, object]) -> int:
@@ -77,8 +84,16 @@ def build_same_item_rows(
     include_unpriced: bool = False,
     include_inactive: bool = False,
     current_keys: Iterable[tuple[object, object]] = (),
+    item_status_labels: Mapping[str, str] | None = None,
+    reference_price: Decimal | None = None,
 ) -> SameItemView:
-    """current_keys: (permit, model) of the exact MFDS record the search resolved to."""
+    """current_keys: (permit, model) of the exact MFDS record the search resolved to.
+
+    item_status_labels: whitespace-free item number -> already fail-closed label from the
+    item-status index (see mfds_item_status_r2.item_status_label). A model-level status from
+    the live 형명 lookup wins over the item-level one.
+    reference_price: the searched model's median direct price, to flag rows priced far apart.
+    """
 
     resolved = {_key(permit, model) for permit, model in current_keys}
     hidden_unpriced = 0
@@ -89,6 +104,9 @@ def build_same_item_rows(
         status = STATUS_UNKNOWN
         if status_index is not None:
             status = status_index.get(_key(row.get("식약처 품목번호"), row.get("모델")), STATUS_UNKNOWN)
+        if status == STATUS_UNKNOWN and item_status_labels:
+            permit_key = "".join(str(row.get("식약처 품목번호") or "").split())
+            status = item_status_labels.get(permit_key, STATUS_UNKNOWN)
         if not current:
             if status in _INACTIVE and not include_inactive:
                 hidden_inactive += 1
@@ -136,9 +154,52 @@ def build_same_item_rows(
         total=len(crosslinks),
         hidden_unpriced=hidden_unpriced,
         hidden_inactive=hidden_inactive,
-        status_loaded=status_index is not None,
+        status_loaded=status_index is not None or bool(item_status_labels),
         unknown_status_count=sum(1 for _row, status, _current in kept if status == STATUS_UNKNOWN),
         current_present=any(current for _row, _status, current in kept) or not resolved,
+        price_gap_count=sum(
+            1
+            for row, _status, current in kept
+            if not current and _far_apart(row.get("나라장터 가격범위"), reference_price)
+        ),
+        reference_price=reference_price,
+    )
+
+
+_AMOUNT = re.compile(r"\d[\d,]*")
+
+
+def price_bounds(text: object) -> tuple[Decimal, Decimal] | None:
+    """'1,650,000 ~ 1,980,000원' -> (1650000, 1980000); None when there is no price."""
+
+    amounts = [Decimal(m.replace(",", "")) for m in _AMOUNT.findall(str(text or "")) if m.replace(",", "")]
+    amounts = [a for a in amounts if a > 0]
+    if not amounts or "건" in str(text or ""):
+        return None
+    return min(amounts), max(amounts)
+
+
+def _far_apart(price_text: object, reference: Decimal | None) -> bool:
+    bounds = price_bounds(price_text)
+    if bounds is None or reference is None or reference <= 0:
+        return False
+    low, high = bounds
+    return high * PRICE_GAP_FACTOR < reference or low > reference * PRICE_GAP_FACTOR
+
+
+def current_model_note(view: SameItemView) -> str | None:
+    if view.current_present:
+        return None
+    return "검색한 모델은 아직 수집된 같은 품목 목록에 없어 이 표에 없습니다. 검색 모델의 가격은 위 카드를 보세요."
+
+
+def price_gap_note(view: SameItemView) -> str | None:
+    if not view.price_gap_count or view.reference_price is None:
+        return None
+    return (
+        f"표의 {view.price_gap_count}개 모델은 검색 모델 가격(중앙값 {view.reference_price:,.0f}원)과 "
+        "3배 이상 차이 납니다. 같은 식약처 품목이라도 용도·사양이 다른 장비(예: 전문가용 제세동기와 "
+        "자동심장충격기)일 수 있으니, 사양을 확인한 뒤 비교하세요."
     )
 
 
@@ -150,11 +211,10 @@ def status_notes(view: SameItemView) -> list[str]:
         )
     elif view.unknown_status_count:
         notes.append(
-            f"상태 미확인 {view.unknown_status_count}개는 형명 조회 결과에 없던 모델입니다. "
-            "품목번호별 상태표(수집 중)를 연결하면 채워집니다"
+            f"상태 미확인 {view.unknown_status_count}개는 아직 확인되지 않은 모델입니다. "
+            "'국내 정상(품목)'은 품목번호별 상태표 기준이며, 취소·취하는 상태표 1회 전체 수집이 "
+            "검증된 뒤부터 표시합니다"
         )
-    if not view.current_present:
-        notes.append("검색한 모델은 아직 수집된 같은 품목 목록에 없어 이 표에 없습니다 (가격은 위 카드 기준)")
     return notes
 
 

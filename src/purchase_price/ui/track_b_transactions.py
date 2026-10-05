@@ -79,6 +79,10 @@ def _text_or_unknown(value: Any) -> str:
     return text or "미확인"
 
 
+# Runtime marker: the dashboard reloads a retained older copy of this module (hot reload).
+GROUP_QUANTITY_NORMALIZED = True
+
+
 def _number_text(value: Any) -> str:
     """1.000 -> 1, 2.50 -> 2.5, 100 -> 100 (Decimal keeps trailing zeros under :g)."""
 
@@ -273,7 +277,7 @@ def model_price_group_rows(track_b: Any) -> list[dict[str, object]]:
                 "최저단가": _money_text(prices[0]),
                 "중앙값": _money_text(median(prices)),
                 "최고단가": _money_text(prices[-1]),
-                "총수량": str(_decimal_sum(quantities) or "미확인"),
+                "총수량": _number_text(total) if (total := _decimal_sum(quantities)) is not None else "미확인",
                 "최근거래일": max(dates) if dates else "미확인",
             }
         )
