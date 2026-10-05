@@ -14,6 +14,13 @@ from purchase_price.services.market_research_support import (
     extract_g2b_supplier_candidates,
     extract_mfds_business_supplier_candidates,
 )
+from purchase_price.services.medical_lookup_handoff import (
+    WIDGET_MANUFACTURER,
+    WIDGET_MODEL,
+    WIDGET_PRODUCT,
+    WIDGET_UDI,
+    apply_handoff,
+)
 from purchase_price.services.mfds_api_keys import (
     mfds_json_client,
     mfds_model_info_json_client,
@@ -57,6 +64,22 @@ st.caption(
     )
 )
 
+handoff = apply_handoff(st.session_state)
+if handoff is not None:
+    filled = " · ".join(
+        part
+        for part in (
+            str(handoff.get("product_name") or ""),
+            str(handoff.get("model_name") or ""),
+            ", ".join(handoff.get("permit_numbers") or ()),
+        )
+        if part
+    )
+    st.info(
+        f"통합검색에서 확인한 제품정보({handoff.get('source') or '검색어'})를 입력칸에 채웠습니다: {filled}. "
+        "식약처 조회는 각 탭의 버튼을 눌러야 실행됩니다."
+    )
+
 market_tab, safety_tab, udi_tab = st.tabs(["등록·시장조사", "Safety·공급사", "UDI-DI"])
 
 with market_tab:
@@ -69,9 +92,9 @@ with market_tab:
 
     with st.form("medical-market-search"):
         c1, c2 = st.columns(2)
-        product_name = c1.text_input("식약처 품목명", placeholder="예: 심장충격기")
-        model_name = c2.text_input("모델명 (선택)", placeholder="예: Efficia DFM100")
-        manufacturer = c1.text_input("제조사/업체명 (선택)")
+        product_name = c1.text_input("식약처 품목명", placeholder="예: 심장충격기", key=WIDGET_PRODUCT)
+        model_name = c2.text_input("모델명 (선택)", placeholder="예: Efficia DFM100", key=WIDGET_MODEL)
+        manufacturer = c1.text_input("제조사/업체명 (선택)", key=WIDGET_MANUFACTURER)
         specification = c2.text_input("규격 (선택)")
         intended_use = c1.text_input("사용목적 (동일품목 국내후보 0건일 때만 보조탐색에 사용)")
         search_submitted = st.form_submit_button(
@@ -301,7 +324,7 @@ with udi_tab:
     if not mfds_key:
         st.warning("MFDS 서비스키가 없어 UDI live 조회가 비활성화되어 있습니다.")
     with st.form("medical-udi-search"):
-        udi_di = st.text_input("UDI-DI", placeholder="알고 있는 UDI-DI를 입력하세요")
+        udi_di = st.text_input("UDI-DI", placeholder="알고 있는 UDI-DI를 입력하세요", key=WIDGET_UDI)
         udi_submitted = st.form_submit_button("UDI-DI 조회", disabled=not bool(mfds_key))
     if udi_submitted:
         if not udi_di.strip():
