@@ -31,6 +31,10 @@ from purchase_price.services.g2b_search_policy import (
 )
 from purchase_price.services.market_survey_export import build_market_survey_workbook
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.medical_lookup_handoff import (
+    MEDICAL_LOOKUP_HANDOFF_KEY,
+    build_medical_lookup_handoff,
+)
 from purchase_price.services.mfds_api_keys import (
     mfds_json_client,
     mfds_model_info_json_client,
@@ -566,6 +570,32 @@ def _build_mfds_procurement_crosslinks(
             }
         )
     return rows
+
+
+def _render_medical_lookup_link(indexed_identity: object, mfds: object, query: object) -> None:
+    """Link to the medical-device page with only the identified product's identity fields."""
+
+    handoff = build_medical_lookup_handoff(
+        identity_records=(
+            indexed_identity.records
+            if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success"
+            else ()
+        ),
+        model_info_records=(
+            mfds.exact_records
+            if isinstance(mfds, MfdsWorkspaceResult) and not mfds.exact_ambiguous
+            else ()
+        ),
+        query_product_name=str(getattr(query, "product_name", "") or ""),
+        query_model_name=str(getattr(query, "model_name", "") or ""),
+    )
+    if not handoff.is_empty:
+        st.session_state[MEDICAL_LOOKUP_HANDOFF_KEY] = handoff.to_state()
+    st.page_link(
+        "pages/4_의료기기_조회.py",
+        label="이 제품을 의료기기 상세 조회에서 열기",
+        icon="🏥",
+    )
 
 
 def _load_mfds_collection_status() -> MfdsIdentityCollectionStatus:
@@ -2052,7 +2082,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                         + (f" 숨긴 결과 · {', '.join(hint_hidden)}" if hint_hidden else "")
                     )
 
-            st.page_link("pages/4_의료기기_조회.py", label="의료기기 상세 조회 화면 열기", icon="🏥")
+            _render_medical_lookup_link(indexed_identity, mfds, query)
 
     else:
         st.markdown("#### 같은 품목의 다른 등록모델과 가격")
@@ -2119,7 +2149,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     use_container_width=True,
                     hide_index=True,
                 )
-        st.page_link("pages/4_의료기기_조회.py", label="의료기기 상세 조회 화면 열기", icon="🏥")
+        _render_medical_lookup_link(indexed_identity, mfds, query)
 
 
 hydrate_streamlit_runtime_secrets()
