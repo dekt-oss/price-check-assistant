@@ -29,7 +29,7 @@ def test_mfds_serving_pointer_is_published_only_after_complete_index_upload() ->
 def test_dashboard_reuses_one_track_b_snapshot_for_crosslinks() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
-    assert "with open_track_b_serving_snapshot() as track_b_snapshot:" in source
+    assert "with snapshot_runtime.open_track_b_serving_snapshot() as track_b_snapshot:" in source
     assert "track_b_snapshot.lookup(" in source
     assert "lookup_track_b_quote_from_r2" not in source
 
