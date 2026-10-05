@@ -8,10 +8,13 @@ on:
       - "src/purchase_price/services/mfds_item_status_index.py"
       - "tests/test_mfds_item_status_index.py"
   schedule:
-    # Two slots per day. The planner skips until the MFDS identity backfill has verified full
-    # coverage, runs both slots during the first 형명 cycle, then refreshes weekly (Sunday).
+    # Four slots per day. A first 형명 cycle that has started keeps running in every slot;
+    # after the first verified cycle the planner refreshes weekly (Sunday).
+    # Measured 2026-10-05: ~33 min per 600-page chunk, so 3 chunks fit the 115-minute limit.
     - cron: "47 3 * * *"
+    - cron: "47 9 * * *"
     - cron: "47 15 * * *"
+    - cron: "47 21 * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -19,8 +22,8 @@ on:
         type: boolean
         default: false
       chunks:
-        description: Checkpointed chunks in this run
-        default: "6"
+        description: Checkpointed chunks in this run (~33 min each)
+        default: "3"
       pages_per_chunk:
         description: 500-row pages per chunk
         default: "600"
@@ -63,7 +66,7 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      CHUNKS: ${{ inputs.chunks || '6' }}
+      CHUNKS: ${{ inputs.chunks || '3' }}
       PAGES_PER_CHUNK: ${{ inputs.pages_per_chunk || '600' }}
     steps:
       - uses: actions/checkout@v7
