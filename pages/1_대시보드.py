@@ -61,6 +61,7 @@ from purchase_price.services.mfds_identity_status import (
     format_status_updated_at,
     get_mfds_identity_collection_status,
 )
+from purchase_price.services.mfds_model_info_query import model_info_product_name
 from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.mfds_workspace import (
     MfdsWorkspaceResult,
@@ -200,8 +201,12 @@ def _run_deferred_mfds_model_info(state: dict[str, Any]) -> MfdsWorkspaceResult:
     """User-initiated 형명 lookup with key fallback; successful results are cached in-process."""
 
     mfds = state.get("mfds")
-    product_name = str(getattr(mfds, "product_name", "") or "")
     model_name = str(getattr(mfds, "model_name", "") or "")
+    product_name = model_info_product_name(
+        str(getattr(mfds, "product_name", "") or ""),
+        model_name,
+        tuple(getattr(state.get("track_b"), "candidates", ()) or ()),
+    )
     cache_key = (normalize_text(product_name), normalize_text(model_name))
     cached = _MFDS_MODEL_INFO_CACHE.get(cache_key)
     if cached is not None:
