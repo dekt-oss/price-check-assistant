@@ -82,6 +82,7 @@ from purchase_price.services.safety_support import (
 from purchase_price.services.search import SearchRun
 from purchase_price.services.structured_query_identity import canonicalize_product_query
 from purchase_price.services.track_b_live_gap_fill import (
+    LIVE_TRANSACTION_TYPE,
     TrackBLiveGapFill,
     fetch_live_gap,
     indexed_detail_codes,
@@ -1421,10 +1422,24 @@ def _render_search_result(state: dict[str, Any]) -> None:
         live_status = str(getattr(live, "status", "") or "")
         live_window = f"{getattr(live, 'begin_date', '')} ~ {getattr(live, 'end_date', '')}"
         if live_status == "success":
-            st.caption(
-                f"나라장터 실시간 보강 · {live_window} · 수집 전 거래 "
-                f"{len(getattr(live, 'candidates', ()) or ())}건을 같은 동일성 기준으로 추가했습니다."
+            # Count only rows that survived dedupe: the rolling collector may already have
+            # ingested part of the window before data_as_of advances.
+            live_found = len(getattr(live, "candidates", ()) or ())
+            live_added = sum(
+                1
+                for candidate in tuple(getattr(state.get("track_b"), "candidates", ()) or ())
+                if getattr(candidate, "transaction_type", None) == LIVE_TRANSACTION_TYPE
             )
+            if live_added:
+                st.caption(
+                    f"나라장터 실시간 보강 · {live_window} · 수집 전 거래 {live_added}건을 "
+                    "같은 동일성 기준으로 추가했습니다."
+                )
+            else:
+                st.caption(
+                    f"나라장터 실시간 보강 · {live_window} · 실시간 조회된 {live_found}건은 "
+                    "이미 수집 데이터에 반영되어 있습니다."
+                )
         elif live_status == "success_0":
             st.caption(f"나라장터 실시간 보강 · {live_window} · 이 기간에 조회된 이 모델의 신규 납품요구 0건")
         elif live_status == "failure":

@@ -235,3 +235,10 @@ def test_dashboard_merges_live_gap_after_indexed_lookup() -> None:
     assert 'search_timings["track_b_live"]' in source
     assert "timeout_seconds=8.0, max_retries=0" in source
     assert "나라장터 실시간 보강" in source
+
+
+def test_dashboard_caption_counts_only_net_added_live_rows() -> None:
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+
+    assert "live_added = sum(" in source
+    assert "이미 수집 데이터에 반영되어 있습니다" in source
