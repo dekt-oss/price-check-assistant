@@ -418,15 +418,29 @@ def _row_conditions(row: TrackBDeliveryLine, *, available: bool) -> tuple[str | 
     return row.contract_delivery_type, row.contract_type, row.delivery_condition
 
 
+def _not_cancelled_clause():
+    """A latest change order with quantity 0 cancelled the line (e.g. 00: +1, 01: -1 -> 0).
+
+    The unit price is still filled in on such rows, so without this they would count as
+    delivered trades. Applied after the latest-change-order filter, so the cancellation
+    also hides the older "1 unit" row of the same line.
+    """
+
+    return or_(TrackBDeliveryLine.quantity.is_(None), TrackBDeliveryLine.quantity != 0)
+
+
 def _price_evidence_clause():
     """Rows with an explicit source unit price or a safely calculable amount/quantity pair."""
 
-    return or_(
-        TrackBDeliveryLine.unit_price > 0,
-        and_(
-            TrackBDeliveryLine.unit_price.is_(None),
-            TrackBDeliveryLine.total_amount > 0,
-            TrackBDeliveryLine.quantity > 0,
+    return and_(
+        _not_cancelled_clause(),
+        or_(
+            TrackBDeliveryLine.unit_price > 0,
+            and_(
+                TrackBDeliveryLine.unit_price.is_(None),
+                TrackBDeliveryLine.total_amount > 0,
+                TrackBDeliveryLine.quantity > 0,
+            ),
         ),
     )
 
@@ -591,6 +605,7 @@ def _find_reference_candidates(
         .where(
             current_clause,
             or_(*conditions),
+            _not_cancelled_clause(),
             TrackBDeliveryLine.unit_price > 0,
             TrackBDeliveryLine.identity_conflict.is_(False),
         )
