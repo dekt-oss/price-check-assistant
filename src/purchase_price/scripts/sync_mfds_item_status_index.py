@@ -283,11 +283,19 @@ def plan(
     item_status_verified_cycles: int,
     weekday: int,
     force: bool = False,
+    cycle_in_progress: bool = False,
 ) -> dict[str, Any]:
-    """Run after the identity backfill is verified (user decision 2026-10-05), then weekly."""
+    """Run after the identity backfill is verified, then weekly.
+
+    A first cycle that was already started (the user asked on 2026-10-05 to start collecting
+    right away) keeps running on its schedule instead of stalling until the identity backfill
+    verifies; otherwise half of the dataset would sit idle for days.
+    """
 
     if event_name == "workflow_dispatch" and force:
         return {"run": True, "reason": "manual dispatch with force"}
+    if item_status_verified_cycles < 1 and cycle_in_progress:
+        return {"run": True, "reason": "first full 형명 cycle already started; continue it"}
     if identity_verified_cycles < 1:
         return {"run": False, "reason": "waiting for the MFDS identity backfill to verify coverage"}
     if item_status_verified_cycles < 1:
@@ -331,6 +339,8 @@ def main() -> int:
         item_status_verified_cycles=int(state.get("verified_complete_cycles") or 0),
         weekday=datetime.now(UTC).weekday(),
         force=args.force,
+        cycle_in_progress=int(state.get("next_page") or 1) > 1
+        or int(state.get("cycle_rows_seen") or 0) > 0,
     )
     _write(args.output, decision)
     return 0

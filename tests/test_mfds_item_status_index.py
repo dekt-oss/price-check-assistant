@@ -217,3 +217,24 @@ def test_plan_waits_for_identity_backfill_then_refreshes_weekly(
         force=force,
     )
     assert decision["run"] is expected
+
+
+def test_plan_continues_a_started_first_cycle_before_identity_verifies() -> None:
+    started = sync_module.plan(
+        event_name="schedule",
+        identity_verified_cycles=0,
+        item_status_verified_cycles=0,
+        weekday=2,
+        cycle_in_progress=True,
+    )
+    assert started["run"] is True
+
+    # Once verified, the weekly cadence applies again even if a refresh cycle is mid-way.
+    weekly = sync_module.plan(
+        event_name="schedule",
+        identity_verified_cycles=0,
+        item_status_verified_cycles=1,
+        weekday=2,
+        cycle_in_progress=True,
+    )
+    assert weekly["run"] is False
