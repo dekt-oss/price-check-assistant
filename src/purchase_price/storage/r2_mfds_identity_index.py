@@ -39,6 +39,7 @@ class R2MfdsIdentityIndexStore:
         bucket: str,
         prefix: str = "derived/v1/mfds-identity",
         quota_store: R2RawEvidenceStore | None = None,
+        schema: str = MFDS_IDENTITY_SCHEMA,
     ) -> None:
         if not bucket.strip():
             raise R2ConfigurationError("R2 bucket name is required")
@@ -46,9 +47,18 @@ class R2MfdsIdentityIndexStore:
         self.bucket = bucket.strip()
         self.prefix = prefix.strip("/") or "derived/v1/mfds-identity"
         self._quota_store = quota_store
+        # The same gzip SQLite store also serves other derived MFDS indexes (e.g. item status);
+        # the schema tag keeps them from being read as one another.
+        self.schema = schema
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> R2MfdsIdentityIndexStore:
+    def from_settings(
+        cls,
+        settings: Settings,
+        *,
+        prefix: str = "derived/v1/mfds-identity",
+        schema: str = MFDS_IDENTITY_SCHEMA,
+    ) -> R2MfdsIdentityIndexStore:
         if not settings.r2_configured:
             raise R2ConfigurationError("R2 is not fully configured for MFDS identity index")
         endpoint = settings.resolved_r2_endpoint_url
@@ -68,6 +78,8 @@ class R2MfdsIdentityIndexStore:
             client=client,
             bucket=bucket,
             quota_store=R2RawEvidenceStore.from_settings(settings),
+            prefix=prefix,
+            schema=schema,
         )
 
     def put_sqlite(self, path: Path) -> MfdsIdentityIndexRef:
@@ -79,7 +91,7 @@ class R2MfdsIdentityIndexStore:
         existing = self._head_if_exists(key)
         if existing is not None:
             metadata = existing.get("Metadata") or {}
-            if metadata.get("sha256") != digest or metadata.get("schema") != MFDS_IDENTITY_SCHEMA:
+            if metadata.get("sha256") != digest or metadata.get("schema") != self.schema:
                 raise R2IntegrityError(f"MFDS identity index metadata mismatch for {key}")
             return MfdsIdentityIndexRef(
                 key=key,
@@ -103,7 +115,7 @@ class R2MfdsIdentityIndexStore:
             ContentEncoding="gzip",
             Metadata={
                 "sha256": digest,
-                "schema": MFDS_IDENTITY_SCHEMA,
+                "schema": self.schema,
                 "data-classification": "public-derived-index",
             },
             StorageClass="STANDARD",
@@ -118,7 +130,7 @@ class R2MfdsIdentityIndexStore:
     def download_sqlite(self, ref: MfdsIdentityIndexRef, destination: Path) -> Path:
         response = self._client.get_object(Bucket=self.bucket, Key=ref.key)
         metadata = response.get("Metadata") or {}
-        if metadata.get("schema") != MFDS_IDENTITY_SCHEMA or metadata.get("sha256") != ref.sha256:
+        if metadata.get("schema") != self.schema or metadata.get("sha256") != ref.sha256:
             raise R2IntegrityError(f"MFDS identity index metadata mismatch for {ref.key}")
 
         compressed = response["Body"].read()
