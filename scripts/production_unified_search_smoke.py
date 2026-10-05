@@ -12,7 +12,7 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v11"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v12"
 RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
 WORKSPACE_DIRECT_PATTERN = re.compile(r"직접 동일성 확인 거래\s*(\d+)건")
 ERROR_TEXTS = (
@@ -153,7 +153,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-runtime-v11 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-runtime-v12 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -192,7 +192,7 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
     _assert_no_error_text(body)
     if (
         "나라장터 동일제품 직접거래" not in body
-        or "참고근거 · Research" not in body
+        or "참고근거 · 입찰·계약 자료" not in body
     ):
         raise RuntimeError("Default price workspace did not render after DFM100 search")
     report["price_section_rendered"] = True
@@ -205,8 +205,8 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
         body = _body_text(page)
         _assert_no_error_text(body)
         if (
-            "식약처 품목·Identity" in body
-            and "실제 조달 공급업체" in body
+            "품목 책임주체 · 식약처에 등록한 제조·수입업체" in body
+            and "실제 납품업체 · 나라장터" in body
         ):
             report["supplier_section_rendered"] = True
             break
@@ -220,7 +220,7 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
-        if "동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격" in body:
+        if "같은 품목의 다른 등록모델과 가격" in body:
             report["comparison_section_rendered"] = True
             report["direct_workspace_sections_seconds"] = round(
                 time.monotonic() - started,

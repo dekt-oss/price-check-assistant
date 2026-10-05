@@ -121,8 +121,8 @@ def test_dashboard_exposes_company_centric_workspace_contract() -> None:
 
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
-    assert "식약처 품목 등록업체 · 품목 책임주체" in source
+    assert "품목 책임주체 · 식약처에 등록한 제조·수입업체" in source
     assert "나라장터 직접가격 보유 업체" in source
     assert "품목 책임주체 상세보기" in source
     assert "선택 업체 식약처 업허가 확인" in source
-    assert "실제 조달 공급업체와 식약처 품목 책임주체·업허가 업체는 서로 다른 근거" in source
+    assert "위 실제 납품업체와는 다른 관계입니다" in source

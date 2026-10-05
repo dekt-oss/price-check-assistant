@@ -144,4 +144,4 @@ def test_dashboard_uses_fixed_header_before_area_tabs() -> None:
     assert "column_order=workspace_header_ui.direct_table_columns(direct_rows)" in source
     assert 'st.expander("확인 내역 · 안전정보 · 검색어 해석", expanded=False)' in source
     # The deferred research loader lives with the reference evidence, not above the fold.
-    assert source.index('st.markdown("#### 참고근거 · Research")') < source.index("research_button_label")
+    assert source.index('st.markdown("#### 참고근거 · 입찰·계약 자료")') < source.index("research_button_label")

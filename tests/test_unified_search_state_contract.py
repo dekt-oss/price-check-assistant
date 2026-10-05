@@ -47,7 +47,7 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "MFDS_ADMIN_SANCTION_PAGE_URL" in source
     assert "MFDS_SAFETY_LETTER_PAGE_URL" in source
     assert "공식 안전정보 확인키" in source
-    assert "priced_active_crosslinks" in source
+    assert "same_item_ui.build_same_item_rows(" in source
     assert '"현재 모델"' in source
     assert "최대 25개" not in source
     assert 'id="unified-search-runtime-v3"' in source
@@ -80,7 +80,7 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "식약처 품목번호 기준 모델·조달가격 연결" in source
     assert "companies[0]" not in source
     assert "식약처 품목번호" in source
-    assert "동일 품목 → 품목 책임주체 → 모델 → 식약처 품목번호 → 나라장터 가격" in source
+    assert "같은 품목의 다른 등록모델과 가격" in source
     assert "_split_transaction_rows_compat" in source
     assert "_strict_candidates_compat" in source
     assert "direct_transaction_rows" not in source
