@@ -241,4 +241,5 @@ def test_dashboard_caption_counts_only_net_added_live_rows() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
     assert "live_added = sum(" in source
-    assert "이미 수집 데이터에 반영되어 있습니다" in source
+    assert "모두 이미 반영" in source
+    assert "수집 전 거래 {live_added}건 추가" in source

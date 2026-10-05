@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
+
+from purchase_price.ui import workspace_header as header
+
+
+def _stats(**overrides):
+    values = {
+        "direct_count": 50,
+        "reference_count": 0,
+        "research_count": 0,
+        "supplier_count": 1,
+        "demand_institution_count": 45,
+        "min_price": Decimal("396000"),
+        "median_price": Decimal("396000"),
+        "max_price": Decimal("396000"),
+        "latest_transaction_date": "2026-10-01",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_price_card_single_price_keeps_smoke_count_phrase() -> None:
+    card = header.price_card(_stats())
+
+    assert card.value == "396,000원"
+    assert card.note == "직접 동일성 확인 거래 50건 · 최근 2026-10-01"
+    assert card.tone == header.TONE_OK
+
+
+def test_price_card_range_shows_median() -> None:
+    card = header.price_card(_stats(min_price=Decimal("100"), median_price=Decimal("150"), max_price=Decimal("300")))
+
+    assert card.value == "100 ~ 300원"
+    assert "중앙값 150원" in card.note
+
+
+def test_price_card_zero_and_unavailable_are_distinct() -> None:
+    zero = header.price_card(_stats(direct_count=0, min_price=None, max_price=None, reference_count=3))
+    unavailable = header.price_card(_stats(), unavailable=True)
+
+    assert zero.value == "직접근거 없음"
+    assert "직접 동일성 확인 거래 0건" in zero.note
+    assert "참고거래 3건" in zero.note
+    assert unavailable.value == "조회 불가"
+    assert unavailable.tone == header.TONE_WARN
+    # The dashboard contract bans this phrase; zero evidence is not "no trade".
+    assert "거래 없음" not in zero.value + zero.note
+
+
+def test_safety_codes_are_translated_and_only_recalls_raise_a_banner() -> None:
+    assert header.safety_card("CHECKED_NONE").value == "확인된 회수 없음"
+    assert header.safety_card("RED").tone == header.TONE_DANGER
+    assert header.safety_card("weird").value == "안전정보 미확인"
+    assert header.safety_needs_banner("RED")
+    assert header.safety_needs_banner("AMBER")
+    assert not header.safety_needs_banner("CHECKED_NONE")
+    assert not header.safety_needs_banner("CHECK_FAILED")
+
+
+def test_mfds_card_states() -> None:
+    found = header.mfds_card("품목번호 확인", permit_numbers=["제허 12-1551 호"], companies=["지이헬스케어코리아"])
+    waiting = header.mfds_card("조회 대기")
+    missing = header.mfds_card("0건", coverage_percent=25.8)
+
+    assert found.note == "제허 12-1551 호 · 지이헬스케어코리아"
+    assert found.tone == header.TONE_OK
+    assert waiting.value == "형명 조회 대기"
+    assert "아래 버튼" in waiting.note
+    assert missing.value == "찾지 못함"
+    assert "26%" in missing.note
+    assert "미등록" not in missing.value + missing.note
+    same_item = header.mfds_card("품목 확인", model_count=632, active_model_count=410)
+    assert same_item.note == "같은 품목 등록모델 632개(국내 정상 410개) · 이 모델명과 일치하는 등록은 미확인"
+
+
+def test_identity_line_prefers_mfds_then_procurement_name() -> None:
+    assert (
+        header.identity_line(
+            product_name="자동심장충격기",
+            permit_numbers=["제허 1 호", "제허 1 호", "제허 2 호"],
+            permit_type="허가",
+            companies=["A", "B"],
+        )
+        == "자동심장충격기 · 식약처 품목번호 [허가] 제허 1 호 외 1건 · 품목 책임주체 A 외 1곳"
+    )
+    assert (
+        header.identity_line(procurement_product="저출력심장충격기", procurement_maker="나눔테크")
+        == "나라장터 품명 저출력심장충격기 · 제조사 나눔테크"
+    )
+    assert header.identity_line() == ""
+
+
+def test_most_common_text_ignores_unknown() -> None:
+    rows = [{"품목/모델": "a"}, {"품목/모델": "b"}, {"품목/모델": "b"}, {"품목/모델": "미확인"}]
+
+    assert header.most_common_text(rows, "품목/모델") == "b"
+    assert header.most_common_text([{"품목/모델": "미확인"}], "품목/모델") is None
+
+
+def test_procurement_product_name_uses_title_class_part() -> None:
+    rows = [{"품목/모델": "저출력심장충격기, 나눔테크, NT-SG, (부품)스탠드형보관함"}] * 2
+
+    assert header.procurement_product_name(rows) == "저출력심장충격기"
+
+
+def test_data_basis_line() -> None:
+    line = header.data_basis_line(
+        track_b_data_as_of="2026-09-18",
+        live_note="나라장터 실시간 보강 2026-09-19 ~ 2026-10-05: 조회된 8건 모두 이미 반영",
+        mfds_coverage_percent=25.8,
+    )
+    assert line == (
+        "자료 기준 · 나라장터 2026-09-18까지 수집 · 나라장터 실시간 보강 2026-09-19 ~ 2026-10-05: "
+        "조회된 8건 모두 이미 반영 · 식약처 제품정보 26% 수집 중"
+    )
+    assert "전체 수집 완료" in header.data_basis_line(track_b_data_as_of="x", mfds_complete=True)
+    assert header.data_basis_line(track_b_data_as_of=None) == ""
+
+
+def test_direct_table_columns_keep_only_available_compact_columns() -> None:
+    rows = [{"거래일": "d", "모델": "m", "가격": "p", "원문근거키": "k"}]
+
+    assert header.direct_table_columns(rows) == ["거래일", "모델", "가격"]
+
+
+def test_cards_html_escapes_values() -> None:
+    markup = header.render_cards_html([header.SummaryCard("x", "<b>", "1<2", "a&b", header.TONE_OK)])
+
+    assert "&lt;b&gt;" in markup and "1&lt;2" in markup and "a&amp;b" in markup
+    assert 'id="purchase-workspace-header-v1"' in markup
+
+
+def test_dashboard_uses_fixed_header_before_area_tabs() -> None:
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+
+    cards = source.index("workspace_header_ui.render_cards_html(header_cards)")
+    segment = source.index("st.segmented_control(")
+    assert cards < segment
+    assert 'id="purchase-workspace-runtime-v11"' in source
+    assert "column_order=workspace_header_ui.direct_table_columns(direct_rows)" in source
+    assert 'st.expander("확인 내역 · 안전정보 · 검색어 해석", expanded=False)' in source
+    # The deferred research loader lives with the reference evidence, not above the fold.
+    assert source.index('st.markdown("#### 참고근거 · Research")') < source.index("research_button_label")

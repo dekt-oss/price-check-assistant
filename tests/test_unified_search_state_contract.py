@@ -38,10 +38,11 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "시장조사표 Excel 내려받기" in source
     assert '"track_b_data_as_of"' in source
     assert 'data_as_of=track_b_data_as_of' in source
-    assert "나라장터 직접가격 데이터 기준일" in source
+    assert "workspace_header_ui.data_basis_line(" in source
     assert "전체 데이터 coverage 기준일은 아직 미확인" in source
     assert "build_manual_safety_check_state" in source
-    assert 'st.markdown("### Safety")' in source
+    assert 'st.markdown("##### 안전정보 확인 내역")' in source
+    assert "workspace_header_ui.safety_needs_banner(safety_status_value)" in source
     assert "MFDS_RECALL_PAGE_URL" in source
     assert "MFDS_ADMIN_SANCTION_PAGE_URL" in source
     assert "MFDS_SAFETY_LETTER_PAGE_URL" in source
