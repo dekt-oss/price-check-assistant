@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -18,6 +20,10 @@ MFDS_BUSINESS_LICENSE_BASE_URL = (
     "https://apis.data.go.kr/1471000/MdlpMnfcturPrmisnInfoService01"
 )
 MFDS_BUSINESS_LICENSE_OPERATION = "getMdlpMnfcturPrmisnList01"
+
+
+MODEL_INFO_PAGE_SIZE = 500
+MODEL_INFO_MAX_WORKERS = 4
 
 
 @dataclass(frozen=True)
@@ -253,7 +259,7 @@ class MfdsModelInfoClient:
         *,
         product_name: str,
         page_no: int = 1,
-        num_of_rows: int = 100,
+        num_of_rows: int = MODEL_INFO_PAGE_SIZE,
     ) -> MfdsPage:
         product_name = product_name.strip()
         if not product_name:
@@ -272,23 +278,83 @@ class MfdsModelInfoClient:
         product_name: str,
         *,
         max_pages: int = 10,
-        num_of_rows: int = 100,
+        num_of_rows: int = MODEL_INFO_PAGE_SIZE,
+        max_workers: int = MODEL_INFO_MAX_WORKERS,
     ) -> tuple[MedicalDeviceModelRecord, ...]:
-        records: list[MedicalDeviceModelRecord] = []
-        for page_no in range(1, max_pages + 1):
-            page = self.fetch_page(
-                product_name=product_name,
-                page_no=page_no,
-                num_of_rows=num_of_rows,
+        """All model rows for a product name.
+
+        The API takes roughly 7-60 s per request regardless of page size, so pages are large
+        (500 rows) and, once page 1 reports totalCount, the remaining pages are fetched
+        concurrently. Order is preserved.
+        """
+
+        first = self.fetch_page(product_name=product_name, page_no=1, num_of_rows=num_of_rows)
+        records = [parse_model_record(item) for item in first.items]
+        if not first.items or len(first.items) < num_of_rows:
+            return tuple(records)
+        if first.total_count is None:
+            for page_no in range(2, max_pages + 1):
+                page = self.fetch_page(
+                    product_name=product_name, page_no=page_no, num_of_rows=num_of_rows
+                )
+                records.extend(parse_model_record(item) for item in page.items)
+                if len(page.items) < num_of_rows:
+                    break
+            return tuple(records)
+
+        page_count = min(max_pages, math.ceil(first.total_count / num_of_rows))
+        remaining = list(range(2, page_count + 1))
+        if not remaining:
+            return tuple(records)
+        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(remaining)))) as pool:
+            pages = list(
+                pool.map(
+                    lambda page_no: self.fetch_page(
+                        product_name=product_name, page_no=page_no, num_of_rows=num_of_rows
+                    ),
+                    remaining,
+                )
             )
+        for page in pages:
             records.extend(parse_model_record(item) for item in page.items)
-            if not page.items:
-                break
-            if page.total_count is not None and len(records) >= page.total_count:
-                break
-            if len(page.items) < num_of_rows:
-                break
         return tuple(records)
+
+    def search_item_numbers(
+        self,
+        item_numbers: Sequence[str],
+        *,
+        max_workers: int = MODEL_INFO_MAX_WORKERS,
+    ) -> tuple[MedicalDeviceModelRecord, ...]:
+        """Exact lookup by MFDS item number (MEDDEV_ITEM_NO): one request per item.
+
+        Use this when the identity index already resolved the permit number; it returns the
+        official registration/cancellation status without scanning the whole product name.
+        """
+
+        numbers = tuple(dict.fromkeys(str(number).strip() for number in item_numbers if number))
+        if not numbers:
+            return ()
+
+        def fetch(number: str) -> tuple[MedicalDeviceModelRecord, ...]:
+            payload = self.client.get_json(
+                self.base_url,
+                MFDS_MODEL_INFO_OPERATION,
+                MEDDEV_ITEM_NO=number,
+                pageNo=1,
+                numOfRows=MODEL_INFO_PAGE_SIZE,
+            )
+            page = unwrap_mfds_page(payload)
+            # Server-side filtering is exact today; keep a client-side guard anyway.
+            target = number.replace(" ", "")
+            return tuple(
+                record
+                for record in (parse_model_record(item) for item in page.items)
+                if (record.permit_number or "").replace(" ", "") == target
+            )
+
+        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(numbers)))) as pool:
+            results = list(pool.map(fetch, numbers))
+        return tuple(record for group in results for record in group)
 
 
 class MfdsBusinessLicenseClient:

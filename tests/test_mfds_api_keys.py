@@ -107,7 +107,7 @@ def test_dashboard_defers_model_info_and_routes_keys() -> None:
 
     assert "mfds = research_mfds_for_workspace(query, track_b)" not in source
     assert '"deferred"' in source
-    assert "식약처 형명정보 조회 (약 30초~2분)" in source
+    assert "식약처 형명정보 조회 (약 10~40초)" in source
     assert "_MFDS_MODEL_INFO_CACHE" in source
     assert "client=mfds_model_info_json_client(settings)" in source
     assert "client=mfds_json_client(get_settings())" in source
