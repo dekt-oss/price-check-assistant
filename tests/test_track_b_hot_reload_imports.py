@@ -92,3 +92,63 @@ def test_dashboard_reloads_retained_pre_fix_track_b_modules() -> None:
     assert hasattr(track_b_db_quote_comparison, "_not_cancelled_clause")
     assert hasattr(snapshot, "WORKSPACE_LOOKUP_LIMIT")
     assert track_b_live_gap_fill.DROPS_CANCELLED_LINES is True
+
+
+def test_native_snapshot_lookup_reads_beyond_50_rows(tmp_path) -> None:
+    """The workspace opens the native snapshot; its lookup must use the 500-row limit."""
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from purchase_price.models import Base
+    from purchase_price.schemas import ProductQuery
+    from purchase_price.services import track_b_r2_quote_index as native
+    from purchase_price.services.g2b_track_b_normalization import TrackBRawPage
+    from purchase_price.services.track_b_db_quote_comparison import ingest_track_b_page
+
+    items = [
+        {
+            "cntrctDlvrReqNo": f"R{n}",
+            "cntrctDlvrReqChgOrd": "00",
+            "prdctSno": "1",
+            "dtilPrdctClsfcNo": "4217210101",
+            "prdctIdntNoNm": "저출력심장충격기, 나눔테크, NT-SG, 보관함",
+            "prdctUprc": "396000",
+            "prdctQty": "1",
+            "prdctAmt": "396000",
+            "cntrctDlvrReqDate": "20260901",
+            "corpNm": "(주)나눔테크",
+            "dminsttNm": f"기관{n}",
+        }
+        for n in range(60)
+    ]
+    page = TrackBRawPage(
+        payload={
+            "schema": "g2b-track-b-page-v1",
+            "operation": "getSpcifyPrdlstPrcureInfoList",
+            "request": {
+                "detail_code": "4217210101",
+                "begin_date": "2025-09-12",
+                "end_date": "2026-09-11",
+                "page_no": 1,
+                "page_size": 999,
+                "final_change_order_filter": "OMITTED",
+            },
+            "response": {"items": items},
+        },
+        raw_object_key="raw/v1/getSpcifyPrdlstPrcureInfoList-page/test.json.gz",
+        raw_payload_sha256="a" * 64,
+    )
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'i.sqlite'}")
+    Base.metadata.create_all(engine)
+    session = Session(bind=engine)
+    ingest_track_b_page(session, page)
+    session.commit()
+    snapshot = native.TrackBServingSnapshot(status="available", engine=engine, session=session)
+
+    result = snapshot.lookup(ProductQuery(product_name="", model_name="NT-SG"), quote_unit_price=None)
+
+    assert native.WORKSPACE_LOOKUP_LIMIT == 500
+    assert len(result.candidates) == 60
+    session.close()
+    engine.dispose()

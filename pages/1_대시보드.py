@@ -26,6 +26,7 @@ from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services import track_b_db_quote_comparison as track_b_comparison_service
 from purchase_price.services import track_b_live_gap_fill as track_b_live_service
+from purchase_price.services import track_b_r2_quote_index as track_b_r2_index_service
 from purchase_price.services import track_b_serving_snapshot as track_b_snapshot_service
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
@@ -160,6 +161,7 @@ _TRACK_B_RELOAD_LOCK = Lock()
 # (module, attribute that only the current code has), reloaded in dependency order.
 _TRACK_B_RUNTIME_MARKERS = (
     (track_b_comparison_service, "_not_cancelled_clause"),
+    (track_b_r2_index_service, "WORKSPACE_LOOKUP_LIMIT"),
     (track_b_snapshot_service, "WORKSPACE_LOOKUP_LIMIT"),
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
 )
@@ -2201,6 +2203,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v11" style="display:none">purchase-workspace-runtime-v11</span>'
     '<span id="purchase-workspace-runtime-v12" style="display:none">purchase-workspace-runtime-v12</span>'
     '<span id="purchase-workspace-runtime-v13" style="display:none">purchase-workspace-runtime-v13</span>'
+    '<span id="purchase-workspace-runtime-v14" style="display:none">purchase-workspace-runtime-v14</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
