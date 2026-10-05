@@ -243,3 +243,24 @@ def test_dashboard_caption_counts_only_net_added_live_rows() -> None:
     assert "live_added = sum(" in source
     assert "모두 이미 반영" in source
     assert "수집 전 거래 {live_added}건 추가" in source
+
+
+def test_live_cancelling_change_order_drops_the_collected_line() -> None:
+    import dataclasses
+
+    collected = gap.fetch_live_gap(
+        QUERY, detail_codes=["4217210101"], window=WINDOW, client=FakeClient({"4217210101": [_item("R1"), _item("R2")]})
+    ).candidates
+    indexed = TrackBQuoteComparison(
+        "success",
+        tuple(dataclasses.replace(c, transaction_type="나라장터 납품요구") for c in collected),
+        2,
+    )
+    cancel = _item("R1", change="01")
+    cancel["prdctQty"] = "0"
+    cancel["prdctAmt"] = "0"
+    live = gap.fetch_live_gap(QUERY, detail_codes=["4217210101"], window=WINDOW, client=FakeClient({"4217210101": [cancel]}))
+
+    merged = gap.merge_live_gap(indexed, live)
+
+    assert [c.source_record_id for c in merged.candidates] == ["delivery:R2|change:00|line:1"]

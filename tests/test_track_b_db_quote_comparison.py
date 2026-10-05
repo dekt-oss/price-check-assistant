@@ -403,3 +403,32 @@ def test_comparison_exposes_search_keys_used_for_zero_decision(session: Session)
     assert result.evidence_status == PriceEvidenceStatus.ZERO
     assert "모델: MA-045DT" in result.search_keys
     assert "품목: 제습기" in result.search_keys
+
+
+def test_change_order_that_cancels_the_line_removes_it_from_direct_trades(session: Session) -> None:
+    # Real case 2026-10-01: 00 ordered 1 unit, 01 changed it by -1 -> prdctQty 0, prdctAmt 0,
+    # while prdctUprc still carries the unit price.
+    ingest_track_b_page(session, _page([_item(change="00", price="90")]))
+    cancelled = _item(change="01", price="90")
+    cancelled["prdctQty"] = "0"
+    cancelled["prdctAmt"] = "0"
+    ingest_track_b_page(session, _page([cancelled]))
+    session.commit()
+
+    result = compare_track_b_quote(session, _query(), quote_unit_price=None)
+    batch = compare_track_b_models_batch(session, (_query(),))
+
+    assert result.candidates == ()
+    assert batch[0].candidates == ()
+
+
+def test_workspace_lookup_reads_beyond_the_old_50_row_default() -> None:
+    from pathlib import Path as _Path
+
+    from purchase_price.services import track_b_serving_snapshot as snapshot
+
+    assert snapshot.WORKSPACE_LOOKUP_LIMIT == 500
+    source = _Path("src/purchase_price/services/track_b_serving_snapshot.py").read_text(encoding="utf-8")
+    assert "limit=WORKSPACE_LOOKUP_LIMIT" in source
+    dashboard = _Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+    assert '건 기준 (더 오래된 거래 있음)' in dashboard

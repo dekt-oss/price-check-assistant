@@ -15,6 +15,8 @@ from purchase_price.schemas import ProductQuery
 from purchase_price.services import track_b_r2_quote_index as legacy_track_b_r2
 from purchase_price.storage.r2 import R2ConfigurationError, R2IntegrityError
 
+WORKSPACE_LOOKUP_LIMIT = 500
+
 
 @dataclass
 class TrackBServingSnapshot:
@@ -56,10 +58,14 @@ class TrackBServingSnapshot:
         if self.status in {"unavailable", "not_ingested"} or self.session is None:
             return TrackBQuoteComparison(self.status, (), 0)
 
+        # The workspace header summarizes every direct trade it receives (range, median,
+        # suppliers, institutions). The old 50-row default silently summarized only the newest
+        # 50 (NT-SG: 50 of 406 trades), so read up to the comparison's 500-row maximum.
         result = compare_track_b_quote(
             self.session,
             query,
             quote_unit_price=quote_unit_price,
+            limit=WORKSPACE_LOOKUP_LIMIT,
         )
         return refine_track_b_reference_quality(self.session, query, result)
 

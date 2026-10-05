@@ -285,9 +285,12 @@ def merge_live_gap(
             if current is None or change > current[0]:
                 best[key] = (change, order if current is None else current[1], candidate)
             order += 1
+    # Dedupe first so a live cancelling change order (final quantity 0) also replaces the
+    # older collected row of the same line, then drop the cancelled line itself.
     merged = tuple(
         candidate
         for _change, _order, candidate in sorted(best.values(), key=lambda item: item[1])
+        if not (candidate.quantity is not None and candidate.quantity == 0)
     )
     merged = tuple(
         sorted(merged, key=lambda candidate: candidate.transaction_date or "", reverse=True)

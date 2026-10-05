@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import importlib
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -1385,8 +1386,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 "대표모델을 임의로 고르지 않고 가격 비교 탭에서 모델별로 보여줍니다."
             )
 
+    price_header_card = workspace_header_ui.price_card(stats, unavailable=track_b_unavailable)
+    if getattr(track_b, "status", "") == "partial" and stats.direct_count:
+        # More matching trades exist than one lookup returns; say what the summary covers.
+        price_header_card = dataclasses.replace(
+            price_header_card,
+            note=price_header_card.note + f" · 최근 {stats.direct_count}건 기준 (더 오래된 거래 있음)",
+        )
     header_cards = [
-        workspace_header_ui.price_card(stats, unavailable=track_b_unavailable),
+        price_header_card,
         workspace_header_ui.supplier_card(stats),
         workspace_header_ui.mfds_card(
             mfds_metric,
