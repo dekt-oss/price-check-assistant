@@ -109,6 +109,6 @@ def test_status_notes_explain_unknown_rows_and_missing_current_model() -> None:
     view = same.build_same_item_rows(links, index, current_keys=[("수허 15-1338 호", "Efficia DFM100")])
     notes = same.status_notes(view)
 
-    assert any("상태 미확인" in note and "형명 조회 결과에 없던" in note for note in notes)
-    assert any("검색한 모델은 아직" in note for note in notes)
+    assert any("상태 미확인" in note and "아직 확인되지 않은 모델" in note for note in notes)
+    assert "검색한 모델은 아직" in (same.current_model_note(view) or "")
     assert same.status_notes(same.build_same_item_rows(LINKS, None))[0].startswith("식약처 상태는 상단 버튼")

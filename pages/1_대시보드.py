@@ -23,6 +23,7 @@ from purchase_price.evidence_domain import (
 )
 from purchase_price.schemas import ProductQuery
 from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
+from purchase_price.services import mfds_item_status_r2 as mfds_item_status_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services import track_b_db_quote_comparison as track_b_comparison_service
 from purchase_price.services import track_b_live_gap_fill as track_b_live_service
@@ -102,6 +103,7 @@ from purchase_price.services.unified_search_intent import (
     interpret_unified_search,
 )
 from purchase_price.ui import same_item_compare as same_item_ui
+from purchase_price.ui import track_b_transactions as track_b_transactions_ui
 from purchase_price.ui import workspace_header as workspace_header_ui
 from purchase_price.ui.market_research import (
     render_market_reference_summary,
@@ -164,6 +166,8 @@ _TRACK_B_RUNTIME_MARKERS = (
     (track_b_r2_index_service, "WORKSPACE_LOOKUP_LIMIT"),
     (track_b_snapshot_service, "WORKSPACE_LOOKUP_LIMIT"),
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
+    (track_b_transactions_ui, "GROUP_QUANTITY_NORMALIZED"),
+    (same_item_ui, "ITEM_STATUS_AWARE"),
 )
 
 
@@ -1437,9 +1441,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
         procurement_product=workspace_header_ui.procurement_product_name(direct_rows),
         procurement_maker=workspace_header_ui.most_common_text(direct_rows, "제조사"),
     )
+    procurement_spec = workspace_header_ui.most_common_text(direct_rows, "규격") or ""
     with identity_slot:
         if identity_text:
             st.caption(identity_text)
+        if "부품" in procurement_spec:
+            st.warning(
+                f"나라장터 규격상 **부품**입니다 · 규격: {procurement_spec}. "
+                "아래 거래가는 본체가 아니라 이 부품의 가격입니다."
+            )
         if (
             isinstance(indexed_identity, MfdsIdentityLookup)
             and indexed_identity.status == "success"
@@ -1458,10 +1468,30 @@ def _render_search_result(state: dict[str, Any]) -> None:
             price_header_card,
             note=price_header_card.note + f" · 최근 {stats.direct_count}건 기준 (더 오래된 거래 있음)",
         )
-    header_cards = [
-        price_header_card,
-        workspace_header_ui.supplier_card(stats),
-        workspace_header_ui.mfds_card(
+    # Instant 국내 정상/취소 status from the item-status index (fail-closed while it is still
+    # being collected: active is definitive, inactive only after a verified full cycle).
+    item_status_lookup = mfds_item_status_service.lookup_item_status_from_r2(
+        [
+            *identity_permits,
+            *(row.get("식약처 품목번호") for row in mfds_procurement_crosslinks),
+        ]
+    )
+    item_status_labels: dict[str, str] = {}
+    for status_key, item_status in item_status_lookup.statuses.items():
+        label = mfds_item_status_service.item_status_label(
+            item_status, cycle_verified=item_status_lookup.cycle_verified
+        )
+        if label:
+            item_status_labels[status_key] = label
+    identity_status_label = next(
+        (
+            item_status_labels["".join(permit.split())]
+            for permit in identity_permits
+            if "".join(permit.split()) in item_status_labels
+        ),
+        None,
+    )
+    mfds_header_card = workspace_header_ui.mfds_card(
             mfds_metric,
             permit_numbers=identity_permits,
             companies=identity_companies,
@@ -1470,7 +1500,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
             active_model_count=(
                 len(mfds.active_records) if isinstance(mfds, MfdsWorkspaceResult) else None
             ),
-        ),
+        )
+    if identity_status_label:
+        mfds_header_card = dataclasses.replace(
+            mfds_header_card, note=f"{identity_status_label} · {mfds_header_card.note}"
+        )
+    header_cards = [
+        price_header_card,
+        workspace_header_ui.supplier_card(stats),
+        mfds_header_card,
         workspace_header_ui.safety_card(safety_status_value),
     ]
     with cards_slot:
@@ -2148,9 +2186,25 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success"
                 else ()
             ),
+            item_status_labels=item_status_labels,
+            reference_price=stats.median_price,
         )
         if same_item_view.rows:
-            st.dataframe(list(same_item_view.rows), use_container_width=True, hide_index=True)
+            current_note = same_item_ui.current_model_note(same_item_view)
+            if current_note:
+                st.info(current_note)
+            gap_note = same_item_ui.price_gap_note(same_item_view)
+            if gap_note:
+                st.warning(gap_note)
+            st.dataframe(
+                list(same_item_view.rows),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "품목 책임주체": st.column_config.TextColumn("품목 책임주체", width="medium"),
+                    "실제 납품업체": st.column_config.TextColumn("실제 납품업체", width="medium"),
+                },
+            )
             notes = [same_item_ui.hidden_note(same_item_view), *same_item_ui.status_notes(same_item_view)]
             st.caption(". ".join(note for note in notes if note) or "모든 모델을 표시했습니다.")
         elif mfds_procurement_crosslinks:
@@ -2204,6 +2258,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v12" style="display:none">purchase-workspace-runtime-v12</span>'
     '<span id="purchase-workspace-runtime-v13" style="display:none">purchase-workspace-runtime-v13</span>'
     '<span id="purchase-workspace-runtime-v14" style="display:none">purchase-workspace-runtime-v14</span>'
+    '<span id="purchase-workspace-runtime-v15" style="display:none">purchase-workspace-runtime-v15</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
