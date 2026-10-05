@@ -18,6 +18,8 @@ from purchase_price.storage.r2 import R2ConfigurationError, R2IntegrityError
 from purchase_price.storage.r2_serving_index import R2ServingIndexRef, R2ServingIndexStore
 from purchase_price.storage.r2_state import R2OperationalStateStore
 
+WORKSPACE_LOOKUP_LIMIT = 500
+
 POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
 _CACHE_DIR = Path(tempfile.gettempdir()) / "price-check-track-b"
 _VALIDATED_CACHE_FILES: dict[str, tuple[int, int, int, int]] = {}
@@ -136,10 +138,14 @@ class TrackBServingSnapshot:
         if self.status in {"unavailable", "not_ingested"} or self.session is None:
             return TrackBQuoteComparison(self.status, (), 0)
 
+        # Summarize every direct trade, not the comparison's 50-row default (see
+        # track_b_serving_snapshot.WORKSPACE_LOOKUP_LIMIT; this native snapshot is the one the
+        # workspace actually opens).
         result = compare_track_b_quote(
             self.session,
             query,
             quote_unit_price=quote_unit_price,
+            limit=WORKSPACE_LOOKUP_LIMIT,
         )
         return refine_track_b_reference_quality(self.session, query, result)
 
