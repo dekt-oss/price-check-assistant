@@ -257,6 +257,10 @@ def fetch_live_gap(
     )
 
 
+# Runtime marker: the dashboard reloads a retained pre-fix copy of this module (hot reload).
+DROPS_CANCELLED_LINES = True
+
+
 def _line_identity(source_record_id: str) -> tuple[tuple[str, str], int] | None:
     match = _SOURCE_ID.match(source_record_id or "")
     if not match:

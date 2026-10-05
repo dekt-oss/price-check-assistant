@@ -24,6 +24,9 @@ from purchase_price.evidence_domain import (
 from purchase_price.schemas import ProductQuery
 from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
+from purchase_price.services import track_b_db_quote_comparison as track_b_comparison_service
+from purchase_price.services import track_b_live_gap_fill as track_b_live_service
+from purchase_price.services import track_b_serving_snapshot as track_b_snapshot_service
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
@@ -92,9 +95,7 @@ from purchase_price.services.track_b_live_gap_fill import (
     fetch_live_gap,
     indexed_detail_codes,
     live_gap_window,
-    merge_live_gap,
 )
-from purchase_price.services.track_b_serving_snapshot import open_track_b_serving_snapshot
 from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
     interpret_unified_search,
@@ -153,6 +154,36 @@ def _mfds_identity_r2_runtime():
             return importlib.reload(module)
         except Exception:
             return module
+
+
+_TRACK_B_RELOAD_LOCK = Lock()
+# (module, attribute that only the current code has), reloaded in dependency order.
+_TRACK_B_RUNTIME_MARKERS = (
+    (track_b_comparison_service, "_not_cancelled_clause"),
+    (track_b_snapshot_service, "WORKSPACE_LOOKUP_LIMIT"),
+    (track_b_live_service, "DROPS_CANCELLED_LINES"),
+)
+
+
+def _track_b_runtime():
+    """Reload Track B lookup modules that Streamlit retained from before a deploy.
+
+    Production kept the pre-#275 modules after the page itself updated (2026-10-05): the
+    header showed the new label but still only 50 trades and counted cancelled lines.
+    Returns the (snapshot, live gap-fill) modules to use for this search.
+    """
+
+    if any(not hasattr(module, marker) for module, marker in _TRACK_B_RUNTIME_MARKERS):
+        with _TRACK_B_RELOAD_LOCK:
+            for module, marker in _TRACK_B_RUNTIME_MARKERS:
+                if hasattr(module, marker):
+                    continue
+                try:
+                    importlib.invalidate_caches()
+                    importlib.reload(module)
+                except Exception:
+                    pass
+    return track_b_snapshot_service, track_b_live_service
 
 
 def _lookup_mfds_identity_runtime(query: str):
@@ -783,6 +814,8 @@ def _execute_search(
     selected_identity: MfdsIdentityRecord | None = None,
     selected_identity_token: str = "",
 ) -> dict[str, Any]:
+    snapshot_runtime, live_runtime = _track_b_runtime()
+    merge_live_gap = live_runtime.merge_live_gap
     raw_search = search_text.strip()
     search_started = monotonic()
     search_timings: dict[str, float] = {}
@@ -893,7 +926,7 @@ def _execute_search(
     track_b_started = monotonic()
     track_b_data_as_of: str | None = None
     track_b_index_updated_at: str | None = None
-    with open_track_b_serving_snapshot() as track_b_snapshot:
+    with snapshot_runtime.open_track_b_serving_snapshot() as track_b_snapshot:
         track_b_data_as_of = getattr(track_b_snapshot, "data_as_of", None)
         track_b_index_updated_at = getattr(track_b_snapshot, "index_updated_at", None)
         track_b = track_b_snapshot.lookup(
@@ -2167,6 +2200,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v10" style="display:none">purchase-workspace-runtime-v10</span>'
     '<span id="purchase-workspace-runtime-v11" style="display:none">purchase-workspace-runtime-v11</span>'
     '<span id="purchase-workspace-runtime-v12" style="display:none">purchase-workspace-runtime-v12</span>'
+    '<span id="purchase-workspace-runtime-v13" style="display:none">purchase-workspace-runtime-v13</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
