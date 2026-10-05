@@ -70,11 +70,14 @@ class KeyFallbackJsonClient:
         )
         self._factory = factory
         self._clients: dict[int, Any] = {}
+        self._clients_lock = Lock()
 
     def _client(self, index: int) -> Any:
-        if index not in self._clients:
-            self._clients[index] = self._factory(self.keys[index])
-        return self._clients[index]
+        # Model-info pages are fetched concurrently; create each per-key client once.
+        with self._clients_lock:
+            if index not in self._clients:
+                self._clients[index] = self._factory(self.keys[index])
+            return self._clients[index]
 
     def get_json(self, base_url: str, endpoint: str, **params: Any) -> dict[str, Any]:
         with _WORKING_KEY_LOCK:

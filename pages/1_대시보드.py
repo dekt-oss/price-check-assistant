@@ -1924,10 +1924,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
         elif mfds.status == "deferred":
             st.info(
                 "식약처 형명정보(국내 정상·취소 상태, 같은 품목의 등록모델)는 공식 API 응답이 "
-                "느려(1회 약 30초~1분) 검색과 분리했습니다. 필요할 때 아래 버튼으로 조회하세요."
+                "느려(조회 1회 약 10~40초) 검색과 분리했습니다. 필요할 때 아래 버튼으로 조회하세요."
             )
             if st.button(
-                "식약처 형명정보 조회 (약 30초~2분)",
+                "식약처 형명정보 조회 (약 10~40초)",
                 key=f"workspace_mfds_model_info::{quote_key}",
             ):
                 with st.status(
