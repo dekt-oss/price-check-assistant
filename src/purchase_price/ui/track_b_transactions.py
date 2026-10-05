@@ -79,13 +79,19 @@ def _text_or_unknown(value: Any) -> str:
     return text or "미확인"
 
 
+def _number_text(value: Any) -> str:
+    """1.000 -> 1, 2.50 -> 2.5, 100 -> 100 (Decimal keeps trailing zeros under :g)."""
+
+    try:
+        return format(Decimal(str(value)).normalize(), "f")
+    except (ArithmeticError, TypeError, ValueError):
+        return str(value)
+
+
 def _quantity_text(value: Any) -> str:
     if value is None:
         return "미확인"
-    try:
-        return f"{value:g}"
-    except (TypeError, ValueError):
-        return str(value)
+    return _number_text(value)
 
 
 def _quantity_unit(quantity: Any, unit: str | None) -> str:
@@ -94,10 +100,7 @@ def _quantity_unit(quantity: Any, unit: str | None) -> str:
     if quantity is None:
         quantity_text = ""
     else:
-        try:
-            quantity_text = f"{quantity:g}"
-        except (TypeError, ValueError):
-            quantity_text = str(quantity)
+        quantity_text = _number_text(quantity)
     return " ".join(part for part in (quantity_text, unit or "") if part) or "미확인"
 
 
