@@ -10,5 +10,5 @@ def test_quote_comparability_is_absorbed_into_quote_review_page() -> None:
     app.run(timeout=10)
 
     assert not app.exception
-    assert app.title[0].value == "견적 검토"
+    assert app.title[0].value == "견적 상세 검증"
     assert any("업로드" in item.value for item in app.info)

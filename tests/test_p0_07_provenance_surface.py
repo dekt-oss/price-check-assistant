@@ -37,7 +37,7 @@ def test_procurement_research_table_exposes_trace_fields_with_nonpromotion_warni
         '"변경차수"',
     ):
         assert label in text
-    assert "해당 필드 존재만으로 동일제품이나 단가 Evidence로 승격하지 않습니다" in text
+    assert "이 항목이 있다고 같은 제품이나 단가 근거로 보지 않습니다" in text
 
 
 def test_shopping_candidate_table_exposes_line_provenance_without_band_promotion() -> None:
@@ -52,4 +52,4 @@ def test_shopping_candidate_table_exposes_line_provenance_without_band_promotion
     assert '"납품조건": candidate.delivery_condition' in text
     assert '"변경차수": candidate.record_change_order' in text
     assert '"원문규격": candidate.original_specification' in text
-    assert "provenance이며 가격 승격 근거가 아닙니다" in text
+    assert "원문을 찾아가기 위한 정보입니다" in text

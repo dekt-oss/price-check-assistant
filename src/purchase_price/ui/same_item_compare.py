@@ -190,16 +190,15 @@ def _far_apart(price_text: object, reference: Decimal | None) -> bool:
 def current_model_note(view: SameItemView) -> str | None:
     if view.current_present:
         return None
-    return "검색한 모델은 아직 수집된 같은 품목 목록에 없어 이 표에 없습니다. 검색 모델의 가격은 위 카드를 보세요."
+    return "검색한 모델은 아직 모은 같은 품목 목록에 없어 이 표에 없습니다. 검색한 모델의 가격은 위 결론을 보세요."
 
 
 def price_gap_note(view: SameItemView) -> str | None:
     if not view.price_gap_count or view.reference_price is None:
         return None
     return (
-        f"표의 {view.price_gap_count}개 모델은 검색 모델 가격(중앙값 {view.reference_price:,.0f}원)과 "
-        "3배 이상 차이 납니다. 같은 식약처 품목이라도 용도·사양이 다른 장비(예: 전문가용 제세동기와 "
-        "자동심장충격기)일 수 있으니, 사양을 확인한 뒤 비교하세요."
+        f"{view.price_gap_count}개 모델은 검색한 모델(중앙값 {view.reference_price:,.0f}원)과 값이 "
+        "3배 넘게 차이 납니다. 같은 품목이라도 용도·사양이 다른 장비일 수 있으니 사양을 먼저 확인하세요."
     )
 
 
@@ -207,13 +206,12 @@ def status_notes(view: SameItemView) -> list[str]:
     notes: list[str] = []
     if not view.status_loaded:
         notes.append(
-            "식약처 상태는 상단 버튼으로 형명정보를 불러온 뒤 표시되며, 그 전에는 국내 정상으로 단정하지 않습니다"
+            "판매 가능 여부는 '식약처에서 확인'을 누른 뒤 표시합니다. 그 전에는 판매 가능으로 보지 않습니다"
         )
     elif view.unknown_status_count:
         notes.append(
-            f"상태 미확인 {view.unknown_status_count}개는 아직 확인되지 않은 모델입니다. "
-            "'국내 정상(품목)'은 품목번호별 상태표 기준이며, 취소·취하는 상태표 1회 전체 수집이 "
-            "검증된 뒤부터 표시합니다"
+            f"'확인 안 됨' {view.unknown_status_count}개는 판매 상태를 아직 모르는 모델입니다. "
+            "'허가 기준'은 허가번호 단위 상태이며, 취소 여부는 식약처 상태표를 한 번 다 모은 뒤부터 표시합니다"
         )
     return notes
 
@@ -221,7 +219,7 @@ def status_notes(view: SameItemView) -> list[str]:
 def hidden_note(view: SameItemView) -> str:
     parts = []
     if view.hidden_unpriced:
-        parts.append(f"조달가격 없는 모델 {view.hidden_unpriced}개")
+        parts.append(f"거래가 없는 모델 {view.hidden_unpriced}개")
     if view.hidden_inactive:
-        parts.append(f"취소·취하·수출용 {view.hidden_inactive}개")
-    return "숨김 · " + " · ".join(parts) if parts else ""
+        parts.append(f"취소·수출 전용 {view.hidden_inactive}개")
+    return "숨긴 모델 · " + " · ".join(parts) if parts else ""

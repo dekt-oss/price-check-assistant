@@ -82,7 +82,7 @@ def test_price_gap_note_flags_rows_three_times_apart() -> None:
     view = same.build_same_item_rows(links, None, reference_price=Decimal("11550000"))
 
     assert view.price_gap_count == 1
-    assert "1개 모델은 검색 모델 가격(중앙값 11,550,000원)과 3배 이상" in same.price_gap_note(view)
+    assert "1개 모델은 검색한 모델(중앙값 11,550,000원)과 값이 3배 넘게" in same.price_gap_note(view)
     assert same.price_bounds("직접 동일성 확인 거래 0건") is None
 
 
@@ -93,8 +93,11 @@ def test_dashboard_wires_item_status_part_warning_and_note_order() -> None:
     assert "item_status_labels=item_status_labels" in source
     assert "reference_price=stats.median_price" in source
     assert 'if "부품" in procurement_spec:' in source
-    assert source.index("same_item_ui.current_model_note(same_item_view)") < source.index(
-        "list(same_item_view.rows)"
+    assert source.index("same_item_ui.current_model_note(summary_view)") < source.index(
+        "result_summary_ui.same_item_summary_rows(summary_view.rows)"
+    )
+    assert source.index("same_item_ui.current_model_note(full_view)") < source.index(
+        "result_summary_ui.display_rows(full_view.rows)"
     )
     assert '(same_item_ui, "ITEM_STATUS_AWARE")' in source
     assert 'id="purchase-workspace-runtime-v15"' in source

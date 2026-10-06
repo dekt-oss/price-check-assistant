@@ -55,7 +55,7 @@ def test_rows_group_by_company_with_current_first_and_default_filters() -> None:
     assert view.rows[0]["식약처 품목번호"] == "[허가] 제허 1"
     assert view.rows[0]["식약처 상태"] == same.STATUS_ACTIVE
     assert view.hidden_unpriced == 1 and view.hidden_inactive == 1
-    assert same.hidden_note(view) == "숨김 · 조달가격 없는 모델 1개 · 취소·취하·수출용 1개"
+    assert same.hidden_note(view) == "숨긴 모델 · 거래가 없는 모델 1개 · 취소·수출 전용 1개"
 
 
 def test_filters_can_show_everything() -> None:
@@ -85,11 +85,9 @@ def test_unavailable_price_is_not_zero() -> None:
 
 def test_dashboard_tabs_use_plain_headings() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
-    supplier = source.index('elif selected_view == "supplier":')
-    assert source.index("#### 실제 납품업체 · 나라장터", supplier) < source.index(
-        "#### 품목 책임주체 · 식약처에 등록한 제조·수입업체", supplier
-    )
-    assert '"조달가격 있는 것만"' in source and '"취소·취하·수출용 포함"' in source
+    supplier = source.index('st.markdown("#### 누가 파는가")')
+    assert supplier < source.index("식약처에 같은 품목으로 등록한 제조·수입업체", supplier)
+    assert '"거래가 있는 모델만"' in source and '"취소·수출 전용 모델도 보기"' in source
     assert 'id="purchase-workspace-runtime-v12"' in source
     for jargon in ("Identity Index", '"exact 모델"', "식약처 live", "식약처 품목·Identity"):
         assert jargon not in source
@@ -109,6 +107,6 @@ def test_status_notes_explain_unknown_rows_and_missing_current_model() -> None:
     view = same.build_same_item_rows(links, index, current_keys=[("수허 15-1338 호", "Efficia DFM100")])
     notes = same.status_notes(view)
 
-    assert any("상태 미확인" in note and "아직 확인되지 않은 모델" in note for note in notes)
+    assert any("확인 안 됨" in note and "판매 상태를 아직 모르는 모델" in note for note in notes)
     assert "검색한 모델은 아직" in (same.current_model_note(view) or "")
-    assert same.status_notes(same.build_same_item_rows(LINKS, None))[0].startswith("식약처 상태는 상단 버튼")
+    assert same.status_notes(same.build_same_item_rows(LINKS, None))[0].startswith("판매 가능 여부는")

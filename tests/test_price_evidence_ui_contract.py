@@ -20,9 +20,9 @@ def test_evidence_rows_split_ab_from_cd_reference() -> None:
 def test_evidence_ui_explicitly_separates_reference_section() -> None:
     source = inspect.getsource(widgets.render_evidence_table)
 
-    assert "A/B 제품일치 근거" in source
+    assert "같은 제품으로 확인된 근거" in source
     assert "C/D 참고자료 · 견적 판정 제외" in source
-    assert "QUOTE_COMPARABLE" in source
+    assert "거래 조건까지 같다고 담당자가 확인한 근거만 씁니다" in source
 
 
 def test_observation_card_names_median_explicitly() -> None:

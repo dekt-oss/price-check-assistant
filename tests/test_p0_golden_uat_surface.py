@@ -15,7 +15,7 @@ def test_integrated_market_research_keeps_research_outside_assessment() -> None:
     assert "None of those records" in text
     assert "or candidates are passed to `search_all` or `assess_prices`." in text
     assert "verified mapping 파일을 수정하지" in text
-    assert "세부품명번호 표적 Shopping Research 실행" in text
+    assert "세부품명번호로 좁힌 쇼핑몰 참고 조사" in text
 
 
 def test_golden_uat_documents_non_promotion_contract() -> None:

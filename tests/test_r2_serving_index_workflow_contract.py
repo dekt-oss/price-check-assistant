@@ -56,21 +56,20 @@ def test_home_is_unified_search_and_upload_entrypoint() -> None:
     transaction_text = Path("src/purchase_price/ui/track_b_transactions.py").read_text()
 
     assert "무엇을 조사할까요?" in page_text
-    assert "상세 검색조건" in page_text
+    assert "조건 직접 입력" in page_text
     assert "home_quote_upload" in page_text
-    assert 'st.switch_page("pages/2_견적_검토.py")' in page_text
+    assert 'st.page_link("pages/2_견적_검토.py"' in page_text
     assert "open_track_b_serving_snapshot" in page_text
-    assert "나라장터 동일제품 직접거래" in page_text
-    assert "검색 참고거래" in page_text
+    assert "#### 얼마에 거래됐나" in page_text
+    assert "비슷한 품목 거래" in page_text
     assert "transaction_rows(track_b)" in page_text
     assert "candidate_counts(track_b)" in page_text
     assert '"판매처"' in transaction_text
     assert '"구매처"' in transaction_text
     assert '"거래기록"' in transaction_text
-    assert "st.segmented_control(" in page_text
-    assert '"💰 가격 비교"' in page_text
-    assert '"🏢 업체·조달"' in page_text
-    assert '"🔁 동일품목 비교"' in page_text
+    # One scrolling result instead of area tabs (UI simplification, 2026-10).
+    assert "st.segmented_control(" not in page_text
+    assert '"💰 가격 비교"' not in page_text
     assert '"📌 요약"' not in page_text
     assert '"📚 Research·근거"' not in page_text
     assert "model_probe_query = model_probe_input.to_product_query()" in page_text

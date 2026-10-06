@@ -47,13 +47,12 @@ def _render_runtime_readiness_notice() -> None:
 _render_r2_runtime_diagnostic()
 _render_runtime_readiness_notice()
 
-business_pages = [
-    st.Page("pages/1_대시보드.py", title="통합 검색", icon="🔎", default=True),
-    st.Page("pages/2_견적_검토.py", title="견적 검토", icon="📋"),
-    st.Page("pages/3_빠른_검색.py", title="상세 검색", icon="🧭"),
-    st.Page("pages/4_의료기기_조회.py", title="의료기기 조회", icon="🏥"),
-]
-
+# The sidebar lists only what the purchasing team uses. Every other page stays registered so
+# links (st.page_link / st.switch_page) and the production smoke URLs keep working.
+price_page = st.Page("pages/1_대시보드.py", title="가격 조사", icon="🔎", default=True)
+medical_page = st.Page("pages/4_의료기기_조회.py", title="의료기기 상세", icon="🏥")
+quote_detail_page = st.Page("pages/2_견적_검토.py", title="견적 상세 검증", icon="📋")
+legacy_search_page = st.Page("pages/3_빠른_검색.py", title="상세 검색(이전 화면)", icon="🧭")
 validation_pages = [
     st.Page(
         "pages/13_견적추출_UAT.py",
@@ -68,13 +67,22 @@ validation_pages = [
         url_path="purchase-review-uat",
     ),
 ]
-
-navigation: dict[str, list[st.Page]] = {
-    "업무": business_pages,
-    "검증": validation_pages,
-}
+admin_pages: list[st.Page] = []
 if _admin_mode():
-    navigation["관리"] = [st.Page("pages/9_관리.py", title="관리", icon="🛠️")]
+    admin_pages = [st.Page("pages/9_관리.py", title="관리", icon="🛠️")]
 
-page = st.navigation(navigation, position="sidebar", expanded=True)
+page = st.navigation(
+    [price_page, medical_page, quote_detail_page, legacy_search_page, *validation_pages, *admin_pages],
+    position="hidden",
+)
+
+with st.sidebar:
+    st.page_link(price_page, label="가격 조사", icon="🔎")
+    st.page_link(medical_page, label="의료기기 상세", icon="🏥")
+    if admin_pages:
+        st.divider()
+        st.caption("관리 · 검증")
+        for admin_link in (*admin_pages, *validation_pages, quote_detail_page, legacy_search_page):
+            st.page_link(admin_link)
+
 page.run()

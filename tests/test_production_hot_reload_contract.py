@@ -6,5 +6,5 @@ def test_dashboard_does_not_direct_import_hot_added_business_lookup_symbol() -> 
 
     assert "lookup_mfds_business_license," not in source
     assert "from purchase_price.services import mfds_workspace as mfds_workspace_service" in source
-    assert 'getattr(\n                    mfds_workspace_service,\n                    "lookup_mfds_business_license",' in source
-    assert "배포 프로세스가 이전 식약처 모듈을 유지" in source
+    assert 'getattr(mfds_workspace_service, "lookup_mfds_business_license", None)' in source
+    assert "업허가 조회 기능을 지금 쓸 수 없습니다" in source

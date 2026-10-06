@@ -92,7 +92,7 @@ def test_dashboard_uses_business_license_view_with_default_filters() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
     assert "from purchase_price.services.mfds_business_license_view import build_business_license_view" in source
-    assert '"폐업·휴업·취소 업허가 포함"' in source
-    assert '"이름 일부만 같은 다른 업체 포함"' in source
+    assert '"폐업·휴업·취소 업허가도 보기"' in source
+    assert '"이름 일부만 같은 다른 업체도 보기"' in source
     assert "license_view.showing_partial_only" in source
     assert '"현재사용가능": item.is_active' not in source

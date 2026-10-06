@@ -71,37 +71,41 @@ def price_card(stats: Any, *, unavailable: bool = False) -> SummaryCard:
     if unavailable:
         return SummaryCard(
             "price",
-            "동일제품 거래가",
+            "거래가",
             "조회 불가",
             "나라장터 가격 자료에 연결하지 못했습니다",
             TONE_WARN,
         )
     if direct_count == 0 or min_price is None or max_price is None:
         note = (
-            f"직접 동일성 확인 거래 0건 · 참고거래 {reference_count}건은 가격 비교에서 확인"
+            f"비슷한 품목 거래 {reference_count}건은 비교에서 제외"
             if reference_count
-            else "직접 동일성 확인 거래 0건"
+            else "나라장터 기준"
         )
-        return SummaryCard("price", "동일제품 거래가", "직접근거 없음", note, TONE_NEUTRAL)
+        return SummaryCard("price", "거래가", "같은 제품 거래 0건", note, TONE_NEUTRAL)
 
-    value = _won(min_price) if min_price == max_price else f"{min_price:,.0f} ~ {max_price:,.0f}원"
-    parts = [f"직접 동일성 확인 거래 {direct_count}건"]
     median = getattr(stats, "median_price", None)
-    if median is not None and min_price != max_price:
-        parts.append(f"중앙값 {_won(median)}")
+    parts = [f"같은 제품 거래 {direct_count}건"]
+    if min_price == max_price:
+        value = _won(min_price)
+    elif direct_count >= 3 and median is not None:
+        value = _won(median)
+        parts.insert(0, "중앙값")
+    else:
+        value = f"{min_price:,.0f} ~ {max_price:,.0f}원"
     latest = getattr(stats, "latest_transaction_date", None)
     if latest:
         parts.append(f"최근 {latest}")
-    return SummaryCard("price", "동일제품 거래가", value, " · ".join(parts), TONE_OK)
+    return SummaryCard("price", "거래가", value, " · ".join(parts), TONE_OK)
 
 
 def supplier_card(stats: Any) -> SummaryCard:
     suppliers = int(getattr(stats, "supplier_count", 0) or 0)
     institutions = int(getattr(stats, "demand_institution_count", 0) or 0)
     if not suppliers:
-        return SummaryCard("supplier", "실제 납품업체", "미확인", "직접거래 기준 납품업체 없음", TONE_NEUTRAL)
-    note = f"구매기관 {institutions}곳에 납품" if institutions else "나라장터 직접거래 기준"
-    return SummaryCard("supplier", "실제 납품업체", f"{suppliers}개", note, TONE_OK)
+        return SummaryCard("supplier", "납품업체", "확인 안 됨", "같은 제품 거래의 납품업체 없음", TONE_NEUTRAL)
+    note = f"{institutions}개 기관에 납품" if institutions else "나라장터 기준"
+    return SummaryCard("supplier", "납품업체", f"{suppliers}곳", note, TONE_OK)
 
 
 _MFDS_METRIC_TONE = {
@@ -115,10 +119,15 @@ _MFDS_METRIC_TONE = {
     "대상 아님": TONE_NEUTRAL,
 }
 
+# Internal metric codes stay; the card shows plain words.
 _MFDS_METRIC_VALUE = {
-    "exact 확인": "모델 확인",
+    "품목번호 확인": "허가 확인",
+    "exact 확인": "허가 확인",
+    "품목 확인": "품목만 확인",
+    "복수 품목번호": "허가 여러 건",
     "0건": "찾지 못함",
-    "조회 대기": "형명 조회 대기",
+    "조회 대기": "확인 전",
+    "대상 아님": "해당 없음",
 }
 
 
@@ -138,21 +147,23 @@ def mfds_card(
         if companies:
             note += f" · {companies[0]}"
     elif mfds_metric == "조회 대기":
-        note = "아래 버튼으로 식약처 형명정보 조회 (10~40초)"
+        note = "아래 '식약처에서 확인' 버튼으로 조회 (약 30초)"
     elif mfds_metric == "복수 품목번호":
-        note = "같은 모델명이 여러 품목번호에 있어 업체·조달 탭에서 확인"
+        note = "같은 모델명이 여러 허가에 있어 상세 자료에서 확인"
     elif mfds_metric == "조회 실패":
         note = "식약처 조회에 실패해 다시 시도가 필요합니다"
     elif mfds_metric == "품목 확인" and model_count:
-        active = f"(국내 정상 {active_model_count}개)" if active_model_count is not None else ""
-        note = f"같은 품목 등록모델 {model_count}개{active} · 이 모델명과 일치하는 등록은 미확인"
+        active = f"(판매 가능 {active_model_count}개)" if active_model_count is not None else ""
+        note = f"같은 품목 등록 모델 {model_count}개{active} · 이 모델명과 같은 등록은 못 찾음"
     elif mfds_metric == "0건" and coverage_percent is not None and coverage_percent < 100:
-        note = f"현재 수집된 식약처 자료({coverage_percent:.0f}%)에서 찾지 못했습니다"
+        note = f"지금까지 모은 식약처 자료({coverage_percent:.0f}%)에서 찾지 못했습니다"
     elif mfds_metric == "0건":
-        note = "현재 연결된 식약처 자료에서 찾지 못했습니다"
+        note = "연결된 식약처 자료에서 찾지 못했습니다"
+    elif mfds_metric == "대상 아님":
+        note = "의료기기로 분류되지 않은 품목"
     else:
-        note = "식약처 품목정보"
-    return SummaryCard("mfds", "식약처 등록", value, note, tone)
+        note = "식약처 허가정보"
+    return SummaryCard("mfds", "식약처 허가", value, note, tone)
 
 
 def most_common_text(rows: Iterable[Mapping[str, object]], key: str) -> str | None:
@@ -196,13 +207,13 @@ def identity_line(
             parts.append(f"제조사 {procurement_maker}")
     unique_permits = list(dict.fromkeys(p for p in permit_numbers if p))
     if unique_permits:
-        badge = f"[{permit_type}] " if permit_type else ""
+        label = permit_type or "허가번호"
         extra = f" 외 {len(unique_permits) - 1}건" if len(unique_permits) > 1 else ""
-        parts.append(f"식약처 품목번호 {badge}{unique_permits[0]}{extra}")
+        parts.append(f"{label} {unique_permits[0]}{extra}")
     unique_companies = list(dict.fromkeys(c for c in companies if c))
     if unique_companies:
         extra = f" 외 {len(unique_companies) - 1}곳" if len(unique_companies) > 1 else ""
-        parts.append(f"품목 책임주체 {unique_companies[0]}{extra}")
+        parts.append(f"제조·수입 {unique_companies[0]}{extra}")
     return " · ".join(parts)
 
 

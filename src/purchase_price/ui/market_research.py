@@ -200,7 +200,7 @@ def run_market_research(
 def _basis_status_label(basis: ResearchBasis) -> str:
     if basis.is_verified_official:
         return "공식 조달분류 확인"
-    return "Research 기준명 후보 · 미검증"
+    return "참고 조사 기준명 후보 · 미검증"
 
 
 def _render_classification_candidates(
@@ -219,7 +219,7 @@ def _render_classification_candidates(
         )
         return
     if status == "not_configured":
-        st.caption("공식 세부품명 resolver는 API 키가 없어 이번 실행에서 조회하지 않았습니다.")
+        st.caption("서비스키가 없어 공식 세부품명 후보는 이번에 조회하지 않았습니다.")
         return
     if status == "success_0":
         st.info("공식 세부품명 resolver는 정상 실행됐지만 현재 품명으로 확인된 후보가 0건입니다.")
@@ -231,7 +231,7 @@ def _render_classification_candidates(
         return
 
     candidates = list(discovery.classification_candidates)
-    with st.expander("공식 세부품명 후보 · Research 미검증", expanded=True):
+    with st.expander("공식 세부품명 후보 · 참고 조사용, 미검증", expanded=True):
         st.dataframe(
             [
                 {
@@ -268,9 +268,8 @@ def _render_classification_candidates(
         )
         # Safety wording contract: verified mapping 파일을 수정하지
         st.caption(
-            "선택값은 현재 세션의 세부품명번호 표적 Research 조회에만 사용합니다. "
-            "verified mapping 파일을 수정하지 않으며, 후보 선택만으로 견적 제품과 동일제품·규격동등으로 "
-            "확정하거나 가격을 `assess_prices()`에 승격하지 않습니다."
+            "고른 값은 이번 화면의 참고 조사에만 씁니다. 후보를 골랐다고 견적 제품과 같은 제품·같은 규격으로 "
+            "보지 않으며, 가격 비교에도 넣지 않습니다."
         )
 
 
@@ -294,10 +293,10 @@ def _render_research_basis(
             target_source = (
                 "검증 공식분류"
                 if basis.is_verified_official
-                else "세션에서 명시적으로 선택한 Research 후보"
+                else "이번 화면에서 직접 고른 후보"
             )
             st.caption(
-                "세부품명번호 표적 Shopping Research 실행: "
+                "세부품명번호로 좁힌 쇼핑몰 참고 조사: "
                 + " · ".join(f"`{code}`" for code in discovery.targeted_detail_codes)
                 + f" · 근거: {target_source}. 표적조회 자체는 동일제품 판정이 아닙니다."
             )
@@ -306,8 +305,7 @@ def _render_research_basis(
         with st.expander("실제 검색 확장어", expanded=False):
             st.write(" · ".join(f"`{term}`" for term in discovery.terms[:8]))
             st.caption(
-                "검색 확장어는 넓은 Research용입니다. 검색어 자체로 동일제품·공식분류·대체가능성을 "
-                "확정하지 않습니다."
+                "넓게 찾기 위한 검색어입니다. 검색어만으로 같은 제품·공식 분류·대체 가능 여부를 정하지 않습니다."
             )
 
 
@@ -335,7 +333,7 @@ def _candidate_rows(candidates: list[G2BDiscoveryCandidate]) -> list[dict[str, s
             "가격": f"{candidate.price:,.0f}원",
             "관계": candidate.relevance,
             "공식 품목속성": candidate.catalog_summary or "-",
-            "근거": candidate.match_reason or "Research 후보",
+            "근거": candidate.match_reason or "참고 조사 후보",
         }
         for candidate in candidates[:10]
     ]
@@ -354,7 +352,7 @@ def _render_model_price_summary(
     ]
 
     if summary.has_prices:
-        st.markdown("**동일모델 표기 가격 후보 · 미검증 Research**")
+        st.markdown("**모델명이 같게 적힌 가격 후보 · 미검증 참고**")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("동일모델 가격후보", f"{summary.model_candidate_count}건")
         c2.metric("하단", f"{summary.low:,.0f}원" if summary.low is not None else "-")
@@ -367,18 +365,16 @@ def _render_model_price_summary(
                 hide_index=True,
             )
         st.caption(
-            "모델 문자열이 표기된 Research 후보만 집계합니다. 공식 품목속성은 해당 나라장터 "
-            "품목식별번호의 규격 검증 보조근거이며, 견적 제품과 동일제품임을 자동 확정하지 않습니다. "
-            "기관·공급업체·라인·규격·납품조건·변경차수는 원자료 추적용 provenance이며 가격 승격 근거가 아닙니다. "
-            "최종 동일제품 직접가격 범위는 엄격한 제품 식별·비교조건 검증을 통과한 Evidence로 별도 산정합니다."
+            "모델명이 같게 적힌 후보만 모았습니다. 같은 제품인지는 확인하지 않았으며, 기관·업체·규격 같은 "
+            "항목은 원문을 찾아가기 위한 정보입니다. 위쪽 '같은 제품 거래' 가격은 이 후보와 따로 계산합니다."
         )
 
         delta = quote_delta_from_market_median(quote_unit_price, summary)
         if delta is not None:
             direction = "높음" if delta > 0 else "낮음" if delta < 0 else "동일"
             st.info(
-                f"현재 견적은 동일모델 표기 Research 중앙값 대비 **{abs(delta):.1f}% {direction}**입니다. "
-                "이는 미검증 Research 비교이며 최종 적정성 판정은 아닙니다."
+                f"내 견적은 이 후보들의 중앙값보다 **{abs(delta):.1f}% {direction}**입니다. "
+                "같은 제품인지 확인하지 않은 참고 비교입니다."
             )
     elif discovery.candidates:
         st.info(
@@ -386,7 +382,7 @@ def _render_model_price_summary(
             "참고로만 표시합니다."
         )
     else:
-        st.info("쇼핑몰 Research는 정상 실행됐지만 현재 조사 기준·기간에서 유의미한 가격 후보가 0건입니다.")
+        st.info("쇼핑몰 참고 조사는 정상적으로 끝났지만, 이 기준·기간에서 쓸 만한 가격 후보는 0건입니다.")
 
 
 def _render_related_price_candidates(
@@ -471,13 +467,13 @@ def render_market_reference_summary(
     if discovery is None:
         return
     if discovery.status == "failure":
-        st.warning("나라장터 쇼핑몰 Research API 조회가 실패했습니다. 이는 시장자료 0건과 다릅니다.")
+        st.warning("나라장터 쇼핑몰 참고 조사가 실패했습니다. 자료가 0건이라는 뜻은 아닙니다.")
         if discovery.error_messages:
             st.caption(" · ".join(discovery.error_messages[:2]))
         return
     if discovery.status == "partial" and discovery.error_messages:
         st.warning(
-            "나라장터 쇼핑몰 Research 일부 요청이 실패하거나 조회 한도에 도달했습니다. "
+            "나라장터 쇼핑몰 참고 조사 일부가 실패했거나 조회 한도에 닿았습니다. "
             "확보된 후보만 부분 결과로 표시합니다."
         )
         st.caption(" · ".join(discovery.error_messages[:2]))
