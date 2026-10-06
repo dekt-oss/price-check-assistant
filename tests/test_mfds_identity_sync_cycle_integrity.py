@@ -274,3 +274,45 @@ def test_quota_exhaustion_mid_run_publishes_collected_pages(harness: SimpleNames
     assert report["next_page"] == 5
     assert report["cycle_completed"] is False
     assert harness.index_rows() == 40
+
+
+class Server504Source(FakeSource):
+    """Pages in `pages_504` return HTTP 504 SERVICETIMEOUT `times` times, then succeed."""
+
+    def __init__(self, total: int, pages_504: set[int], times: int) -> None:
+        super().__init__(total)
+        self.pages_504 = pages_504
+        self.times = times
+        self.attempts: dict[int, int] = {}
+
+    def get_json(self, base_url: str, operation: str, *, pageNo: int, numOfRows: int) -> Any:
+        if pageNo in self.pages_504:
+            self.attempts[pageNo] = self.attempts.get(pageNo, 0) + 1
+            if self.attempts[pageNo] <= self.times:
+                raise PublicDataClientError(
+                    "Public Data Portal request failed: HTTP 504 error=SERVICETIMEOUT_ERROR code=05"
+                )
+        return super().get_json(base_url, operation, pageNo=pageNo, numOfRows=numOfRows)
+
+
+def test_transient_504_is_retried(harness: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    from purchase_price.clients import data_go_kr
+
+    monkeypatch.setattr(data_go_kr, "SERVER_ERROR_RETRY_DELAYS", (0.0, 0.0))
+    report = harness.run(Server504Source(total=100, pages_504={4}, times=2), max_pages=10)
+
+    assert report["status"] == "SUCCESS"
+    assert harness.index_rows() == 100
+
+
+def test_persistent_504_mid_run_publishes_collected_pages(
+    harness: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from purchase_price.clients import data_go_kr
+
+    monkeypatch.setattr(data_go_kr, "SERVER_ERROR_RETRY_DELAYS", (0.0, 0.0))
+    report = harness.run(Server504Source(total=100, pages_504={4}, times=99), max_pages=10)
+
+    assert report["status"] == "SOURCE_TRANSPORT_ERROR"
+    assert report["next_page"] == 4
+    assert harness.index_rows() == 30

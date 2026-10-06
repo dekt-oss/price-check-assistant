@@ -22,7 +22,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataTransportError
+from purchase_price.clients.data_go_kr import (
+    PublicDataClientError,
+    PublicDataTransportError,
+    call_with_server_retry,
+    is_server_side_error,
+)
 from purchase_price.config import Settings
 from purchase_price.services.mfds_api_keys import build_mfds_json_client, is_key_not_registered
 from purchase_price.services.mfds_device_intelligence import (
@@ -142,8 +147,10 @@ def sync(
     total_count = _positive_int(pipeline.get("last_total_count"))
 
     def fetch(page: int) -> tuple[int, dict[str, Any]]:
-        return page, client.get_json(
-            base_url, MFDS_MODEL_INFO_OPERATION, pageNo=page, numOfRows=rows_per_page
+        return page, call_with_server_retry(
+            lambda: client.get_json(
+                base_url, MFDS_MODEL_INFO_OPERATION, pageNo=page, numOfRows=rows_per_page
+            )
         )
 
     with tempfile.TemporaryDirectory(prefix="mfds-item-status-") as temp_dir:
@@ -170,7 +177,9 @@ def sync(
                         try:
                             page, payload = future.result()
                         except PublicDataClientError as exc:
-                            if pages_collected and isinstance(exc, PublicDataTransportError):
+                            if pages_collected and (
+                                isinstance(exc, PublicDataTransportError) or is_server_side_error(exc)
+                            ):
                                 source_anomaly = "TRANSPORT_ERROR"
                             elif pages_collected and any(m in str(exc) for m in _QUOTA_MARKERS):
                                 source_anomaly = "QUOTA_EXCEEDED"

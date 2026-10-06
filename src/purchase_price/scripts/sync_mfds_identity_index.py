@@ -15,6 +15,8 @@ from purchase_price.clients.data_go_kr import (
     PublicDataClientError,
     PublicDataPortalClient,
     PublicDataTransportError,
+    call_with_server_retry,
+    is_server_side_error,
 )
 from purchase_price.config import Settings
 from purchase_price.services.mfds_device_intelligence import unwrap_mfds_page
@@ -219,11 +221,13 @@ def _sync_without_lock(
             ) as client:
                 for _ in range(max_pages):
                     try:
-                        payload = client.get_json(
-                            settings.mfds_product_info_base_url or MFDS_PRODUCT_INFO_BASE_URL,
-                            MFDS_PRODUCT_INFO_OPERATION,
-                            pageNo=page_no,
-                            numOfRows=rows_per_page,
+                        payload = call_with_server_retry(
+                            lambda: client.get_json(
+                                settings.mfds_product_info_base_url or MFDS_PRODUCT_INFO_BASE_URL,
+                                MFDS_PRODUCT_INFO_OPERATION,
+                                pageNo=page_no,
+                                numOfRows=rows_per_page,
+                            )
                         )
                     except PublicDataClientError as exc:
                         if pages_collected == 0 and _is_source_not_authorized(exc):
@@ -243,7 +247,9 @@ def _sync_without_lock(
                                 },
                             )
                             return 0
-                        if pages_collected > 0 and isinstance(exc, PublicDataTransportError):
+                        if pages_collected > 0 and (
+                            isinstance(exc, PublicDataTransportError) or is_server_side_error(exc)
+                        ):
                             # Publish the pages already collected in this run; the next run
                             # resumes from this page instead of redoing the whole chunk.
                             source_anomaly = "TRANSPORT_ERROR"

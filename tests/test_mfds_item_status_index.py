@@ -238,3 +238,46 @@ def test_plan_continues_a_started_first_cycle_before_identity_verifies() -> None
         cycle_in_progress=True,
     )
     assert weekly["run"] is False
+
+
+class ServerErrorSource(FakeSource):
+    def __init__(self, rows, *, server_error_pages=(), recover_after: int = 99) -> None:
+        super().__init__(rows)
+        self.server_error_pages = set(server_error_pages)
+        self.recover_after = recover_after
+        self.attempts: dict[int, int] = {}
+
+    def get_json(self, base_url: str, endpoint: str, **params: Any) -> dict[str, Any]:
+        page = params["pageNo"]
+        if page in self.server_error_pages:
+            with self.lock:
+                self.attempts[page] = self.attempts.get(page, 0) + 1
+                attempt = self.attempts[page]
+            if attempt <= self.recover_after:
+                from purchase_price.clients.data_go_kr import PublicDataClientError
+
+                raise PublicDataClientError(
+                    "Public Data Portal request failed: HTTP 504 error=SERVICETIMEOUT_ERROR code=05"
+                )
+        return super().get_json(base_url, endpoint, **params)
+
+
+def test_transient_504_is_retried_and_the_chunk_completes(harness: SimpleNamespace, monkeypatch) -> None:
+    from purchase_price.clients import data_go_kr
+
+    monkeypatch.setattr(data_go_kr, "SERVER_ERROR_RETRY_DELAYS", (0.0, 0.0))
+    report = harness.run(ServerErrorSource([_row(i) for i in range(50)], server_error_pages={3}, recover_after=1), max_pages=10)
+
+    assert report["status"] == "SUCCESS"
+    assert report["cycle_completed"] is True
+
+
+def test_persistent_504_after_progress_keeps_collected_pages(harness: SimpleNamespace, monkeypatch) -> None:
+    from purchase_price.clients import data_go_kr
+
+    monkeypatch.setattr(data_go_kr, "SERVER_ERROR_RETRY_DELAYS", (0.0, 0.0))
+    report = harness.run(ServerErrorSource([_row(i) for i in range(50)], server_error_pages={4}), max_pages=10)
+
+    assert report["status"] == "SOURCE_TRANSPORT_ERROR"
+    assert report["next_page"] == 4
+    assert len(harness.items()) == 30
