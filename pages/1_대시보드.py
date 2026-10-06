@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import sqlite3
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from inspect import signature
@@ -29,6 +30,7 @@ from purchase_price.services import track_b_db_quote_comparison as track_b_compa
 from purchase_price.services import track_b_live_gap_fill as track_b_live_service
 from purchase_price.services import track_b_r2_quote_index as track_b_r2_index_service
 from purchase_price.services import track_b_serving_snapshot as track_b_snapshot_service
+from purchase_price.services import track_b_supplier_summary as supplier_summary_service
 from purchase_price.services.g2b_search_policy import (
     G2B_DEFAULT_LOOKBACK_DAYS,
     G2B_LOOKBACK_OPTIONS,
@@ -58,6 +60,8 @@ from purchase_price.services.mfds_identity_corroboration import identity_needs_r
 from purchase_price.services.mfds_identity_index import (
     MfdsIdentityLookup,
     MfdsIdentityRecord,
+    lookup_identity,
+    lookup_same_product,
 )
 from purchase_price.services.mfds_identity_live import lookup_mfds_model_identity_live
 from purchase_price.services.mfds_identity_live_policy import should_query_live_mfds_identity
@@ -103,6 +107,7 @@ from purchase_price.services.unified_search_intent import (
     interpret_unified_search,
 )
 from purchase_price.ui import same_item_compare as same_item_ui
+from purchase_price.ui import search_overviews as overview_ui
 from purchase_price.ui import track_b_transactions as track_b_transactions_ui
 from purchase_price.ui import workspace_header as workspace_header_ui
 from purchase_price.ui.market_research import (
@@ -495,6 +500,13 @@ def _identity_hydration(
         return product_name, manufacturer, model_name, specification, None
 
     identity = _lookup_mfds_identity_runtime(lookup_key)
+    if isinstance(identity, MfdsIdentityLookup) and identity.status == "success_0" and raw_search:
+        # "메디아나" -> "(주)메디아나": accept only an exact company match on a legal-form spelling.
+        for variant in overview_ui.company_name_variants(raw_search):
+            candidate = _lookup_mfds_identity_runtime(variant)
+            if candidate.status == "success" and candidate.match_type == "company":
+                identity = candidate
+                break
     base_query = ProductQuery(
         product_name=product_name,
         manufacturer=manufacturer,
@@ -557,7 +569,9 @@ def _build_mfds_procurement_crosslinks(
         )
         for item in items
     )
-    comparisons = track_b_snapshot.lookup_model_summaries(queries)
+    # 500 per model (the comparison maximum): the old 50 default capped counts such as
+    # HeartOn A16-DS at "50건" when it has 92 direct trades.
+    comparisons = track_b_snapshot.lookup_model_summaries(queries, limit_per_model=500)
 
     rows: list[dict[str, object]] = []
     for item, comparison in zip(items, comparisons, strict=True):
@@ -607,6 +621,212 @@ def _build_mfds_procurement_crosslinks(
             }
         )
     return rows
+
+
+OVERVIEW_RECORD_LIMIT = 2000
+
+
+def _identity_index_wide(query_company: str = "", product_name: str = "") -> tuple[MfdsIdentityRecord, ...]:
+    """Up to OVERVIEW_RECORD_LIMIT identity rows (the regular lookup stops at 200, which hid
+    busy models such as HeartOn A16-DS from a 메디아나 overview). Empty on any failure."""
+
+    module = _mfds_identity_r2_runtime()
+    local_index_path = getattr(module, "_local_index_path", None)
+    if not callable(local_index_path):
+        return ()
+    try:
+        path = local_index_path(get_settings())
+        if path is None:
+            return ()
+        connection = sqlite3.connect(path)
+        try:
+            if query_company:
+                found = lookup_identity(connection, query_company, limit=OVERVIEW_RECORD_LIMIT)
+                return found.records if found.match_type == "company" else ()
+            return lookup_same_product(connection, product_name, limit=OVERVIEW_RECORD_LIMIT)
+        finally:
+            connection.close()
+    except Exception:
+        return ()
+
+
+def _build_overview_state(
+    raw_search: str,
+    identity: MfdsIdentityLookup,
+    snapshot_runtime: Any,
+) -> dict[str, Any]:
+    route = "company_overview" if identity.match_type == "company" else "product_overview"
+    records = list(identity.records)
+    if route == "product_overview":
+        heading = next((r.product_name for r in records if r.product_name), raw_search)
+        wide = _identity_index_wide(product_name=heading) or tuple(
+            _lookup_same_mfds_product_runtime(heading) or ()
+        )
+    else:
+        heading = next((r.registered_company for r in records if r.registered_company), raw_search)
+        wide = _identity_index_wide(query_company=heading)
+    if wide:
+        records = list(wide)
+    with snapshot_runtime.open_track_b_serving_snapshot() as snapshot:
+        crosslinks = _build_mfds_procurement_crosslinks(records, track_b_snapshot=snapshot, current_model="")
+        supplier = (
+            supplier_summary_service.supplier_trade_summary(getattr(snapshot, "session", None), heading)
+            if route == "company_overview"
+            else None
+        )
+        data_as_of = str(getattr(snapshot, "data_as_of", "") or "")
+    return {
+        "route": route,
+        "search_text": raw_search,
+        "heading": heading,
+        "overview_records": records,
+        "overview_crosslinks": crosslinks,
+        "overview_supplier": supplier,
+        "overview_record_limit_hit": len(records) >= OVERVIEW_RECORD_LIMIT,
+        "track_b_data_as_of": data_as_of,
+    }
+
+
+def _render_overview_model_picker(models: list[str], key: str) -> None:
+    if not models:
+        return
+    pick_col, button_col = st.columns([4, 1.4], vertical_alignment="bottom")
+    chosen = pick_col.selectbox("모델을 골라 구매조사 화면으로 이동", options=models, key=f"overview_pick::{key}")
+    if button_col.button("이 모델 구매조사", key=f"overview_open::{key}", use_container_width=True):
+        st.session_state.pop(HOME_SEARCH_STATE_KEY, None)
+        st.query_params["q"] = chosen
+        st.query_params["view"] = "price"
+        st.rerun()
+
+
+def _render_overview(state: dict[str, Any]) -> None:
+    route = state["route"]
+    heading = str(state.get("heading") or "")
+    records = list(state.get("overview_records") or [])
+    crosslinks = list(state.get("overview_crosslinks") or [])
+    priced_models = [
+        str(row.get("모델"))
+        for row in sorted(crosslinks, key=lambda row: -int(row.get("나라장터 직접거래") or 0))
+        if int(row.get("나라장터 직접거래") or 0) > 0
+    ]
+    all_models = list(dict.fromkeys(priced_models + [str(r.model_name) for r in records if r.model_name]))
+
+    st.divider()
+    st.caption("업체 중심 결과" if route == "company_overview" else "품목 중심 결과")
+    st.subheader(heading)
+    if route == "company_overview":
+        st.caption(
+            "식약처 품목 책임주체(제조·수입업체)로서 등록한 품목과, 나라장터 실제 납품업체로서의 실적을 "
+            "따로 보여줍니다. 모델을 고르면 그 모델의 구매조사 화면으로 이동합니다."
+        )
+        product_rows = overview_ui.company_product_rows(records, crosslinks)
+        supplier = state.get("overview_supplier") or {}
+        supplied = int(supplier.get("trade_count") or 0)
+        cards = [
+            workspace_header_ui.SummaryCard(
+                "items", "식약처 등록 품목", f"{len(product_rows)}개", "품목 책임주체 기준", workspace_header_ui.TONE_NEUTRAL
+            ),
+            workspace_header_ui.SummaryCard(
+                "models",
+                "등록 모델",
+                f"{len(all_models)}개",
+                f"조달가격 있는 모델 {len(priced_models)}개",
+                workspace_header_ui.TONE_NEUTRAL,
+            ),
+            workspace_header_ui.SummaryCard(
+                "supply",
+                "나라장터 납품 실적",
+                f"{supplied}건",
+                overview_ui.NAME_MATCH_LABEL if supplied else "같은 이름의 납품업체 없음",
+                workspace_header_ui.TONE_OK if supplied else workspace_header_ui.TONE_NEUTRAL,
+            ),
+        ]
+    else:
+        st.caption(
+            "식약처에 이 품목명으로 등록된 분류와 업체·모델, 모델별 나라장터 동일제품 거래가를 보여줍니다. "
+            "모델을 고르면 그 모델의 구매조사 화면으로 이동합니다."
+        )
+        class_rows = overview_ui.classification_rows(records)
+        companies = {r.registered_company for r in records if r.registered_company}
+        cards = [
+            workspace_header_ui.SummaryCard(
+                "classes", "분류·등급", f"{len(class_rows)}개", "식약처 분류번호 기준", workspace_header_ui.TONE_NEUTRAL
+            ),
+            workspace_header_ui.SummaryCard(
+                "companies", "품목 책임주체", f"{len(companies)}곳", "제조·수입업체", workspace_header_ui.TONE_NEUTRAL
+            ),
+            workspace_header_ui.SummaryCard(
+                "models",
+                "등록 모델",
+                f"{len(all_models)}개",
+                f"조달가격 있는 모델 {len(priced_models)}개",
+                workspace_header_ui.TONE_NEUTRAL,
+            ),
+        ]
+    st.markdown(
+        workspace_header_ui.HEADER_CSS + workspace_header_ui.render_cards_html(cards),
+        unsafe_allow_html=True,
+    )
+    basis = []
+    if state.get("track_b_data_as_of"):
+        basis.append(f"나라장터 {state['track_b_data_as_of']}까지 수집")
+    collection_status = _load_mfds_collection_status()
+    if (
+        collection_status.status != "unavailable"
+        and not collection_status.first_backfill_complete
+        and collection_status.progress_percent is not None
+    ):
+        basis.append(f"식약처 제품정보 {collection_status.progress_percent:.0f}% 수집 중이라 아직 없는 모델이 있을 수 있음")
+    if state.get("overview_record_limit_hit"):
+        basis.append(f"식약처 등록 모델이 많아 상위 {OVERVIEW_RECORD_LIMIT}개 기준")
+    if basis:
+        st.caption("자료 기준 · " + " · ".join(basis))
+    _render_overview_model_picker(all_models, route)
+
+    if route == "company_overview":
+        st.markdown("#### 식약처 품목 책임주체로서 · 품목별")
+        st.dataframe(product_rows, use_container_width=True, hide_index=True)
+        with st.expander(f"등록 모델 전체 {len(all_models)}개", expanded=False):
+            st.dataframe(
+                overview_ui.company_model_rows(records, crosslinks),
+                use_container_width=True,
+                hide_index=True,
+            )
+        st.markdown("#### 나라장터 실제 납품업체로서")
+        supplier_row = overview_ui.supplier_summary_row(state.get("overview_supplier"), heading)
+        if supplier_row:
+            st.dataframe([supplier_row], use_container_width=True, hide_index=True)
+            st.caption(
+                "식약처 자료와 나라장터 가격 자료에는 서로 대조할 사업자등록번호가 없어, 이름이 같은 "
+                "납품업체를 '명칭 일치 · 사업자번호 미확인'으로만 표시합니다. 같은 회사로 단정하지 않습니다."
+            )
+        elif (state.get("overview_supplier") or {}).get("status") == "unavailable":
+            st.warning("나라장터 납품 실적을 조회하지 못했습니다.")
+        else:
+            st.info("나라장터 동일제품 거래에서 같은 이름의 납품업체를 찾지 못했습니다.")
+    else:
+        st.markdown("#### 분류번호·등급별")
+        st.dataframe(class_rows, use_container_width=True, hide_index=True)
+        st.markdown("#### 업체 → 모델 · 나라장터 가격")
+        only_priced = st.checkbox("조달가격 있는 것만", value=True, key="overview_product_priced")
+        view = same_item_ui.build_same_item_rows(crosslinks, None, include_unpriced=not only_priced)
+        if view.rows:
+            st.dataframe(
+                list(view.rows),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "품목 책임주체": st.column_config.TextColumn("품목 책임주체", width="medium"),
+                    "실제 납품업체": st.column_config.TextColumn("실제 납품업체", width="medium"),
+                },
+            )
+            notes = [
+                same_item_ui.hidden_note(view),
+                "식약처 상태(국내 정상·취소)는 모델을 골라 구매조사 화면에서 확인합니다",
+            ]
+            st.caption(". ".join(note for note in notes if note))
+        else:
+            st.info("조건에 맞는 모델이 없습니다. " + (same_item_ui.hidden_note(view) or ""))
 
 
 def _render_medical_lookup_link(indexed_identity: object, mfds: object, query: object) -> None:
@@ -871,6 +1091,15 @@ def _execute_search(
             product_name=product_name,
         )
     )
+    if (
+        selected_identity is None
+        and isinstance(indexed_identity, MfdsIdentityLookup)
+        and indexed_identity.status == "success"
+        and indexed_identity.match_type in {"company", "product"}
+    ):
+        # A company or product-name match is not one product (#221 9.4-9.5): show an
+        # overview instead of a product workspace with the company injected as manufacturer.
+        return _build_overview_state(raw_search, indexed_identity, snapshot_runtime)
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.match_type == "model" and (
         mfds_identity_status(indexed_identity) == IdentityEvidenceStatus.AMBIGUOUS or weak_key_review
     ):
@@ -2259,6 +2488,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v13" style="display:none">purchase-workspace-runtime-v13</span>'
     '<span id="purchase-workspace-runtime-v14" style="display:none">purchase-workspace-runtime-v14</span>'
     '<span id="purchase-workspace-runtime-v15" style="display:none">purchase-workspace-runtime-v15</span>'
+    '<span id="purchase-workspace-runtime-v16" style="display:none">purchase-workspace-runtime-v16</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
@@ -2500,6 +2730,8 @@ search_state = st.session_state.get(HOME_SEARCH_STATE_KEY)
 if isinstance(search_state, dict):
     if search_state.get("route") == "candidate_selection":
         _render_identity_candidate_selection(search_state)
+    elif search_state.get("route") in overview_ui.OVERVIEW_ROUTES:
+        _render_overview(search_state)
     else:
         _render_search_result(search_state)
 
