@@ -218,14 +218,20 @@ def call_with_server_retry(
     delays: Sequence[float] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> T:
-    """Run a portal call, retrying only server-side errors after the given delays."""
+    """Run a portal call, retrying transient failures after the given delays.
+
+    Transient means a server-side error (HTTP 5xx, SERVICETIMEOUT) or a transport failure
+    that outlived the client's own short retries, e.g. the ConnectTimeout that stopped a
+    형명 run before its first page on 2026-10-06. Quota and authorization errors are raised
+    immediately.
+    """
 
     waits = SERVER_ERROR_RETRY_DELAYS if delays is None else tuple(delays)
     for wait in waits:
         try:
             return call()
         except PublicDataClientError as exc:
-            if not is_server_side_error(exc):
+            if not (is_server_side_error(exc) or isinstance(exc, PublicDataTransportError)):
                 raise
             sleep(wait)
     return call()

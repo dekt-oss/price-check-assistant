@@ -53,3 +53,17 @@ def test_retry_gives_up_and_does_not_retry_other_errors() -> None:
     with pytest.raises(PublicDataClientError):
         call_with_server_retry(unauthorized, delays=(1, 2), sleep=waits.append)
     assert waits == []
+
+
+def test_transport_failures_are_retried_too() -> None:
+    calls = []
+    waits = []
+
+    def connect_timeout_then_ok():
+        calls.append(1)
+        if len(calls) == 1:
+            raise PublicDataTransportError("ConnectTimeout: timed out")
+        return {"ok": True}
+
+    assert call_with_server_retry(connect_timeout_then_ok, delays=(5,), sleep=waits.append) == {"ok": True}
+    assert waits == [5]
