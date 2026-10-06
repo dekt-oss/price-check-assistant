@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from collections.abc import Callable, Sequence
 from threading import Lock
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import quote, unquote
 from xml.etree import ElementTree
 
@@ -191,6 +193,42 @@ def _http_error_message(response: httpx.Response, secret: str) -> str:
     if body:
         message += f" body={body}"
     return _redact_secret(message, secret)
+
+
+T = TypeVar("T")
+_SERVER_SIDE_ERROR = re.compile(r"HTTP 5\d\d|SERVICETIMEOUT|code=05\b")
+SERVER_ERROR_RETRY_DELAYS: tuple[float, ...] = (10.0, 30.0)
+
+
+def is_server_side_error(exc: BaseException) -> bool:
+    """HTTP 5xx or the portal's SERVICETIMEOUT (code=05): the server failed, not the request.
+
+    Observed 2026-10-06 on the MFDS model-info API ("HTTP 504 error=SERVICETIMEOUT_ERROR
+    code=05"); these clear on retry, unlike quota or authorization errors.
+    """
+
+    if not isinstance(exc, PublicDataClientError) or isinstance(exc, PublicDataTransportError):
+        return False
+    return bool(_SERVER_SIDE_ERROR.search(str(exc)))
+
+
+def call_with_server_retry(
+    call: Callable[[], T],
+    *,
+    delays: Sequence[float] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> T:
+    """Run a portal call, retrying only server-side errors after the given delays."""
+
+    waits = SERVER_ERROR_RETRY_DELAYS if delays is None else tuple(delays)
+    for wait in waits:
+        try:
+            return call()
+        except PublicDataClientError as exc:
+            if not is_server_side_error(exc):
+                raise
+            sleep(wait)
+    return call()
 
 
 class PublicDataPortalClient:
