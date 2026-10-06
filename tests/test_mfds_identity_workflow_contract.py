@@ -9,7 +9,10 @@ def test_mfds_identity_workflow_uses_checkpointed_stable_backfill_mode() -> None
     assert 'cron: "23 6 * * *"' in text
     assert 'cron: "23 18 * * *"' in text
     assert 'default: "5"' in text
-    assert 'default: "200"' in text
+    assert 'default: "600"' in text
+    assert "python -m purchase_price.scripts.continue_collection" in text
+    assert "actions: write" in text
+    assert "github.ref == 'refs/heads/main'" in text
     assert 'default: "100"' in text
     assert 'MFDS_BACKFILL_CHUNKS:' in text
     assert 'MFDS_BACKFILL_PAGES_PER_CHUNK:' in text
