@@ -7,6 +7,7 @@ import sqlite3
 import tempfile
 import uuid
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,8 @@ _SOURCE_NOT_AUTHORIZED_MARKERS = (
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
+
+FETCH_WORKERS = 4
 
 _QUOTA_EXCEEDED_MARKERS = (
     "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR",
@@ -154,6 +157,7 @@ def _sync_without_lock(
     rows_per_page: int,
     output: Path,
     settings: Settings | None = None,
+    workers: int = FETCH_WORKERS,
 ) -> int:
     if max_pages < 1:
         raise ValueError("max_pages must be positive")
@@ -219,86 +223,111 @@ def _sync_without_lock(
                 timeout_seconds=settings.mfds_request_timeout_seconds,
                 max_retries=settings.mfds_max_retries,
             ) as client:
-                for _ in range(max_pages):
-                    try:
-                        payload = call_with_server_retry(
-                            lambda: client.get_json(
-                                settings.mfds_product_info_base_url or MFDS_PRODUCT_INFO_BASE_URL,
-                                MFDS_PRODUCT_INFO_OPERATION,
-                                pageNo=page_no,
-                                numOfRows=rows_per_page,
-                            )
+                base_url = settings.mfds_product_info_base_url or MFDS_PRODUCT_INFO_BASE_URL
+
+                def fetch(requested_page: int) -> dict[str, Any]:
+                    return call_with_server_retry(
+                        lambda: client.get_json(
+                            base_url,
+                            MFDS_PRODUCT_INFO_OPERATION,
+                            pageNo=requested_page,
+                            numOfRows=rows_per_page,
                         )
-                    except PublicDataClientError as exc:
-                        if pages_collected == 0 and _is_source_not_authorized(exc):
-                            connection.close()
-                            _write_report(
-                                output,
-                                {
-                                    "status": "SOURCE_NOT_AUTHORIZED",
-                                    "source": "MFDS medical-device product information",
-                                    "operation": MFDS_PRODUCT_INFO_OPERATION,
-                                    "reason": (
-                                        "configured service key is not approved for this "
-                                        "official product-info operation"
-                                    ),
-                                    "next_page": page_no,
-                                    "writes_performed": 0,
-                                },
+                    )
+
+                # Pages are downloaded up to `workers` at a time but applied strictly in page
+                # order, so checkpoints, empty-page detection and cycle verification behave
+                # exactly as in the sequential collector (measured ~5 s per page sequential).
+                remaining = max_pages
+                stop = False
+                with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                    while remaining > 0 and not stop:
+                        batch = list(range(page_no, page_no + min(max(1, workers), remaining)))
+                        if total_count:
+                            final_page = -(-total_count // rows_per_page)
+                            batch = [p for p in batch if p <= final_page] or batch[:1]
+                        futures = [pool.submit(fetch, p) for p in batch]
+                        for future in futures:
+                            remaining -= 1
+                            try:
+                                payload = future.result()
+                            except PublicDataClientError as exc:
+                                if pages_collected == 0 and _is_source_not_authorized(exc):
+                                    connection.close()
+                                    _write_report(
+                                        output,
+                                        {
+                                            "status": "SOURCE_NOT_AUTHORIZED",
+                                            "source": "MFDS medical-device product information",
+                                            "operation": MFDS_PRODUCT_INFO_OPERATION,
+                                            "reason": (
+                                                "configured service key is not approved for this "
+                                                "official product-info operation"
+                                            ),
+                                            "next_page": page_no,
+                                            "writes_performed": 0,
+                                        },
+                                    )
+                                    return 0
+                                if pages_collected > 0 and (
+                                    isinstance(exc, PublicDataTransportError) or is_server_side_error(exc)
+                                ):
+                                    # Publish the pages already collected in this run; the next run
+                                    # resumes from this page instead of redoing the whole chunk.
+                                    source_anomaly = "TRANSPORT_ERROR"
+                                    stop = True
+                                    break
+                                if pages_collected > 0 and _is_quota_exceeded(exc):
+                                    source_anomaly = "QUOTA_EXCEEDED"
+                                    stop = True
+                                    break
+                                raise
+
+                            page = unwrap_mfds_page(payload)
+                            # A transient response can report totalCount=0; never let it erase a
+                            # known source size.
+                            total_count = _positive_int(page.total_count) or total_count
+                            raw_ref = raw_store.put_public_json(
+                                source_operation=MFDS_PRODUCT_INFO_RAW_OPERATION,
+                                payload=payload,
                             )
-                            return 0
-                        if pages_collected > 0 and (
-                            isinstance(exc, PublicDataTransportError) or is_server_side_error(exc)
-                        ):
-                            # Publish the pages already collected in this run; the next run
-                            # resumes from this page instead of redoing the whole chunk.
-                            source_anomaly = "TRANSPORT_ERROR"
-                            break
-                        if pages_collected > 0 and _is_quota_exceeded(exc):
-                            source_anomaly = "QUOTA_EXCEEDED"
-                            break
-                        raise
+                            last_raw_key = raw_ref.key
+                            new_raw_objects += int(raw_ref.created)
+                            records = tuple(
+                                parse_mfds_product_info_record(
+                                    item,
+                                    source_payload_sha256=raw_ref.payload_hash,
+                                )
+                                for item in page.items
+                            )
+                            upserted += upsert_identity_records(
+                                connection,
+                                records,
+                                cycle=active_cycle,
+                            )
+                            rows_seen += len(records)
+                            pages_collected += 1
 
-                    page = unwrap_mfds_page(payload)
-                    # A transient response can report totalCount=0; never let it erase a
-                    # known source size.
-                    total_count = _positive_int(page.total_count) or total_count
-                    raw_ref = raw_store.put_public_json(
-                        source_operation=MFDS_PRODUCT_INFO_RAW_OPERATION,
-                        payload=payload,
-                    )
-                    last_raw_key = raw_ref.key
-                    new_raw_objects += int(raw_ref.created)
-                    records = tuple(
-                        parse_mfds_product_info_record(
-                            item,
-                            source_payload_sha256=raw_ref.payload_hash,
-                        )
-                        for item in page.items
-                    )
-                    upserted += upsert_identity_records(
-                        connection,
-                        records,
-                        cycle=active_cycle,
-                    )
-                    rows_seen += len(records)
-                    pages_collected += 1
+                            if not page.items:
+                                if not _covers_source(cycle_rows_seen + rows_seen, total_count):
+                                    # An empty page before the known end is a source glitch, not the
+                                    # end of the cycle. Keep page_no so the next run retries it.
+                                    source_anomaly = "EMPTY_PAGE_BEFORE_SOURCE_END"
+                                    stop = True
+                                    break
+                                page_no = 1
+                                cycle_completed = True
+                                stop = True
+                                break
 
-                    if not page.items:
-                        if not _covers_source(cycle_rows_seen + rows_seen, total_count):
-                            # An empty page before the known end is a source glitch, not the
-                            # end of the cycle. Keep page_no so the next run retries it.
-                            source_anomaly = "EMPTY_PAGE_BEFORE_SOURCE_END"
-                            break
-                        page_no = 1
-                        cycle_completed = True
-                        break
-
-                    page_no += 1
-                    if total_count is not None and (page_no - 1) * rows_per_page >= total_count:
-                        page_no = 1
-                        cycle_completed = True
-                        break
+                            page_no += 1
+                            if total_count is not None and (page_no - 1) * rows_per_page >= total_count:
+                                page_no = 1
+                                cycle_completed = True
+                                stop = True
+                                break
+                        for future in futures:
+                            future.cancel()
 
             if cycle_completed:
                 cycle_verified = _covers_source(cycle_rows_seen + rows_seen, total_count)
@@ -407,6 +436,7 @@ def sync(
     rows_per_page: int,
     output: Path,
     settings: Settings | None = None,
+    workers: int = FETCH_WORKERS,
 ) -> int:
     settings = settings or Settings()
     service_key = (settings.resolved_mfds_service_key or "").strip()
@@ -416,6 +446,7 @@ def sync(
             rows_per_page=rows_per_page,
             output=output,
             settings=settings,
+            workers=workers,
         )
 
     state_store = R2OperationalStateStore.from_settings(settings)
@@ -447,6 +478,7 @@ def sync(
             rows_per_page=rows_per_page,
             output=output,
             settings=settings,
+            workers=workers,
         )
     finally:
         try:
@@ -462,6 +494,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-pages", type=int, default=100)
     parser.add_argument("--rows-per-page", type=int, default=100)
+    parser.add_argument("--workers", type=int, default=FETCH_WORKERS)
     parser.add_argument(
         "--output",
         type=Path,
@@ -476,6 +509,7 @@ def main() -> int:
         max_pages=args.max_pages,
         rows_per_page=args.rows_per_page,
         output=args.output,
+        workers=args.workers,
     )
 
 

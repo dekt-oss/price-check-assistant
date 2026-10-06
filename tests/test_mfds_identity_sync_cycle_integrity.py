@@ -316,3 +316,34 @@ def test_persistent_504_mid_run_publishes_collected_pages(
     assert report["status"] == "SOURCE_TRANSPORT_ERROR"
     assert report["next_page"] == 4
     assert harness.index_rows() == 30
+
+
+def test_parallel_fetch_matches_sequential(harness: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    original = sync_module._sync_without_lock
+    reports = {}
+    rows = {}
+    for workers in (1, 4):
+        harness.states.clear()
+        monkeypatch.setattr(
+            sync_module,
+            "_sync_without_lock",
+            lambda w=workers, **kwargs: original(**kwargs, workers=w),
+        )
+        reports[workers] = harness.run(FakeSource(total=95), max_pages=20)
+        rows[workers] = harness.index_rows()
+
+    assert reports[1]["status"] == reports[4]["status"] == "SUCCESS"
+    assert reports[1]["cycle_verified"] is reports[4]["cycle_verified"] is True
+    assert reports[1]["next_page"] == reports[4]["next_page"] == 1
+    assert rows[1] == rows[4] == 95
+
+
+def test_failure_mid_batch_does_not_apply_later_downloaded_pages(harness: SimpleNamespace) -> None:
+    source = FakeSource(total=100, failing_pages={3})
+    report = harness.run(source, max_pages=10)
+
+    # Pages 1-4 are downloaded together; page 3 fails, so page 4 must not be applied.
+    assert 4 in source.requested
+    assert report["status"] == "SOURCE_TRANSPORT_ERROR"
+    assert report["next_page"] == 3
+    assert harness.index_rows() == 20

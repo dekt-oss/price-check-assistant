@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/mfds-item-status-index.yml"
       - "src/purchase_price/scripts/sync_mfds_item_status_index.py"
+      - "src/purchase_price/scripts/continue_collection.py"
       - "src/purchase_price/services/mfds_item_status_index.py"
       - "tests/test_mfds_item_status_index.py"
   schedule:
@@ -55,6 +56,9 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 115
+    permissions:
+      contents: read
+      actions: write
     env:
       PYTHONPATH: src
       MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY }}
@@ -88,6 +92,7 @@ jobs:
             --output artifacts/mfds-item-status/plan.json
           python -c "import json,os; d=json.load(open('artifacts/mfds-item-status/plan.json')); open(os.environ['GITHUB_OUTPUT'],'a').write('run=' + ('true' if d['run'] else 'false') + '\n')"
       - name: Collect 형명 pages in checkpointed chunks
+        id: collect
         if: ${{ steps.plan.outputs.run == 'true' }}
         run: |
           set -euo pipefail
@@ -127,6 +132,18 @@ jobs:
                           "verified_complete_cycles", "cycle_rows_seen"):
                   print(f"{key}=", last.get(key))
           PY
+      - name: Continue the first cycle without waiting for the schedule
+        if: ${{ success() && steps.plan.outputs.run == 'true' && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          first_cycle="$(python -c "import json,glob; r=[json.load(open(p)) for p in sorted(glob.glob('artifacts/mfds-item-status/sync-*.json'))]; print('true' if r and int(r[-1].get('verified_complete_cycles') or 0) == 0 else 'false')")"
+          decision="$(python -m purchase_price.scripts.continue_collection --reports 'artifacts/mfds-item-status/sync-*.json' --first-cycle "$first_cycle")"
+          echo "decision=$decision"
+          if [ "$decision" = "continue" ]; then
+            gh workflow run mfds-item-status-index.yml --ref main -f chunks="$CHUNKS" -f pages_per_chunk="$PAGES_PER_CHUNK"
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:

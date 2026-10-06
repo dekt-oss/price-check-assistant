@@ -10,6 +10,7 @@ on:
       - "src/purchase_price/storage/r2_mfds_identity_index.py"
       - "src/purchase_price/scripts/sync_mfds_identity_index.py"
       - "src/purchase_price/scripts/plan_mfds_identity_collection.py"
+      - "src/purchase_price/scripts/continue_collection.py"
       - "src/purchase_price/services/mfds_identity_status.py"
       - "pages/1_대시보드.py"
       - "tests/test_mfds_identity_index.py"
@@ -41,9 +42,9 @@ on:
         required: true
         default: "5"
       pages_per_chunk:
-        description: MFDS pages per checkpoint chunk
+        description: MFDS pages per checkpoint chunk (4 pages are fetched at a time)
         required: true
-        default: "200"
+        default: "600"
       rows_per_page:
         description: Rows requested per MFDS page
         required: true
@@ -82,6 +83,9 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: write
     env:
       PYTHONPATH: src
       MFDS_SERVICE_KEY: ${{ secrets.MFDS_SERVICE_KEY || secrets.DATA_GO_KR_MARKET_SERVICE_KEY || secrets.DATA_GO_KR_SERVICE_KEY }}
@@ -90,7 +94,7 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       MFDS_BACKFILL_CHUNKS: ${{ inputs.chunks || '5' }}
-      MFDS_BACKFILL_PAGES_PER_CHUNK: ${{ inputs.pages_per_chunk || '200' }}
+      MFDS_BACKFILL_PAGES_PER_CHUNK: ${{ inputs.pages_per_chunk || '600' }}
       MFDS_BACKFILL_ROWS_PER_PAGE: ${{ inputs.rows_per_page || '100' }}
     steps:
       - uses: actions/checkout@v7
@@ -202,6 +206,18 @@ jobs:
           if any(item.get("status") == "SOURCE_NOT_AUTHORIZED" for item in reports):
               print("::warning::MFDS product-info API utilization approval is required for this service key.")
           PY
+      - name: Continue the backfill without waiting for the schedule
+        if: ${{ success() && steps.plan.outputs.chunks != '0' && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIRST_CYCLE: ${{ steps.plan.outputs.collection_mode == 'backfill' }}
+        run: |
+          set -euo pipefail
+          decision="$(python -m purchase_price.scripts.continue_collection --reports 'artifacts/mfds-identity/sync-*.json' --first-cycle "$FIRST_CYCLE")"
+          echo "decision=$decision"
+          if [ "$decision" = "continue" ]; then
+            gh workflow run mfds-identity-index.yml --ref main               -f chunks="$MFDS_BACKFILL_CHUNKS"               -f pages_per_chunk="$MFDS_BACKFILL_PAGES_PER_CHUNK"               -f rows_per_page="$MFDS_BACKFILL_ROWS_PER_PAGE"
+          fi
       - name: Upload collection evidence
         if: always()
         uses: actions/upload-artifact@v7
