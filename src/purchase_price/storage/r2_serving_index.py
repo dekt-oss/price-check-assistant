@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +16,7 @@ from purchase_price.storage.r2 import (
     R2QuotaExceededError,
     R2RawEvidenceStore,
 )
+from purchase_price.storage.streaming_gzip import write_verified_gzip_body
 
 _NOT_FOUND_CODES = {"404", "NoSuchKey", "NotFound"}
 SERVING_INDEX_SCHEMA = "track-b-serving-sqlite-v2"
@@ -128,40 +127,13 @@ class R2ServingIndexStore:
         schema = metadata.get("schema")
         if schema not in SUPPORTED_SERVING_INDEX_SCHEMAS or metadata.get("sha256") != ref.sha256:
             raise R2IntegrityError(f"R2 serving index metadata mismatch for {ref.key}")
-        compressed = response["Body"].read()
-        try:
-            raw = gzip.decompress(compressed)
-        except (OSError, EOFError) as exc:
-            raise R2IntegrityError(f"R2 serving index {ref.key} is not valid gzip") from exc
-        digest = hashlib.sha256(raw).hexdigest()
-        if digest != ref.sha256:
-            raise R2IntegrityError(
-                f"R2 serving index hash mismatch: expected {ref.sha256}, got {digest}"
-            )
-
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        temp_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=destination.parent,
-                prefix=f".{destination.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as handle:
-                temp_path = Path(handle.name)
-                handle.write(raw)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temp_path, destination)
-            temp_path = None
-        finally:
-            if temp_path is not None:
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
-        return destination
+        return write_verified_gzip_body(
+            response["Body"],
+            destination,
+            expected_sha256=ref.sha256,
+            invalid_gzip_message=f"R2 serving index {ref.key} is not valid gzip",
+            hash_mismatch_prefix="R2 serving index hash mismatch",
+        )
 
     def delete(self, key: str) -> None:
         if not key.startswith(f"{self.prefix}/"):
