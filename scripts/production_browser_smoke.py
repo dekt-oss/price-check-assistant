@@ -58,24 +58,12 @@ def _wait_heading(context: Any, name: str, *, timeout: int = 30_000) -> None:
     context.get_by_role("heading", name=name, exact=True).wait_for(state="visible", timeout=timeout)
 
 
-def _navigate(page: Any, name: str) -> None:
-    """Navigate by sidebar label; destination-specific controls prove page readiness.
-
-    Streamlit navigation titles are allowed to differ from a page's internal H1/page title, so
-    coupling those strings made the smoke test fail on healthy pages. Callers always wait for a
-    destination-specific control immediately after navigation.
-    """
-
-    app = _app_frame(page)
-    app.get_by_role("link", name=name, exact=True).click()
-
-
 def _open_page(page: Any, url_path: str) -> None:
     """Open a registered page by its URL path.
 
-    Since the 2026-10 UI simplification the sidebar lists only 가격 조사 and 의료기기 상세; the
-    detailed-search, quote-review and UAT pages stay registered but are reached by URL (or by
-    in-app links), so the smoke cannot click a sidebar label for them.
+    Since the 2026-10 UI simplification the sidebar lists only 가격 조사 and 의료기기 상세 and the
+    other pages are reached by URL or in-app links. URL paths come from the page files, so they are
+    the same before and after a rename of a sidebar label; Streamlit Cloud forwards them to the app.
     """
 
     page.goto(
@@ -388,7 +376,7 @@ def main() -> None:
                 app.get_by_label("견적서 파일", exact=True).wait_for(state="visible")
                 report["checks"].append("quote_review_rendered")
 
-                _navigate(page, "의료기기 상세")
+                _open_page(page, "의료기기_조회")
                 app = _app_frame(page)
                 app.get_by_role("tab", name="등록·시장조사", exact=True).wait_for(
                     state="visible"
