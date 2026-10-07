@@ -498,3 +498,6 @@ def render_external_research_links(query: ProductQuery) -> None:
         st.caption("나라장터 밖의 공개 웹 자료를 추가로 확인할 때 사용하는 보조 검색입니다.")
         for label, url in links:
             st.link_button(label, url)
+
+# Runtime marker: the dashboard reloads a retained pre-2026-10 copy of this module (hot reload).
+PLAIN_WORDING_2026_10 = True

@@ -482,7 +482,7 @@ def overview_model_rows(
             "모델": row.get("모델") or "",
             "제조·수입업체": row.get("품목 책임주체") or "",
             "같은 제품 거래": f"{count(row)}건" if row.get("나라장터 직접거래") is not None else "조회 불가",
-            "가격범위": row.get("나라장터 가격범위") or "",
+            "가격범위": (row.get("나라장터 가격범위") or "") if count(row) else "",
             "최근 거래": row.get("최근거래") or "",
         }
         for row in selected

@@ -215,3 +215,6 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             f"규격/설명 첨부 링크 {attachment_count}개를 확인했습니다. 첨부문서의 제조사·모델 식별은 "
             "동일제품 여부 검증에 사용하되, 첨부 키워드만으로 직접가격을 자동 승격하지 않습니다."
         )
+
+# Runtime marker: the dashboard reloads a retained pre-2026-10 copy of this module (hot reload).
+PLAIN_WORDING_2026_10 = True

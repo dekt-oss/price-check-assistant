@@ -265,3 +265,6 @@ def render_observation_cards(items: Iterable[CollectedPrice]) -> None:
                 f"{group.median:,.0f}원" if group.median is not None else "산정불가",
             )
             c4.metric("상단", f"{group.high:,.0f}원" if group.high is not None else "산정불가")
+
+# Runtime marker: the dashboard reloads a retained pre-2026-10 copy of this module (hot reload).
+PLAIN_WORDING_2026_10 = True

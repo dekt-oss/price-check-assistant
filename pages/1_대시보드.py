@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import sqlite3
+import sys
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from inspect import signature
@@ -174,6 +175,40 @@ _TRACK_B_RUNTIME_MARKERS = (
     (track_b_transactions_ui, "GROUP_QUANTITY_NORMALIZED"),
     (same_item_ui, "ITEM_STATUS_AWARE"),
 )
+
+
+# Modules whose screen wording changed in the 2026-10 simplification. A Streamlit process that
+# was started before the deploy keeps the old copies (the page updates, its imports do not), so the
+# cards would show the new layout with the old developer words.
+_UI_RUNTIME_MARKERS = (
+    ("purchase_price.ui.widgets", "PLAIN_WORDING_2026_10"),
+    ("purchase_price.ui.g2b_market_research", "PLAIN_WORDING_2026_10"),
+    ("purchase_price.ui.market_research", "PLAIN_WORDING_2026_10"),
+    ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
+    ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10"),
+)
+
+
+def _refresh_ui_modules() -> None:
+    """Reload retained pre-2026-10 UI modules once, in dependency order; never raises."""
+
+    stale = [
+        name
+        for name, marker in _UI_RUNTIME_MARKERS
+        if name in sys.modules and not hasattr(sys.modules[name], marker)
+    ]
+    if not stale:
+        return
+    with _TRACK_B_RELOAD_LOCK:
+        for name, marker in _UI_RUNTIME_MARKERS:
+            module = sys.modules.get(name)
+            if module is None or hasattr(module, marker):
+                continue
+            try:
+                importlib.invalidate_caches()
+                importlib.reload(module)
+            except Exception:
+                pass
 
 
 def _track_b_runtime():
@@ -609,7 +644,7 @@ def _build_mfds_procurement_crosslinks(
                     if prices
                     else "조회 불가"
                     if comparison.evidence_status == PriceEvidenceStatus.UNAVAILABLE
-                    else "직접 동일성 확인 거래 0건"
+                    else "같은 제품 거래 0건"
                 ),
                 "최근거래": dates[-1] if dates else "",
                 "실제 조달 공급업체": " / ".join(suppliers[:5]),
@@ -670,10 +705,31 @@ def _build_overview_state(
             else None
         )
         data_as_of = str(getattr(snapshot, "data_as_of", "") or "")
+    similar_companies: list[dict[str, object]] = []
+    if route == "company_overview":
+        # "메디아나" can match a small company of exactly that name while the buyer meant
+        # "(주)메디아나"; offer other registered legal-form spellings instead of guessing.
+        seen = {normalize_text(heading)}
+        for variant in overview_ui.company_name_variants(raw_search):
+            try:
+                found = _lookup_mfds_identity_runtime(variant)
+            except Exception:
+                continue
+            if not isinstance(found, MfdsIdentityLookup) or found.status != "success" or found.match_type != "company":
+                continue
+            name = next((r.registered_company for r in found.records if r.registered_company), variant)
+            if normalize_text(name) in seen:
+                continue
+            seen.add(normalize_text(name))
+            models = {r.model_name for r in found.records if r.model_name}
+            similar_companies.append(
+                {"name": name, "models": len(models), "more": len(found.records) >= 200}
+            )
     return {
         "route": route,
         "search_text": raw_search,
         "heading": heading,
+        "similar_companies": similar_companies,
         "overview_records": records,
         "overview_crosslinks": crosslinks,
         "overview_supplier": supplier,
@@ -705,6 +761,18 @@ def _render_overview(state: dict[str, Any]) -> None:
     st.subheader(heading)
     if route == "company_overview":
         st.caption("업체 이름으로 찾은 결과입니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다.")
+        for similar in state.get("similar_companies") or ():
+            note_col, button_col = st.columns([4, 1.4], vertical_alignment="center")
+            more = " 이상" if similar.get("more") else ""
+            note_col.info(
+                f"이름이 비슷한 다른 업체도 있습니다: **{similar['name']}** · 등록 모델 {similar['models']}개{more}"
+            )
+            if button_col.button(
+                f"{similar['name']} 보기",
+                key=f"overview_similar::{similar['name']}",
+                use_container_width=True,
+            ):
+                _open_model_from_overview(str(similar["name"]))
         product_rows = overview_ui.company_product_rows(records, crosslinks)
         supplier = state.get("overview_supplier") or {}
         supplied = int(supplier.get("trade_count") or 0)
@@ -2407,6 +2475,7 @@ def _render_mfds_raw_details(indexed_identity: object, mfds: object) -> None:
 
 
 hydrate_streamlit_runtime_secrets()
+_refresh_ui_modules()
 st.set_page_config(page_title="가격 조사", page_icon="🔎", layout="wide")
 st.markdown(
     '<span id="unified-search-runtime-v3" style="display:none">unified-search-runtime-v3</span>'

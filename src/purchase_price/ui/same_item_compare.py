@@ -28,6 +28,9 @@ _INACTIVE = {STATUS_CANCELLED, STATUS_EXPORT, f"{STATUS_CANCELLED}(품목)", f"{
 ITEM_STATUS_AWARE = True
 PRICE_GAP_FACTOR = Decimal("3")
 
+# Runtime marker: the dashboard reloads a retained pre-2026-10 copy of this module (hot reload).
+PLAIN_WORDING_2026_10 = True
+
 
 def _key(permit: object, model: object) -> tuple[str, str]:
     return normalize_text(str(permit or "")), normalize_text(str(model or ""))

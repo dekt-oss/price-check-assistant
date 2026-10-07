@@ -25,6 +25,9 @@ TONE_WARN = "warn"
 TONE_DANGER = "danger"
 TONE_NEUTRAL = "neutral"
 
+# Runtime marker: the dashboard reloads a retained pre-2026-10 copy of this module (hot reload).
+PLAIN_WORDING_2026_10 = True
+
 # Safety codes stay internal; the header shows what they mean.
 _SAFETY_TEXT: dict[str, tuple[str, str, str]] = {
     "RED": ("회수·판매중지 해당", "이 모델에 일치하는 공식 회수·판매중지 기록이 있습니다", TONE_DANGER),
