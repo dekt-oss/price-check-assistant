@@ -100,7 +100,7 @@ def _coverage_caption(bundle: MarketResearchBundle) -> str:
 def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 100) -> None:
     """Render broad external procurement research without implying hospital procurement flow."""
 
-    st.subheader("타 기관 나라장터 구매사례 Research")
+    st.subheader("다른 기관의 나라장터 구매 사례")
     st.caption(
         "우리 병원의 입찰 절차가 아니라 타 기관의 공개 조달자료를 시장가격 조사 참고자료로 조회합니다. "
         "입찰공고·공고 품목상세·낙찰·사전규격·계약·과정통합 자료를 함께 보되, 추정가격·예산·낙찰총액·계약총액은 "
@@ -155,13 +155,13 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
         label = _SOURCE_LABELS[source.source]
         if source.status == ResearchSourceStatus.NOT_AUTHORIZED:
             st.error(
-                f"{label}: 현재 선택된 Research API 인증/활용신청으로 호출할 수 없습니다. "
+                f"{label}: 현재 서비스키로는 이 자료를 조회할 권한이 없습니다. "
                 "검색 결과 0건이 아니라 서비스 권한 문제입니다. "
                 f"{source.error_type}: {source.error_message}"
             )
         else:
             st.warning(
-                f"{label}: API 조회 실패/부분완료입니다. 이것은 검색 결과 0건이 아닙니다. "
+                f"{label}: 조회가 실패했거나 일부만 끝났습니다. 검색 결과 0건이라는 뜻은 아닙니다. "
                 f"{source.error_type}: {source.error_message}"
             )
 
@@ -169,8 +169,8 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
         label = _SOURCE_LABELS[source.source]
         st.info(
             f"{label}: 공고번호로 직접 연결되는 계약은 표시하되, 독립 품명 장기검색은 "
-            "공공데이터 API가 31일 범위만 허용하고 단일 요청 응답이 느려 메인 검색에서 동기 실행하지 않습니다. "
-            "이 상태는 0건이나 조회실패가 아닙니다. 3년 직접가격·납품근거는 Track B에서 계속 조회합니다."
+            "공공데이터 조회가 한 번에 31일씩만 되고 느려서 여기서는 실행하지 않습니다. "
+            "0건이나 조회 실패가 아닙니다. 같은 제품 거래가는 위쪽 결과에서 따로 보여줍니다."
         )
 
     for source in not_run:
@@ -187,7 +187,7 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
     )
     if not records:
         if not failures and not not_run and not deferred:
-            st.info("API는 정상 응답했지만 현재 조사 기준·기간에서 유의미한 Research 결과가 0건입니다.")
+            st.info("조회는 정상적으로 끝났지만, 이 기준·기간에서 쓸 만한 참고 자료는 0건입니다.")
         elif (not_run or deferred) and not failures:
             st.info(
                 "실행된 1차 검색에서 일부 후속 조회가 미실행 또는 심화대기 상태입니다. "
@@ -203,8 +203,8 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
         column_config={"원문": st.column_config.LinkColumn("원문")},
     )
     st.caption(
-        "품목식별번호·세부품명번호·라인·원문규격·납품조건·변경차수·원문금액은 원자료 추적과 "
-        "후속 제품 fingerprint 비교를 위한 provenance입니다. 해당 필드 존재만으로 동일제품이나 단가 Evidence로 승격하지 않습니다."
+        "품목식별번호·세부품명번호·원문규격·납품조건 같은 항목은 원문을 찾아가기 위한 정보입니다. "
+        "이 항목이 있다고 같은 제품이나 단가 근거로 보지 않습니다."
     )
     if len(records) > len(shown):
         st.caption(f"총 {len(records)}건 중 최신 {len(shown)}건을 표시합니다.")
@@ -215,3 +215,6 @@ def render_g2b_market_research(bundle: MarketResearchBundle, *, max_rows: int = 
             f"규격/설명 첨부 링크 {attachment_count}개를 확인했습니다. 첨부문서의 제조사·모델 식별은 "
             "동일제품 여부 검증에 사용하되, 첨부 키워드만으로 직접가격을 자동 승격하지 않습니다."
         )
+
+# Runtime marker: the dashboard reloads a retained pre-2026-10 copy of this module (hot reload).
+PLAIN_WORDING_2026_10 = True

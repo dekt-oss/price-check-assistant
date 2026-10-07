@@ -23,28 +23,32 @@ def _stats(**overrides):
     return SimpleNamespace(**values)
 
 
-def test_price_card_single_price_keeps_smoke_count_phrase() -> None:
+def test_price_card_single_price_keeps_count_phrase() -> None:
     card = header.price_card(_stats())
 
     assert card.value == "396,000원"
-    assert card.note == "직접 동일성 확인 거래 50건 · 최근 2026-10-01"
+    assert card.note == "같은 제품 거래 50건 · 최근 2026-10-01"
     assert card.tone == header.TONE_OK
 
 
 def test_price_card_range_shows_median() -> None:
     card = header.price_card(_stats(min_price=Decimal("100"), median_price=Decimal("150"), max_price=Decimal("300")))
 
-    assert card.value == "100 ~ 300원"
-    assert "중앙값 150원" in card.note
+    assert card.value == "150원"
+    assert card.note.startswith("중앙값 · 같은 제품 거래 50건")
+
+    two = header.price_card(
+        _stats(direct_count=2, min_price=Decimal("100"), median_price=Decimal("200"), max_price=Decimal("300"))
+    )
+    assert two.value == "100 ~ 300원"
 
 
 def test_price_card_zero_and_unavailable_are_distinct() -> None:
     zero = header.price_card(_stats(direct_count=0, min_price=None, max_price=None, reference_count=3))
     unavailable = header.price_card(_stats(), unavailable=True)
 
-    assert zero.value == "직접근거 없음"
-    assert "직접 동일성 확인 거래 0건" in zero.note
-    assert "참고거래 3건" in zero.note
+    assert zero.value == "같은 제품 거래 0건"
+    assert "비슷한 품목 거래 3건은 비교에서 제외" in zero.note
     assert unavailable.value == "조회 불가"
     assert unavailable.tone == header.TONE_WARN
     # The dashboard contract bans this phrase; zero evidence is not "no trade".
@@ -68,13 +72,13 @@ def test_mfds_card_states() -> None:
 
     assert found.note == "제허 12-1551 호 · 지이헬스케어코리아"
     assert found.tone == header.TONE_OK
-    assert waiting.value == "형명 조회 대기"
-    assert "아래 버튼" in waiting.note
+    assert waiting.value == "확인 전"
+    assert "식약처에서 확인" in waiting.note
     assert missing.value == "찾지 못함"
     assert "26%" in missing.note
     assert "미등록" not in missing.value + missing.note
     same_item = header.mfds_card("품목 확인", model_count=632, active_model_count=410)
-    assert same_item.note == "같은 품목 등록모델 632개(국내 정상 410개) · 이 모델명과 일치하는 등록은 미확인"
+    assert same_item.note == "같은 품목 등록 모델 632개(판매 가능 410개) · 이 모델명과 같은 등록은 못 찾음"
 
 
 def test_identity_line_prefers_mfds_then_procurement_name() -> None:
@@ -85,7 +89,7 @@ def test_identity_line_prefers_mfds_then_procurement_name() -> None:
             permit_type="허가",
             companies=["A", "B"],
         )
-        == "자동심장충격기 · 식약처 품목번호 [허가] 제허 1 호 외 1건 · 품목 책임주체 A 외 1곳"
+        == "자동심장충격기 · 허가 제허 1 호 외 1건 · 제조·수입 A 외 1곳"
     )
     assert (
         header.identity_line(procurement_product="저출력심장충격기", procurement_maker="나눔테크")
@@ -137,11 +141,12 @@ def test_cards_html_escapes_values() -> None:
 def test_dashboard_uses_fixed_header_before_area_tabs() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
+    conclusion = source.index("result_summary_ui.render_conclusion_html(conclusion)")
     cards = source.index("workspace_header_ui.render_cards_html(header_cards)")
-    segment = source.index("st.segmented_control(")
-    assert cards < segment
+    first_section = source.index('st.markdown("#### 얼마에 거래됐나")')
+    assert conclusion < cards < first_section
     assert 'id="purchase-workspace-runtime-v11"' in source
-    assert "column_order=workspace_header_ui.direct_table_columns(direct_rows)" in source
-    assert 'st.expander("확인 내역 · 안전정보 · 검색어 해석", expanded=False)' in source
-    # The deferred research loader lives with the reference evidence, not above the fold.
-    assert source.index('st.markdown("#### 참고근거 · 입찰·계약 자료")') < source.index("research_button_label")
+    assert "workspace_header_ui.direct_table_columns(direct_rows)" in source
+    assert 'st.expander("상세 자료 · 견적 조건 · 안전정보 · 식약처 원자료 · 자료 기준", expanded=False)' in source
+    # The deferred research loader lives at the bottom, not above the fold.
+    assert source.index('st.markdown("##### 입찰·계약 참고자료")') < source.index("research_button_label")

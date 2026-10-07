@@ -12,8 +12,8 @@ def test_purchase_workspace_integrates_official_mfds_recall_lookup() -> None:
     assert 'safety_status_value == "RED"' in source
     assert '"NOT_AUTHORIZED",' in source
     assert '"safety_lookup": safety_lookup' in source
-    assert "식약처 회수·판매중지 API 확인시각" in source
-    assert "Service04 형명/품목 응답에는 exact 식약처 품목번호가 없어" in source
+    assert "식약처 회수·판매중지 확인 시각" in source
+    assert "회수 기록에는 허가번호가 없어 '관련 안전정보'로 표시합니다" in source
 
 
 def test_recall_api_authorization_is_configured_separately() -> None:

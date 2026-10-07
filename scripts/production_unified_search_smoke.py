@@ -12,9 +12,11 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v16"
-RESULT_PATTERN = re.compile(r"동일성 확인 (\d+)건 · 검색 참고 (\d+)건")
-WORKSPACE_DIRECT_PATTERN = re.compile(r"직접 동일성 확인 거래\s*(\d+)건")
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v17"
+# The simplified result screen (2026-10) states counts in plain words on the price card.
+WORKSPACE_DIRECT_PATTERN = re.compile(r"같은 제품 거래\s*(\d+)건")
+REFERENCE_PATTERN = re.compile(r"비슷한 품목 거래\s*(\d+)건")
+RESULT_SECTIONS = ("얼마에 거래됐나", "누가 파는가")
 ERROR_TEXTS = (
     "AttributeError",
     "This app has encountered an error",
@@ -153,7 +155,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-runtime-v16 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-runtime-v17 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -165,15 +167,11 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
             page.wait_for_timeout(1_000)
             continue
         _assert_no_error_text(body)
-        legacy_match = RESULT_PATTERN.search(body)
+        reference_match = REFERENCE_PATTERN.search(body)
         workspace_match = WORKSPACE_DIRECT_PATTERN.search(body)
-        if (
-            workspace_match is not None
-            and "구매조사 워크스페이스" in body
-            and "나라장터 동일제품 직접거래" in body
-        ):
+        if workspace_match is not None and all(section in body for section in RESULT_SECTIONS):
             strict_count = int(workspace_match.group(1))
-            reference_count = int(legacy_match.group(2)) if legacy_match is not None else 0
+            reference_count = int(reference_match.group(1)) if reference_match is not None else 0
             if strict_count < 1:
                 raise RuntimeError(
                     "DFM100 one-line search did not recover direct A/B evidence: "
@@ -185,43 +183,37 @@ def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple
 
 
 def _verify_workspace_sections_persist_result(page: Any, report: dict[str, object]) -> None:
+    """The result is one scrolling page now: check its sections, then change the quote price
+    (a Streamlit rerun) and confirm the same result is still shown with the quote position."""
+
     started = time.monotonic()
     app = _app(page)
 
     body = _body_text(page)
     _assert_no_error_text(body)
-    if (
-        "나라장터 동일제품 직접거래" not in body
-        or "참고근거 · 입찰·계약 자료" not in body
-    ):
-        raise RuntimeError("Default price workspace did not render after DFM100 search")
+    if "얼마에 거래됐나" not in body or "입찰·계약 참고자료" not in body:
+        raise RuntimeError("Default price result did not render after DFM100 search")
     report["price_section_rendered"] = True
+    if "누가 파는가" not in body:
+        raise RuntimeError("Supplier section did not render after DFM100 search")
+    report["supplier_section_rendered"] = True
+    # Only shown when MFDS lists the same item; absence is not a failure.
+    report["comparison_section_rendered"] = "같은 품목의 다른 모델" in body
 
-    supplier_section = app.get_by_text("업체·조달", exact=True)
-    supplier_section.wait_for(state="visible", timeout=20_000)
-    supplier_section.click()
+    quote_input = app.get_by_label("내 견적가 (원)", exact=True)
+    quote_input.wait_for(state="visible", timeout=20_000)
+    quote_input.fill("12000000")
+    quote_input.press("Enter")
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         body = _body_text(page)
         _assert_no_error_text(body)
         if (
-            "품목 책임주체 · 식약처에 등록한 제조·수입업체" in body
-            and "실제 납품업체 · 나라장터" in body
+            "내 견적가 12,000,000원은" in body
+            and WORKSPACE_DIRECT_PATTERN.search(body) is not None
+            and "얼마에 거래됐나" in body
         ):
-            report["supplier_section_rendered"] = True
-            break
-        page.wait_for_timeout(1_000)
-    else:
-        raise RuntimeError("Supplier/procurement section did not preserve DFM100 result")
-
-    compare_section = app.get_by_text("동일품목 비교", exact=True)
-    compare_section.click()
-    deadline = time.monotonic() + 45
-    while time.monotonic() < deadline:
-        body = _body_text(page)
-        _assert_no_error_text(body)
-        if "같은 품목의 다른 등록모델과 가격" in body:
-            report["comparison_section_rendered"] = True
+            report["quote_position_rendered"] = True
             report["direct_workspace_sections_seconds"] = round(
                 time.monotonic() - started,
                 2,
@@ -229,7 +221,7 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
             _save_snapshot(page, report, "unified-search-dfm100-workspace")
             return
         page.wait_for_timeout(1_000)
-    raise RuntimeError("Same-item comparison section did not preserve DFM100 result")
+    raise RuntimeError("DFM100 result did not survive the quote-price rerun")
 
 
 def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
@@ -335,9 +327,9 @@ def _verify_quote_upload_uses_unified_workspace(browser: Any, report: dict[str, 
             body = _body_text(page)
             _assert_no_error_text(body)
             if (
-                "구매조사 워크스페이스" in body
-                and "일반 통합검색과 동일한 구매조사 파이프라인" in body
+                f"견적서 {quote_path.name}" in body
                 and "DFM100" in body
+                and all(section in body for section in RESULT_SECTIONS)
             ):
                 direct_match = WORKSPACE_DIRECT_PATTERN.search(body)
                 if direct_match is None or int(direct_match.group(1)) < 1:

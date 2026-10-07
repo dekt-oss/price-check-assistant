@@ -6,6 +6,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 EXPECT_QUOTE_UAT = os.getenv("EXPECT_QUOTE_UAT", "").strip().casefold() in {
@@ -57,47 +58,20 @@ def _wait_heading(context: Any, name: str, *, timeout: int = 30_000) -> None:
     context.get_by_role("heading", name=name, exact=True).wait_for(state="visible", timeout=timeout)
 
 
-def _navigate(page: Any, name: str) -> None:
-    """Navigate by sidebar label; destination-specific controls prove page readiness.
+def _open_page(page: Any, url_path: str) -> None:
+    """Open a registered page by its URL path.
 
-    Streamlit navigation titles are allowed to differ from a page's internal H1/page title, so
-    coupling those strings made the smoke test fail on healthy pages. Callers always wait for a
-    destination-specific control immediately after navigation.
+    Since the 2026-10 UI simplification the sidebar lists only 가격 조사 and 의료기기 상세 and the
+    other pages are reached by URL or in-app links. URL paths come from the page files, so they are
+    the same before and after a rename of a sidebar label; Streamlit Cloud forwards them to the app.
     """
 
-    app = _app_frame(page)
-    app.get_by_role("link", name=name, exact=True).click()
-
-
-def _wait_for_navigation_link(
-    page: Any,
-    name: str,
-    *,
-    timeout_seconds: float = 180.0,
-) -> None:
-    """Wait for a newly deployed navigation target without treating rollout lag as app failure."""
-
-    deadline = time.monotonic() + timeout_seconds
-    last_error = ""
-    while time.monotonic() < deadline:
-        try:
-            app = _app_frame(page)
-            link = app.get_by_role("link", name=name, exact=True)
-            if link.count() > 0:
-                link.first.wait_for(state="visible", timeout=5_000)
-                return
-        except Exception as exc:
-            last_error = f"{type(exc).__name__}: {exc}"[:1000]
-
-        try:
-            page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(5_000)
-        except Exception as exc:
-            last_error = f"{type(exc).__name__}: {exc}"[:1000]
-        page.wait_for_timeout(5_000)
-
-    detail = f"; last_error={last_error}" if last_error else ""
-    raise RuntimeError(f"Production navigation link did not appear: {name}{detail}")
+    page.goto(
+        PRODUCTION_URL.rstrip("/") + "/" + quote(url_path),
+        wait_until="domcontentloaded",
+        timeout=60_000,
+    )
+    page.wait_for_timeout(3_000)
 
 
 def _diagnostic_snapshot(page: Any, *, label: str) -> dict[str, object]:
@@ -380,7 +354,7 @@ def main() -> None:
                     _wait_for_hotfix_deployment(page, report)
                     _exercise_unified_search(page, report)
 
-                _navigate(page, "상세 검색")
+                _open_page(page, "빠른_검색")
                 app = _app_frame(page)
                 app.get_by_label("제품명", exact=True).wait_for(state="visible")
                 app.get_by_label("제조사", exact=True).wait_for(state="visible")
@@ -397,12 +371,12 @@ def main() -> None:
                 )
                 report["checks"].append("contract_tab_rendered")
 
-                _navigate(page, "견적 검토")
+                _open_page(page, "견적_검토")
                 app = _app_frame(page)
                 app.get_by_label("견적서 파일", exact=True).wait_for(state="visible")
                 report["checks"].append("quote_review_rendered")
 
-                _navigate(page, "의료기기 조회")
+                _open_page(page, "의료기기_조회")
                 app = _app_frame(page)
                 app.get_by_role("tab", name="등록·시장조사", exact=True).wait_for(
                     state="visible"
@@ -415,8 +389,7 @@ def main() -> None:
 
                 final_label = "medical-device-page"
                 if EXPECT_QUOTE_UAT:
-                    _wait_for_navigation_link(page, "견적추출 UAT")
-                    _navigate(page, "견적추출 UAT")
+                    _open_page(page, "quote-extraction-uat")
                     app = _app_frame(page)
                     app.get_by_label("UAT 견적 파일", exact=True).wait_for(
                         state="visible", timeout=30_000

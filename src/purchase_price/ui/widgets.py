@@ -114,10 +114,9 @@ def render_evidence_table(items: Iterable[CollectedPrice]) -> None:
 
     direct_rows, reference_rows = split_evidence_rows_by_match_grade(rows)
     if direct_rows:
-        st.markdown("**A/B 제품일치 근거**")
+        st.markdown("**같은 제품으로 확인된 근거**")
         st.caption(
-            "A/B는 제품 동일성 수준입니다. 견적 판정에는 Evidence Type과 비교범위가 "
-            "직접가격·QUOTE_COMPARABLE 조건까지 충족한 근거만 사용합니다."
+            "같은 제품으로 확인된 근거입니다. 견적 비교에는 거래 조건까지 같다고 담당자가 확인한 근거만 씁니다."
         )
         _render_evidence_rows(direct_rows)
     if reference_rows:
@@ -210,7 +209,7 @@ def render_discovery_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
     if not rows:
         st.info("선택 기간과 연구용 탐색어에서 나라장터 후보를 찾지 못했습니다.")
         return
-    with st.expander("미검증 Research 후보 보기", expanded=True):
+    with st.expander("미검증 참고 후보 보기", expanded=True):
         st.dataframe(
             pd.DataFrame(rows),
             use_container_width=True,
@@ -220,7 +219,7 @@ def render_discovery_candidates(discovery: G2BUnmappedDiscoveryResult) -> None:
             },
         )
         st.warning(
-            "Research 후보의 관련성 점수는 조사 우선순위일 뿐 MatchGrade가 아닙니다. "
+            "관련성 점수는 살펴볼 순서일 뿐 같은 제품이라는 뜻이 아닙니다. "
             "위 금액은 관측가격 범위와 견적 판정에 포함하지 않습니다."
         )
 
@@ -252,7 +251,7 @@ def build_observation_groups(items: Iterable[CollectedPrice]) -> list[Observatio
 def render_observation_cards(items: Iterable[CollectedPrice]) -> None:
     groups = build_observation_groups(items)
     if not groups:
-        st.info("A/B 직접가격 근거로 표시할 관측범위가 없습니다.")
+        st.info("같은 제품으로 확인된 가격 근거가 없어 범위를 표시하지 않습니다.")
         return
     st.caption("관측범위는 출처와 VAT 상태가 같은 근거끼리만 묶습니다. 조건이 다른 근거는 합치지 않습니다.")
     for group in groups:
@@ -266,3 +265,6 @@ def render_observation_cards(items: Iterable[CollectedPrice]) -> None:
                 f"{group.median:,.0f}원" if group.median is not None else "산정불가",
             )
             c4.metric("상단", f"{group.high:,.0f}원" if group.high is not None else "산정불가")
+
+# Runtime marker: the dashboard reloads a retained pre-2026-10 copy of this module (hot reload).
+PLAIN_WORDING_2026_10 = True

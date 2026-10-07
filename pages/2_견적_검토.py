@@ -15,16 +15,16 @@ from purchase_price.ui.quote_review_steps import (
     render_stepper,
 )
 
-st.set_page_config(page_title="견적 검토", page_icon="📋", layout="wide")
+st.set_page_config(page_title="견적 상세 검증", page_icon="📋", layout="wide")
 
 if QUOTE_REVIEW_STATE_SESSION_KEY not in st.session_state:
     st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY] = QuoteReviewState()
 state: QuoteReviewState = st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY]
 
-st.title("견적 검토")
+st.title("견적 상세 검증")
 st.caption(
-    "견적서를 한 번 업로드하면 품목 추출과 수집 DB 가격 비교를 바로 실행합니다. "
-    "외부 시장조사와 동일제품 직접비교, 최종 승인·판정은 필요한 경우 이어서 진행합니다."
+    "추출한 품목을 원문과 맞춰 보고, 거래 조건을 대조한 뒤 담당자가 승인하는 화면입니다. "
+    "품목별 거래가만 보려면 가격 조사 화면에서 견적서를 올리면 됩니다."
 )
 
 if state.extraction is None:
