@@ -27,6 +27,8 @@ TONE_NEUTRAL = "neutral"
 
 # Runtime marker: the dashboard reloads a retained pre-2026-10 copy of this module (hot reload).
 PLAIN_WORDING_2026_10 = True
+# Bumped when this module's wording changes again, so retained copies reload once more.
+PLAIN_WORDING_2026_10B = True
 
 # Safety codes stay internal; the header shows what they mean.
 _SAFETY_TEXT: dict[str, tuple[str, str, str]] = {
@@ -130,7 +132,7 @@ _MFDS_METRIC_VALUE = {
     "복수 품목번호": "허가 여러 건",
     "0건": "찾지 못함",
     "조회 대기": "확인 전",
-    "대상 아님": "해당 없음",
+    "대상 아님": "확인 못 함",
 }
 
 
@@ -163,7 +165,9 @@ def mfds_card(
     elif mfds_metric == "0건":
         note = "연결된 식약처 자료에서 찾지 못했습니다"
     elif mfds_metric == "대상 아님":
-        note = "의료기기로 분류되지 않은 품목"
+        # Also reached when the MFDS index could not answer yet (cold start), so never claim
+        # the product is not a medical device.
+        note = "식약처 등록을 찾지 못해 조회하지 않았습니다"
     else:
         note = "식약처 허가정보"
     return SummaryCard("mfds", "식약처 허가", value, note, tone)

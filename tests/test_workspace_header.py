@@ -150,3 +150,11 @@ def test_dashboard_uses_fixed_header_before_area_tabs() -> None:
     assert 'st.expander("상세 자료 · 견적 조건 · 안전정보 · 식약처 원자료 · 자료 기준", expanded=False)' in source
     # The deferred research loader lives at the bottom, not above the fold.
     assert source.index('st.markdown("##### 입찰·계약 참고자료")') < source.index("research_button_label")
+
+
+def test_mfds_not_applicable_does_not_claim_the_item_is_not_medical() -> None:
+    card = header.mfds_card("대상 아님")
+
+    assert card.value == "확인 못 함"
+    assert card.note == "식약처 등록을 찾지 못해 조회하지 않았습니다"
+    assert "의료기기" not in card.value + card.note

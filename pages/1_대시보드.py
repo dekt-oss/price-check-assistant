@@ -185,7 +185,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.g2b_market_research", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.market_research", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
-    ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10"),
+    ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10B"),
 )
 
 
