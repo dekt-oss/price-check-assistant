@@ -125,15 +125,15 @@ def test_dashboard_reloads_retained_pre_simplification_ui_modules() -> None:
 
     source = DASHBOARD.read_text(encoding="utf-8")
     assert "_refresh_ui_modules()\nst.set_page_config(" in source
-    for name in (
-        "purchase_price.ui.widgets",
-        "purchase_price.ui.g2b_market_research",
-        "purchase_price.ui.market_research",
-        "purchase_price.ui.same_item_compare",
-        "purchase_price.ui.workspace_header",
+    for name, marker in (
+        ("purchase_price.ui.widgets", "PLAIN_WORDING_2026_10"),
+        ("purchase_price.ui.g2b_market_research", "PLAIN_WORDING_2026_10"),
+        ("purchase_price.ui.market_research", "PLAIN_WORDING_2026_10"),
+        ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
+        ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10B"),
     ):
-        assert f'("{name}", "PLAIN_WORDING_2026_10")' in source
-        assert getattr(importlib.import_module(name), "PLAIN_WORDING_2026_10") is True
+        assert f'("{name}", "{marker}")' in source
+        assert getattr(importlib.import_module(name), marker) is True
 
 
 def test_zero_trade_rows_do_not_put_words_in_the_price_column() -> None:
