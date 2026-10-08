@@ -82,7 +82,7 @@ def y_domain(frame: pd.DataFrame) -> list[float]:
     return [low - span * 0.15, high + span * 0.15]
 
 
-def trend_chart(frame: pd.DataFrame, *, unit_label: str, value_format: str = ",.1f", height: int = 260) -> alt.LayerChart:
+def trend_chart(frame: pd.DataFrame, *, unit_label: str, value_format: str = ",.0f", height: int = 260) -> alt.LayerChart:
     if frame.empty:
         raise ValueError("no data")
     domain = y_domain(frame)
@@ -150,8 +150,11 @@ def trend_chart(frame: pd.DataFrame, *, unit_label: str, value_format: str = ",.
     )
 
 
-def wide_table(frame: pd.DataFrame, value_format: str = "{:,.1f}") -> pd.DataFrame:
-    """Table view of the same numbers (병원 × 연도) for readers who need exact values."""
+def wide_table(frame: pd.DataFrame, value_format: str = "{:,.0f}", *, unit: str = "") -> pd.DataFrame:
+    """Table view of the same numbers (병원 × 연도) for readers who need exact values.
+
+    Year columns carry the unit ("2024 (%)") so the unit stays visible when the table is copied.
+    """
 
     if frame.empty:
         return frame
@@ -162,4 +165,6 @@ def wide_table(frame: pd.DataFrame, value_format: str = "{:,.1f}") -> pd.DataFra
     pivot = pivot.sort_values(["_o", "병원"]).drop(columns=["_o", "구분"])
     for column in pivot.columns[1:]:
         pivot[column] = pivot[column].map(lambda v: "-" if pd.isna(v) else value_format.format(v))
+    if unit:
+        pivot = pivot.rename(columns={c: f"{c} ({unit})" for c in pivot.columns[1:]})
     return pivot

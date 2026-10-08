@@ -40,7 +40,7 @@ def _reload_retained_modules() -> None:
     )
     if all(hasattr(obj, name) for obj, name in markers) and getattr(
         benchmark, "MODULES_REVISION", ""
-    ) == "2026-10-09b":
+    ) == "2026-10-09c":
         return
     for name in (
         "purchase_price.services.hospital_metrics",
@@ -162,25 +162,43 @@ elif not peers:
     st.info("이 조건에 맞는 비교 병원이 병원 명단에 없습니다.")
     peers_ready = False
 else:
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {
-                    "병원": peer.canonical_name,
-                    "지역": peer.region,
-                    "종별": peer.hospital_type,
-                    "설립형태": peer.ownership,
-                    "병상수": peer.size_beds_text,
-                    "회계자료 연도": (
-                        f"{years[0]}~{years[-1]}" if (years := data.years_for(peer.hospital_id)) else "자료 없음"
-                    ),
-                }
-                for peer in peers
-            ]
-        ),
+    peer_table = pd.DataFrame(
+        [
+            {
+                "평균에 포함": True,
+                "병원": peer.canonical_name,
+                "지역": peer.region,
+                "종별": peer.hospital_type,
+                "설립형태": peer.ownership,
+                "병상수": peer.size_beds_text,
+                "회계자료 연도": (
+                    f"{years[0]}~{years[-1]}" if (years := data.years_for(peer.hospital_id)) else "자료 없음"
+                ),
+            }
+            for peer in peers
+        ]
+    )
+    edited = st.data_editor(
+        peer_table,
         hide_index=True,
         width="stretch",
+        disabled=[c for c in peer_table.columns if c != "평균에 포함"],
+        column_config={
+            "평균에 포함": st.column_config.CheckboxColumn(
+                "평균에 포함", help="체크를 풀면 그 병원은 비교군 평균·표·그래프에서 빠집니다."
+            )
+        },
+        # A new key per comparison set, so the checkboxes reset when the group changes.
+        key=f"peer_include::{target_id}::{peer_kind}::{bed_range}::{','.join(custom_ids)}",
     )
+    included = [peer for peer, keep in zip(peers, edited["평균에 포함"].tolist(), strict=True) if keep]
+    excluded = len(peers) - len(included)
+    if excluded:
+        st.caption(f"{excluded}곳을 뺀 {len(included)}곳으로 비교군 평균을 계산합니다.")
+    if not included:
+        st.info("평균에 넣을 병원을 1곳 이상 체크해 주세요.")
+        peers_ready = False
+    peers = tuple(included)
 if not peers_ready:
     peers = ()
 
@@ -195,6 +213,11 @@ else:
         fiscal_years,
         index=0,
         help="공시 회계연도입니다. 학교법인 병원은 그해 3월부터 다음 해 2월까지가 한 회계연도입니다.",
+    )
+    st.caption(
+        f"회계정보 공시는 회계연도가 끝나고 약 10~12개월 뒤에 올라옵니다(2024년 자료는 2026년 1월 6일 공개). "
+        f"그래서 지금은 {fiscal_years[0]}년이 최신이고, {fiscal_years[0] + 1}년 자료는 "
+        f"{fiscal_years[0] + 3}년 1월 전후에 나올 예정입니다."
     )
 
 if fiscal_year is None:
@@ -328,7 +351,8 @@ else:
         unit = title.split("(")[-1].rstrip(")") if "(" in title else ""
         st.altair_chart(charts.trend_chart(frame, unit_label=unit), use_container_width=True)
         with st.expander(f"{title} 숫자로 보기"):
-            st.dataframe(charts.wide_table(frame), hide_index=True, width="stretch")
+            st.markdown(f"**단위: {unit}** · 소수점 아래는 반올림했습니다.")
+            st.dataframe(charts.wide_table(frame, unit=unit), hide_index=True, width="stretch")
     st.caption("빈 칸은 그해 공시가 없다는 뜻입니다. 빈 해를 다른 값으로 채우지 않습니다.")
 
 st.subheader("자료 상태")
@@ -406,7 +430,13 @@ if fiscal_year is None or not peers:
     st.caption("회계연도와 비교군이 정해지면 리포트를 내려받을 수 있습니다.")
 else:
     report = report_service.build_report(
-        data, target, peer_kind, fiscal_year, custom_ids=custom_ids, bed_range=bed_range
+        data,
+        target,
+        peer_kind,
+        fiscal_year,
+        custom_ids=custom_ids,
+        bed_range=bed_range,
+        peer_ids=[p.hospital_id for p in peers],
     )
     ai_text = st.session_state.get(
         f"benchmark_ai::{target_id}::{peer_kind}::{','.join(custom_ids)}::{fiscal_year}"
