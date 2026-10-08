@@ -4,6 +4,7 @@ import hashlib
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import create_engine
@@ -23,6 +24,8 @@ WORKSPACE_LOOKUP_LIMIT = 500
 POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
 _CACHE_DIR = Path(tempfile.gettempdir()) / "price-check-track-b"
 _VALIDATED_CACHE_FILES: dict[str, tuple[int, int, int, int]] = {}
+# One download at a time: the start-up prefetch thread and a search can both ask for the index.
+_LOCAL_INDEX_LOCK = Lock()
 
 
 def _sha256_file(path: Path) -> str:
@@ -53,6 +56,13 @@ def _remember_validated_cache(path: Path, sha256: str) -> None:
 
 
 def _local_index_snapshot(
+    settings: Settings,
+) -> tuple[Path | None, dict[str, object] | None]:
+    with _LOCAL_INDEX_LOCK:
+        return _local_index_snapshot_locked(settings)
+
+
+def _local_index_snapshot_locked(
     settings: Settings,
 ) -> tuple[Path | None, dict[str, object] | None]:
     state_store = R2OperationalStateStore.from_settings(settings)
