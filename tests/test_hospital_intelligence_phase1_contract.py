@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.machinery
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -11,9 +12,13 @@ from alembic import command
 from purchase_price import models
 from purchase_price.config import get_settings
 from purchase_price.ui import result_summary as rs
-from tests.test_simple_result_ui_contract import _screen_strings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+# Same helper as tests/test_simple_result_ui_contract.py; tests is not a package, so it is
+# loaded by path instead of imported.
+_screen_strings = importlib.machinery.SourceFileLoader(
+    "simple_result_ui_contract", str(REPO_ROOT / "tests" / "test_simple_result_ui_contract.py")
+).load_module()._screen_strings
 HOME = REPO_ROOT / "Home.py"
 NEW_PAGES = (
     REPO_ROOT / "pages" / "0_홈.py",
