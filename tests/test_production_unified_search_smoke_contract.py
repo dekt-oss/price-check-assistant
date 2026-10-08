@@ -4,7 +4,7 @@ from pathlib import Path
 def test_production_unified_search_smoke_uses_user_visible_result_contract() -> None:
     script = Path("scripts/production_unified_search_smoke.py").read_text(encoding="utf-8")
 
-    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v19"' in script
+    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v20"' in script
     assert 'fill("DFM100")' in script
     assert 'WORKSPACE_DIRECT_PATTERN = re.compile(r"같은 제품 거래\s*(\d+)건")' in script
     assert 'REFERENCE_PATTERN = re.compile(r"비슷한 품목 거래\s*(\d+)건")' in script

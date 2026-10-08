@@ -30,6 +30,8 @@ OUTLIERS_V1 = True
 UNIT_AWARE_V1 = True
 UNIT_AWARE_V2 = True
 G2B_LINK_COLUMN_V1 = True
+BUSINESS_NAME_V1 = True
+BUSINESS_NAME_MAX_CHARS = 40
 OVERVIEW_ROW_LIMIT = 10
 
 # Words that only make sense to the developers. The screen uses the plain words instead.
@@ -579,6 +581,11 @@ def outlier_line(row: Mapping[str, object], median_price: Decimal, main_unit: st
         ratio = price / median_price if price >= median_price else median_price / price
         direction = "높음" if price >= median_price else "낮음"
         parts.append(f"{per_unit_label(main_unit)}중앙값의 {ratio:.1f}배 {direction}")
+    business_name = " ".join(str(row.get("사업명") or "").split())
+    if business_name:
+        if len(business_name) > BUSINESS_NAME_MAX_CHARS:
+            business_name = business_name[: BUSINESS_NAME_MAX_CHARS - 1] + "…"
+        parts.append(f"사업명 「{business_name}」")
     for key in ("거래조건", "구매처", "거래일"):
         value = str(row.get(key) or "").strip()
         if value and value != "미확인":
@@ -689,6 +696,8 @@ def trade_table_rows(rows: Sequence[Mapping[str, object]]) -> list[dict[str, obj
                 "1단위 가격": f"{_won(price)} / {unit}" if unit else _won(price),
                 # Next to the price, so the link is visible without scrolling the wide table.
                 "나라장터": _g2b_url(row.get("원천기록")),
+                # What the institution bought it for: explains a set, a package or an odd price.
+                "사업명": row.get("사업명") or "",
                 "거래조건": row.get("거래조건") or "",
                 "납품업체": row.get("판매처") or "",
                 "구매 기관": row.get("구매처") or "",

@@ -172,11 +172,11 @@ def _mfds_identity_r2_runtime():
 _TRACK_B_RELOAD_LOCK = Lock()
 # (module, attribute that only the current code has), reloaded in dependency order.
 _TRACK_B_RUNTIME_MARKERS = (
-    (track_b_comparison_service, "_not_cancelled_clause"),
+    (track_b_comparison_service, "_BUSINESS_NAME_COLUMN"),
     (track_b_r2_index_service, "_LAST_GOOD_SNAPSHOT"),
     (track_b_snapshot_service, "WORKSPACE_LOOKUP_LIMIT"),
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
-    (track_b_transactions_ui, "SOURCE_RECORD_COLUMN"),
+    (track_b_transactions_ui, "BUSINESS_NAME_COLUMN"),
     (same_item_ui, "ITEM_STATUS_AWARE"),
 )
 
@@ -191,7 +191,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10B"),
     ("purchase_price.services.g2b_delivery_record", "G2B_LINK_V1"),
-    ("purchase_price.ui.result_summary", "G2B_LINK_COLUMN_V1"),
+    ("purchase_price.ui.result_summary", "BUSINESS_NAME_V1"),
 )
 
 
@@ -2661,7 +2661,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v14" style="display:none">purchase-workspace-runtime-v14</span>'
     '<span id="purchase-workspace-runtime-v15" style="display:none">purchase-workspace-runtime-v15</span>'
     '<span id="purchase-workspace-runtime-v16" style="display:none">purchase-workspace-runtime-v16</span>'
-    '<span id="purchase-workspace-runtime-v19" style="display:none">purchase-workspace-runtime-v19</span>'
+    '<span id="purchase-workspace-runtime-v20" style="display:none">purchase-workspace-runtime-v20</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

@@ -169,6 +169,8 @@ class TrackBDeliveryLine(Base):
     contract_delivery_type: Mapped[str | None] = mapped_column(Text, deferred=True)
     contract_type: Mapped[str | None] = mapped_column(Text, deferred=True)
     delivery_condition: Mapped[str | None] = mapped_column(Text, deferred=True)
+    # 사업명 (cntrctDlvrReqNm): what the institution called the purchase; serving schema v3.
+    business_name: Mapped[str | None] = mapped_column(Text, deferred=True)
     api_params_json: Mapped[str] = mapped_column(Text)
 
 

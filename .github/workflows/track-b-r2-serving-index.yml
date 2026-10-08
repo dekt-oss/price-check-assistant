@@ -13,6 +13,7 @@ on:
       - "src/purchase_price/storage/r2_serving_index.py"
       - "src/purchase_price/models.py"
       - "alembic/versions/0004_track_b_delivery_conditions.py"
+      - "alembic/versions/0006_track_b_business_name.py"
   push:
     branches:
       - main
@@ -26,6 +27,7 @@ on:
       - "src/purchase_price/storage/r2_serving_index.py"
       - "src/purchase_price/models.py"
       - "alembic/versions/0004_track_b_delivery_conditions.py"
+      - "alembic/versions/0006_track_b_business_name.py"
   workflow_run:
     workflows:
       - "Track B Daily Backfill"
@@ -170,7 +172,8 @@ jobs:
            (github.event.workflow_run.conclusion == 'success' ||
             github.event.workflow_run.conclusion == 'failure')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # A schema rebuild re-reads every R2 raw page: 83 min for 650k rows on 2026-09-23.
+    timeout-minutes: 180
     env:
       PYTHONPATH: src
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
