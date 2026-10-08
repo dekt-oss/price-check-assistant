@@ -12,18 +12,21 @@ The historical collection window remains fixed at 2025-09-12 through 2026-09-11 
 
 ## Schedule and quota
 
-The price API answers one 10-digit category code per request, and the development-account key
-allows about 1,000 requests a day (runs on 2026-09-16 stopped with `RATE_LIMIT_EXHAUSTED` after
-101-319 calls once the day's quota was spent). The day is shared:
+The price API answers one 10-digit category code per request. The development-account key allowed
+about 1,000 requests a day (runs on 2026-09-16 stopped with `RATE_LIMIT_EXHAUSTED` after 101-319
+calls). On 2026-10-09 the shopping service traffic was raised to 100,000 a day: 1,022 calls ran in
+that KST day without a rate-limit stop, at about 1.1 s per call.
 
-| Run | KST | Default budget | Override (repo variable) |
+| Run | Schedule | Default budget | Override (repo variable) |
 | --- | --- | --- | --- |
-| Base: rolling recent window | 03:10 daily | 600 | `TRACK_B_DAILY_REQUEST_BUDGET` |
-| History: 2021-01-01 to 2025-09-11 | 13:10 daily | 330 | `TRACK_B_HISTORY_REQUEST_BUDGET` |
-| Supplemental verified codes | 04:40 Monday | 50 | workflow input |
+| Base: rolling recent window | 03:10 KST daily | 6,000 (one full 5,208-code cycle) | `TRACK_B_DAILY_REQUEST_BUDGET` |
+| History: 2021-01-01 to 2025-09-11 | every 3 h at :40 UTC | 5,000 | `TRACK_B_HISTORY_REQUEST_BUDGET` |
+| Supplemental verified codes | 04:40 KST Monday | 50 | workflow input |
 
-After a data.go.kr traffic increase, raise the two variables; no code change is needed. Each run
-is still capped at 900 requests by the collector. Backfill concurrency is serialized.
+The collector caps a single run at 10,000 requests. All writers share one concurrency group, so
+runs are serialized; a scheduled run that is still waiting when a newer one queues is dropped by
+GitHub and simply runs at its next slot.
+
 - R2 raw evidence is immutable and content-addressed under `raw/v1/`.
 
 ## History backfill (2021 onward)

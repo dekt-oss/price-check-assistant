@@ -7,15 +7,15 @@ on:
       - "src/purchase_price/scripts/run_g2b_track_b_history.py"
       - "src/purchase_price/services/track_b_history_state.py"
   schedule:
-    # 04:10 UTC = 13:10 KST, the same quota day as the 03:10 KST base run. The base run keeps recent
-    # trades fresh first; this run spends the rest of the ~1,000 daily price-API calls on 2021-2025.
-    - cron: "10 4 * * *"
+    # Every three hours at :40 (UTC), so a run never starts at the 18:10 UTC base run. About 26,000
+    # code-windows remain, so five or six 5,000-call runs finish 2021-2025 inside the 100,000/day quota.
+    - cron: "40 */3 * * *"
   workflow_dispatch:
     inputs:
       request_budget:
-        description: Maximum G2B requests for this history batch (hard cap 900)
+        description: Maximum G2B requests for this history batch (hard cap 10000)
         required: true
-        default: "330"
+        default: "5000"
 
 concurrency:
   # Shares the production writer group with collection and the serving-index sync.
@@ -53,7 +53,7 @@ jobs:
     name: Track B history batch to R2
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-14
-    timeout-minutes: 70
+    timeout-minutes: 240
     env:
       PYTHONPATH: src
       G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
@@ -81,7 +81,7 @@ jobs:
       - name: Run one history batch
         run: >-
           python -m purchase_price.scripts.run_g2b_track_b_history
-          --request-budget "${{ inputs.request_budget || vars.TRACK_B_HISTORY_REQUEST_BUDGET || '330' }}"
+          --request-budget "${{ inputs.request_budget || vars.TRACK_B_HISTORY_REQUEST_BUDGET || '5000' }}"
           --output artifacts/track-b-history/collection-summary.json
       - name: Upload collection evidence
         if: always()

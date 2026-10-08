@@ -153,7 +153,7 @@ def run(*, request_budget: int, output: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collect one batch of older Track B trades")
-    parser.add_argument("--request-budget", type=int, default=350)
+    parser.add_argument("--request-budget", type=int, default=5000)
     parser.add_argument(
         "--output",
         type=Path,

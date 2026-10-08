@@ -8,15 +8,15 @@ on:
       - "src/purchase_price/services/track_b_pipeline_state.py"
       - "src/purchase_price/storage/r2_state.py"
   schedule:
-    # 18:10 UTC daily = 03:10 KST. data.go.kr allows ~1,000 price-API calls a day, shared with the
-    # history backfill (13:10 KST) and the weekly supplemental run; see TRACK_B_DAILY_PIPELINE.md.
+    # 18:10 UTC daily = 03:10 KST. One run walks all 5,208 codes for the rolling window (about 5,400
+    # calls, ~1.5 h) within the 100,000/day quota shared with the history backfill; see TRACK_B_DAILY_PIPELINE.md.
     - cron: "10 18 * * *"
   workflow_dispatch:
     inputs:
       request_budget:
-        description: Maximum G2B requests for this backfill batch (hard cap 900)
+        description: Maximum G2B requests for this backfill batch (hard cap 10000)
         required: true
-        default: "900"
+        default: "6000"
 
 concurrency:
   # Production collection and serving-index writes must serialize on the shared group. PR checks are
@@ -77,7 +77,7 @@ jobs:
     name: bounded Track B backfill to R2
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-14
-    timeout-minutes: 70
+    timeout-minutes: 240
     env:
       PYTHONPATH: src
       G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
@@ -126,7 +126,7 @@ jobs:
       - name: Run resumable daily collection
         run: >-
           python -m purchase_price.scripts.run_g2b_track_b_daily
-          --request-budget "${{ inputs.request_budget || vars.TRACK_B_DAILY_REQUEST_BUDGET || '600' }}"
+          --request-budget "${{ inputs.request_budget || vars.TRACK_B_DAILY_REQUEST_BUDGET || '6000' }}"
           --bootstrap-snapshot artifacts/track-b-daily/bootstrap-target-codes.json
           --output artifacts/track-b-daily/collection-summary.json
       - name: Upload collection evidence

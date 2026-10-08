@@ -31,7 +31,10 @@ TRACK_B_OPERATION = G2BShoppingOperation.SPECIFIC_ITEM_PROCUREMENTS.value
 PAGE_SIZE = 999
 # Collection priority follows the hospital-use scope: medical -> lab -> IT -> office -> tools/safety/electrical.
 TARGET_SEGMENTS = ("42", "41", "43", "44", "23", "27", "46", "39")
-MAX_REQUEST_BUDGET = 900
+# The data.go.kr traffic for the shopping service was raised to 100,000 calls a day (2026-10-09;
+# 1,022 calls ran that KST day without a rate-limit stop). Requests take ~1.1 s, so 10,000 is about
+# three hours, inside the workflow timeouts.
+MAX_REQUEST_BUDGET = 10_000
 
 
 class JsonClient(Protocol):
