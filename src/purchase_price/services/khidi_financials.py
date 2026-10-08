@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from purchase_price.services.hospital_metrics import ACCOUNT_LABELS
+from purchase_price.services.hospital_metrics import ACCOUNT_LABELS, BED_COUNT_KEY
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_FINANCIAL_CSV = REPO_ROOT / "data" / "hospital_financial.csv"
@@ -354,7 +354,12 @@ def rows_from_statements(
         url = (source_urls or {}).get(stmt.statement) or (
             statement_url(stmt.statement, stmt.hos_code, stmt.fiscal_year) if stmt.hos_code else ""
         )
-        for key, (name, amount) in stmt.mapped().items():
+        mapped = dict(stmt.mapped())
+        # The disclosure's 일반현황 shows that year's bed count (심평원 year-end figure). It is kept
+        # as its own row, from the income statement only, so per-bed metrics use the same year.
+        if stmt.statement == STATEMENT_IS and stmt.bed_count is not None:
+            mapped[BED_COUNT_KEY] = (ACCOUNT_LABELS[BED_COUNT_KEY], Decimal(stmt.bed_count))
+        for key, (name, amount) in mapped.items():
             rows.append(
                 FinancialRow(
                     hospital_id=hospital_id,
@@ -532,7 +537,8 @@ class HaspaClient:
     def search(self, year: int, name: str) -> list[HaspaListing]:
         listings: list[HaspaListing] = []
         for page in range(1, 6):
-            html = self._get("/total-public-inq", {"y": year, "hn": name, "page": page}).text
+            # The site pages with ``p`` (``page`` is ignored and always returns page 1).
+            html = self._get("/total-public-inq", {"p": page, "y": year, "hn": name}).text
             found = [item for item in parse_search_html(html) if item.fiscal_year == year]
             new = [item for item in found if item not in listings]
             if not new:
@@ -540,6 +546,20 @@ class HaspaClient:
             listings.extend(new)
             if len(found) < 10:
                 break
+        return listings
+
+    def list_all(self, year: int, *, max_pages: int = 400) -> list[HaspaListing]:
+        """Every institution in one disclosure year (about 1,100 in 2024, 10 per page)."""
+
+        listings: list[HaspaListing] = []
+        seen: set[str] = set()
+        for page in range(1, max_pages + 1):
+            html = self._get("/total-public-inq", {"p": page, "y": year, "hn": ""}).text
+            new = [i for i in parse_search_html(html) if i.fiscal_year == year and i.hos_code not in seen]
+            if not new:
+                break
+            seen.update(i.hos_code for i in new)
+            listings.extend(new)
         return listings
 
     def statement_payload(self, statement: str, hos_code: str, year: int) -> dict[str, Any]:

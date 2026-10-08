@@ -75,7 +75,7 @@ def test_error_payload_is_rejected() -> None:
 
 def test_rows_use_income_period_and_fall_back_to_balance_date() -> None:
     rows = khidi.rows_from_statements("H-BUSAN-PAIK", [_is(), _sfp()], fetched_at="2026-10-08T00:00:00+09:00")
-    assert len(rows) == 23
+    assert len(rows) == 24  # 23 accounts + 병상수(공시 일반현황)
     assert {(r.fiscal_period_start, r.fiscal_period_end) for r in rows} == {(date(2024, 3, 1), date(2025, 2, 28))}
     assert {r.account_code for r in rows} <= set(khidi.ACCOUNT_LABELS)
     revenue = next(r for r in rows if r.account_code == "medical_revenue")
@@ -97,7 +97,7 @@ def test_merge_is_idempotent_and_keeps_first_fetch_time(tmp_path: Path) -> None:
     khidi.write_financial_csv(khidi.merge_rows(khidi.load_financial_csv(csv_path), again), csv_path)
     assert csv_path.read_bytes() == before
     loaded = khidi.load_financial_csv(csv_path)
-    assert len(loaded) == 23 and loaded[0].fetched_at == "2026-10-08T01:00:00+09:00"
+    assert len(loaded) == 24 and loaded[0].fetched_at == "2026-10-08T01:00:00+09:00"
 
 
 def test_search_html_listing_and_legal_prefix_resolution() -> None:
@@ -138,7 +138,7 @@ def test_cli_from_raw_reparses_saved_snapshots(tmp_path: Path) -> None:
     csv_path = tmp_path / "fin.csv"
     assert cli.main(["--from-raw", "--raw-dir", str(raw_dir), "--csv", str(csv_path)]) == 0
     rows = khidi.load_financial_csv(csv_path)
-    assert len(rows) == 23
+    assert len(rows) == 24  # 23 accounts + 병상수(공시 일반현황)
     assert {r.fetched_at for r in rows} == {"2026-10-08T20:00:00+09:00"}
 
 

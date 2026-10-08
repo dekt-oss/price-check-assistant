@@ -49,10 +49,32 @@ class Hospital:
     bed_count: int | None
     bed_count_as_of: str | None
     type_verified: bool = False
+    # "core": the curated hospitals of the plan (지역 경쟁군 · 동일 의료원 · 동일 유형 use only these).
+    # "size_peer": hospitals added from the nationwide disclosure list for the 유사 규모 comparison.
+    group: str = "core"
+    # Bed count printed in the KHIDI disclosure list (that year's HIRA year-end figure). Used only
+    # for the 유사 규모 grouping until a HIRA-confirmed bed_count exists.
+    disclosed_bed_count: int | None = None
+    disclosed_bed_year: int | None = None
+    khidi_code: str | None = None
 
     @property
     def names(self) -> tuple[str, ...]:
         return (self.canonical_name, self.short_name, *self.aliases)
+
+    @property
+    def size_beds(self) -> int | None:
+        """HIRA bed count when confirmed, otherwise the disclosure-list bed count."""
+
+        return self.bed_count if self.bed_count is not None else self.disclosed_bed_count
+
+    @property
+    def size_beds_text(self) -> str:
+        if self.bed_count is not None:
+            return f"{self.bed_count:,}"
+        if self.disclosed_bed_count is not None:
+            return f"{self.disclosed_bed_count:,} (공시 {self.disclosed_bed_year})"
+        return "자료 없음"
 
 
 class HospitalMaster:
@@ -82,33 +104,47 @@ class HospitalMaster:
         kind: str,
         *,
         bed_tolerance: int = 100,
+        bed_range: tuple[int, int] | None = None,
         custom_ids: Sequence[str] = (),
     ) -> tuple[Hospital, ...]:
-        """Return comparison hospitals for ``target`` (never including the target)."""
+        """Return comparison hospitals for ``target`` (never including the target).
+
+        지역 경쟁군 · 동일 의료원 · 동일 유형 stay within the curated core list; 유사 규모 searches every
+        hospital (including the nationwide size peers) by ``bed_range`` or ``target ± bed_tolerance``.
+        """
 
         others = [h for h in self._hospitals if h.hospital_id != target.hospital_id]
+        core = [h for h in others if h.group == "core"]
         if kind == PEER_REGION:
-            return tuple(h for h in others if h.region == target.region)
+            return tuple(h for h in core if h.region == target.region)
         if kind == PEER_NETWORK:
-            return tuple(h for h in others if h.network == target.network)
+            return tuple(h for h in core if h.network and h.network == target.network)
         if kind == PEER_SAME_TYPE:
             return tuple(
                 h
-                for h in others
+                for h in core
                 if h.hospital_type == target.hospital_type and h.ownership == target.ownership
             )
         if kind == PEER_SIMILAR_SIZE:
-            if target.bed_count is None:
-                return ()
+            if bed_range is None:
+                if target.size_beds is None:
+                    return ()
+                bed_range = (target.size_beds - bed_tolerance, target.size_beds + bed_tolerance)
+            low, high = bed_range
             return tuple(
-                h
-                for h in others
-                if h.bed_count is not None and abs(h.bed_count - target.bed_count) <= bed_tolerance
+                sorted(
+                    (h for h in others if h.size_beds is not None and low <= h.size_beds <= high),
+                    key=lambda h: -(h.size_beds or 0),
+                )
             )
         if kind == PEER_CUSTOM:
             wanted = set(custom_ids)
             return tuple(h for h in others if h.hospital_id in wanted)
         raise ValueError(f"unknown peer group: {kind}")
+
+
+def _int(value: object) -> int | None:
+    return int(value) if value is not None and str(value).strip() != "" else None
 
 
 def load_hospital_master(path: Path = DEFAULT_MASTER_FILE) -> HospitalMaster:
@@ -130,6 +166,10 @@ def load_hospital_master(path: Path = DEFAULT_MASTER_FILE) -> HospitalMaster:
                 bed_count=int(bed_count) if bed_count is not None else None,
                 bed_count_as_of=raw.get("bed_count_as_of"),
                 type_verified=bool(raw.get("type_verified", False)),
+                group=str(raw.get("group") or "core"),
+                disclosed_bed_count=_int(raw.get("disclosed_bed_count")),
+                disclosed_bed_year=_int(raw.get("disclosed_bed_year")),
+                khidi_code=raw.get("khidi_code"),
             )
         )
     return HospitalMaster(hospitals)

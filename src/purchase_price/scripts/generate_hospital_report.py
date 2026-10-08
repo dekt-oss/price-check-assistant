@@ -38,6 +38,7 @@ def _parser() -> argparse.ArgumentParser:
         help="비교 방식 (여러 번 줄 수 있음). 기본: region, network",
     )
     parser.add_argument("--year", type=int, default=None, help="회계연도 (기본: 적재된 최신 연도)")
+    parser.add_argument("--bed-range", default="700-850", help="유사 규모 비교군의 병상수 범위 (예: 700-850)")
     parser.add_argument("--output-dir", default="artifacts/hospital-report")
     parser.add_argument("--with-ai", action="store_true")
     parser.add_argument("--with-news", action="store_true")
@@ -134,7 +135,8 @@ def main(argv: list[str] | None = None) -> int:
     written: list[Path] = []
     summaries: list[dict[str, object]] = []
     for peer_kind in args.peer or ["region", "network"]:
-        report = report_service.build_report(data, target, peer_kind, year, now=now)
+        low, high = (int(v) for v in args.bed_range.split("-", 1))
+        report = report_service.build_report(data, target, peer_kind, year, bed_range=(low, high), now=now)
         if args.with_ai:
             report.explanation, report.explanation_note = _explanation_for(report)
         report.news = news

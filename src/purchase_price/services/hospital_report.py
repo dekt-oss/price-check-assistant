@@ -60,6 +60,8 @@ def quality_notes(quality: benchmark.QualityReport) -> list[str]:
         )
     if any("자료 없음" in text for text in quality.bed_counts.values()):
         notes.append("병상수 자료가 없는 병원은 병상당 지표와 유사 규모 비교를 할 수 없습니다.")
+    if any("회계공시 일반현황" in text for text in quality.bed_counts.values()):
+        notes.append("병상수는 회계공시 일반현황(그해 말 심평원 자료)의 값입니다. 심평원 병원정보 연계 후 확정값으로 바뀝니다.")
     if quality.unverified_types:
         notes.append("종별은 심평원 연계 전 1차 입력입니다: " + ", ".join(quality.unverified_types))
     return notes
@@ -100,9 +102,10 @@ def build_report(
     fiscal_year: int,
     *,
     custom_ids: Sequence[str] = (),
+    bed_range: tuple[int, int] | None = None,
     now: datetime | None = None,
 ) -> BenchmarkReport:
-    peers = tuple(data.master.peer_group(target, peer_kind, custom_ids=custom_ids))
+    peers = tuple(data.master.peer_group(target, peer_kind, custom_ids=custom_ids, bed_range=bed_range))
     rows = benchmark.compare(data, target, peers, fiscal_year, HEADLINE_METRICS)
     findings = (
         metrics.describe_findings(
@@ -124,10 +127,13 @@ def build_report(
     trends = {
         title: benchmark.trend_table(data, hospitals, key, years) for key, title, _ in TREND_METRICS
     }
+    peer_label = master_service.PEER_GROUP_LABELS.get(peer_kind, peer_kind)
+    if peer_kind == master_service.PEER_SIMILAR_SIZE and bed_range is not None:
+        peer_label += f" {bed_range[0]}~{bed_range[1]}병상"
     return BenchmarkReport(
         target=target,
         fiscal_year=fiscal_year,
-        peer_label=master_service.PEER_GROUP_LABELS.get(peer_kind, peer_kind),
+        peer_label=peer_label,
         peers=peers,
         rows=rows,
         findings=findings,

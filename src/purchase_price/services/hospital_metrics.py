@@ -36,7 +36,9 @@ ACCOUNT_LABELS: dict[str, str] = {
     "long_term_borrowings": "장기차입금",
     "foreign_long_term_borrowings": "외화장기차입금",
     "borrowings": "차입금",
+    "disclosed_bed_count": "병상수(공시 일반현황)",
 }
+BED_COUNT_KEY = "disclosed_bed_count"
 
 # The KHIDI balance sheet has no single "차입금" line; borrowings are the sum of these lines.
 BORROWING_COMPONENTS: tuple[str, ...] = (

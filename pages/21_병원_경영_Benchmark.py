@@ -18,6 +18,7 @@ from purchase_price.services import hospital_benchmark as benchmark
 from purchase_price.services import hospital_master as master_service
 from purchase_price.services import hospital_metrics as metrics
 from purchase_price.services import hospital_report as report_service
+from purchase_price.ui import benchmark_charts as charts
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 
 hydrate_streamlit_runtime_secrets()
@@ -40,10 +41,12 @@ HEADLINE_METRICS = (
     "revenue_per_bed",
 )
 TREND_YEARS = 5
+DEFAULT_BED_RANGE = (700, 850)
 TREND_CHARTS = (
     ("medical_revenue", "의료수익 (억원)", Decimal(100_000_000)),
     ("labor_ratio", "인건비율 (%)", Decimal(1)),
     ("material_ratio", "재료비율 (%)", Decimal(1)),
+    ("medical_margin", "의료이익률 (%)", Decimal(1)),
 )
 SOURCE_NAME = "의료기관 회계정보 공시(한국보건산업진흥원, haspa.khidi.or.kr)"
 
@@ -55,11 +58,15 @@ by_id = {hospital.hospital_id: hospital for hospital in hospitals}
 st.title("병원 경영 Benchmark")
 st.caption("공개 회계자료로 병원을 같은 기준에서 비교합니다. 숫자는 모두 프로그램이 계산합니다.")
 
+target_options = [h.hospital_id for h in hospitals if h.group == "core"] + [
+    h.hospital_id for h in sorted(hospitals, key=lambda h: h.short_name) if h.group != "core"
+]
 target_id = st.selectbox(
     "기준 병원",
-    [hospital.hospital_id for hospital in hospitals],
-    index=[h.hospital_id for h in hospitals].index(DEFAULT_TARGET_ID),
-    format_func=lambda value: by_id[value].canonical_name,
+    target_options,
+    index=target_options.index(DEFAULT_TARGET_ID),
+    format_func=lambda value: by_id[value].canonical_name
+    + ("" if by_id[value].group == "core" else f" ({by_id[value].region}, 유사 규모)"),
 )
 target = by_id[target_id]
 
@@ -71,7 +78,7 @@ for column, (label, value) in zip(
         ("의료원", target.network or "확인 안 됨"),
         ("지역", target.region or "확인 안 됨"),
         ("종별", target.hospital_type or "확인 안 됨"),
-        ("병상수", f"{target.bed_count:,}" if target.bed_count else "자료 없음"),
+        ("병상수", target.size_beds_text),
     ),
     strict=True,
 ):
@@ -96,9 +103,19 @@ if peer_kind == master_service.PEER_CUSTOM:
         format_func=lambda value: by_id[value].canonical_name,
         max_selections=10,
     )
-peers = master.peer_group(target, peer_kind, custom_ids=custom_ids)
+bed_range: tuple[int, int] | None = None
+if peer_kind == master_service.PEER_SIMILAR_SIZE:
+    bed_range = st.slider(
+        "병상수 범위",
+        min_value=300,
+        max_value=1500,
+        value=DEFAULT_BED_RANGE,
+        step=10,
+        help="회계공시 목록에 실린 병상수(해당 연도 말 심평원 자료) 기준입니다. 전국 상급종합·종합병원 중 이 범위 병원을 비교합니다.",
+    )
+peers = master.peer_group(target, peer_kind, custom_ids=custom_ids, bed_range=bed_range)
 peers_ready = True
-if peer_kind == master_service.PEER_SIMILAR_SIZE and target.bed_count is None:
+if peer_kind == master_service.PEER_SIMILAR_SIZE and target.size_beds is None:
     st.warning("병상수 자료가 아직 없어 유사 규모 비교군을 만들 수 없습니다.")
     peers_ready = False
 elif peer_kind == master_service.PEER_CUSTOM and len(peers) < 2:
@@ -116,7 +133,7 @@ else:
                     "지역": peer.region,
                     "종별": peer.hospital_type,
                     "설립형태": peer.ownership,
-                    "병상수": f"{peer.bed_count:,}" if peer.bed_count is not None else "자료 없음",
+                    "병상수": peer.size_beds_text,
                     "회계자료 연도": (
                         f"{years[0]}~{years[-1]}" if (years := data.years_for(peer.hospital_id)) else "자료 없음"
                     ),
@@ -259,17 +276,22 @@ if fiscal_year is None:
 else:
     trend_years = [y for y in range(fiscal_year - TREND_YEARS + 1, fiscal_year + 1)]
     chart_hospitals = [target, *peers]
+    st.caption(
+        f"파란 선은 {target.short_name}, 검은 점선은 비교군 평균, 회색 선은 비교 병원 하나하나입니다. "
+        "선이나 점에 마우스를 올리면 병원 이름과 값이 보입니다. 세로축은 차이가 잘 보이도록 값의 범위에 맞췄고, "
+        "값이 아주 크거나 작은 비교 병원 선은 그래프 가장자리에서 잘립니다(정확한 값은 '숫자로 보기')."
+    )
     for metric_key, title, scale in TREND_CHARTS:
         st.markdown(f"**{title}**")
         table = benchmark.trend_table(data, chart_hospitals, metric_key, trend_years)
-        frame = pd.DataFrame(
-            {name: benchmark.as_float_series(values, scale) for name, values in table.items()}
-        )
-        frame.index = [str(year) for year in frame.index]
-        if frame.notna().any().any():
-            st.line_chart(frame)
-        else:
+        frame = charts.trend_frame(table, target.short_name, scale)
+        if frame.empty:
             st.caption("이 기간에는 표시할 자료가 없습니다.")
+            continue
+        unit = title.split("(")[-1].rstrip(")") if "(" in title else ""
+        st.altair_chart(charts.trend_chart(frame, unit_label=unit), use_container_width=True)
+        with st.expander(f"{title} 숫자로 보기"):
+            st.dataframe(charts.wide_table(frame), hide_index=True, width="stretch")
     st.caption("빈 칸은 그해 공시가 없다는 뜻입니다. 빈 해를 다른 값으로 채우지 않습니다.")
 
 st.subheader("자료 상태")
@@ -300,7 +322,7 @@ else:
             "**병상수 기준일:** "
             + "; ".join(f"{name} {text}" for name, text in quality.bed_counts.items())
         )
-        if any(h.bed_count is None for h in (target, *peers)):
+        if any(benchmark.beds_for(data, h, fiscal_year) is None for h in (target, *peers)):
             st.caption("병상수가 없는 병원은 병상당 지표와 유사 규모 비교가 '자료 없음'입니다.")
         if quality.unverified_types:
             st.caption("종별 확인 전(심평원 연계 전): " + ", ".join(quality.unverified_types))
@@ -346,7 +368,9 @@ st.subheader("리포트 내려받기")
 if fiscal_year is None or not peers:
     st.caption("회계연도와 비교군이 정해지면 리포트를 내려받을 수 있습니다.")
 else:
-    report = report_service.build_report(data, target, peer_kind, fiscal_year, custom_ids=custom_ids)
+    report = report_service.build_report(
+        data, target, peer_kind, fiscal_year, custom_ids=custom_ids, bed_range=bed_range
+    )
     ai_text = st.session_state.get(
         f"benchmark_ai::{target_id}::{peer_kind}::{','.join(custom_ids)}::{fiscal_year}"
     )
