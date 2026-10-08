@@ -12,6 +12,7 @@ from decimal import Decimal
 import pandas as pd
 import streamlit as st
 
+from purchase_price.services import alio_disclosure
 from purchase_price.services import hospital_ai_explanation as ai_explanation
 from purchase_price.services import hospital_benchmark as benchmark
 from purchase_price.services import hospital_master as master_service
@@ -306,6 +307,40 @@ else:
         st.caption(
             f"출처: {SOURCE_NAME}. 가져온 날: " + ", ".join(sorted(set(quality.fetched.values())))
         )
+
+alio_hospitals = [h for h in (target, *peers) if alio_disclosure.alio_table_for(h.hospital_id)]
+if alio_hospitals:
+    st.subheader("공공기관 경영공시 (알리오) 보조 지표")
+    st.info(alio_disclosure.ALIO_SCOPE_NOTE)
+    shown_entities: set[str] = set()
+    for hospital in alio_hospitals:
+        table = alio_disclosure.alio_table_for(hospital.hospital_id)
+        entity_key = repr(table[:2])
+        if entity_key in shown_entities:  # 본원과 양산은 같은 법인 자료라 한 번만 보여 준다
+            continue
+        shown_entities.add(entity_key)
+        with st.expander(f"{hospital.short_name} 법인 인력·재무·차입금 (알리오)", expanded=hospital is target):
+            year_columns = sorted({k for row in table for k in row if k.endswith("년") or "분기" in k})
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "항목": row["항목"],
+                            "단위": row["단위"],
+                            **{
+                                col: (f"{row[col]:,}" if row.get(col) is not None else "-")
+                                for col in year_columns
+                            },
+                        }
+                        for row in table
+                    ]
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+            st.caption(
+                "출처: 알리오(alio.go.kr) 공시 원문. 연말 결산 기준이며 '분기 중간' 열은 올해 공시된 분기 값입니다."
+            )
 
 st.subheader("리포트 내려받기")
 if fiscal_year is None or not peers:
