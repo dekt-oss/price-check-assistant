@@ -34,11 +34,17 @@ def test_seed_keyword_groups_match_the_plan() -> None:
     our = groups[0]
     assert [keyword.text for keyword in our.keywords] == [
         "부산백병원",
-        "인제대학교",
+        "인제대학교 백병원",
         "백중앙의료원",
         "해운대백병원",
+        "부산진구 종합병원",
     ]
     assert our.keywords[0].alert_label == "즉시"
+    all_texts = [keyword.text for group in groups for keyword in group.keywords]
+    assert "부산 상급종합병원" in all_texts
+    # Stand-alone generic words pulled in unrelated articles (2026-10-08 scan); keep them qualified.
+    for generic in ("의료수가", "병상", "의료인력", "의료기기", "의료장비", "필수의료"):
+        assert generic not in all_texts
 
 
 def test_group_toggle_filters_active_keywords() -> None:
