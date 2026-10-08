@@ -36,7 +36,8 @@ class ImportReport:
     loaded: list[tuple[str, int, str]] = field(default_factory=list)
     missing: list[tuple[str, int, str]] = field(default_factory=list)
 
-    def print(self, out=sys.stdout) -> None:
+    def print(self, out=None) -> None:
+        out = out or sys.stdout
         for hospital_id, year, note in sorted(self.loaded):
             print(f"loaded  {hospital_id} {year} {note}", file=out)
         for hospital_id, year, note in sorted(self.missing):
