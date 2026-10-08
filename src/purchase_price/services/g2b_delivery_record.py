@@ -15,11 +15,17 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import quote
 
 G2B_SHOPPING_DATASET_URL = "https://www.data.go.kr/data/15129471/openapi.do"
 G2B_SHOPPING_DATASET_NAME = "조달청_나라장터쇼핑몰 품목정보 서비스"
-# Runtime marker: bump when the field list changes so a retained copy reloads.
+# 나라장터 통합검색 결과 화면(FIUA009_01)의 공식 바로가기. The /link/ loader hands query parameters
+# to the screen, which searches `searchKeyword` across 납품요구·계약현황 etc. (verified 2026-10-08:
+# R26TB02199340 → 납품요구 "2026년 구급차 조달구매", R26TA02234081 → 계약현황 국립재활원).
+G2B_SEARCH_LINK = "https://www.g2b.go.kr/link/FIUA009_01/single/?searchKeyword="
+# Runtime marker: bump when the field list or links change so a retained copy reloads.
 FIELD_ORDER_V1 = True
+G2B_LINK_V1 = True
 
 _SOURCE_ID = re.compile(r"^delivery:(?P<number>[^|]+)\|change:(?P<change>[^|]*)\|line:(?P<line>.+)$")
 _RAW_HASH = re.compile(r"(?P<hash>[0-9a-f]{64})\.json\.gz$")
@@ -68,6 +74,10 @@ class DeliveryRecordRef:
         return match.group("hash") if match else None
 
     @property
+    def g2b_url(self) -> str:
+        return g2b_search_url(self.delivery_number)
+
+    @property
     def label(self) -> str:
         text = f"{self.delivery_number} · {self.line}번 물품"
         if self.change_order and self.change_order.strip("0"):
@@ -80,6 +90,17 @@ class DeliveryRecordLookup:
     status: str  # found | not_archived | not_found | failure
     fields: tuple[tuple[str, str], ...] = ()
     error_type: str = ""
+
+
+def g2b_search_url(number: str) -> str:
+    """나라장터 통합검색 opened on this 납품요구번호/계약번호."""
+
+    return G2B_SEARCH_LINK + quote(str(number or "").strip(), safe="")
+
+
+def g2b_url_for_source_record(source_record_id: object) -> str | None:
+    match = _SOURCE_ID.match(str(source_record_id or "").strip())
+    return g2b_search_url(match.group("number").strip()) if match else None
 
 
 def parse_record_ref(source_record_id: object, raw_object_key: object) -> DeliveryRecordRef | None:
