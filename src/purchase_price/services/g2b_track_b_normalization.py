@@ -90,6 +90,7 @@ class NormalizedTrackBRecord:
     contract_type: str | None
     delivery_condition: str | None
     raw_item: dict[str, Any]
+    business_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -420,6 +421,7 @@ def _normalize_item(
         contract_type=_text_or_none(item.get("cntrctDivNm")),
         delivery_condition=_text_or_none(item.get("dlvryCndtnNm")),
         raw_item=item,
+        business_name=_text_or_none(item.get("cntrctDlvrReqNm")),
     )
 
 

@@ -109,12 +109,12 @@ def test_dashboard_wires_the_record_panel_and_reloads_new_helpers() -> None:
     assert "result_summary_ui.price_outlier_rows(direct_rows, median_price)" in source
     assert "_render_delivery_record(" in source
     assert 'key=record_table_key' in source and 'on_select="rerun"' in source
-    assert '(track_b_transactions_ui, "SOURCE_RECORD_COLUMN")' in source
+    assert '(track_b_transactions_ui, "BUSINESS_NAME_COLUMN")' in source
     assert "G2B_SHOPPING_DATASET_URL" not in source
     assert 'link_col.link_button("나라장터에서 이 거래 보기", ref.g2b_url' in source
     assert 'st.column_config.LinkColumn("나라장터", display_text="열기")' in source
     assert '("purchase_price.services.g2b_delivery_record", "G2B_LINK_V1")' in source
-    assert '("purchase_price.ui.result_summary", "G2B_LINK_COLUMN_V1")' in source
+    assert '("purchase_price.ui.result_summary", "BUSINESS_NAME_V1")' in source
     assert record.G2B_LINK_V1 is True
 
 

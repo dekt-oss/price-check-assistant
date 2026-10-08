@@ -41,10 +41,12 @@ POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
 
 
 
-_REQUIRED_SERVING_V2_COLUMNS = {
+# An older index without one of these columns is rebuilt from the R2 raw pages.
+_REQUIRED_SERVING_COLUMNS = {
     "contract_delivery_type",
     "contract_type",
     "delivery_condition",
+    "business_name",
 }
 
 
@@ -56,7 +58,7 @@ def _serving_schema_is_current(engine) -> bool:
         }
     except Exception:
         return False
-    return _REQUIRED_SERVING_V2_COLUMNS.issubset(columns)
+    return _REQUIRED_SERVING_COLUMNS.issubset(columns)
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()

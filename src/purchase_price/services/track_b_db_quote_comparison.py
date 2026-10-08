@@ -61,6 +61,7 @@ class TrackBQuoteCandidate:
     contract_delivery_type: str | None = None
     contract_type: str | None = None
     delivery_condition: str | None = None
+    business_name: str | None = None
     transaction_type: str = "나라장터 납품요구"
     unit_price_basis: UnitPriceBasis = UnitPriceBasis.SOURCE_UNIT_PRICE
 
@@ -86,6 +87,7 @@ class TrackBReferenceCandidate:
     contract_delivery_type: str | None = None
     contract_type: str | None = None
     delivery_condition: str | None = None
+    business_name: str | None = None
     reference_scope: str = "KEYWORD"
     transaction_type: str = "나라장터 납품요구"
     unit_price_basis: UnitPriceBasis = UnitPriceBasis.SOURCE_UNIT_PRICE
@@ -207,6 +209,8 @@ def _line_from_record(record: NormalizedTrackBRecord) -> TrackBDeliveryLine:
         contract_delivery_type=record.contract_delivery_type,
         contract_type=record.contract_type,
         delivery_condition=record.delivery_condition,
+        # getattr: a hot-reloaded process may still hold the normalizer without this field.
+        business_name=getattr(record, "business_name", None),
         api_params_json=json.dumps(dict(record.provenance.api_params), sort_keys=True),
     )
 
@@ -393,13 +397,14 @@ _CONDITION_COLUMNS = {
     "contract_type",
     "delivery_condition",
 }
+_BUSINESS_NAME_COLUMN = "business_name"
 
 
-def _condition_columns_available(session: Session) -> bool:
-    """Return whether the current serving index exposes condition schema v2.
+def _condition_columns_available(session: Session) -> frozenset[str]:
+    """Return which optional serving columns the current SQLite index has.
 
     The fields are deferred on the ORM model, so a freshly deployed app can still read
-    the previous v1 SQLite index while the main-branch serving rebuild is running.
+    an older index (v1 without conditions, v2 without 사업명) while the rebuild runs.
     """
 
     try:
@@ -408,14 +413,30 @@ def _condition_columns_available(session: Session) -> bool:
             for column in inspect(session.get_bind()).get_columns("track_b_delivery_lines")
         }
     except Exception:
-        return False
-    return _CONDITION_COLUMNS.issubset(columns)
+        return frozenset()
+    return frozenset(columns & (_CONDITION_COLUMNS | {_BUSINESS_NAME_COLUMN}))
 
 
-def _row_conditions(row: TrackBDeliveryLine, *, available: bool) -> tuple[str | None, str | None, str | None]:
-    if not available:
-        return None, None, None
-    return row.contract_delivery_type, row.contract_type, row.delivery_condition
+def _row_conditions(
+    row: TrackBDeliveryLine, *, available: bool | frozenset[str]
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """(계약납품구분, 계약구분, 납품조건, 사업명); True means an in-memory line with every field."""
+
+    if available is True:
+        return (
+            row.contract_delivery_type,
+            row.contract_type,
+            row.delivery_condition,
+            row.business_name,
+        )
+    columns = available or frozenset()
+    conditions = (
+        (row.contract_delivery_type, row.contract_type, row.delivery_condition)
+        if _CONDITION_COLUMNS.issubset(columns)
+        else (None, None, None)
+    )
+    business_name = row.business_name if _BUSINESS_NAME_COLUMN in columns else None
+    return (*conditions, business_name)
 
 
 def _not_cancelled_clause():
@@ -473,7 +494,7 @@ def _candidate_from_row(
     *,
     quote_unit_price: Decimal | None,
     include_conditions: bool,
-    condition_columns_available: bool = False,
+    condition_columns_available: bool | frozenset[str] = False,
 ) -> TrackBQuoteCandidate | None:
     if row.product_title is None:
         return None
@@ -508,9 +529,9 @@ def _candidate_from_row(
     ):
         delta = ((quote_unit_price - price) / price * 100).quantize(Decimal("0.1"))
 
-    contract_delivery_type = contract_type = delivery_condition = None
+    contract_delivery_type = contract_type = delivery_condition = business_name = None
     if include_conditions:
-        contract_delivery_type, contract_type, delivery_condition = _row_conditions(
+        contract_delivery_type, contract_type, delivery_condition, business_name = _row_conditions(
             row,
             available=condition_columns_available,
         )
@@ -543,6 +564,7 @@ def _candidate_from_row(
         contract_delivery_type=contract_delivery_type,
         contract_type=contract_type,
         delivery_condition=delivery_condition,
+        business_name=business_name,
         unit_price_basis=unit_price_basis,
     )
 
@@ -642,7 +664,7 @@ def _find_reference_candidates(
         if source_record_id in seen:
             continue
         seen.add(source_record_id)
-        contract_delivery_type, contract_type, delivery_condition = _row_conditions(
+        contract_delivery_type, contract_type, delivery_condition, business_name = _row_conditions(
             row,
             available=condition_columns_available,
         )
@@ -671,6 +693,7 @@ def _find_reference_candidates(
                 contract_delivery_type=contract_delivery_type,
                 contract_type=contract_type,
                 delivery_condition=delivery_condition,
+                business_name=business_name,
             )
         )
         if len(references) >= limit:

@@ -19,8 +19,8 @@ from purchase_price.storage.r2 import (
 from purchase_price.storage.streaming_gzip import write_verified_gzip_body
 
 _NOT_FOUND_CODES = {"404", "NoSuchKey", "NotFound"}
-SERVING_INDEX_SCHEMA = "track-b-serving-sqlite-v2"
-LEGACY_SERVING_INDEX_SCHEMAS = {"track-b-serving-sqlite-v1"}
+SERVING_INDEX_SCHEMA = "track-b-serving-sqlite-v3"
+LEGACY_SERVING_INDEX_SCHEMAS = {"track-b-serving-sqlite-v1", "track-b-serving-sqlite-v2"}
 SUPPORTED_SERVING_INDEX_SCHEMAS = {SERVING_INDEX_SCHEMA, *LEGACY_SERVING_INDEX_SCHEMAS}
 
 
