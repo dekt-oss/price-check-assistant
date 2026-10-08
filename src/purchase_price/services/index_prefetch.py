@@ -67,9 +67,9 @@ def _warm_mfds_item_status(settings: Settings) -> bool:
 # Search order: a text search first resolves the product in the identity index (the "조사할 제품
 # 고르기" step), then reads its trades, then the item status.
 WARMERS: tuple[tuple[str, Callable[[Settings], bool]], ...] = (
-    ("mfds_identity", _warm_mfds_identity),
-    ("track_b", _warm_track_b),
     ("mfds_item_status", _warm_mfds_item_status),
+    ("track_b", _warm_track_b),
+    ("mfds_identity", _warm_mfds_identity),
 )
 
 
@@ -119,9 +119,13 @@ def warm_indexes_once(
     settings: Settings,
     warmers: tuple[tuple[str, Callable[[Settings], bool]], ...] = WARMERS,
 ) -> dict[str, IndexWarmStatus]:
-    """Load every index once, all at the same time. One failure does not stop the others."""
+    """Load every index once, one after another. One failure does not stop the others.
 
-    with ThreadPoolExecutor(max_workers=max(1, len(warmers)), thread_name_prefix="index-warm") as pool:
+    They used to download side by side; on 2026-10-09 a restart then pushed the Cloud app over its
+    resource limit, so they now run one at a time (smallest first) to keep the peak low.
+    """
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="index-warm") as pool:
         for future in [pool.submit(_warm_one, name, warm, settings) for name, warm in warmers]:
             future.result()
     return prefetch_status()
