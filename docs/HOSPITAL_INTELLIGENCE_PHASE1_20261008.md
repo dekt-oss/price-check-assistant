@@ -117,6 +117,31 @@ NEWS_RADAR_INDEX_PATH=.local/news-radar.json.gz streamlit run Home.py   # /news-
 - 앱에서 상태를 저장하려면 앱의 R2 키가 `news/v1/status.json`에 쓸 수 있어야 한다. 지금 운영 앱 키는 읽기
   전용이라 상태는 세션 안에서만 유지된다.
 
+## Phase 4 — AI 경영분석 설명 · 자동 리포트 (2026-10-09)
+
+### AI 경영분석 설명 (`services/hospital_ai_explanation.py`)
+
+- 기획서 4.7의 "수치 = 계산, 해석 = AI"를 코드로 지킨다. Claude(`claude-opus-5-5`, effort low,
+  거절 시 서버 측 대체 모델 `fallbacks: "default"`)에게 넘기는 것은 화면 비교표의 값·비교군 평균·위치,
+  계산 문장, 자료 상태 메모뿐이다. 원자료·뉴스·NAVER 결과는 넘기지 않는다.
+- 답변 속 숫자를 모두 입력과 대조해, 입력에 없는 숫자가 하나라도 있으면 답변을 버리고 계산 문장을 보여 준다.
+  키가 없거나 API 오류·거절이면 같은 방식으로 계산 문장만 남는다.
+- 화면: Benchmark의 "AI 경영분석 설명" 상자에 "AI 설명 보기" 버튼(누를 때만 호출, 결과는 세션에 보관).
+  운영 설정 `ANTHROPIC_API_KEY`(Streamlit Secrets)가 있어야 버튼이 나온다.
+
+### 리포트 (`services/hospital_report.py`, `scripts/generate_hospital_report.py`)
+
+- 한 병원·한 회계연도·한 비교군 기준 리포트를 Markdown과 Excel로 만든다. Excel 시트: 요약(비교표·해석),
+  병원별 전체 지표, 5년 추이, 자료 상태, (선택) 최근 7일 관련 기사 제목·링크.
+- Benchmark 화면 아래 "리포트 내려받기"에서 지금 화면 기준으로 내려받는다. AI 설명을 본 뒤 받으면 설명도 들어간다.
+- 주간 자동 리포트 `.github/workflows/hospital-weekly-report.yml`: 매주 월요일 08:00(한국 시간) 부산백병원
+  지역 경쟁군·동일 의료원 리포트를 만들어 Actions 요약, 산출물(21일 보관), R2 `reports/v1/<날짜>/`에 올린다.
+  기사 제목이 들어가므로 R2 리포트도 21일 지나면 지운다. `ANTHROPIC_API_KEY` Secret이 있으면 AI 설명을 넣는다.
+
+```bash
+python -m purchase_price.scripts.generate_hospital_report --hospital H-BUSAN-PAIK --peer region --output-dir .local/report
+```
+
 ## 다음 단계 (기획서 Phase 2~3)
 
 1. News Radar: ~~서버 저장 + 정기 수집 Job + 알림~~ Phase 2에서 R2로 완료. 남은 것: 상태 저장용 쓰기 권한 결정, 메일 발송.
