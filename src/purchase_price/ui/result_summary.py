@@ -26,6 +26,9 @@ OUTLIER_FACTOR = Decimal("3")
 OUTLIER_SHOWN = 3
 # Runtime marker: the dashboard reloads a retained copy that lacks price_outlier_rows.
 OUTLIERS_V1 = True
+# Runtime marker: unit-aware conclusion, unit groups and total/quantity/unit-price rows.
+UNIT_AWARE_V1 = True
+UNIT_AWARE_V2 = True
 OVERVIEW_ROW_LIMIT = 10
 
 # Words that only make sense to the developers. The screen uses the plain words instead.
@@ -129,6 +132,7 @@ def build_conclusion(
     *,
     quote_unit_price: Decimal | None,
     unavailable: bool = False,
+    unit: str | None = None,
 ) -> Conclusion:
     """One sentence on what the product traded for and where the quote sits.
 
@@ -180,6 +184,7 @@ def build_conclusion(
         )
 
     latest_text = f" · 최근 거래 {latest}" if latest else ""
+    per = per_unit_label(unit)
     if direct == 1:
         quote_line = None
         if quote is not None:
@@ -188,7 +193,7 @@ def build_conclusion(
                 "1건뿐이라 가격대를 판단하기에는 부족합니다."
             )
         return Conclusion(
-            headline=f"같은 제품의 나라장터 거래는 1건이고, {_won(low)}에 거래됐습니다.",
+            headline=f"같은 제품의 나라장터 거래는 1건이고, {per}{_won(low)}에 거래됐습니다.",
             detail=latest_text.removeprefix(" · ") or None,
             quote_line=quote_line,
             caveat=caveat,
@@ -201,7 +206,7 @@ def build_conclusion(
         if quote is not None:
             quote_line = f"내 견적가 {_won(quote)}은 이 거래가보다 {_direction(_percent(quote, low))}."
         return Conclusion(
-            headline=f"같은 제품이 나라장터에서 {direct}번 거래됐고, 모두 {_won(low)}이었습니다.",
+            headline=f"같은 제품이 나라장터에서 {direct}번 거래됐고, 모두 {per}{_won(low)}이었습니다.",
             detail=latest_text.removeprefix(" · ") or None,
             quote_line=quote_line,
             caveat=caveat,
@@ -210,11 +215,11 @@ def build_conclusion(
         )
 
     if direct == 2:
-        headline = f"같은 제품의 나라장터 거래는 2건이고, {_won(low)}과 {_won(high)}에 거래됐습니다."
+        headline = f"같은 제품의 나라장터 거래는 2건이고, {per}{_won(low)}과 {_won(high)}에 거래됐습니다."
         band = None
     else:
         headline = (
-            f"같은 제품이 나라장터에서 {direct}번 거래됐고, 가운데 값(중앙값)은 {_won(mid)}입니다."
+            f"같은 제품이 나라장터에서 {direct}번 거래됐고, {per}가운데 값(중앙값)은 {_won(mid)}입니다."
         )
         band = PriceBand(low=low, high=high, median=mid, quote=quote)
 
@@ -235,7 +240,7 @@ def build_conclusion(
 
     return Conclusion(
         headline=headline,
-        detail=f"거래가 {_won(low)} ~ {_won(high)}{latest_text}",
+        detail=f"{per}거래가 {_won(low)} ~ {_won(high)}{latest_text}",
         quote_line=quote_line,
         caveat=caveat,
         tone=TONE_OK,
@@ -566,15 +571,188 @@ def price_outlier_rows(
     return [row for _ratio, row in sorted(found, key=lambda item: -item[0])]
 
 
-def outlier_line(row: Mapping[str, object], median_price: Decimal) -> str:
+def outlier_line(row: Mapping[str, object], median_price: Decimal, main_unit: str | None = None) -> str:
     price = _decimal(row.get("가격"))
-    parts = [_won(price)]
+    parts = [trade_amount_line(row)]
     if price is not None and median_price > 0:
         ratio = price / median_price if price >= median_price else median_price / price
         direction = "높음" if price >= median_price else "낮음"
-        parts.append(f"중앙값의 {ratio:.1f}배 {direction}")
-    for key in ("수량/단위", "거래조건", "구매처", "거래일"):
+        parts.append(f"{per_unit_label(main_unit)}중앙값의 {ratio:.1f}배 {direction}")
+    for key in ("거래조건", "구매처", "거래일"):
         value = str(row.get(key) or "").strip()
         if value and value != "미확인":
             parts.append(value)
     return " · ".join(parts)
+
+
+# ── 단위(대·set 등)를 섞지 않고, 거래 총액 → 수량 → 1단위 가격 순으로 보여주기 ──
+
+
+def unit_key(unit: object) -> str:
+    text = " ".join(str(unit or "").split())
+    return "" if text in {"", "미확인"} else text.casefold()
+
+
+def _unit_display(units: Iterable[object]) -> dict[str, str]:
+    display: dict[str, str] = {}
+    for unit in units:
+        key = unit_key(unit)
+        if key and key not in display:
+            display[key] = " ".join(str(unit).split())
+    return display
+
+
+@dataclass(frozen=True)
+class UnitSplit:
+    """Same-product trades split by the most common unit; unknown units stay with it."""
+
+    kept: tuple[Any, ...]
+    other: tuple[Any, ...]
+    main_unit: str | None
+    other_units: tuple[str, ...]
+
+    @property
+    def mixed(self) -> bool:
+        return bool(self.other)
+
+
+def split_by_main_unit(candidates: Sequence[Any]) -> UnitSplit:
+    keys = [unit_key(getattr(candidate, "unit", None)) for candidate in candidates]
+    counts: dict[str, int] = {}
+    for key in keys:
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    display = _unit_display(getattr(candidate, "unit", None) for candidate in candidates)
+    if len(counts) <= 1:
+        main = next(iter(counts), None)
+        return UnitSplit(tuple(candidates), (), display.get(main) if main else None, ())
+    main = max(counts, key=lambda key: (counts[key], key))
+    kept = tuple(c for c, key in zip(candidates, keys, strict=True) if key in {"", main})
+    other = tuple(c for c, key in zip(candidates, keys, strict=True) if key not in {"", main})
+    other_units = tuple(dict.fromkeys(display[key] for key in keys if key not in {"", main}))
+    return UnitSplit(kept, other, display[main], other_units)
+
+
+def per_unit_label(unit: str | None) -> str:
+    return f"1{unit}당 " if unit and len(unit) <= 2 and not unit.isascii() else (f"1 {unit}당 " if unit else "")
+
+
+def unit_note(split: UnitSplit) -> str | None:
+    if not split.mixed:
+        return None
+    others = "·".join(split.other_units)
+    return (
+        f"단위가 다른 거래 {len(split.other)}건({others})은 {split.main_unit} 단위 가격과 섞지 않고 "
+        "아래 표에 따로 보여줍니다. 1세트가 몇 대인지는 원문에 없어 대당 가격으로 나누지 않습니다."
+    )
+
+
+def _quantity(value: object) -> Decimal | None:
+    number = _decimal(value)
+    return number if number is not None and number > 0 else None
+
+
+def _number(value: Decimal) -> str:
+    return f"{value:,.0f}" if value == value.to_integral_value() else f"{value.normalize():,}"
+
+
+def trade_amount_line(row: Mapping[str, object]) -> str:
+    """'73,026,000원 ÷ 2 set = 1 set당 36,513,000원' (or just the unit price when total is unknown)."""
+
+    price = _decimal(row.get("가격"))
+    total = _decimal(row.get("총액"))
+    quantity = _quantity(row.get("수량"))
+    unit = " ".join(str(row.get("단위") or "").split())
+    unit = "" if unit == "미확인" else unit
+    label = per_unit_label(unit or None).strip() or "1단위당"
+    if total is not None and quantity is not None:
+        return f"{_won(total)} ÷ {_number(quantity)}{(' ' + unit) if unit else ''} = {label} {_won(price)}"
+    return f"{label} {_won(price)}"
+
+
+def trade_table_rows(rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    """Full trade list, total amount first, then quantity and the price for one unit."""
+
+    output: list[dict[str, object]] = []
+    for row in rows:
+        unit = " ".join(str(row.get("단위") or "").split())
+        unit = "" if unit == "미확인" else unit
+        quantity = _quantity(row.get("수량"))
+        price = _decimal(row.get("가격"))
+        output.append(
+            {
+                "거래일": row.get("거래일") or "",
+                "모델": row.get("모델") or "",
+                "거래 총액": row.get("총액") if row.get("총액") not in (None, "미확인") else "확인 안 됨",
+                "수량": f"{_number(quantity)} {unit}".strip() if quantity is not None else "확인 안 됨",
+                "1단위 가격": f"{_won(price)} / {unit}" if unit else _won(price),
+                "거래조건": row.get("거래조건") or "",
+                "납품업체": row.get("판매처") or "",
+                "구매 기관": row.get("구매처") or "",
+                "규격": row.get("규격") or "",
+            }
+        )
+    return output
+
+
+def unit_group_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    limit: int = SUMMARY_ROW_LIMIT,
+) -> list[dict[str, object]]:
+    """Groups by model (when several), unit and trade condition; never mixes units in a price."""
+
+    multiple_models = len({str(row.get("모델") or "") for row in rows}) > 1
+    display = _unit_display(row.get("단위") for row in rows)
+    groups: dict[tuple[str, str, str], list[Mapping[str, object]]] = {}
+    for row in rows:
+        # "SET" and "set" are one unit; show the first spelling seen.
+        key = (
+            str(row.get("모델") or "") if multiple_models else "",
+            unit_key(row.get("단위")),
+            str(row.get("거래조건") or ""),
+        )
+        groups.setdefault(key, []).append(row)
+
+    summaries: list[tuple[int, dict[str, object]]] = []
+    for (model, unit_id, condition), members in groups.items():
+        unit = display.get(unit_id, "")
+        prices = sorted(p for p in (_decimal(m.get("가격")) for m in members) if p is not None)
+        if not prices:
+            continue
+        quantities = [_quantity(m.get("수량")) for m in members]
+        totals = [_decimal(m.get("총액")) for m in members]
+        mid = prices[len(prices) // 2] if len(prices) % 2 else (prices[len(prices) // 2 - 1] + prices[len(prices) // 2]) / 2
+        label = per_unit_label(unit or None).strip() or "1단위당"
+        row: dict[str, object] = {}
+        if multiple_models:
+            row["모델"] = model
+        row.update(
+            {
+                "단위": unit or "확인 안 됨",
+                "거래조건": condition,
+                "건수": len(members),
+                "총수량": (
+                    f"{_number(sum(q for q in quantities if q is not None))} {unit}".strip()
+                    if all(q is not None for q in quantities)
+                    else "일부 확인 안 됨"
+                ),
+                "거래 총액 합계": (
+                    _won(sum(t for t in totals if t is not None))
+                    if all(t is not None for t in totals)
+                    else "일부 확인 안 됨"
+                ),
+                f"{label} 중앙값" if unit else "1단위 중앙값": _won(mid),
+                "1단위 최저~최고": _won(prices[0]) if prices[0] == prices[-1] else f"{prices[0]:,.0f} ~ {prices[-1]:,.0f}원",
+                "최근 거래": max((str(m.get("거래일") or "") for m in members), default=""),
+            }
+        )
+        summaries.append((len(members), row))
+    ordered = [row for _count, row in sorted(summaries, key=lambda item: -item[0])]
+    # One shared header across groups: name the median column generically when units differ.
+    if len({tuple(r.keys()) for r in ordered}) > 1:
+        normalized = []
+        for r in ordered:
+            normalized.append({("1단위 중앙값" if k.endswith("중앙값") else k): v for k, v in r.items()})
+        ordered = normalized
+    return ordered[:limit]
