@@ -56,7 +56,8 @@ def build_tiers(
             tiers["hospital_active"].append(code)
         else:
             tiers["other_active"].append(code)
-    return {name: tuple(codes) for name, codes in tiers.items() if codes}
+    # The collector requires explicit target codes in ascending order.
+    return {name: tuple(sorted(codes)) for name, codes in tiers.items() if codes}
 
 
 def tiers_fingerprint(tiers: Mapping[str, tuple[str, ...]]) -> str:
@@ -151,7 +152,9 @@ class TrackBHistoryState:
 
     @property
     def current_codes(self) -> tuple[str, ...]:
-        return self.tiers[self.current_pass[0]]
+        # Sorted here as well: the first production state (2026-10-08) froze tiers in snapshot
+        # order before any request was made, and the collector rejects unsorted explicit codes.
+        return tuple(sorted(self.tiers[self.current_pass[0]]))
 
     def progress(self) -> dict[str, Any]:
         """Codes done across every pass, for the run summary and the screen."""

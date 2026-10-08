@@ -60,9 +60,9 @@ def test_hospital_categories_that_traded_come_first_and_quiet_codes_last() -> No
     tiers = build_tiers(SNAPSHOT, ACTIVE)
 
     assert tiers == {
-        "hospital_active": ("4218190401", "4110449801"),
+        "hospital_active": ("4110449801", "4218190401"),
         "other_active": ("4321150201",),
-        "no_recent_trade": ("4410310801", "4229000001"),
+        "no_recent_trade": ("4229000001", "4410310801"),
     }
     passes = history_passes(tiers)
     # Every window for hospital equipment before any other category.
@@ -183,9 +183,33 @@ def test_runner_freezes_tiers_then_collects_the_first_pass(monkeypatch, tmp_path
     exit_code = runner.run(request_budget=330, output=tmp_path / "summary.json")
 
     assert exit_code == 0
-    assert calls[0]["explicit_target_codes"] == ("4218190401", "4110449801")
+    assert calls[0]["explicit_target_codes"] == ("4110449801", "4218190401")
     assert calls[0]["begin"].isoformat() == HISTORY_WINDOWS[0][0]
     saved = TrackBHistoryState.from_payload(states.values[HISTORY_STATE_NAME])
     assert saved.cursor == CollectionCursor(1, 1)
     report = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert report["tier"] == "hospital_active" and report["mode"] == "history_backfill"
+
+
+def test_codes_reach_the_collector_sorted_even_from_an_unsorted_frozen_state(tmp_path) -> None:
+    """The collector's own check, not a fake: unsorted explicit codes are rejected."""
+
+    from datetime import date
+
+    from purchase_price.scripts.collect_g2b_track_b_r2 import _resolve_target_codes
+
+    state = TrackBHistoryState.bootstrap({"hospital_active": ("4218190401", "4110449801")})
+    codes = state.current_codes
+
+    assert codes == ("4110449801", "4218190401")
+    resolved = _resolve_target_codes(
+        catalog_client=None,
+        catalog_base_url="unused",
+        segments=("41", "42"),
+        page_size=999,
+        snapshot_path=None,
+        refresh_snapshot=False,
+        explicit_target_codes=codes,
+    )
+    assert tuple(resolved[0]) == codes
+    assert date.fromisoformat(state.current_pass[1])
