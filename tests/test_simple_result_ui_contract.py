@@ -98,7 +98,8 @@ def test_slow_lookups_are_not_primary_buttons_on_the_first_screen() -> None:
 def test_full_tables_are_one_expander_away() -> None:
     source = DASHBOARD.read_text(encoding="utf-8")
     assert 'f"같은 제품 거래 {strict_count}건 전체 보기"' in source
-    assert "price_group_summary_rows(" in source
+    assert "result_summary_ui.unit_group_rows(direct_rows" in source
+    assert "result_summary_ui.trade_table_rows(direct_rows)" in source
     assert "supplier_summary_rows(" in source
     assert "same_item_summary_rows(" in source
 

@@ -162,3 +162,62 @@ def test_short_basis_line():
         "자료 기준 · 나라장터 2026-09-18 수집분 + 2026-10-06까지 실시간 확인 · "
         "식약처 자료 53% 수집 중이라 빠진 모델이 있을 수 있음"
     )
+
+
+def _cand(unit, price):
+    return SimpleNamespace(unit=unit, price=Decimal(price))
+
+
+def test_split_by_main_unit_keeps_unknown_units_and_separates_sets():
+    candidates = [_cand("대", "4400000")] * 15 + [_cand(None, "4389000"), _cand("set", "36513000"), _cand("SET", "30000000")]
+    split = rs.split_by_main_unit(candidates)
+    assert split.main_unit == "대"
+    assert len(split.kept) == 16 and len(split.other) == 2
+    assert split.other_units == ("set",)
+    assert "1세트가 몇 대인지는 원문에 없어" in rs.unit_note(split)
+
+    single = rs.split_by_main_unit([_cand("대", "1"), _cand(None, "2")])
+    assert not single.mixed and single.main_unit == "대" and rs.unit_note(single) is None
+
+
+def test_conclusion_names_the_unit():
+    stats = _stats(15, "4400000", "4400000", "6585500")
+    conclusion = rs.build_conclusion(stats, quote_unit_price=None, unit="대")
+    assert "1대당 가운데 값(중앙값)은 4,400,000원" in conclusion.headline
+    assert conclusion.detail.startswith("1대당 거래가 4,400,000원 ~ 6,585,500원")
+    assert "1 set당 " == rs.per_unit_label("set")
+
+
+def test_trade_rows_show_total_quantity_then_unit_price():
+    rows = [{"거래일": "2026-09-28", "모델": "M40", "가격": "36,513,000원", "총액": "73,026,000원", "수량": "2", "단위": "set", "거래조건": "총액계약", "판매처": "세명", "구매처": "비에스", "규격": "미확인"}]
+    table = rs.trade_table_rows(rows)
+    assert list(table[0])[:5] == ["거래일", "모델", "거래 총액", "수량", "1단위 가격"]
+    assert table[0]["거래 총액"] == "73,026,000원"
+    assert table[0]["수량"] == "2 set"
+    assert table[0]["1단위 가격"] == "36,513,000원 / set"
+    assert rs.trade_amount_line(rows[0]) == "73,026,000원 ÷ 2 set = 1 set당 36,513,000원"
+
+
+def test_unit_groups_never_mix_units():
+    rows = [
+        {"모델": "M40", "가격": "4,400,000원", "총액": "8,800,000원", "수량": "2", "단위": "대", "거래조건": "납품요구", "거래일": "2026-09-21"},
+        {"모델": "M40", "가격": "4,400,000원", "총액": "4,400,000원", "수량": "1", "단위": "대", "거래조건": "납품요구", "거래일": "2026-09-01"},
+        {"모델": "M40", "가격": "36,513,000원", "총액": "73,026,000원", "수량": "2", "단위": "set", "거래조건": "총액계약", "거래일": "2026-09-28"},
+    ]
+    groups = rs.unit_group_rows(rows)
+    assert [g["단위"] for g in groups] == ["대", "set"]
+    assert groups[0]["총수량"] == "3 대"
+    assert groups[0]["거래 총액 합계"] == "13,200,000원"
+    assert groups[0]["1단위 중앙값"] == "4,400,000원"
+    assert groups[1]["1단위 최저~최고"] == "36,513,000원"
+
+
+def test_unit_groups_merge_case_variants_of_one_unit():
+    rows = [
+        {"모델": "M40", "가격": "4,747,080원", "총액": "37,976,640원", "수량": "8", "단위": "SET", "거래조건": "총액계약", "거래일": "2026-09-28"},
+        {"모델": "M40", "가격": "36,513,000원", "총액": "73,026,000원", "수량": "2", "단위": "set", "거래조건": "총액계약", "거래일": "2026-09-28"},
+    ]
+    groups = rs.unit_group_rows(rows)
+    assert len(groups) == 1
+    assert groups[0]["단위"] == "SET"
+    assert groups[0]["총수량"] == "10 SET"

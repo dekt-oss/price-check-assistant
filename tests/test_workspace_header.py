@@ -146,7 +146,8 @@ def test_dashboard_uses_fixed_header_before_area_tabs() -> None:
     first_section = source.index('st.markdown("#### 얼마에 거래됐나")')
     assert conclusion < cards < first_section
     assert 'id="purchase-workspace-runtime-v11"' in source
-    assert "workspace_header_ui.direct_table_columns(direct_rows)" in source
+    # Full trade list: total amount, quantity, then the price of one unit (UI 2026-10-08).
+    assert "result_summary_ui.trade_table_rows(direct_rows)" in source
     assert 'st.expander("상세 자료 · 견적 조건 · 안전정보 · 식약처 원자료 · 자료 기준", expanded=False)' in source
     # The deferred research loader lives at the bottom, not above the fold.
     assert source.index('st.markdown("##### 입찰·계약 참고자료")') < source.index("research_button_label")

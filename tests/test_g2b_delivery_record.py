@@ -92,15 +92,15 @@ def test_missing_line_and_read_failure_are_reported_not_raised() -> None:
 def test_price_outliers_are_three_times_from_the_median_farthest_first() -> None:
     rows = [
         {"가격": "4,400,000원", "원천기록": "a"},
-        {"가격": "36,513,000원", "수량/단위": "2 set", "거래조건": "총액계약 · 납품장소도", "구매처": "비에스종합병원", "거래일": "2026-09-28", "원천기록": "b"},
+        {"가격": "36,513,000원", "총액": "73,026,000원", "수량": "2", "단위": "set", "거래조건": "총액계약 · 납품장소도", "구매처": "비에스종합병원", "거래일": "2026-09-28", "원천기록": "b"},
         {"가격": "1,000,000원", "원천기록": "c"},
         {"가격": "미확인", "원천기록": "d"},
     ]
     median = Decimal("4400000")
     outliers = rs.price_outlier_rows(rows, median)
     assert [row["원천기록"] for row in outliers] == ["b", "c"]
-    line = rs.outlier_line(outliers[0], median)
-    assert line.startswith("36,513,000원 · 중앙값의 8.3배 높음 · 2 set · 총액계약")
+    line = rs.outlier_line(outliers[0], median, "대")
+    assert line.startswith("73,026,000원 ÷ 2 set = 1 set당 36,513,000원 · 1대당 중앙값의 8.3배 높음 · 총액계약")
     assert rs.price_outlier_rows(rows, None) == []
 
 
@@ -109,7 +109,7 @@ def test_dashboard_wires_the_record_panel_and_reloads_new_helpers() -> None:
     assert "result_summary_ui.price_outlier_rows(direct_rows, median_price)" in source
     assert "_render_delivery_record(" in source
     assert 'key=record_table_key' in source and 'on_select="rerun"' in source
-    assert '("purchase_price.ui.result_summary", "OUTLIERS_V1")' in source
+    assert '("purchase_price.ui.result_summary", "UNIT_AWARE_V2")' in source
     assert '(track_b_transactions_ui, "SOURCE_RECORD_COLUMN")' in source
     assert "delivery_record_service.G2B_SHOPPING_DATASET_URL" in source
     assert '("purchase_price.services.g2b_delivery_record", "FIELD_ORDER_V1")' in source

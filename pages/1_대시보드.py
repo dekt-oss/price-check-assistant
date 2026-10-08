@@ -137,7 +137,7 @@ from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
     has_transaction_candidates,
-    model_price_group_rows,
+    strict_comparison_candidates,
     transaction_rows,
 )
 from purchase_price.ui.widgets import (
@@ -188,7 +188,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.market_research", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10B"),
-    ("purchase_price.ui.result_summary", "OUTLIERS_V1"),
+    ("purchase_price.ui.result_summary", "UNIT_AWARE_V2"),
     ("purchase_price.services.g2b_delivery_record", "FIELD_ORDER_V1"),
 )
 
@@ -612,9 +612,11 @@ def _build_mfds_procurement_crosslinks(
         model = str(getattr(item, "model_name", "") or "").strip()
         company = str(getattr(item, "registered_company", "") or "").strip()
         direct = _strict_candidates_compat(comparison)
+        # The price range uses the model's main unit only (대 vs set are not one range).
+        priced = result_summary_ui.split_by_main_unit(direct).kept
         prices = sorted(
             Decimal(str(candidate.price))
-            for candidate in direct
+            for candidate in priced
             if getattr(candidate, "price", None) is not None
         )
         suppliers = sorted(
@@ -1465,11 +1467,30 @@ def _render_diagnostic_markers(state: dict[str, Any]) -> None:
 QUOTE_ITEM_RESULTS_SESSION_KEY = "quote_item_results_v1"
 
 
+def _main_unit_view(track_b: Any) -> tuple[Any, Any]:
+    """Track B limited to the most common unit (대 vs set...) for medians and ranges.
+
+    Prices in different units are never mixed into one median; the other-unit trades stay in
+    the tables. Returns (track_b for stats, unit split).
+    """
+
+    split = result_summary_ui.split_by_main_unit(strict_comparison_candidates(track_b))
+    if not split.mixed:
+        return track_b, split
+    other = {id(candidate) for candidate in split.other}
+    try:
+        kept = tuple(c for c in tuple(getattr(track_b, "candidates", ()) or ()) if id(c) not in other)
+        return dataclasses.replace(track_b, candidates=kept), split
+    except TypeError:
+        return track_b, split
+
+
 def _quote_item_summary(result: dict[str, Any]) -> dict[str, object]:
     if result.get("route") != "workspace":
         return {"needs_choice": True}
+    stats_track_b, _split = _main_unit_view(result.get("track_b"))
     stats = build_purchase_workspace_stats(
-        track_b=result.get("track_b"),
+        track_b=stats_track_b,
         market_bundle=None,
         quote_unit_price=None,
     )
@@ -1715,8 +1736,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
         workspace_quote = review_input.quote_unit_price
         st.warning("내 견적가는 숫자로만 입력하세요. 직전 값으로 비교합니다.")
 
+    stats_track_b, unit_split = _main_unit_view(track_b)
     stats = build_purchase_workspace_stats(
-        track_b=track_b,
+        track_b=stats_track_b,
         market_bundle=market_bundle,
         quote_unit_price=workspace_quote,
     )
@@ -1727,8 +1749,12 @@ def _render_search_result(state: dict[str, Any]) -> None:
         stats,
         quote_unit_price=workspace_quote,
         unavailable=track_b_unavailable,
+        unit=unit_split.main_unit,
     )
     st.markdown(result_summary_ui.render_conclusion_html(conclusion), unsafe_allow_html=True)
+    unit_note = result_summary_ui.unit_note(unit_split)
+    if unit_note:
+        st.caption(unit_note)
 
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
         mfds_metric = "품목번호 확인"
@@ -1835,7 +1861,12 @@ def _render_search_result(state: dict[str, Any]) -> None:
         )
     header_cards = [
         price_header_card,
-        workspace_header_ui.supplier_card(stats),
+        # Who supplied the product does not depend on the unit, so count every same-product trade.
+        workspace_header_ui.supplier_card(
+            stats
+            if not unit_split.mixed
+            else build_purchase_workspace_stats(track_b=track_b, market_bundle=None, quote_unit_price=None)
+        ),
         mfds_header_card,
         workspace_header_ui.safety_card(safety_status_value),
     ]
@@ -1999,18 +2030,22 @@ def _render_search_result(state: dict[str, Any]) -> None:
     if state["model_probe_used"]:
         st.caption("검색어가 모델명과 같아 그 모델의 거래를 보여줍니다.")
     if direct_rows:
-        group_rows = model_price_group_rows(track_b)
-        if group_rows:
+        all_groups = result_summary_ui.unit_group_rows(direct_rows, limit=len(direct_rows))
+        if all_groups:
             st.dataframe(
-                result_summary_ui.price_group_summary_rows(group_rows),
+                all_groups[: result_summary_ui.SUMMARY_ROW_LIMIT],
                 use_container_width=True,
                 hide_index=True,
             )
-            if len(group_rows) > result_summary_ui.SUMMARY_ROW_LIMIT:
-                st.caption(
-                    f"규격·거래조건 {len(group_rows)}가지 중 거래가 많은 "
-                    f"{result_summary_ui.SUMMARY_ROW_LIMIT}가지만 보여줍니다."
+            st.caption(
+                "단위(대·set 등)와 거래조건이 같은 거래끼리 묶었습니다. 가격은 모두 1단위 가격이며, "
+                "거래 총액 합계 ÷ 총수량과는 다를 수 있습니다."
+                + (
+                    f" {len(all_groups)}가지 중 거래가 많은 {result_summary_ui.SUMMARY_ROW_LIMIT}가지만 보여줍니다."
+                    if len(all_groups) > result_summary_ui.SUMMARY_ROW_LIMIT
+                    else ""
                 )
+            )
         record_view_key = f"workspace_record_view::{quote_key}"
         record_table_key = f"workspace_direct_table::{quote_key}"
         record_applied_key = f"workspace_direct_table_applied::{quote_key}"
@@ -2034,7 +2069,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
             )
             for index, row in enumerate(outliers[: result_summary_ui.OUTLIER_SHOWN]):
                 line_col, button_col = st.columns([5, 1.2], vertical_alignment="center")
-                line_col.caption(result_summary_ui.outlier_line(row, median_price))
+                line_col.caption(result_summary_ui.outlier_line(row, median_price, unit_split.main_unit))
                 if row.get("원천기록") and button_col.button(
                     "원문 보기",
                     key=f"workspace_outlier_record::{quote_key}::{index}",
@@ -2055,20 +2090,13 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
         with st.expander(f"같은 제품 거래 {strict_count}건 전체 보기", expanded=False):
             st.dataframe(
-                result_summary_ui.display_rows(
-                    [
-                        {column: row.get(column) for column in workspace_header_ui.direct_table_columns(direct_rows)}
-                        for row in direct_rows
-                    ]
-                ),
+                # 거래 총액 → 수량 → 1단위 가격 순서라 세트 거래도 헷갈리지 않습니다.
+                result_summary_ui.trade_table_rows(direct_rows),
                 use_container_width=True,
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
                 key=record_table_key,
-                column_config={
-                    "총액": st.column_config.TextColumn("거래총액"),
-                },
             )
             st.caption(
                 "행을 누르면 그 거래의 조달청 공개 원문(사업명·계약 방법·납품 기한 등)이 위에 열립니다. "
