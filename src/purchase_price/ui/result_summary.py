@@ -22,6 +22,10 @@ TONE_WARN = "warn"
 TONE_NEUTRAL = "neutral"
 
 SUMMARY_ROW_LIMIT = 5
+OUTLIER_FACTOR = Decimal("3")
+OUTLIER_SHOWN = 3
+# Runtime marker: the dashboard reloads a retained copy that lacks price_outlier_rows.
+OUTLIERS_V1 = True
 OVERVIEW_ROW_LIMIT = 10
 
 # Words that only make sense to the developers. The screen uses the plain words instead.
@@ -535,3 +539,42 @@ def quote_item_rows(
 
 def has_banned_term(text: str) -> str | None:
     return next((term for term in BANNED_SCREEN_TERMS if term in text), None)
+
+
+def price_outlier_rows(
+    rows: Sequence[Mapping[str, object]],
+    median_price: Decimal | None,
+    *,
+    factor: Decimal = OUTLIER_FACTOR,
+) -> list[Mapping[str, object]]:
+    """Same-product trades priced ``factor`` times above or below the median, farthest first.
+
+    These usually differ in unit (set vs 대), contract type or bundled options; the buyer checks
+    them against the archived public record instead of the app guessing why.
+    """
+
+    if median_price is None or median_price <= 0:
+        return []
+    found: list[tuple[Decimal, Mapping[str, object]]] = []
+    for row in rows:
+        price = _decimal(row.get("가격"))
+        if price is None or price <= 0:
+            continue
+        ratio = price / median_price if price >= median_price else median_price / price
+        if ratio >= factor:
+            found.append((ratio, row))
+    return [row for _ratio, row in sorted(found, key=lambda item: -item[0])]
+
+
+def outlier_line(row: Mapping[str, object], median_price: Decimal) -> str:
+    price = _decimal(row.get("가격"))
+    parts = [_won(price)]
+    if price is not None and median_price > 0:
+        ratio = price / median_price if price >= median_price else median_price / price
+        direction = "높음" if price >= median_price else "낮음"
+        parts.append(f"중앙값의 {ratio:.1f}배 {direction}")
+    for key in ("수량/단위", "거래조건", "구매처", "거래일"):
+        value = str(row.get(key) or "").strip()
+        if value and value != "미확인":
+            parts.append(value)
+    return " · ".join(parts)
