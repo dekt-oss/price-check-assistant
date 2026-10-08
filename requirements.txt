@@ -1,6 +1,7 @@
 -e .
 
 # Streamlit Community Cloud runtime parser manifest.
+# Revision 2026-10-09b: restart after HIRA bed/type sync (#301).
 # Revision 2026-10-09a: restart after the Benchmark size-peer deploy left old hospital modules loaded (#298).
 # Revision 2026-10-07a: restart after the streamed index-download memory fix (#285).
 # Revision 2026-09-09g: scanned-PDF OCR no longer depends on packages.txt/apt.

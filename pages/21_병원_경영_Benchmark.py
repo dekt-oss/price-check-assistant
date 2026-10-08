@@ -38,11 +38,14 @@ def _reload_retained_modules() -> None:
         (benchmark, "beds_for"),
         (charts, "y_domain"),
     )
-    if all(hasattr(obj, name) for obj, name in markers):
+    if all(hasattr(obj, name) for obj, name in markers) and getattr(
+        benchmark, "MODULES_REVISION", ""
+    ) == "2026-10-09b":
         return
     for name in (
         "purchase_price.services.hospital_metrics",
         "purchase_price.services.khidi_financials",
+        "purchase_price.services.hira_hospital_info",
         "purchase_price.services.hospital_master",
         "purchase_price.services.hospital_benchmark",
         "purchase_price.services.alio_disclosure",
