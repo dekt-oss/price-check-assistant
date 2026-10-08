@@ -50,6 +50,18 @@ _render_runtime_readiness_notice()
 # The sidebar lists only what the purchasing team uses. Every other page stays registered so
 # links (st.page_link / st.switch_page) and the production smoke URLs keep working.
 price_page = st.Page("pages/1_대시보드.py", title="가격 조사", icon="🔎", default=True)
+# The integrated home lives at /home so the root URL keeps opening the price search that the
+# production smokes and purchasing-team bookmarks expect.
+home_page = st.Page("pages/0_홈.py", title="홈", icon="🏠", url_path="home")
+news_page = st.Page(
+    "pages/20_병원_News_Radar.py", title="병원 News Radar", icon="📰", url_path="news-radar"
+)
+benchmark_page = st.Page(
+    "pages/21_병원_경영_Benchmark.py",
+    title="병원 경영 Benchmark",
+    icon="📈",
+    url_path="hospital-benchmark",
+)
 medical_page = st.Page("pages/4_의료기기_조회.py", title="의료기기 상세", icon="🏥")
 quote_detail_page = st.Page("pages/2_견적_검토.py", title="견적 상세 검증", icon="📋")
 legacy_search_page = st.Page("pages/3_빠른_검색.py", title="상세 검색(이전 화면)", icon="🧭")
@@ -72,12 +84,25 @@ if _admin_mode():
     admin_pages = [st.Page("pages/9_관리.py", title="관리", icon="🛠️")]
 
 page = st.navigation(
-    [price_page, medical_page, quote_detail_page, legacy_search_page, *validation_pages, *admin_pages],
+    [
+        price_page,
+        home_page,
+        news_page,
+        benchmark_page,
+        medical_page,
+        quote_detail_page,
+        legacy_search_page,
+        *validation_pages,
+        *admin_pages,
+    ],
     position="hidden",
 )
 
 with st.sidebar:
-    st.page_link(price_page, label="가격 조사", icon="🔎")
+    st.page_link(home_page, label="홈", icon="🏠")
+    st.page_link(price_page, label="구매가격 조사", icon="🔎")
+    st.page_link(news_page, label="병원 News Radar", icon="📰")
+    st.page_link(benchmark_page, label="병원 경영 Benchmark", icon="📈")
     st.page_link(medical_page, label="의료기기 상세", icon="🏥")
     if admin_pages:
         st.divider()

@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     mfds_request_timeout_seconds: float = 20.0
     mfds_max_retries: int = 3
 
+    # NAVER 뉴스 검색 API (병원 News Radar 탐지 전용). 검색결과는 제목·시간·링크 표시에만 쓰고
+    # AI 입력·요약에는 쓰지 않는다 (2026-09-07 네이버 검색 API 이용약관).
+    naver_client_id: str | None = None
+    naver_client_secret: str | None = None
+    naver_news_base_url: str = "https://openapi.naver.com/v1/search/news.json"
+    naver_request_timeout_seconds: float = 10.0
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property
@@ -102,6 +109,15 @@ class Settings(BaseSettings):
     @property
     def r2_zero_cost_warn_limit_bytes(self) -> int:
         return int(self.r2_zero_cost_warn_limit_gb * 1_000_000_000)
+
+    @property
+    def naver_configured(self) -> bool:
+        return bool(
+            self.naver_client_id
+            and self.naver_client_id.strip()
+            and self.naver_client_secret
+            and self.naver_client_secret.strip()
+        )
 
     @property
     def resolved_mfds_service_key(self) -> str | None:
