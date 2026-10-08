@@ -1,15 +1,19 @@
-"""병원 News Radar (Phase 1 기본 화면).
+"""병원 News Radar.
 
 NAVER 뉴스 검색 결과는 '새 기사가 있는지'를 확인하고 제목·시간·링크를 그대로 보여 주는 데만 쓴다.
 검색 결과를 AI 요약·분석에 넘기지 않는다 (2026-09-07 네이버 검색 API 이용약관).
-키워드 그룹과 읽음 상태는 이 세션 안에서만 유지된다.
+
+Phase 2: a GitHub Actions job collects every 30 minutes into R2 (news/v1/index.json.gz) and this
+page reads it (cached 5 minutes). NEWS_RADAR_INDEX_PATH points the page at a local file instead.
+Reading statuses are saved to news/v1/status.json when the credentials allow writing; otherwise
+they stay in this session. Without R2 or a local file the page behaves as in Phase 1.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
@@ -17,6 +21,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 from purchase_price.clients.naver_news import NaverNewsClient, NaverNewsClientError
 from purchase_price.config import get_settings
 from purchase_price.services import news_radar as radar
+from purchase_price.services import news_radar_index as nri
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 
 hydrate_streamlit_runtime_secrets()
@@ -26,6 +31,11 @@ GROUP_TOGGLE_PREFIX = "news_radar_group::"
 STATUS_WIDGET_PREFIX = "news_radar_status::"
 STATUS_OPTIONS = tuple(radar.STATUS_LABELS)
 PAGE_SIZE = 50
+SESSION_STATUSES_KEY = "news_radar_session_statuses"
+SAVED_STATUSES_KEY = "news_radar_saved_statuses"
+STATUS_SESSION_ONLY_KEY = "news_radar_status_session_only"
+INDEX_CACHE_SECONDS = 300
+STALE_AFTER = timedelta(hours=2)
 
 
 def _secret(name: str) -> str | None:
@@ -61,21 +71,85 @@ def _state() -> radar.NewsRadarState:
     return state
 
 
+def _store() -> nri.NewsRadarStore | None:
+    try:
+        return nri.resolve_store(get_settings())
+    except Exception:  # broken settings must not take the page down
+        return None
+
+
+@st.cache_data(ttl=INDEX_CACHE_SECONDS, show_spinner=False)
+def _load_index(source: str) -> tuple[nri.NewsRadarIndex | None, bool]:
+    """(stored list or None, read failed). ``source`` only keys the cache."""
+
+    del source
+    store = _store()
+    if store is None:
+        return None, False
+    try:
+        return store.read_index(), False
+    except Exception:
+        return None, True
+
+
+def _saved_statuses(store: nri.NewsRadarStore | None) -> dict[str, dict]:
+    if SAVED_STATUSES_KEY not in st.session_state:
+        loaded: dict[str, dict] = {}
+        if store is not None:
+            try:
+                loaded = store.read_statuses()
+            except Exception:
+                loaded = {}
+        st.session_state[SAVED_STATUSES_KEY] = loaded
+    return st.session_state[SAVED_STATUSES_KEY]
+
+
+def _session_statuses() -> dict[str, str]:
+    return st.session_state.setdefault(SESSION_STATUSES_KEY, {})
+
+
+def _save_status(entry_id: str, status: str) -> None:
+    """Read-modify-write the small status object; any failure means statuses stay in this session."""
+
+    store = _store()
+    if store is None or st.session_state.get(STATUS_SESSION_ONLY_KEY):
+        return
+    index, _ = _load_index(store.describe())
+    valid = {entry_id, *(index.items if index is not None else ())}
+    now = datetime.now(UTC)
+    try:
+        statuses = nri.prune_statuses(store.read_statuses(), valid)
+        nri.set_status(statuses, entry_id, status, now=now)
+        store.write_statuses(statuses, now=now)
+    except Exception:
+        st.session_state[STATUS_SESSION_ONLY_KEY] = True
+        return
+    st.session_state[SAVED_STATUSES_KEY] = statuses
+
+
 def _group_enabled(group: radar.KeywordGroup) -> bool:
     return bool(st.session_state.get(GROUP_TOGGLE_PREFIX + group.key, group.enabled))
 
 
 def _apply_status(entry_id: str) -> None:
-    _state().set_status(entry_id, st.session_state[STATUS_WIDGET_PREFIX + entry_id])
+    status = st.session_state[STATUS_WIDGET_PREFIX + entry_id]
+    _state().set_status(entry_id, status)
+    _session_statuses()[entry_id] = status
+    _save_status(entry_id, status)
 
 
 def _time_text(value: datetime | None) -> str:
-    return value.astimezone().strftime("%m-%d %H:%M") if value else "시간 확인 안 됨"
+    return radar.seoul_time_text(value)
 
 
 groups = radar.load_keyword_groups()
 state = _state()
 credentials = _naver_credentials()
+store = _store()
+stored_index, index_failed = _load_index(store.describe()) if store is not None else (None, False)
+nri.seed_state(
+    state, stored_index, _saved_statuses(store), session_statuses=_session_statuses()
+)
 
 st.title("병원 News Radar")
 st.caption("등록한 키워드로 새 기사를 자동 확인합니다. 기사 제목·시간·링크를 그대로 보여 주고 요약하지 않습니다.")
@@ -87,8 +161,36 @@ m2.metric("이번 주", f"{summary.this_week}건")
 m3.metric("중요 표시", f"{summary.important}건")
 m4.metric("아직 안 읽음", f"{summary.unread}건")
 
+if store is not None:
+    last_run = stored_index.last_run if stored_index is not None else None
+    if index_failed:
+        st.warning("자동으로 모아 둔 기사를 불러오지 못했습니다. 잠시 뒤 다시 열거나 새 기사 확인 버튼을 눌러 주세요.")
+    elif last_run is None:
+        st.caption("자동 수집 상태: 아직 자동으로 모은 기사가 없습니다. 첫 자동 확인이 끝나면 여기에 쌓입니다.")
+    else:
+        same_day = radar.to_seoul(last_run.finished_at).date() == radar.to_seoul(datetime.now(UTC)).date()
+        last_text = radar.seoul_time_text(last_run.finished_at, "%H:%M" if same_day else "%m-%d %H:%M")
+        status_text = (
+            f"자동 수집 상태: 마지막 자동 확인 {last_text} · 키워드 {last_run.keyword_count}개 중 "
+            f"{last_run.ok_count}개 확인 · 새 기사 {last_run.new_count}건 · 30분마다 자동 확인"
+        )
+        if last_run.failed_keywords:
+            status_text += " · 확인 못 한 키워드: " + ", ".join(last_run.failed_keywords)
+        st.caption(status_text)
+        if datetime.now(UTC) - last_run.finished_at > STALE_AFTER:
+            st.warning("자동 확인이 2시간 넘게 멈춰 있습니다. 새 기사 확인 버튼으로 직접 확인할 수 있습니다.")
+    if st.session_state.get(STATUS_SESSION_ONLY_KEY):
+        st.caption("읽음·중요 표시는 이 화면을 연 동안만 유지됩니다 (저장 권한이 없는 연결).")
+    else:
+        st.caption("읽음·중요 표시는 저장되어 다음에 열어도 그대로 보입니다.")
+else:
+    st.caption("읽음·중요 표시는 이 화면을 연 동안만 유지됩니다.")
+
 with st.expander("관심 키워드 관리", expanded=not state.entries):
-    st.caption("그룹 단위로 켜고 끌 수 있습니다. 알림 방식은 다음 단계에서 메일·메신저와 연결합니다.")
+    st.caption(
+        "그룹 단위로 켜고 끌 수 있습니다(이 화면에만 적용). 즉시 알림 키워드는 새 기사가 나오면 알림 채널로 "
+        "보내고, 하루 1회 요약 키워드는 매일 오전 8시 30분에 모아 정리합니다."
+    )
     for group in groups:
         toggle_col, list_col = st.columns([1, 3])
         with toggle_col:
@@ -116,7 +218,7 @@ else:
     with note_col:
         if state.last_scan_at is not None:
             st.caption(
-                f"마지막 확인 {state.last_scan_at:%m-%d %H:%M} · 새로 찾은 기사 {state.last_new_count}건"
+                f"마지막 직접 확인 {_time_text(state.last_scan_at)} · 새로 찾은 기사 {state.last_new_count}건"
             )
     if run_scan:
         client_id, client_secret = credentials

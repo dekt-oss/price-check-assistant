@@ -33,6 +33,14 @@ _TAG_RE = re.compile(r"<[^>]+>")
 class NaverNewsClientError(RuntimeError):
     """Raised when the NAVER news search request fails (keys are never included)."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+    @property
+    def rate_limited(self) -> bool:
+        return self.status_code == 429
+
 
 @dataclass(frozen=True)
 class NaverNewsItem:
@@ -158,7 +166,7 @@ class NaverNewsClient:
         except httpx.HTTPError as exc:
             raise NaverNewsClientError(f"NAVER 뉴스 검색 연결 실패: {type(exc).__name__}") from exc
         if response.status_code != 200:
-            raise NaverNewsClientError(_error_text(response))
+            raise NaverNewsClientError(_error_text(response), status_code=response.status_code)
         try:
             payload = response.json()
         except ValueError as exc:

@@ -12,7 +12,7 @@
 | 모듈 | 주소 | 지금 되는 것 |
 | --- | --- | --- |
 | 구매가격 조사 | `/` | 기존 기능 그대로 |
-| 병원 News Radar | `/news-radar` | 키워드 그룹 관리, NAVER API HUB 뉴스 검색으로 새 기사 탐지·읽음/중요 표시 (`NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`, 뉴스 검색 API 활성화 필요) |
+| 병원 News Radar | `/news-radar` | 30분마다 자동 수집한 기사 목록(R2 `news/v1/`, 21일 보관)과 직접 "새 기사 확인", 읽음/중요 표시 저장, 즉시 알림(선택 webhook)·매일 08:30 요약 (`NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`, 뉴스 검색 API 활성화 필요; `docs/HOSPITAL_INTELLIGENCE_PHASE1_20261008.md` Phase 2) |
 | 병원 경영 Benchmark | `/hospital-benchmark` | 병원 Master 8곳, 비교군 선택, 지표 계산 틀 (회계자료는 아직 미적재) |
 
 NAVER 검색결과는 제목·시간·링크를 그대로 보여 주는 탐지 용도로만 쓰고 AI 요약·학습에 넘기지 않는다
