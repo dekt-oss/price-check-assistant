@@ -25,6 +25,7 @@ NEWS_STATE_KEY = "news_radar_state"
 GROUP_TOGGLE_PREFIX = "news_radar_group::"
 STATUS_WIDGET_PREFIX = "news_radar_status::"
 STATUS_OPTIONS = tuple(radar.STATUS_LABELS)
+PAGE_SIZE = 50
 
 
 def _secret(name: str) -> str | None:
@@ -148,13 +149,27 @@ if failed_logs:
     )
 
 st.subheader("오늘의 병원동향")
-show_ignored = st.checkbox("관심없음으로 표시한 기사도 보기", value=False)
+filter_col, ignored_col = st.columns([2, 1])
+with filter_col:
+    keyword_filter = st.multiselect(
+        "키워드로 좁혀 보기", [keyword.text for keyword in keywords], placeholder="전체 키워드"
+    )
+with ignored_col:
+    show_ignored = st.checkbox("관심없음으로 표시한 기사도 보기", value=False)
 entries = radar.sorted_entries(state.entries.values(), include_ignored=show_ignored)
+if keyword_filter:
+    entries = [entry for entry in entries if set(entry.keywords) & set(keyword_filter)]
 
 if not entries:
     st.write("아직 확인된 기사가 없습니다. 위의 새 기사 확인 버튼을 누르면 여기에 쌓입니다.")
 
-for entry in entries:
+# Hundreds of cards make the page sluggish; show the newest batch and let the reader extend it.
+page_size = st.session_state.setdefault("news_radar_page_size", PAGE_SIZE)
+visible_entries = entries[:page_size]
+if len(entries) > len(visible_entries):
+    st.caption(f"최신 {len(visible_entries)}건을 보여 줍니다 (전체 {len(entries)}건).")
+
+for entry in visible_entries:
     with st.container(border=True):
         head_col, body_col, status_col = st.columns([1, 4, 1.2])
         with head_col:
@@ -184,3 +199,8 @@ for entry in entries:
                 on_change=_apply_status,
                 args=(entry.article_id,),
             )
+
+if len(entries) > len(visible_entries):
+    if st.button(f"기사 {PAGE_SIZE}건 더 보기"):
+        st.session_state["news_radar_page_size"] = page_size + PAGE_SIZE
+        st.rerun()
