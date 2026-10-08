@@ -538,8 +538,21 @@ def immediate_alert_text(
     return text
 
 
-def daily_digest_markdown(index: NewsRadarIndex, *, now: datetime, hours: int = 24) -> str:
-    """Markdown digest of the last ``hours`` of articles for keywords marked 하루 1회 요약."""
+DIGEST_PER_KEYWORD_LIMIT = 15
+
+
+def daily_digest_markdown(
+    index: NewsRadarIndex,
+    *,
+    now: datetime,
+    hours: int = 24,
+    per_keyword_limit: int = DIGEST_PER_KEYWORD_LIMIT,
+) -> str:
+    """Markdown digest of the last ``hours`` of articles for keywords marked 하루 1회 요약.
+
+    Each keyword shows its newest ``per_keyword_limit`` articles; the first live run produced a
+    1,300-line digest otherwise.
+    """
 
     daily = index.keywords_with_alert("daily")
     since = _aware(now) - timedelta(hours=hours)
@@ -562,10 +575,12 @@ def daily_digest_markdown(index: NewsRadarIndex, *, now: datetime, hours: int = 
         entries = by_keyword[str(keyword)]
         lines.append(f"## {keyword} ({len(entries)}건)")
         lines.append("")
-        for entry in entries:
+        for entry in entries[:per_keyword_limit]:
             title = entry.title.replace("[", "(").replace("]", ")")
             source = entry.source_domain or "출처 확인 안 됨"
             lines.append(f"- [{title}]({entry.url}) · {source} · {_when(entry.published_at)}")
+        if len(entries) > per_keyword_limit:
+            lines.append(f"- 외 {len(entries) - per_keyword_limit}건은 News Radar 화면에서 확인하세요.")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
