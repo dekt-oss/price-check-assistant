@@ -15,7 +15,9 @@ ACCOUNT_LABELS: dict[str, str] = {
     "medical_revenue": "의료수익",
     "inpatient_revenue": "입원수익",
     "outpatient_revenue": "외래수익",
+    "medical_expense": "의료비용",
     "labor_cost": "인건비",
+    "material_cost": "재료비",
     "drug_cost": "약품비",
     "supply_cost": "진료재료비",
     "admin_cost": "관리운영비",
@@ -28,8 +30,22 @@ ACCOUNT_LABELS: dict[str, str] = {
     "total_equity": "자본총계",
     "current_assets": "유동자산",
     "current_liabilities": "유동부채",
+    "short_term_borrowings": "단기차입금",
+    "employee_short_term_borrowings": "임직원단기차입금",
+    "current_long_term_debt": "유동성장기부채",
+    "long_term_borrowings": "장기차입금",
+    "foreign_long_term_borrowings": "외화장기차입금",
     "borrowings": "차입금",
 }
+
+# The KHIDI balance sheet has no single "차입금" line; borrowings are the sum of these lines.
+BORROWING_COMPONENTS: tuple[str, ...] = (
+    "short_term_borrowings",
+    "employee_short_term_borrowings",
+    "current_long_term_debt",
+    "long_term_borrowings",
+    "foreign_long_term_borrowings",
+)
 
 # metric_key -> (label, unit, direction). direction: "higher_better" | "lower_better" | "neutral"
 METRIC_SPECS: dict[str, tuple[str, str, str]] = {
@@ -89,6 +105,28 @@ def cagr(start: Decimal | None, end: Decimal | None, years: int) -> Decimal | No
     return (Decimal((float(end) / float(start)) ** (1.0 / years)) - 1) * 100
 
 
+def borrowings_total(accounts: Accounts) -> Decimal | None:
+    """Reported ``borrowings`` if present, else the sum of the KHIDI borrowing lines.
+
+    ``None`` when no borrowing line is reported at all (a missing line is never read as 0).
+    """
+
+    direct = _dec(accounts.get("borrowings"))
+    if direct is not None:
+        return direct
+    parts = [_dec(accounts.get(key)) for key in BORROWING_COMPONENTS]
+    present = [part for part in parts if part is not None]
+    return sum(present, Decimal(0)) if present else None
+
+
+def debt_ratio(liabilities: Decimal | None, equity: Decimal | None) -> Decimal | None:
+    """부채비율. Undefined (``None``) when equity is zero or negative (자본잠식)."""
+
+    if equity is None or equity <= 0:
+        return None
+    return percent(liabilities, equity)
+
+
 def compute_metrics(
     accounts: Accounts,
     *,
@@ -120,9 +158,9 @@ def compute_metrics(
         "drug_ratio": percent(drug, revenue),
         "supply_ratio": percent(supply, revenue),
         "admin_ratio": percent(get("admin_cost"), revenue),
-        "debt_ratio": percent(get("total_liabilities"), get("total_equity")),
+        "debt_ratio": debt_ratio(get("total_liabilities"), get("total_equity")),
         "current_ratio": percent(get("current_assets"), get("current_liabilities")),
-        "borrowing_ratio": percent(get("borrowings"), get("total_assets")),
+        "borrowing_ratio": percent(borrowings_total(accounts), get("total_assets")),
         "revenue_per_bed": ratio(revenue, beds),
         "labor_per_bed": ratio(labor, beds),
         "material_per_bed": ratio(material, beds),
@@ -233,3 +271,95 @@ def format_metric(value: Decimal | None, unit: str) -> str:
             return f"{value / 100_000_000:,.1f}억원"
         return f"{value:,.0f}원"
     return f"{value}"
+
+
+# --- deterministic findings ("해석") -----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One plain-Korean sentence derived only from computed numbers.
+
+    AI explanation hook: a later explanation layer may take ``Finding`` objects (``text`` plus
+    the numbers in ``value`` / ``peer_average`` / ``gap_history``) as its only input and rephrase
+    or connect them. It must not add numbers that are not here; every figure on the screen stays
+    computed by this module.
+    """
+
+    metric_key: str
+    text: str
+    value: Decimal | None
+    peer_average: Decimal | None
+    gap_history: tuple[tuple[int, Decimal], ...] = ()
+
+
+def _has_final_consonant(word: str) -> bool:
+    last = word.strip()[-1:] if word.strip() else ""
+    if not ("가" <= last <= "힣"):
+        return False
+    return (ord(last) - ord("가")) % 28 != 0
+
+
+def _subject(word: str) -> str:
+    return f"{word}{'이' if _has_final_consonant(word) else '가'}"
+
+
+def gap_trend(gaps: Sequence[tuple[int, Decimal]], *, years: int = 3) -> str | None:
+    """"widening" / "narrowing" when the absolute gap moved one way over ``years`` consecutive years."""
+
+    recent = sorted(gaps)[-years:]
+    if len(recent) < years or any(b[0] - a[0] != 1 for a, b in zip(recent, recent[1:], strict=False)):
+        return None
+    sizes = [abs(gap) for _, gap in recent]
+    signs = {gap > 0 for _, gap in recent if gap != 0}
+    if len(signs) > 1:
+        return None
+    if all(b > a for a, b in zip(sizes, sizes[1:], strict=False)):
+        return "widening"
+    if all(b < a for a, b in zip(sizes, sizes[1:], strict=False)):
+        return "narrowing"
+    return None
+
+
+def describe_findings(
+    rows: Sequence[ComparisonRow],
+    gap_history: Mapping[str, Sequence[tuple[int, Decimal]]] | None = None,
+    *,
+    min_gap_points: Decimal = Decimal("1"),
+    min_gap_percent: Decimal = Decimal("5"),
+) -> list[Finding]:
+    """Turn peer comparisons into sentences such as
+    "재료비율이 비교군 평균보다 2.7%p 높습니다. 최근 3년간 차이가 커지고 있습니다."
+
+    Only rows with both a value and a peer average produce a sentence, and only when the gap is
+    larger than ``min_gap_points`` (%p, for ratios) or ``min_gap_percent`` (%, for 원 metrics).
+    ``gap_history`` maps metric_key to ``[(fiscal_year, value - peer_average), ...]``.
+    """
+
+    findings: list[Finding] = []
+    for row in rows:
+        if row.value is None or row.peer_average is None:
+            continue
+        diff = row.value - row.peer_average
+        if row.unit == "%":
+            if abs(diff) <= min_gap_points:
+                continue
+            amount = f"{abs(diff):.1f}%p"
+            direction = "높습니다" if diff > 0 else "낮습니다"
+        else:
+            if row.peer_average == 0:
+                continue
+            relative = diff / abs(row.peer_average) * 100
+            if abs(relative) <= min_gap_percent:
+                continue
+            amount = f"{abs(relative):.1f}%"
+            direction = "많습니다" if diff > 0 else "적습니다"
+        text = f"{_subject(row.label)} 비교군 평균보다 {amount} {direction}."
+        history = tuple(sorted((gap_history or {}).get(row.metric_key, ())))
+        trend = gap_trend(history)
+        if trend == "widening":
+            text += " 최근 3년간 차이가 커지고 있습니다."
+        elif trend == "narrowing":
+            text += " 최근 3년간 차이가 줄고 있습니다."
+        findings.append(Finding(row.metric_key, text, row.value, row.peer_average, history))
+    return findings
