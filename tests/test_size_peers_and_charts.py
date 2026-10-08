@@ -86,3 +86,30 @@ def test_trend_frame_adds_computed_average_and_keeps_gaps() -> None:
     assert y_scale["zero"] is False and y_scale["domain"][0] > 0
     wide = charts.wide_table(frame)
     assert list(wide["병원"])[:2] == ["부산백", "비교군 평균"]
+
+
+def test_wide_table_whole_numbers_and_unit_in_headers() -> None:
+    table = {"부산백": {2024: Decimal("50.4")}, "P1": {2024: Decimal("46.6")}}
+    wide = charts.wide_table(charts.trend_frame(table, "부산백"), unit="%")
+    assert list(wide.columns) == ["병원", "2024 (%)"]
+    assert list(wide["2024 (%)"])[:2] == ["50", "47"]  # 부산백 50.4 -> 50, 평균 46.6 -> 47
+
+
+def test_chart_labels_and_axis_use_whole_numbers() -> None:
+    frame = charts.trend_frame({"부산백": {2024: Decimal("50.4")}, "P1": {2024: Decimal("46")}}, "부산백")
+    spec = charts.trend_chart(frame, unit_label="%").to_dict()
+    assert spec["layer"][0]["encoding"]["y"]["axis"]["format"] == ",.0f"
+
+
+def test_report_uses_only_the_checked_peers() -> None:
+    from purchase_price.services import hospital_benchmark as benchmark
+    from purchase_price.services import hospital_report as report_service
+
+    data = benchmark.load_benchmark_data()
+    target = data.master.get("H-BUSAN-PAIK")
+    assert target is not None
+    full = report_service.build_report(data, target, hm.PEER_REGION, 2024)
+    kept = [p.hospital_id for p in full.peers][:2]
+    narrowed = report_service.build_report(data, target, hm.PEER_REGION, 2024, peer_ids=kept)
+    assert [p.hospital_id for p in narrowed.peers] == kept
+    assert {r.peer_count for r in narrowed.rows if r.value is not None} <= {0, 1, 2}

@@ -105,9 +105,13 @@ def build_report(
     *,
     custom_ids: Sequence[str] = (),
     bed_range: tuple[int, int] | None = None,
+    peer_ids: Sequence[str] | None = None,
     now: datetime | None = None,
 ) -> BenchmarkReport:
     peers = tuple(data.master.peer_group(target, peer_kind, custom_ids=custom_ids, bed_range=bed_range))
+    if peer_ids is not None:  # the screen's "평균에 포함" checkboxes
+        wanted = set(peer_ids)
+        peers = tuple(p for p in peers if p.hospital_id in wanted)
     rows = benchmark.compare(data, target, peers, fiscal_year, HEADLINE_METRICS)
     findings = (
         metrics.describe_findings(

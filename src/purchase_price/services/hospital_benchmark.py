@@ -18,7 +18,7 @@ from purchase_price.services import khidi_financials as khidi
 
 # Bumped whenever this module or its siblings change behaviour; the Benchmark page reloads retained
 # copies (Streamlit Cloud keeps imported modules across a redeploy) when it sees an older value.
-MODULES_REVISION = "2026-10-09b"
+MODULES_REVISION = "2026-10-09c"
 
 # Accounts a headline metric needs; used to tell the reader which inputs are missing.
 REQUIRED_ACCOUNTS: tuple[str, ...] = (
