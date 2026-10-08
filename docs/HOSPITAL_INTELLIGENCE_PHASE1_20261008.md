@@ -11,7 +11,7 @@
 | 통합 홈 (AI Hospital Intelligence) | `pages/0_홈.py` | `/home` | 동작 |
 | 구매가격 조사 (기존) | `pages/1_대시보드.py` | `/` (기본) | 변경 없음 |
 | 병원 News Radar | `pages/20_병원_News_Radar.py` | `/news-radar` | 동작 (NAVER 키 필요) |
-| 병원 경영 Benchmark | `pages/21_병원_경영_Benchmark.py` | `/hospital-benchmark` | 틀만 동작 (회계자료 미적재) |
+| 병원 경영 Benchmark | `pages/21_병원_경영_Benchmark.py` | `/hospital-benchmark` | 동작 (Phase 3: 2016~2024 회계자료 적재, 병상수는 심평원 키 대기) |
 
 기본 주소(`/`)는 그대로 구매가격 조사 화면이다. 운영 스모크와 구매팀 즐겨찾기가 루트 주소에서
 "통합 검색" 입력칸을 기대하므로 통합 홈은 `/home`에 두고 왼쪽 메뉴 맨 위에 넣었다.
@@ -48,7 +48,8 @@
   약품비율 · 진료재료비율 · 관리운영비율 · 부채비율 · 유동비율 · 차입금 비중 · 의료수익 증가율 · 3/5년 CAGR ·
   병상당 의료수익/인건비/재료비. 입력이 없으면 `None`("자료 없음")이고 어떤 값도 추정하지 않는다.
   비교군 평균과 위치(평균 이상/평균/평균 이하, 비용 지표는 높은 편/낮은 편)도 코드가 정한다.
-- 회계자료는 아직 적재하지 않았으므로 화면의 지표 표는 전부 "자료 없음"이다. 5년 추이도 자리만 있다.
+- (Phase 3, 2026-10-08) KHIDI 공시 2016~2024를 `data/hospital_financial.csv`에 적재했고 화면이 이를 읽는다.
+  출처 · 접근 방법 · 적재 현황은 `docs/HOSPITAL_BENCHMARK_DATA_SOURCES.md`.
 
 ## DB
 
