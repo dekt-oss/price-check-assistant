@@ -1,0 +1,64 @@
+{
+  "groups": [
+    {
+      "key": "our_hospital",
+      "name": "우리병원",
+      "enabled": true,
+      "keywords": [
+        {"text": "부산백병원", "alert": "immediate"},
+        {"text": "인제대학교 백병원", "alert": "immediate"},
+        {"text": "백중앙의료원", "alert": "immediate"},
+        {"text": "해운대백병원", "alert": "immediate"},
+        {"text": "부산진구 종합병원", "alert": "daily"}
+      ]
+    },
+    {
+      "key": "peer_hospitals",
+      "name": "경쟁·Benchmark 병원",
+      "enabled": true,
+      "keywords": [
+        {"text": "부산 상급종합병원", "alert": "immediate"},
+        {"text": "부산대학교병원", "alert": "daily"},
+        {"text": "동아대학교병원", "alert": "daily"},
+        {"text": "고신대학교복음병원", "alert": "daily"},
+        {"text": "양산부산대학교병원", "alert": "daily"}
+      ]
+    },
+    {
+      "key": "management",
+      "name": "병원경영",
+      "enabled": true,
+      "keywords": [
+        {"text": "상급종합병원 지정", "alert": "immediate"},
+        {"text": "병원 경영 적자", "alert": "daily"},
+        {"text": "병원 수가 인상", "alert": "daily"},
+        {"text": "대학병원 투자", "alert": "daily"},
+        {"text": "병원 의료인력 부족", "alert": "daily"}
+      ]
+    },
+    {
+      "key": "ai_digital",
+      "name": "AI·디지털",
+      "enabled": true,
+      "keywords": [
+        {"text": "병원 AI 도입", "alert": "daily"},
+        {"text": "의료 AI 병원", "alert": "daily"},
+        {"text": "생성형 AI 병원", "alert": "daily"},
+        {"text": "EMR AI", "alert": "daily"},
+        {"text": "디지털헬스 병원", "alert": "none"}
+      ]
+    },
+    {
+      "key": "procurement",
+      "name": "구매·관리",
+      "enabled": true,
+      "keywords": [
+        {"text": "병원 의료장비 도입", "alert": "none"},
+        {"text": "의료기기 회수", "alert": "immediate"},
+        {"text": "식약처 회수 의료기기", "alert": "immediate"},
+        {"text": "신의료기술 평가", "alert": "daily"},
+        {"text": "의료기기 안전성 정보", "alert": "daily"}
+      ]
+    }
+  ]
+}

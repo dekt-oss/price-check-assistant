@@ -170,3 +170,113 @@ class TrackBDeliveryLine(Base):
     contract_type: Mapped[str | None] = mapped_column(Text, deferred=True)
     delivery_condition: Mapped[str | None] = mapped_column(Text, deferred=True)
     api_params_json: Mapped[str] = mapped_column(Text)
+
+
+class HospitalMasterRecord(Base):
+    """Canonical hospital identity used to join KHIDI / HIRA / ALIO / news data."""
+
+    __tablename__ = "hospital_master"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[str] = mapped_column(String(40), unique=True)
+    canonical_name: Mapped[str] = mapped_column(String(200), unique=True)
+    short_name: Mapped[str | None] = mapped_column(String(100))
+    aliases_json: Mapped[str] = mapped_column(Text, default="[]")
+    foundation: Mapped[str | None] = mapped_column(String(200))
+    network: Mapped[str | None] = mapped_column(String(200), index=True)
+    region: Mapped[str | None] = mapped_column(String(50), index=True)
+    hospital_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    ownership: Mapped[str | None] = mapped_column(String(50))
+    bed_count: Mapped[int | None] = mapped_column(Integer)
+    bed_count_as_of: Mapped[date | None] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class HospitalFinancial(Base):
+    """One account amount per hospital, fiscal year and source (raw figures, never derived)."""
+
+    __tablename__ = "hospital_financial"
+    __table_args__ = (
+        UniqueConstraint(
+            "hospital_id", "fiscal_year", "account_code", "source",
+            name="uq_hospital_financial_account",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[str] = mapped_column(
+        ForeignKey("hospital_master.hospital_id", ondelete="CASCADE"), index=True
+    )
+    fiscal_year: Mapped[int] = mapped_column(Integer, index=True)
+    fiscal_period_start: Mapped[date | None] = mapped_column(Date)
+    fiscal_period_end: Mapped[date | None] = mapped_column(Date)
+    account_code: Mapped[str] = mapped_column(String(60))
+    account_name: Mapped[str | None] = mapped_column(String(200))
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 0))
+    source: Mapped[str] = mapped_column(String(40))
+    source_url: Mapped[str | None] = mapped_column(Text)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HospitalMetric(Base):
+    """Derived metric computed by code from ``hospital_financial`` (see hospital_metrics)."""
+
+    __tablename__ = "hospital_metric"
+    __table_args__ = (
+        UniqueConstraint("hospital_id", "fiscal_year", "metric_key", name="uq_hospital_metric"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[str] = mapped_column(
+        ForeignKey("hospital_master.hospital_id", ondelete="CASCADE"), index=True
+    )
+    fiscal_year: Mapped[int] = mapped_column(Integer, index=True)
+    metric_key: Mapped[str] = mapped_column(String(60))
+    value: Mapped[Decimal | None] = mapped_column(Numeric(24, 6))
+    inputs_json: Mapped[str | None] = mapped_column(Text)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NewsKeyword(Base):
+    __tablename__ = "news_keyword"
+    __table_args__ = (UniqueConstraint("group_key", "text", name="uq_news_keyword_group_text"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    text: Mapped[str] = mapped_column(String(200))
+    group_key: Mapped[str] = mapped_column(String(60), index=True)
+    group_name: Mapped[str] = mapped_column(String(100))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    alert: Mapped[str] = mapped_column(String(20), default="none")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NewsItem(Base):
+    """A detected article: display fields only (NAVER terms), never AI input."""
+
+    __tablename__ = "news_item"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    article_id: Mapped[str] = mapped_column(String(600), unique=True)
+    title: Mapped[str] = mapped_column(Text)
+    source_domain: Mapped[str | None] = mapped_column(String(200))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    url: Mapped[str] = mapped_column(Text)
+    naver_link: Mapped[str | None] = mapped_column(Text)
+    keywords_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(20), default="new", index=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DataSourceLog(Base):
+    __tablename__ = "data_source_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_name: Mapped[str] = mapped_column(String(100), index=True)
+    query_text: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text)
