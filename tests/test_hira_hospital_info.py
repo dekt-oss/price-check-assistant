@@ -33,9 +33,23 @@ class FakeClient:
         return {"response": {"body": {"items": {"item": item} if item else ""}}}
 
 
-def _master_payload() -> tuple[master_service.HospitalMaster, dict[str, Any]]:
+def _master_payload(tmp_path=None) -> tuple[master_service.HospitalMaster, dict[str, Any]]:
+    """The committed list as it was before any HIRA sync (bed and type-check fields cleared)."""
+
+    import tempfile
+    from pathlib import Path
+
     payload = json.loads(master_service.DEFAULT_MASTER_FILE.read_text(encoding="utf-8"))
-    return master_service.load_hospital_master(), payload
+    for raw in payload["hospitals"]:
+        raw["bed_count"] = None
+        raw["bed_count_as_of"] = None
+        raw["type_verified"] = False
+        for key in ("hira_address", "hira_synced_at"):
+            raw.pop(key, None)
+    folder = Path(tempfile.mkdtemp())
+    path = folder / "master.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return master_service.load_hospital_master(path), payload
 
 
 def test_unambiguous_match_fills_type_beds_and_date() -> None:

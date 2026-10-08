@@ -36,6 +36,9 @@ class Settings(BaseSettings):
 
     # MFDS keys. Source-specific wins over shared/legacy.
     mfds_service_key: str | None = None
+    # HIRA (건강보험심사평가원) 병원정보 / 의료기관별상세정보. Optional: the sync tries every data.go.kr
+    # key when unset, because 활용신청 is tied to the account that owns the key.
+    hira_service_key: str | None = None
     mfds_recall_service_key: str | None = None
 
     # Historical G2B key name. Existing deployments often used this for ShoppingMall API.

@@ -38,11 +38,14 @@ def _reload_retained_modules() -> None:
         (benchmark, "beds_for"),
         (charts, "y_domain"),
     )
-    if all(hasattr(obj, name) for obj, name in markers):
+    if all(hasattr(obj, name) for obj, name in markers) and getattr(
+        benchmark, "MODULES_REVISION", ""
+    ) == "2026-10-09b":
         return
     for name in (
         "purchase_price.services.hospital_metrics",
         "purchase_price.services.khidi_financials",
+        "purchase_price.services.hira_hospital_info",
         "purchase_price.services.hospital_master",
         "purchase_price.services.hospital_benchmark",
         "purchase_price.services.alio_disclosure",
@@ -145,7 +148,7 @@ if peer_kind == master_service.PEER_SIMILAR_SIZE:
         max_value=1500,
         value=DEFAULT_BED_RANGE,
         step=10,
-        help="회계공시 목록에 실린 병상수(해당 연도 말 심평원 자료) 기준입니다. 전국 상급종합·종합병원 중 이 범위 병원을 비교합니다.",
+        help="심평원 현재 허가병상수 기준입니다(없으면 회계공시 병상수). 전국 상급종합·종합병원 중 이 범위 병원을 비교합니다.",
     )
 peers = master.peer_group(target, peer_kind, custom_ids=custom_ids, bed_range=bed_range)
 peers_ready = True

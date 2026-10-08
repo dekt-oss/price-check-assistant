@@ -16,12 +16,14 @@
       "region": "부산",
       "hospital_type": "상급종합병원",
       "ownership": "사립대학병원",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 776,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "disclosed_bed_count": 810,
       "disclosed_bed_year": 2024,
-      "khidi_code": "21100063"
+      "khidi_code": "21100063",
+      "hira_address": "부산광역시 부산진구 복지로 75, 진사로83번길 75, 진사로83번길 81, 1층(일부), 3층 (개금동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "H-HAEUNDAE-PAIK",
@@ -37,12 +39,14 @@
       "region": "부산",
       "hospital_type": "종합병원",
       "ownership": "사립대학병원",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 872,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "disclosed_bed_count": 866,
       "disclosed_bed_year": 2024,
-      "khidi_code": "21100608"
+      "khidi_code": "21100608",
+      "hira_address": "부산광역시 해운대구 해운대로 875, (좌동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "H-ILSAN-PAIK",
@@ -56,14 +60,16 @@
       "foundation": "학교법인 인제학원",
       "network": "백중앙의료원",
       "region": "경기",
-      "hospital_type": "상급종합병원",
+      "hospital_type": "종합병원",
       "ownership": "사립대학병원",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 716,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "disclosed_bed_count": 551,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31100651"
+      "khidi_code": "31100651",
+      "hira_address": "경기도 고양시 일산서구 주화로 170, (대화동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "H-SANGGYE-PAIK",
@@ -79,12 +85,14 @@
       "region": "서울",
       "hospital_type": "종합병원",
       "ownership": "사립대학병원",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 487,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "disclosed_bed_count": 468,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11100818"
+      "khidi_code": "11100818",
+      "hira_address": "서울특별시 노원구 동일로 1342, 상계백병원 (상계동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "H-PNUH",
@@ -100,12 +108,14 @@
       "region": "부산",
       "hospital_type": "상급종합병원",
       "ownership": "국립대학병원",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 1051,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "disclosed_bed_count": 1048,
       "disclosed_bed_year": 2024,
-      "khidi_code": "21100021"
+      "khidi_code": "21100021",
+      "hira_address": "부산광역시 서구 구덕로 179, (아미동1가)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "H-PNUYH",
@@ -121,12 +131,14 @@
       "region": "경남",
       "hospital_type": "상급종합병원",
       "ownership": "국립대학병원",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 1152,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "disclosed_bed_count": 1142,
       "disclosed_bed_year": 2024,
-      "khidi_code": "38100509"
+      "khidi_code": "38100509",
+      "hira_address": "경상남도 양산시 물금읍 금오로 20, (물금읍)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "H-DAUH",
@@ -142,12 +154,14 @@
       "region": "부산",
       "hospital_type": "상급종합병원",
       "ownership": "사립대학병원",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 909,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "disclosed_bed_count": 973,
       "disclosed_bed_year": 2024,
-      "khidi_code": "21100390"
+      "khidi_code": "21100390",
+      "hira_address": "부산광역시 서구 대신공원로 26, (동대신동3가)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "H-KOSIN",
@@ -164,12 +178,14 @@
       "region": "부산",
       "hospital_type": "상급종합병원",
       "ownership": "사립대학병원",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 840,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "disclosed_bed_count": 844,
       "disclosed_bed_year": 2024,
-      "khidi_code": "21100039"
+      "khidi_code": "21100039",
+      "hira_address": "부산광역시 서구 감천로 262, (암남동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K31100554",
@@ -183,13 +199,15 @@
       "region": "인천",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 861,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 847,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31100554"
+      "khidi_code": "31100554",
+      "hira_address": "인천광역시 제물포구 인항로 27-0, 인하대학병원",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K38100215",
@@ -201,13 +219,15 @@
       "region": "경남",
       "hospital_type": "상급종합병원",
       "ownership": "공립",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 836,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 840,
       "disclosed_bed_year": 2024,
-      "khidi_code": "38100215"
+      "khidi_code": "38100215",
+      "hira_address": "경상남도 진주시 강남로 79, (칠암동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K37100092",
@@ -219,13 +239,15 @@
       "region": "대구",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 838,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 833,
       "disclosed_bed_year": 2024,
-      "khidi_code": "37100092"
+      "khidi_code": "37100092",
+      "hira_address": "대구광역시 남구 두류공원로17길 33, (대명동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K31100767",
@@ -239,13 +261,15 @@
       "region": "경기",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 823,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 829,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31100767"
+      "khidi_code": "31100767",
+      "hira_address": "경기도 부천시 원미구 조마루로 170, 부흥로 173(1층일부) (중동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K32100035",
@@ -260,13 +284,15 @@
       "region": "강원",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 826,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 823,
       "disclosed_bed_year": 2024,
-      "khidi_code": "32100035"
+      "khidi_code": "32100035",
+      "hira_address": "강원특별자치도 원주시 일산로 20-0,  (일산동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K36100021",
@@ -278,13 +304,15 @@
       "region": "광주",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 818,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 816,
       "disclosed_bed_year": 2024,
-      "khidi_code": "36100021"
+      "khidi_code": "36100021",
+      "hira_address": "전남광주통합특별시 동구 필문대로 365, (학동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K34100245",
@@ -299,13 +327,15 @@
       "region": "대전",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 819,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 805,
       "disclosed_bed_year": 2024,
-      "khidi_code": "34100245"
+      "khidi_code": "34100245",
+      "hira_address": "대전광역시 서구 관저동로 158, (관저동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K11100168",
@@ -317,13 +347,15 @@
       "region": "서울",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 822,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 801,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11100168"
+      "khidi_code": "11100168",
+      "hira_address": "서울특별시 동대문구 경희대로 23, (회기동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K11100184",
@@ -335,13 +367,15 @@
       "region": "서울",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 802,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 794,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11100184"
+      "khidi_code": "11100184",
+      "hira_address": "서울특별시 성동구 왕십리로 222-1, (사근동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K31100058",
@@ -356,13 +390,15 @@
       "region": "경기",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 796,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 786,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31100058"
+      "khidi_code": "31100058",
+      "hira_address": "경기도 수원시 팔달구 중부대로 93, (지동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K11100435",
@@ -374,13 +410,15 @@
       "region": "서울",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 785,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 784,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11100435"
+      "khidi_code": "11100435",
+      "hira_address": "서울특별시 광진구 능동로 120-1, (화양동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K31101097",
@@ -394,13 +432,15 @@
       "region": "경기",
       "hospital_type": "종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 754,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 781,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31101097"
+      "khidi_code": "31101097",
+      "hira_address": "경기도 화성시 동탄구 큰재봉길 7, (석우동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K31100627",
@@ -414,13 +454,15 @@
       "region": "경기",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 811,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 780,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31100627"
+      "khidi_code": "31100627",
+      "hira_address": "경기도 안양시 동안구 관평로170번길 22, (평촌동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K11100150",
@@ -435,13 +477,15 @@
       "region": "서울",
       "hospital_type": "종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 805,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 779,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11100150"
+      "khidi_code": "11100150",
+      "hira_address": "서울특별시 은평구 통일로 1021, (진관동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K35100061",
@@ -453,13 +497,15 @@
       "region": "전북",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 782,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 779,
       "disclosed_bed_year": 2024,
-      "khidi_code": "35100061"
+      "khidi_code": "35100061",
+      "hira_address": "전북특별자치도 익산시 무왕로 895, (신동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K33100128",
@@ -471,13 +517,15 @@
       "region": "충북",
       "hospital_type": "상급종합병원",
       "ownership": "공립",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 847,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 776,
       "disclosed_bed_year": 2024,
-      "khidi_code": "33100128"
+      "khidi_code": "33100128",
+      "hira_address": "충청북도 청주시 서원구 1순환로 776-0, 충북대학교병원",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K11100443",
@@ -492,13 +540,15 @@
       "region": "서울",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 768,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 767,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11100443"
+      "khidi_code": "11100443",
+      "hira_address": "서울특별시 강남구 언주로 211, 강남세브란스병원 (도곡동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K31100252",
@@ -512,13 +562,15 @@
       "region": "경기",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 779,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 766,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31100252"
+      "khidi_code": "31100252",
+      "hira_address": "경기도 안산시 단원구 적금로 123, (고잔동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K31100678",
@@ -532,13 +584,15 @@
       "region": "경기",
       "hospital_type": "종합병원",
       "ownership": "공립",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 809,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 766,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31100678"
+      "khidi_code": "31100678",
+      "hira_address": "경기도 고양시 일산동구 일산로 100, (백석동,백석1동 1241외1필지 4층)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K11100249",
@@ -552,13 +606,15 @@
       "region": "서울",
       "hospital_type": "종합병원",
       "ownership": "공립",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 765,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 765,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11100249"
+      "khidi_code": "11100249",
+      "hira_address": "서울특별시 동작구 보라매로5길 20, (신대방동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K38100487",
@@ -570,13 +626,15 @@
       "region": "경남",
       "hospital_type": "종합병원",
       "ownership": "의료법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 767,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 765,
       "disclosed_bed_year": 2024,
-      "khidi_code": "38100487"
+      "khidi_code": "38100487",
+      "hira_address": "경상남도 창원시 의창구 용동로57번길 8, (사림동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K35100028",
@@ -590,13 +648,15 @@
       "region": "전북",
       "hospital_type": "종합병원",
       "ownership": "재단법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 751,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 751,
       "disclosed_bed_year": 2024,
-      "khidi_code": "35100028"
+      "khidi_code": "35100028",
+      "hira_address": "전북특별자치도 전주시 완산구 서원로 365, (중화산동1가, 예수병원)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K37100211",
@@ -610,13 +670,15 @@
       "region": "경북",
       "hospital_type": "종합병원",
       "ownership": "의료법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 745,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 734,
       "disclosed_bed_year": 2024,
-      "khidi_code": "37100211"
+      "khidi_code": "37100211",
+      "hira_address": "경상북도 포항시 남구 포스코대로 351,  (대도동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K31100031",
@@ -630,13 +692,15 @@
       "region": "인천",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 726,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 731,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31100031"
+      "khidi_code": "31100031",
+      "hira_address": "인천광역시 부평구 동수로 56-0, 가톨릭대학교인천성모병원",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K11100052",
@@ -648,13 +712,15 @@
       "region": "서울",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 739,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 727,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11100052"
+      "khidi_code": "11100052",
+      "hira_address": "서울특별시 동작구 흑석로 102, (흑석동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K11100095",
@@ -666,13 +732,15 @@
       "region": "서울",
       "hospital_type": "상급종합병원",
       "ownership": "의료법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 667,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 720,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11100095"
+      "khidi_code": "11100095",
+      "hira_address": "서울특별시 종로구 새문안로 29, (평동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K38100525",
@@ -686,33 +754,38 @@
       "region": "경남",
       "hospital_type": "상급종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 731,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 719,
       "disclosed_bed_year": 2024,
-      "khidi_code": "38100525"
+      "khidi_code": "38100525",
+      "hira_address": "경상남도 창원시 마산회원구 팔용로 158-158, (합성동, 삼성창원병원)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K11101270",
       "canonical_name": "강동경희대학교의대병원",
       "short_name": "강동경희대병원",
       "aliases": [
-        "강동경희대병원"
+        "강동경희대병원",
+        "강동경희대학교병원"
       ],
       "foundation": "학교법인",
       "network": "",
       "region": "서울",
       "hospital_type": "종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 706,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 706,
       "disclosed_bed_year": 2024,
-      "khidi_code": "11101270"
+      "khidi_code": "11101270",
+      "hira_address": "서울특별시 강동구 동남로 892, (상일동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K31100295",
@@ -726,20 +799,24 @@
       "region": "경기",
       "hospital_type": "종합병원",
       "ownership": "학교법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 700,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 700,
       "disclosed_bed_year": 2024,
-      "khidi_code": "31100295"
+      "khidi_code": "31100295",
+      "hira_address": "경기도 의정부시 천보로 271, 의정부성모병원 (금오동)",
+      "hira_synced_at": "2026-10-09"
     },
     {
       "hospital_id": "K21100616",
       "canonical_name": "의료법인 온그룹의료재단 온종합병원",
       "short_name": "온종합병원",
       "aliases": [
+        "온병원",
         "온종합병원",
+        "의료법인 온병원그룹의료재단 온병원",
         "의료법인온그룹의료재단온종합병원"
       ],
       "foundation": "의료법인",
@@ -747,13 +824,15 @@
       "region": "부산",
       "hospital_type": "종합병원",
       "ownership": "의료법인",
-      "bed_count": null,
-      "bed_count_as_of": null,
-      "type_verified": false,
+      "bed_count": 700,
+      "bed_count_as_of": "2026-10-09",
+      "type_verified": true,
       "group": "size_peer",
       "disclosed_bed_count": 700,
       "disclosed_bed_year": 2024,
-      "khidi_code": "21100616"
+      "khidi_code": "21100616",
+      "hira_address": "부산광역시 부산진구 가야대로 719, ,767,721,본관 지하3~11층 전부,12층 일부,13~14층 전부,15층 일부,신관 1층, 9층 일부 (당감동)",
+      "hira_synced_at": "2026-10-09"
     }
   ]
 }

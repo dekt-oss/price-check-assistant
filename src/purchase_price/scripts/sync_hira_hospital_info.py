@@ -3,7 +3,7 @@
     python -m purchase_price.scripts.sync_hira_hospital_info            # all 8 hospitals
     python -m purchase_price.scripts.sync_hira_hospital_info --dry-run  # print only
 
-Needs ``DATA_GO_KR_SERVICE_KEY`` with 활용신청 for 건강보험심사평가원_병원정보서비스 (15001698) and
+Needs a data.go.kr key (HIRA_SERVICE_KEY, or any configured data.go.kr key) with 활용신청 for 건강보험심사평가원_병원정보서비스 (15001698) and
 _의료기관별상세정보서비스 (15001699). Without it the script stops and changes nothing.
 """
 
@@ -21,17 +21,58 @@ from purchase_price.clients.data_go_kr import PublicDataClientError, PublicDataP
 from purchase_price.services import hira_hospital_info as hira
 from purchase_price.services import hospital_master as master_service
 
+KEY_ORDER = (
+    "HIRA_SERVICE_KEY",
+    "DATA_GO_KR_MARKET_SERVICE_KEY",
+    "G2B_RESEARCH_SERVICE_KEY",
+    "DATA_GO_KR_SERVICE_KEY",
+    "MFDS_SERVICE_KEY",
+    "G2B_SERVICE_KEY",
+)
 
-def _service_key() -> str:
-    key = os.environ.get("DATA_GO_KR_SERVICE_KEY", "").strip()
-    if key:
-        return key
+
+def candidate_keys() -> list[tuple[str, str]]:
+    """Every configured data.go.kr key, in preference order, without duplicates.
+
+    data.go.kr authorises per account: a key from another account answers code 30 even when the
+    services are approved on this one, so the sync tries each configured key once.
+    """
+
     try:
         from purchase_price.config import get_settings
 
-        return (get_settings().data_go_kr_service_key or "").strip()
+        settings = get_settings()
     except Exception:  # pragma: no cover - settings import is best effort
-        return ""
+        settings = None
+    seen: set[str] = set()
+    keys: list[tuple[str, str]] = []
+    for name in KEY_ORDER:
+        value = os.environ.get(name, "") or (getattr(settings, name.lower(), None) or "")
+        value = value.strip()
+        if value and value not in seen:
+            seen.add(value)
+            keys.append((name, value))
+    return keys
+
+
+def authorised_key(keys: Sequence[tuple[str, str]]) -> tuple[str, str] | None:
+    """The first key the 병원정보서비스 accepts (one small request per key)."""
+
+    for name, key in keys:
+        with PublicDataPortalClient(key) as client:
+            try:
+                client.get_json(
+                    hira.HIRA_HOSP_INFO_BASE_URL,
+                    hira.HIRA_HOSP_BASIS_OPERATION,
+                    yadmNm="부산백병원",
+                    numOfRows=1,
+                    pageNo=1,
+                    _type="json",
+                )
+            except PublicDataClientError:
+                continue
+        return name, key
+    return None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -41,10 +82,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
-    key = _service_key()
-    if not key:
-        print("DATA_GO_KR_SERVICE_KEY가 없어 심평원 자료를 가져올 수 없습니다. 아무것도 바꾸지 않았습니다.")
+    keys = candidate_keys()
+    if not keys:
+        print("data.go.kr 키가 없어 심평원 자료를 가져올 수 없습니다. 아무것도 바꾸지 않았습니다.")
         return 2
+    chosen = authorised_key(keys)
+    if chosen is None:
+        print(f"설정된 키 {len(keys)}개 모두 심평원 병원정보서비스에서 거절됐습니다(활용신청한 계정의 키인지 확인).")
+        print("hospital_master.json은 바꾸지 않았습니다.")
+        return 3
+    key_name, key = chosen
+    print(f"심평원 호출에 {key_name} 사용")
     payload = json.loads(args.master.read_text(encoding="utf-8"))
     master = master_service.load_hospital_master(args.master)
     with PublicDataPortalClient(key) as client:

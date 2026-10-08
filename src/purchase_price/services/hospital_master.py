@@ -71,7 +71,8 @@ class Hospital:
     @property
     def size_beds_text(self) -> str:
         if self.bed_count is not None:
-            return f"{self.bed_count:,}"
+            as_of = f" (심평원 {self.bed_count_as_of})" if self.bed_count_as_of else ""
+            return f"{self.bed_count:,}{as_of}"
         if self.disclosed_bed_count is not None:
             return f"{self.disclosed_bed_count:,} (공시 {self.disclosed_bed_year})"
         return "자료 없음"
