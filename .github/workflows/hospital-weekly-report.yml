@@ -51,7 +51,7 @@ jobs:
         run: >-
           python -m purchase_price.scripts.generate_hospital_report
           --hospital "${{ inputs.hospital || 'H-BUSAN-PAIK' }}"
-          --peer region --peer network
+          --peer region --peer network --peer similar_size --bed-range 700-850
           --with-ai --with-news --r2
           --output-dir artifacts/hospital-report
           --summary-json artifacts/hospital-report/summary.json

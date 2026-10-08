@@ -123,7 +123,7 @@ def test_weekly_report_from_committed_data_has_real_rows_and_no_invented_values(
     report = report_service.build_report(data, target, "region", 2024, now=datetime(2026, 10, 12, 8, tzinfo=KST))
     text = report_service.report_markdown(report)
     assert "| 인건비율 | 50.4% | 47.6% | 4곳 | 높은 편 |" in text
-    assert "| 병상당 의료수익 | 자료 없음 | 자료 없음 | 0곳 | 비교 불가 |" in text
+    assert "| 병상당 의료수익 | 4.2억원 | 4.0억원 | 4곳 | 평균 이상 |" in text  # 810 beds from the 2024 disclosure
     assert "2024-03-01 ~ 2025-02-28" in text
     assert any("회계기간" in note for note in report.quality)
     from openpyxl import load_workbook

@@ -134,9 +134,13 @@ def from_raw(
     master: master_service.HospitalMaster, raw_dir: Path, report: ImportReport
 ) -> list[khidi.FinancialRow]:
     grouped: dict[tuple[str, int], list[tuple[khidi.Statement, str, str]]] = {}
+    # Disclosed names change between years (e.g. a legal-form prefix); the KHIDI code does not.
+    by_code = {h.khidi_code: h for h in master.hospitals if getattr(h, "khidi_code", None)}
     for path in sorted(raw_dir.glob("*/*.json")):
         statement, url, fetched_at = khidi.load_raw_snapshot(path)
-        hospital = khidi.resolve_disclosed_name(master, statement.hos_name or "")
+        hospital = khidi.resolve_disclosed_name(master, statement.hos_name or "") or by_code.get(
+            statement.hos_code or path.stem.split("_")[0]
+        )
         if hospital is None:
             report.missing.append(("?", statement.fiscal_year, f"{path.name}: 병원 명단에 없는 기관 {statement.hos_name}"))
             continue

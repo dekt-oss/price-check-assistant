@@ -24,7 +24,10 @@ def test_seed_contains_the_plan_hospitals_without_invented_bed_counts(master: hm
         "동아대학교병원",
         "고신대학교복음병원",
     } <= names
+    # HIRA-confirmed bed counts stay empty until the HIRA sync runs; the disclosure-list count is
+    # kept in its own field so the two are never confused.
     assert all(hospital.bed_count is None for hospital in master.hospitals)
+    assert master.get("H-BUSAN-PAIK").disclosed_bed_count == 810  # type: ignore[union-attr]
 
 
 @pytest.mark.parametrize(
@@ -67,10 +70,11 @@ def test_same_type_peer_group_matches_type_and_ownership(master: hm.HospitalMast
     assert "부산대학교병원" not in {p.canonical_name for p in peers}
 
 
-def test_similar_size_is_empty_until_bed_counts_exist(master: hm.HospitalMaster) -> None:
+def test_similar_size_is_empty_without_any_bed_count(master: hm.HospitalMaster) -> None:
     target = master.get("H-BUSAN-PAIK")
     assert target is not None
-    assert master.peer_group(target, hm.PEER_SIMILAR_SIZE) == ()
+    unsized = dataclasses.replace(target, bed_count=None, disclosed_bed_count=None)
+    assert hm.HospitalMaster([unsized]).peer_group(unsized, hm.PEER_SIMILAR_SIZE) == ()
     sized = hm.HospitalMaster(
         [
             dataclasses.replace(target, bed_count=900),
