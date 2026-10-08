@@ -4,6 +4,7 @@ import dataclasses
 import importlib
 import sqlite3
 import sys
+from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from inspect import signature
@@ -24,6 +25,7 @@ from purchase_price.evidence_domain import (
     SafetyEvidenceStatus,
 )
 from purchase_price.schemas import ProductQuery
+from purchase_price.services import g2b_delivery_record as delivery_record_service
 from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_item_status_r2 as mfds_item_status_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
@@ -172,7 +174,7 @@ _TRACK_B_RUNTIME_MARKERS = (
     (track_b_r2_index_service, "WORKSPACE_LOOKUP_LIMIT"),
     (track_b_snapshot_service, "WORKSPACE_LOOKUP_LIMIT"),
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
-    (track_b_transactions_ui, "GROUP_QUANTITY_NORMALIZED"),
+    (track_b_transactions_ui, "SOURCE_RECORD_COLUMN"),
     (same_item_ui, "ITEM_STATUS_AWARE"),
 )
 
@@ -186,6 +188,8 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.market_research", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10B"),
+    ("purchase_price.ui.result_summary", "OUTLIERS_V1"),
+    ("purchase_price.services.g2b_delivery_record", "FIELD_ORDER_V1"),
 )
 
 
@@ -1556,6 +1560,59 @@ def _render_mfds_collection_status_body(status: MfdsIdentityCollectionStatus) ->
         st.caption(f"마지막 갱신 · {updated_at}")
 
 
+DELIVERY_RECORD_CACHE_KEY = "delivery_record_cache_v1"
+
+
+def _render_delivery_record(row: Mapping[str, object], *, view_key: str, close_key: str) -> None:
+    """The archived public API record of one same-product trade, in plain labels."""
+
+    record_id = str(row.get("원천기록") or "")
+    ref = delivery_record_service.parse_record_ref(record_id, row.get("원문근거키"))
+    with st.container(border=True):
+        if ref is None:
+            st.info("이 거래는 원문 위치 정보가 없어 원문을 열 수 없습니다.")
+            return
+        head_col, close_col = st.columns([5, 1], vertical_alignment="center")
+        head_col.markdown(f"**조달청 공개 원문 · 납품요구 {ref.label}**")
+        if close_col.button("닫기", key=close_key, type="tertiary"):
+            st.session_state.pop(view_key, None)
+            st.rerun()
+        cache = st.session_state.setdefault(DELIVERY_RECORD_CACHE_KEY, {})
+        lookup = cache.get(record_id)
+        if lookup is None:
+            with st.spinner("보관해 둔 조달청 원문을 읽고 있습니다..."):
+                lookup = delivery_record_service.load_delivery_record(ref)
+            if lookup.status != "failure":
+                cache[record_id] = lookup
+        if lookup.status == "found":
+            st.dataframe(
+                [{"항목": label, "내용": value} for label, value in lookup.fields],
+                use_container_width=True,
+                hide_index=True,
+                # Tall enough for every field, so 단가·수량·단위 are never below a scroll fold.
+                height=35 * (len(lookup.fields) + 1) + 3,
+            )
+            st.caption(
+                f"공공데이터포털 '{delivery_record_service.G2B_SHOPPING_DATASET_NAME}'가 공개한 기록을 "
+                f"수집할 때 그대로 보관한 원본입니다 (원본 확인값 {(ref.payload_hash or '')[:12]})."
+            )
+        elif lookup.status == "not_archived":
+            st.info("최근 며칠 사이 실시간으로 받은 거래라 아직 원문을 보관하지 않았습니다. 아래 번호로 확인하세요.")
+        elif lookup.status == "not_found":
+            st.warning("보관한 원문에서 이 줄을 찾지 못했습니다. 아래 번호로 확인하세요.")
+        else:
+            st.warning(f"원문을 읽지 못했습니다 ({lookup.error_type or '오류'}). 잠시 뒤 다시 여세요.")
+        st.caption(
+            "나라장터 화면은 거래마다 고유 주소가 없어 바로 열 수 없습니다. 납품요구번호로 찾아 확인하세요."
+        )
+        number_col, link_col = st.columns([2, 3], vertical_alignment="center")
+        number_col.code(ref.delivery_number, language=None)
+        link_col.link_button(
+            "출처 데이터셋 보기 (공공데이터포털)",
+            delivery_record_service.G2B_SHOPPING_DATASET_URL,
+        )
+
+
 def _render_search_result(state: dict[str, Any]) -> None:
     heading = state["heading"]
     review_input = state["review_input"]
@@ -1954,6 +2011,48 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     f"규격·거래조건 {len(group_rows)}가지 중 거래가 많은 "
                     f"{result_summary_ui.SUMMARY_ROW_LIMIT}가지만 보여줍니다."
                 )
+        record_view_key = f"workspace_record_view::{quote_key}"
+        record_table_key = f"workspace_direct_table::{quote_key}"
+        record_applied_key = f"workspace_direct_table_applied::{quote_key}"
+        # A row picked in the full table (previous run) opens its record above the table.
+        table_state = st.session_state.get(record_table_key)
+        picked_rows = list(
+            ((table_state or {}).get("selection") or {}).get("rows") or []
+        ) if isinstance(table_state, Mapping) else []
+        picked = picked_rows[0] if picked_rows else None
+        if picked != st.session_state.get(record_applied_key):
+            st.session_state[record_applied_key] = picked
+            if picked is not None and 0 <= picked < len(direct_rows):
+                st.session_state[record_view_key] = str(direct_rows[picked].get("원천기록") or "")
+
+        median_price = stats.median_price
+        outliers = result_summary_ui.price_outlier_rows(direct_rows, median_price)
+        if outliers and median_price is not None:
+            st.warning(
+                f"중앙값과 3배 넘게 차이 나는 거래가 {len(outliers)}건 있습니다. "
+                "단위(세트·대)나 계약 방식이 다른 거래일 수 있으니 조달청 원문을 확인하세요."
+            )
+            for index, row in enumerate(outliers[: result_summary_ui.OUTLIER_SHOWN]):
+                line_col, button_col = st.columns([5, 1.2], vertical_alignment="center")
+                line_col.caption(result_summary_ui.outlier_line(row, median_price))
+                if row.get("원천기록") and button_col.button(
+                    "원문 보기",
+                    key=f"workspace_outlier_record::{quote_key}::{index}",
+                    type="tertiary",
+                ):
+                    st.session_state[record_view_key] = str(row["원천기록"])
+
+        rows_by_record = {
+            str(row.get("원천기록") or ""): row for row in direct_rows if row.get("원천기록")
+        }
+        selected_record = str(st.session_state.get(record_view_key) or "")
+        if selected_record in rows_by_record:
+            _render_delivery_record(
+                rows_by_record[selected_record],
+                view_key=record_view_key,
+                close_key=f"workspace_record_close::{quote_key}",
+            )
+
         with st.expander(f"같은 제품 거래 {strict_count}건 전체 보기", expanded=False):
             st.dataframe(
                 result_summary_ui.display_rows(
@@ -1964,11 +2063,17 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 ),
                 use_container_width=True,
                 hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key=record_table_key,
                 column_config={
                     "총액": st.column_config.TextColumn("거래총액"),
                 },
             )
-            st.caption("원문 위치·식별번호 등 모든 항목은 Excel에 들어 있습니다.")
+            st.caption(
+                "행을 누르면 그 거래의 조달청 공개 원문(사업명·계약 방법·납품 기한 등)이 위에 열립니다. "
+                "모든 항목은 Excel에도 들어 있습니다."
+            )
     elif track_b.status == "unavailable":
         st.warning("가격 자료에 연결하지 못했습니다.")
     elif track_b.status == "not_ingested":

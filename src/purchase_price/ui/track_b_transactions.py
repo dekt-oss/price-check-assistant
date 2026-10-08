@@ -81,6 +81,8 @@ def _text_or_unknown(value: Any) -> str:
 
 # Runtime marker: the dashboard reloads a retained older copy of this module (hot reload).
 GROUP_QUANTITY_NORMALIZED = True
+# Runtime marker: rows carry 원천기록 so the dashboard can open the archived record.
+SOURCE_RECORD_COLUMN = True
 
 
 def _number_text(value: Any) -> str:
@@ -189,6 +191,8 @@ def _transaction_row(candidate: Any, *, comparison_level: str) -> dict[str, obje
         or "나라장터 납품요구",
         "Source": "나라장터 납품요구",
         "원문근거키": getattr(candidate, "raw_object_key", None) or "미확인",
+        # delivery:<납품요구번호>|change:<차수>|line:<물품순번>; opens the archived public record.
+        "원천기록": getattr(candidate, "source_record_id", None) or "",
         "품목/모델": candidate.product_title,
         "비교수준": comparison_level,
     }
