@@ -67,9 +67,12 @@ class Settings(BaseSettings):
 
     # NAVER 뉴스 검색 API (병원 News Radar 탐지 전용). 검색결과는 제목·시간·링크 표시에만 쓰고
     # AI 입력·요약에는 쓰지 않는다 (2026-09-07 네이버 검색 API 이용약관).
+    # Keys come from NAVER API HUB (NAVER Cloud Platform console). The legacy Developers
+    # Center keys still work until 2027-06 when NAVER_API_STYLE=developers is set.
     naver_client_id: str | None = None
     naver_client_secret: str | None = None
-    naver_news_base_url: str = "https://openapi.naver.com/v1/search/news.json"
+    naver_api_style: str = "apihub"
+    naver_news_base_url: str | None = None
     naver_request_timeout_seconds: float = 10.0
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

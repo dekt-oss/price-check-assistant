@@ -24,6 +24,10 @@
   원문 주소 기준으로 이미 본 기사를 걸러 새 기사만 센다. 같은 기사가 여러 키워드에 걸리면 한 건으로 합친다.
 - 기사별 상태: 새 기사 / 읽음 / 중요 / 관심없음. 상단에 오늘 · 이번 주 · 중요 표시 · 아직 안 읽음 건수.
 - 운영 설정(`NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`)이 없으면 안내문만 보이고 키워드 관리는 그대로 된다.
+- 키는 **NAVER API HUB**(네이버클라우드 콘솔) 기준이다: 주소 `https://naverapihub.apigw.ntruss.com/search/v1/news`,
+  헤더 `X-NCP-APIGW-API-KEY-ID` / `X-NCP-APIGW-API-KEY`. Application에서 "검색 > 뉴스" API를 켜지 않으면
+  401 "요청한 API는 이 Application에서 활성화되어 있지 않습니다"가 난다. 옛 developers.naver.com 키는
+  `NAVER_API_STYLE=developers`로 2027-06까지 쓸 수 있다.
 
 ### 네이버 검색 API 이용약관 분리 (2026-09-07 개정)
 

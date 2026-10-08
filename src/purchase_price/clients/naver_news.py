@@ -17,7 +17,15 @@ from urllib.parse import urlsplit
 
 import httpx
 
-NAVER_NEWS_BASE_URL = "https://openapi.naver.com/v1/search/news.json"
+# NAVER API HUB (NAVER Cloud Platform) is the current platform; the Developers Center
+# endpoint keeps working with its own key pair until 2027-06.
+API_STYLE_HUB = "apihub"
+API_STYLE_DEVELOPERS = "developers"
+NAVER_NEWS_BASE_URLS: dict[str, str] = {
+    API_STYLE_HUB: "https://naverapihub.apigw.ntruss.com/search/v1/news",
+    API_STYLE_DEVELOPERS: "https://openapi.naver.com/v1/search/news.json",
+}
+NAVER_NEWS_BASE_URL = NAVER_NEWS_BASE_URLS[API_STYLE_HUB]
 MAX_DISPLAY = 100
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -59,6 +67,31 @@ def parse_published(value: str | None) -> datetime | None:
         return None
 
 
+def _error_text(response: httpx.Response) -> str:
+    """Readable error for both platforms; never includes request headers."""
+
+    code = ""
+    message = ""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):  # API HUB: {"error": {"errorCode": 401, "message": ...}}
+            code = str(error.get("errorCode") or "")
+            message = str(error.get("message") or "")
+        else:  # Developers Center: {"errorCode": "024", "errorMessage": ...}
+            code = str(payload.get("errorCode") or "")
+            message = str(payload.get("errorMessage") or "")
+    text = f"NAVER 뉴스 검색 오류 HTTP {response.status_code}"
+    if code and code != str(response.status_code):
+        text += f" ({code})"
+    if message:
+        text += f": {message}"
+    return text
+
+
 def parse_news_payload(payload: dict) -> list[NaverNewsItem]:
     items: list[NaverNewsItem] = []
     for raw in payload.get("items") or []:
@@ -86,17 +119,27 @@ class NaverNewsClient:
         client_id: str,
         client_secret: str,
         *,
-        base_url: str = NAVER_NEWS_BASE_URL,
+        api_style: str = API_STYLE_HUB,
+        base_url: str | None = None,
         timeout_seconds: float = 10.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         if not client_id.strip() or not client_secret.strip():
             raise NaverNewsClientError("NAVER API 키가 설정되지 않았습니다.")
-        self._headers = {
-            "X-Naver-Client-Id": client_id.strip(),
-            "X-Naver-Client-Secret": client_secret.strip(),
-        }
-        self._base_url = base_url
+        style = (api_style or API_STYLE_HUB).strip().casefold()
+        if style not in NAVER_NEWS_BASE_URLS:
+            raise NaverNewsClientError(f"알 수 없는 NAVER API 방식: {api_style}")
+        if style == API_STYLE_HUB:
+            self._headers = {
+                "X-NCP-APIGW-API-KEY-ID": client_id.strip(),
+                "X-NCP-APIGW-API-KEY": client_secret.strip(),
+            }
+        else:
+            self._headers = {
+                "X-Naver-Client-Id": client_id.strip(),
+                "X-Naver-Client-Secret": client_secret.strip(),
+            }
+        self._base_url = (base_url or "").strip() or NAVER_NEWS_BASE_URLS[style]
         self._client = httpx.Client(timeout=timeout_seconds, transport=transport)
 
     def close(self) -> None:
@@ -115,14 +158,7 @@ class NaverNewsClient:
         except httpx.HTTPError as exc:
             raise NaverNewsClientError(f"NAVER 뉴스 검색 연결 실패: {type(exc).__name__}") from exc
         if response.status_code != 200:
-            code = ""
-            try:
-                code = str(response.json().get("errorCode") or "")
-            except ValueError:
-                pass
-            raise NaverNewsClientError(
-                f"NAVER 뉴스 검색 오류 HTTP {response.status_code}" + (f" ({code})" if code else "")
-            )
+            raise NaverNewsClientError(_error_text(response))
         try:
             payload = response.json()
         except ValueError as exc:

@@ -61,24 +61,61 @@ def test_client_sends_headers_and_parses_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         seen["headers"] = dict(request.headers)
         seen["params"] = dict(request.url.params)
+        seen["url"] = str(request.url.copy_with(query=None))
         return httpx.Response(200, json=SAMPLE)
 
     with NaverNewsClient("id-1", "secret-1", transport=httpx.MockTransport(handler)) as client:
         items = client.search("부산백병원", display=500)
     assert len(items) == 2
+    assert seen["headers"]["x-ncp-apigw-api-key-id"] == "id-1"
+    assert seen["headers"]["x-ncp-apigw-api-key"] == "secret-1"
+    assert seen["url"] == "https://naverapihub.apigw.ntruss.com/search/v1/news"
+    assert seen["params"] == {"query": "부산백병원", "display": "100", "start": "1", "sort": "date"}
+
+
+def test_developers_center_style_uses_legacy_endpoint_and_headers() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["headers"] = dict(request.headers)
+        seen["url"] = str(request.url.copy_with(query=None))
+        return httpx.Response(200, json=SAMPLE)
+
+    with NaverNewsClient(
+        "id-1", "secret-1", api_style="developers", transport=httpx.MockTransport(handler)
+    ) as client:
+        client.search("부산백병원")
     assert seen["headers"]["x-naver-client-id"] == "id-1"
     assert seen["headers"]["x-naver-client-secret"] == "secret-1"
-    assert seen["params"] == {"query": "부산백병원", "display": "100", "start": "1", "sort": "date"}
+    assert seen["url"] == "https://openapi.naver.com/v1/search/news.json"
+
+
+def test_unknown_api_style_is_rejected() -> None:
+    with pytest.raises(NaverNewsClientError):
+        NaverNewsClient("id", "secret", api_style="ncp-v2")
+
+
+def test_api_hub_error_message_is_surfaced() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = {"error": {"errorCode": 401, "message": "요청한 API는 이 Application에서 활성화되어 있지 않습니다."}}
+        return httpx.Response(401, json=body)
+
+    with NaverNewsClient("id", "secret-abc", transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(NaverNewsClientError, match="활성화되어 있지 않습니다"):
+            client.search("병상")
 
 
 def test_client_error_never_includes_secret() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"errorMessage": "bad", "errorCode": "024"})
 
-    with NaverNewsClient("id-1", "secret-xyz", transport=httpx.MockTransport(handler)) as client:
+    with NaverNewsClient(
+        "id-1", "secret-xyz", api_style="developers", transport=httpx.MockTransport(handler)
+    ) as client:
         with pytest.raises(NaverNewsClientError) as excinfo:
             client.search("부산백병원")
     assert "401" in str(excinfo.value) and "024" in str(excinfo.value)
+    assert "bad" in str(excinfo.value)
     assert "secret-xyz" not in str(excinfo.value)
 
 

@@ -102,8 +102,9 @@ keywords = radar.active_keywords(groups, enabled_overrides)
 
 if credentials is None:
     st.info(
-        "뉴스 검색 연결 설정이 없습니다. 운영 설정에 NAVER_CLIENT_ID 와 NAVER_CLIENT_SECRET 을 넣으면 "
-        "바로 새 기사 확인을 시작할 수 있습니다. 키워드 관리는 지금도 가능합니다."
+        "뉴스 검색 연결 설정이 없습니다. NAVER API HUB에서 뉴스 검색 API를 켠 Application의 "
+        "NAVER_CLIENT_ID 와 NAVER_CLIENT_SECRET 을 운영 설정에 넣으면 바로 새 기사 확인을 "
+        "시작할 수 있습니다. 키워드 관리는 지금도 가능합니다."
     )
 else:
     action_col, note_col = st.columns([1, 3])
@@ -124,6 +125,7 @@ else:
                 with NaverNewsClient(
                     client_id,
                     client_secret,
+                    api_style=settings.naver_api_style,
                     base_url=settings.naver_news_base_url,
                     timeout_seconds=settings.naver_request_timeout_seconds,
                 ) as client:
