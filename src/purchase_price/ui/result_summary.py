@@ -29,6 +29,7 @@ OUTLIERS_V1 = True
 # Runtime marker: unit-aware conclusion, unit groups and total/quantity/unit-price rows.
 UNIT_AWARE_V1 = True
 UNIT_AWARE_V2 = True
+G2B_LINK_COLUMN_V1 = True
 OVERVIEW_ROW_LIMIT = 10
 
 # Words that only make sense to the developers. The screen uses the plain words instead.
@@ -686,6 +687,8 @@ def trade_table_rows(rows: Sequence[Mapping[str, object]]) -> list[dict[str, obj
                 "거래 총액": row.get("총액") if row.get("총액") not in (None, "미확인") else "확인 안 됨",
                 "수량": f"{_number(quantity)} {unit}".strip() if quantity is not None else "확인 안 됨",
                 "1단위 가격": f"{_won(price)} / {unit}" if unit else _won(price),
+                # Next to the price, so the link is visible without scrolling the wide table.
+                "나라장터": _g2b_url(row.get("원천기록")),
                 "거래조건": row.get("거래조건") or "",
                 "납품업체": row.get("판매처") or "",
                 "구매 기관": row.get("구매처") or "",
@@ -693,6 +696,12 @@ def trade_table_rows(rows: Sequence[Mapping[str, object]]) -> list[dict[str, obj
             }
         )
     return output
+
+
+def _g2b_url(source_record_id: object) -> str | None:
+    from purchase_price.services.g2b_delivery_record import g2b_url_for_source_record
+
+    return g2b_url_for_source_record(source_record_id)
 
 
 def unit_group_rows(

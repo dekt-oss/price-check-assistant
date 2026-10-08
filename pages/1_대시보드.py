@@ -188,8 +188,8 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.market_research", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10B"),
-    ("purchase_price.ui.result_summary", "UNIT_AWARE_V2"),
-    ("purchase_price.services.g2b_delivery_record", "FIELD_ORDER_V1"),
+    ("purchase_price.services.g2b_delivery_record", "G2B_LINK_V1"),
+    ("purchase_price.ui.result_summary", "G2B_LINK_COLUMN_V1"),
 )
 
 
@@ -1614,8 +1614,8 @@ def _render_delivery_record(row: Mapping[str, object], *, view_key: str, close_k
                 height=35 * (len(lookup.fields) + 1) + 3,
             )
             st.caption(
-                f"공공데이터포털 '{delivery_record_service.G2B_SHOPPING_DATASET_NAME}'가 공개한 기록을 "
-                f"수집할 때 그대로 보관한 원본입니다 (원본 확인값 {(ref.payload_hash or '')[:12]})."
+                "조달청이 공개한 기록을 수집할 때 그대로 보관한 원본입니다 "
+                f"(원본 확인값 {(ref.payload_hash or '')[:12]})."
             )
         elif lookup.status == "not_archived":
             st.info("최근 며칠 사이 실시간으로 받은 거래라 아직 원문을 보관하지 않았습니다. 아래 번호로 확인하세요.")
@@ -1623,14 +1623,12 @@ def _render_delivery_record(row: Mapping[str, object], *, view_key: str, close_k
             st.warning("보관한 원문에서 이 줄을 찾지 못했습니다. 아래 번호로 확인하세요.")
         else:
             st.warning(f"원문을 읽지 못했습니다 ({lookup.error_type or '오류'}). 잠시 뒤 다시 여세요.")
-        st.caption(
-            "나라장터 화면은 거래마다 고유 주소가 없어 바로 열 수 없습니다. 납품요구번호로 찾아 확인하세요."
-        )
-        number_col, link_col = st.columns([2, 3], vertical_alignment="center")
+        link_col, number_col = st.columns([2, 2], vertical_alignment="center")
+        link_col.link_button("나라장터에서 이 거래 보기", ref.g2b_url, type="primary", use_container_width=True)
         number_col.code(ref.delivery_number, language=None)
-        link_col.link_button(
-            "출처 데이터셋 보기 (공공데이터포털)",
-            delivery_record_service.G2B_SHOPPING_DATASET_URL,
+        st.caption(
+            "나라장터 통합검색에서 이 번호로 바로 찾습니다. 결과 줄의 '더보기'를 누르면 납품요청·검수·대금지급 "
+            "단계까지 따라갈 수 있습니다. 민간 병원의 자체조달처럼 나라장터 공개 범위 밖의 거래는 0건으로 나올 수 있습니다."
         )
 
 
@@ -2097,10 +2095,13 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 on_select="rerun",
                 selection_mode="single-row",
                 key=record_table_key,
+                column_config={
+                    "나라장터": st.column_config.LinkColumn("나라장터", display_text="열기"),
+                },
             )
             st.caption(
-                "행을 누르면 그 거래의 조달청 공개 원문(사업명·계약 방법·납품 기한 등)이 위에 열립니다. "
-                "모든 항목은 Excel에도 들어 있습니다."
+                "행을 누르면 그 거래의 조달청 공개 원문(사업명·계약 방법·납품 기한 등)이 위에 열리고, "
+                "'열기'를 누르면 나라장터에서 그 거래를 찾습니다. 모든 항목은 Excel에도 들어 있습니다."
             )
     elif track_b.status == "unavailable":
         st.warning("가격 자료에 연결하지 못했습니다.")
