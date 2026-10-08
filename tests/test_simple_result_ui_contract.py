@@ -77,7 +77,7 @@ def test_result_screen_keeps_deployment_and_diagnostic_markers() -> None:
     source = DASHBOARD.read_text(encoding="utf-8")
     for marker in (
         'id="purchase-workspace-runtime-v16"',
-        'id="purchase-workspace-runtime-v18"',
+        'id="purchase-workspace-runtime-v19"',
         'id="purchase-search-timings-v1"',
         'id="purchase-research-stage-timings-v1"',
         'id="purchase-safety-diagnostic-v1"',

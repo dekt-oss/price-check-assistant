@@ -26,6 +26,7 @@ _CACHE_DIR = Path(tempfile.gettempdir()) / "price-check-track-b"
 _VALIDATED_CACHE_FILES: dict[str, tuple[int, int, int, int]] = {}
 # One download at a time: the start-up prefetch thread and a search can both ask for the index.
 _LOCAL_INDEX_LOCK = Lock()
+_LAST_GOOD_SNAPSHOT: tuple[Path, dict[str, object]] | None = None
 
 
 def _sha256_file(path: Path) -> str:
@@ -58,8 +59,21 @@ def _remember_validated_cache(path: Path, sha256: str) -> None:
 def _local_index_snapshot(
     settings: Settings,
 ) -> tuple[Path | None, dict[str, object] | None]:
-    with _LOCAL_INDEX_LOCK:
-        return _local_index_snapshot_locked(settings)
+    global _LAST_GOOD_SNAPSHOT
+    # While another thread (usually the start-up prefetch refreshing every 10 minutes) downloads
+    # a newer index, answer from the copy already on disk instead of waiting for it.
+    if not _LOCAL_INDEX_LOCK.acquire(blocking=False):
+        last_good = _LAST_GOOD_SNAPSHOT
+        if last_good is not None and last_good[0].exists():
+            return last_good[0], dict(last_good[1])
+        _LOCAL_INDEX_LOCK.acquire()
+    try:
+        path, pointer = _local_index_snapshot_locked(settings)
+    finally:
+        _LOCAL_INDEX_LOCK.release()
+    if path is not None and pointer is not None:
+        _LAST_GOOD_SNAPSHOT = (path, dict(pointer))
+    return path, pointer
 
 
 def _local_index_snapshot_locked(

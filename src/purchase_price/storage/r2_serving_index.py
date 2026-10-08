@@ -133,6 +133,7 @@ class R2ServingIndexStore:
             expected_sha256=ref.sha256,
             invalid_gzip_message=f"R2 serving index {ref.key} is not valid gzip",
             hash_mismatch_prefix="R2 serving index hash mismatch",
+            total_bytes=_content_length(response),
         )
 
     def delete(self, key: str) -> None:
@@ -149,3 +150,10 @@ class R2ServingIndexStore:
                 return None
             raise
         return dict(response)
+
+
+def _content_length(response: dict[str, Any]) -> int | None:
+    try:
+        return int(response.get("ContentLength") or 0) or None
+    except (TypeError, ValueError):
+        return None

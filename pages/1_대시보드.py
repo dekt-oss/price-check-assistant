@@ -5,11 +5,12 @@ import importlib
 import sqlite3
 import sys
 from collections.abc import Mapping
+from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from inspect import signature
 from threading import Lock
-from time import monotonic
+from time import monotonic, sleep
 from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -155,11 +156,11 @@ def _mfds_identity_r2_runtime():
     """Refresh only the leaf R2 adapter when Streamlit retained its pre-cache version."""
 
     module = mfds_identity_r2_service
-    if hasattr(module, "_LOCAL_INDEX_PATH_CACHE"):
+    if hasattr(module, "SERVE_STALE_WHILE_REFRESHING"):
         return module
 
     with _MFDS_IDENTITY_R2_RELOAD_LOCK:
-        if hasattr(module, "_LOCAL_INDEX_PATH_CACHE"):
+        if hasattr(module, "SERVE_STALE_WHILE_REFRESHING"):
             return module
         try:
             importlib.invalidate_caches()
@@ -172,7 +173,7 @@ _TRACK_B_RELOAD_LOCK = Lock()
 # (module, attribute that only the current code has), reloaded in dependency order.
 _TRACK_B_RUNTIME_MARKERS = (
     (track_b_comparison_service, "_not_cancelled_clause"),
-    (track_b_r2_index_service, "_LOCAL_INDEX_LOCK"),
+    (track_b_r2_index_service, "_LAST_GOOD_SNAPSHOT"),
     (track_b_snapshot_service, "WORKSPACE_LOOKUP_LIMIT"),
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
     (track_b_transactions_ui, "SOURCE_RECORD_COLUMN"),
@@ -237,17 +238,35 @@ def _track_b_runtime():
     return track_b_snapshot_service, track_b_live_service
 
 
-WARMING_NOTE = " 서버가 막 다시 켜져 가격 자료를 내려받는 중이라 1~2분 더 걸릴 수 있습니다."
+WARMUP_WAIT_SECONDS = 240.0
 
 
-def _search_status_label(label: str) -> str:
-    """Say why the first search after a restart is slow instead of leaving a bare spinner."""
+def _wait_for_index_warmup() -> None:
+    """Show how far the start-up download is instead of a bare spinner, then let the search run.
+
+    Right after a restart the price indexes (about 2.8 GB) are still coming down from R2. The
+    search would block on them anyway; waiting here first lets the screen show a percentage.
+    """
 
     try:
-        warming = index_prefetch_service.indexes_warming()
+        if not index_prefetch_service.indexes_warming():
+            return
+        box = st.empty()
+        deadline = monotonic() + WARMUP_WAIT_SECONDS
+        while index_prefetch_service.indexes_warming() and monotonic() < deadline:
+            fraction, text = index_prefetch_service.warmup_progress()
+            box.progress(fraction, text=text)
+            sleep(0.5)
+        box.empty()
     except Exception:
-        warming = False
-    return label + WARMING_NOTE if warming else label
+        return
+
+
+@contextmanager
+def _search_status(label: str):
+    _wait_for_index_warmup()
+    with st.status(label, expanded=False) as status:
+        yield status
 
 
 def _lookup_mfds_identity_runtime(query: str):
@@ -1058,7 +1077,7 @@ def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
     )
     if st.button("이 제품으로 조사", type="primary"):
         selected = candidates[int(selected_index)]
-        with st.status(_search_status_label("고른 제품의 거래가와 허가정보를 찾고 있습니다..."), expanded=False) as status:
+        with _search_status("고른 제품의 거래가와 허가정보를 찾고 있습니다...") as status:
             resolved = _execute_search(
                 search_text=state.get("search_text") or selected.model_name or "",
                 product_name=selected.product_name or "",
@@ -1514,7 +1533,7 @@ def _quote_item_summary(result: dict[str, Any]) -> dict[str, object]:
 def _open_quote_item(quote_state: QuoteReviewState, index: int, file_name: str) -> None:
     item = quote_state.items[index]
     try:
-        with st.status(_search_status_label(f"{index + 1}번 품목을 조사하고 있습니다..."), expanded=False) as status:
+        with _search_status(f"{index + 1}번 품목을 조사하고 있습니다...") as status:
             result = _execute_search(
                 search_text=(item.model_name or item.product_name or ""),
                 product_name="",
@@ -2642,7 +2661,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v14" style="display:none">purchase-workspace-runtime-v14</span>'
     '<span id="purchase-workspace-runtime-v15" style="display:none">purchase-workspace-runtime-v15</span>'
     '<span id="purchase-workspace-runtime-v16" style="display:none">purchase-workspace-runtime-v16</span>'
-    '<span id="purchase-workspace-runtime-v18" style="display:none">purchase-workspace-runtime-v18</span>'
+    '<span id="purchase-workspace-runtime-v19" style="display:none">purchase-workspace-runtime-v19</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
@@ -2678,7 +2697,7 @@ handoff_payload = st.session_state.pop(PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY, N
 handoff = parse_purchase_workspace_handoff(handoff_payload)
 if handoff is not None:
     try:
-        with st.status(_search_status_label("견적서 품목의 거래가·허가정보를 찾고 있습니다..."), expanded=False) as status:
+        with _search_status("견적서 품목의 거래가·허가정보를 찾고 있습니다...") as status:
             search_state = _execute_search(
                 search_text=(handoff.model_name or handoff.product_name),
                 product_name="",
@@ -2702,7 +2721,7 @@ search_state = st.session_state.get(HOME_SEARCH_STATE_KEY)
 shared_query = str(st.query_params.get("q") or "").strip()
 if not isinstance(search_state, dict) and shared_query and handoff is None:
     try:
-        with st.status(_search_status_label("공유된 검색을 다시 불러오고 있습니다..."), expanded=False) as status:
+        with _search_status("공유된 검색을 다시 불러오고 있습니다...") as status:
             search_state = _execute_search(
                 search_text=shared_query,
                 product_name="",
@@ -2853,7 +2872,7 @@ if uploaded is not None:
 
 if submitted:
     try:
-        with st.status(_search_status_label("거래가와 허가정보를 찾고 있습니다..."), expanded=False) as status:
+        with _search_status("거래가와 허가정보를 찾고 있습니다...") as status:
             search_state = _execute_search(
                 search_text=search_text,
                 product_name=product_name,

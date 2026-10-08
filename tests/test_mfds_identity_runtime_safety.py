@@ -39,7 +39,7 @@ def test_dashboard_refreshes_stale_mfds_identity_r2_adapter() -> None:
 
     assert "from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service" in source
     assert "def _mfds_identity_r2_runtime(" in source
-    assert 'hasattr(module, "_LOCAL_INDEX_PATH_CACHE")' in source
+    assert 'hasattr(module, "SERVE_STALE_WHILE_REFRESHING")' in source
     assert "importlib.reload(module)" in source
     assert "_lookup_mfds_identity_runtime(lookup_key)" in source
     assert "_lookup_same_mfds_product_runtime(identity_product)" in source
