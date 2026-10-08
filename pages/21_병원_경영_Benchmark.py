@@ -24,6 +24,40 @@ from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 hydrate_streamlit_runtime_secrets()
 
 
+def _reload_retained_modules() -> None:
+    """Streamlit Cloud keeps already-imported modules across a redeploy. When this page is newer
+    than a retained copy (e.g. Hospital without ``size_beds``), reload the services it uses in
+    dependency order so the page never runs against an old object."""
+
+    import importlib
+    import sys
+
+    markers = (
+        (metrics, "BED_COUNT_KEY"),
+        (master_service.Hospital, "size_beds"),
+        (benchmark, "beds_for"),
+        (charts, "y_domain"),
+    )
+    if all(hasattr(obj, name) for obj, name in markers):
+        return
+    for name in (
+        "purchase_price.services.hospital_metrics",
+        "purchase_price.services.khidi_financials",
+        "purchase_price.services.hospital_master",
+        "purchase_price.services.hospital_benchmark",
+        "purchase_price.services.alio_disclosure",
+        "purchase_price.services.hospital_ai_explanation",
+        "purchase_price.services.hospital_report",
+        "purchase_price.ui.benchmark_charts",
+    ):
+        module = sys.modules.get(name)
+        if module is not None:
+            importlib.reload(module)
+
+
+_reload_retained_modules()
+
+
 def _streamlit_secrets():
     try:
         return st.secrets
