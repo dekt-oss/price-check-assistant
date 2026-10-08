@@ -10,6 +10,19 @@ from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 hydrate_streamlit_runtime_secrets()
 
 
+def _start_index_prefetch() -> None:
+    # Download the search indexes now, not during the first search after a restart.
+    try:
+        from purchase_price.services.index_prefetch import start_index_prefetch
+
+        start_index_prefetch()
+    except Exception:
+        pass
+
+
+_start_index_prefetch()
+
+
 def _truthy(value: object) -> bool:
     return str(value or "").strip().casefold() in {"1", "true", "yes", "y", "on"}
 
