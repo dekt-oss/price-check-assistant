@@ -12,12 +12,21 @@ from decimal import Decimal
 import pandas as pd
 import streamlit as st
 
+from purchase_price.services import hospital_ai_explanation as ai_explanation
 from purchase_price.services import hospital_benchmark as benchmark
 from purchase_price.services import hospital_master as master_service
 from purchase_price.services import hospital_metrics as metrics
+from purchase_price.services import hospital_report as report_service
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 
 hydrate_streamlit_runtime_secrets()
+
+
+def _streamlit_secrets():
+    try:
+        return st.secrets
+    except Exception:  # noqa: BLE001 - no secrets file locally
+        return None
 
 DEFAULT_TARGET_ID = "H-BUSAN-PAIK"
 HEADLINE_METRICS = (
@@ -166,6 +175,38 @@ if fiscal_year is not None and peers:
         st.caption("비교군 평균과 눈에 띄게 다른 지표가 없거나, 비교할 자료가 부족합니다.")
     st.caption("해석 문장은 위 표의 숫자만으로 프로그램이 만든 문장입니다.")
 
+    ai_key = ai_explanation.resolve_api_key(_streamlit_secrets())
+    explain_key = f"benchmark_ai::{target_id}::{peer_kind}::{','.join(custom_ids)}::{fiscal_year}"
+    quality_for_ai = report_service.quality_notes(
+        benchmark.quality_report(data, target, peers, fiscal_year)
+    )
+    with st.container(border=True):
+        st.markdown("**AI 경영분석 설명**")
+        if ai_key is None:
+            st.caption("AI 설명 연결 설정이 아직 없습니다. 위 계산 문장으로 확인해 주세요.")
+        elif st.button("AI 설명 보기", key=f"btn::{explain_key}"):
+            source = ai_explanation.build_input(
+                target_name=target.short_name,
+                fiscal_year=fiscal_year,
+                peer_label=master_service.PEER_GROUP_LABELS[peer_kind],
+                peer_names=[p.short_name for p in peers],
+                rows=rows,
+                findings=findings,
+                quality_notes=quality_for_ai,
+            )
+            with st.spinner("계산 결과를 바탕으로 설명을 쓰는 중입니다."):
+                try:
+                    st.session_state[explain_key] = ai_explanation.explain(source, api_key=ai_key).text
+                except ai_explanation.ExplanationError as exc:
+                    st.session_state[explain_key] = None
+                    st.warning(f"{exc} 위 계산 문장을 기준으로 봐 주세요.")
+        if st.session_state.get(explain_key):
+            st.write(st.session_state[explain_key])
+            st.caption(
+                "AI는 위 표의 계산 결과만 받아 문장으로 풀어 썼습니다. 설명 속 숫자는 모두 계산 결과와 "
+                "대조했고, 계산 결과에 없는 숫자가 나오면 표시하지 않습니다."
+            )
+
 if fiscal_year is not None:
     with st.expander("병원별 전체 지표 보기"):
         compare_hospitals = [target, *peers]
@@ -265,3 +306,35 @@ else:
         st.caption(
             f"출처: {SOURCE_NAME}. 가져온 날: " + ", ".join(sorted(set(quality.fetched.values())))
         )
+
+st.subheader("리포트 내려받기")
+if fiscal_year is None or not peers:
+    st.caption("회계연도와 비교군이 정해지면 리포트를 내려받을 수 있습니다.")
+else:
+    report = report_service.build_report(data, target, peer_kind, fiscal_year, custom_ids=custom_ids)
+    ai_text = st.session_state.get(
+        f"benchmark_ai::{target_id}::{peer_kind}::{','.join(custom_ids)}::{fiscal_year}"
+    )
+    if ai_text:
+        report.explanation = ai_text
+        report.explanation_note = "AI 설명: 위 표의 계산 결과만 입력으로 받아 쓴 문장입니다."
+    excel_col, text_col = st.columns(2)
+    with excel_col:
+        st.download_button(
+            "엑셀 리포트 내려받기",
+            data=report_service.report_workbook(report),
+            file_name=report_service.report_filename(report, "xlsx"),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    with text_col:
+        st.download_button(
+            "문서 리포트 내려받기 (.md)",
+            data=report_service.report_markdown(report).encode("utf-8"),
+            file_name=report_service.report_filename(report, "md"),
+            mime="text/markdown",
+        )
+    st.caption(
+        "지금 화면의 병원·연도·비교군 기준입니다. 요약표, 병원별 전체 지표, 5년 추이, 자료 상태가 들어 있고, "
+        "AI 설명을 본 뒤 내려받으면 그 설명도 함께 들어갑니다. 매주 월요일 아침에는 같은 형식의 리포트가 "
+        "자동으로 만들어집니다."
+    )
