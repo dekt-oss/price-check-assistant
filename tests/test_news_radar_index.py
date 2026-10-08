@@ -298,3 +298,18 @@ def test_resolve_store_prefers_local_path(tmp_path) -> None:
     store = nri.resolve_store(settings)
     assert isinstance(store, nri.LocalNewsRadarStore)
     assert store.status_path == tmp_path / "i-status.json"
+
+
+def test_times_are_shown_in_korean_time_even_on_a_utc_server() -> None:
+    from datetime import UTC
+
+    utc_value = datetime(2026, 10, 8, 10, 48, tzinfo=UTC)
+    assert radar.seoul_time_text(utc_value) == "10-08 19:48"
+    assert radar.seoul_time_text(utc_value, "%H:%M") == "19:48"
+    assert radar.seoul_time_text(datetime(2026, 10, 8, 15, 30, tzinfo=UTC)) == "10-09 00:30"
+    assert radar.seoul_time_text(None) == "시간 확인 안 됨"
+    # An article at 23:30 UTC on 10-07 is "today" (10-08) in Korea.
+    entry = radar.NewsEntry(
+        "a", "t", "https://a.kr", "", "a.kr", datetime(2026, 10, 7, 23, 30, tzinfo=UTC), ("k",), NOW
+    )
+    assert radar.summarize([entry], today=date(2026, 10, 8)).today == 1

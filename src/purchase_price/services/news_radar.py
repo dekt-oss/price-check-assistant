@@ -11,9 +11,10 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from purchase_price.clients.naver_news import NaverNewsClientError, NaverNewsItem
 
@@ -35,6 +36,23 @@ ALERT_LABELS: dict[str, str] = {
     "daily": "하루 1회 요약",
     "none": "알림 없음",
 }
+
+try:
+    SEOUL = ZoneInfo("Asia/Seoul")
+except ZoneInfoNotFoundError:  # no tz database (bare Windows); Korea has no DST
+    SEOUL = timezone(timedelta(hours=9), name="KST")
+UNKNOWN_TIME_TEXT = "시간 확인 안 됨"
+
+
+def to_seoul(value: datetime) -> datetime:
+    """Streamlit Cloud runs in UTC; every time shown to people is Korean time."""
+
+    return (value if value.tzinfo is not None else value.replace(tzinfo=UTC)).astimezone(SEOUL)
+
+
+def seoul_time_text(value: datetime | None, fmt: str = "%m-%d %H:%M") -> str:
+    return to_seoul(value).strftime(fmt) if value is not None else UNKNOWN_TIME_TEXT
+
 
 _TRACKING_PARAMS = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid"}
 
@@ -225,13 +243,13 @@ class RadarSummary:
 
 
 def summarize(entries: Iterable[NewsEntry], *, today: date | None = None) -> RadarSummary:
-    today_value = today or date.today()
+    today_value = today or datetime.now(SEOUL).date()
     week_start = today_value - timedelta(days=today_value.weekday())
     today_count = week_count = important = unread = 0
     for entry in entries:
         if entry.status == STATUS_IGNORED:
             continue
-        day = (entry.published_at or entry.detected_at).date()
+        day = to_seoul(entry.published_at or entry.detected_at).date()
         if day == today_value:
             today_count += 1
         if week_start <= day <= today_value:

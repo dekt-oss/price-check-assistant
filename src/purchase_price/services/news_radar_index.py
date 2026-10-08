@@ -26,7 +26,7 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -47,7 +47,7 @@ STATUS_SCHEMA = "news-radar-status-v1"
 DATA_CLASSIFICATION = "naver-display-cache-21d"
 MAX_INDEX_STORED_BYTES = 64 * 1024 * 1024
 SOURCE_NAME = "naver_news"
-KST = timezone(timedelta(hours=9), name="KST")
+KST = radar.SEOUL
 ALERT_ITEM_LIMIT = 20
 _DIGEST_KEY_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.md$")
 
@@ -508,7 +508,7 @@ def seed_state(
 
 
 def _when(value: datetime | None) -> str:
-    return _aware(value).astimezone(KST).strftime("%m-%d %H:%M") if value else "시간 확인 안 됨"
+    return radar.seoul_time_text(value)
 
 
 def immediate_alert_text(
