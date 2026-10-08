@@ -31,6 +31,8 @@ _LOCAL_INDEX_CACHE_TTL_SECONDS = 300.0
 _LOCAL_INDEX_CACHE_LOCK = Lock()
 _VALIDATED_CACHE_FILES: dict[str, tuple[int, int, int, int]] = {}
 _LOCAL_INDEX_PATH_CACHE: dict[tuple[str, str], tuple[float, Path, str]] = {}
+_LAST_GOOD_PATH: dict[tuple[str, str], Path] = {}
+SERVE_STALE_WHILE_REFRESHING = True
 
 
 def _ref_from_pointer(payload: Mapping[str, Any]) -> MfdsIdentityIndexRef:
@@ -109,41 +111,62 @@ def _cached_local_index_path(
 
 
 def _local_index_path(settings: Settings) -> Path | None:
-    with _LOCAL_INDEX_CACHE_LOCK:
-        current = monotonic()
-        cached = _cached_local_index_path(settings, now=current)
-        if cached is not None:
-            return cached
+    # While another thread (usually the start-up prefetch refreshing every 10 minutes) downloads
+    # a newer index, answer from the copy already on disk instead of waiting about a minute.
+    if not _LOCAL_INDEX_CACHE_LOCK.acquire(blocking=False):
+        last_good = _LAST_GOOD_PATH.get(_runtime_cache_key(settings))
+        if last_good is not None and last_good.exists():
+            return last_good
+        _LOCAL_INDEX_CACHE_LOCK.acquire()
+    try:
+        path = _local_index_path_locked(settings)
+    finally:
+        _LOCAL_INDEX_CACHE_LOCK.release()
+    if path is not None:
+        _LAST_GOOD_PATH[_runtime_cache_key(settings)] = path
+    return path
 
-        state_store = R2OperationalStateStore.from_settings(settings)
-        pointer = state_store.read_json(MFDS_IDENTITY_POINTER_STATE)
-        if pointer is None:
-            return None
-        ref = _ref_from_pointer(pointer)
-        destination = _CACHE_DIR / f"{ref.sha256}.sqlite"
-        if destination.exists():
-            if _cache_file_is_valid(destination, ref.sha256):
-                _LOCAL_INDEX_PATH_CACHE[_runtime_cache_key(settings)] = (
-                    current + _LOCAL_INDEX_CACHE_TTL_SECONDS,
-                    destination,
-                    ref.sha256,
-                )
-                return destination
-            _VALIDATED_CACHE_FILES.pop(ref.sha256, None)
-            destination.unlink(missing_ok=True)
 
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        R2MfdsIdentityIndexStore.from_settings(settings).download_sqlite(ref, destination)
-        _remember_validated_cache(destination, ref.sha256)
-        _LOCAL_INDEX_PATH_CACHE[_runtime_cache_key(settings)] = (
-            current + _LOCAL_INDEX_CACHE_TTL_SECONDS,
-            destination,
-            ref.sha256,
-        )
-        for stale in _CACHE_DIR.glob("*.sqlite"):
-            if stale != destination:
-                stale.unlink(missing_ok=True)
-        return destination
+def _local_index_path_locked(settings: Settings) -> Path | None:
+    current = monotonic()
+    cached = _cached_local_index_path(settings, now=current)
+    if cached is not None:
+        return cached
+
+    state_store = R2OperationalStateStore.from_settings(settings)
+    pointer = state_store.read_json(MFDS_IDENTITY_POINTER_STATE)
+    if pointer is None:
+        return None
+    ref = _ref_from_pointer(pointer)
+    destination = _CACHE_DIR / f"{ref.sha256}.sqlite"
+    if destination.exists():
+        if _cache_file_is_valid(destination, ref.sha256):
+            _LOCAL_INDEX_PATH_CACHE[_runtime_cache_key(settings)] = (
+                current + _LOCAL_INDEX_CACHE_TTL_SECONDS,
+                destination,
+                ref.sha256,
+            )
+            return destination
+        _VALIDATED_CACHE_FILES.pop(ref.sha256, None)
+        destination.unlink(missing_ok=True)
+
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    R2MfdsIdentityIndexStore.from_settings(settings).download_sqlite(ref, destination)
+    _remember_validated_cache(destination, ref.sha256)
+    _LOCAL_INDEX_PATH_CACHE[_runtime_cache_key(settings)] = (
+        current + _LOCAL_INDEX_CACHE_TTL_SECONDS,
+        destination,
+        ref.sha256,
+    )
+    for stale in _CACHE_DIR.glob("*.sqlite"):
+        if stale != destination:
+            stale.unlink(missing_ok=True)
+    return destination
+
+
+def _connect_read_only(path: Path) -> sqlite3.Connection:
+    # Read-only: if a refresh removed this copy a moment ago, fail instead of creating an empty file.
+    return sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
 
 
 def lookup_mfds_identity_from_r2(
@@ -158,7 +181,7 @@ def lookup_mfds_identity_from_r2(
         path = _local_index_path(settings)
         if path is None:
             return MfdsIdentityLookup("not_ingested", query.strip(), None, ())
-        connection = sqlite3.connect(path)
+        connection = _connect_read_only(path)
         try:
             return lookup_identity(connection, query)
         finally:
@@ -187,7 +210,7 @@ def lookup_same_mfds_product_from_r2(
         path = _local_index_path(settings)
         if path is None:
             return ()
-        connection = sqlite3.connect(path)
+        connection = _connect_read_only(path)
         try:
             return lookup_same_product(connection, product_name)
         finally:

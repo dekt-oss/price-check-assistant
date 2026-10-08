@@ -39,7 +39,7 @@ def test_warm_once_records_each_index_and_survives_a_failure() -> None:
         (("a", broken), ("b", ok), ("c", missing)),
     )
 
-    assert calls == ["broken", "ok", "missing"]
+    assert sorted(calls) == ["broken", "missing", "ok"]
     assert status["a"].state == "failed" and status["a"].error_type == "OSError"
     assert status["b"].state == "ready"
     assert status["c"].state == "not_ingested"
@@ -125,5 +125,100 @@ def test_app_starts_prefetch_and_explains_the_wait() -> None:
     page = (ROOT / "pages" / "1_대시보드.py").read_text(encoding="utf-8")
 
     assert "start_index_prefetch()" in home
-    assert "_search_status_label(" in page
-    assert '(track_b_r2_index_service, "_LOCAL_INDEX_LOCK")' in page
+    assert "_search_status(" in page and "_wait_for_index_warmup()" in page
+    assert '(track_b_r2_index_service, "_LAST_GOOD_SNAPSHOT")' in page
+
+
+def test_progress_combines_running_downloads_and_names_what_is_left() -> None:
+    from purchase_price.services.index_prefetch import IndexWarmStatus
+
+    with index_prefetch._LOCK:
+        index_prefetch._STATUS["mfds_identity"] = IndexWarmStatus(
+            "loading", bytes_done=50_000_000, bytes_total=200_000_000
+        )
+        index_prefetch._STATUS["track_b"] = IndexWarmStatus(
+            "ready", bytes_done=100_000_000, bytes_total=100_000_000
+        )
+
+    fraction, text = index_prefetch.warmup_progress()
+
+    assert fraction == pytest.approx(0.5)
+    assert "50%" in text and "150 / 300 MB" in text
+    assert "식약처 제품 자료" in text and "나라장터 거래 자료" not in text
+
+
+def test_progress_is_complete_when_nothing_is_loading() -> None:
+    assert index_prefetch.warmup_progress()[0] == 1.0
+
+
+def test_download_progress_reaches_the_warm_status(monkeypatch) -> None:
+    import io
+
+    from purchase_price.storage.streaming_gzip import write_verified_gzip_body
+
+    seen: list[tuple[int, int | None]] = []
+
+    def warm(_settings):
+        import gzip
+        import hashlib
+        import tempfile
+
+        raw = b"x" * 300_000
+        body = io.BytesIO(gzip.compress(raw))
+        with tempfile.TemporaryDirectory() as tmp:
+            write_verified_gzip_body(
+                body,
+                Path(tmp) / "a.sqlite",
+                expected_sha256=hashlib.sha256(raw).hexdigest(),
+                invalid_gzip_message="bad",
+                hash_mismatch_prefix="bad",
+                chunk_bytes=1024,
+                total_bytes=len(body.getvalue()),
+            )
+        seen.append((index_prefetch._STATUS["a"].bytes_done, index_prefetch._STATUS["a"].bytes_total))
+        return True
+
+    index_prefetch.warm_indexes_once(SimpleNamespace(), (("a", warm),))
+
+    done, total = seen[0]
+    assert total and done == total
+    assert index_prefetch.prefetch_status()["a"].state == "ready"
+
+
+def test_track_b_search_uses_the_copy_on_disk_while_a_refresh_downloads(monkeypatch, tmp_path) -> None:
+    old = tmp_path / "old.sqlite"
+    old.write_bytes(b"")
+    monkeypatch.setattr(track_b_index, "_LAST_GOOD_SNAPSHOT", (old, {"sha256": "old"}))
+    monkeypatch.setattr(
+        track_b_index,
+        "_local_index_snapshot_locked",
+        lambda _settings: pytest.fail("must not wait for the running download"),
+    )
+
+    assert track_b_index._LOCAL_INDEX_LOCK.acquire(blocking=False)
+    try:
+        path, pointer = track_b_index._local_index_snapshot(None)
+    finally:
+        track_b_index._LOCAL_INDEX_LOCK.release()
+
+    assert path == old and pointer == {"sha256": "old"}
+
+
+def test_mfds_search_uses_the_copy_on_disk_while_a_refresh_downloads(monkeypatch, tmp_path) -> None:
+    from purchase_price.services import mfds_identity_r2
+
+    old = tmp_path / "old.sqlite"
+    old.write_bytes(b"")
+    settings = SimpleNamespace(resolved_r2_endpoint_url="e", resolved_r2_bucket_name="b")
+    monkeypatch.setitem(mfds_identity_r2._LAST_GOOD_PATH, ("e", "b"), old)
+    monkeypatch.setattr(
+        mfds_identity_r2,
+        "_local_index_path_locked",
+        lambda _settings: pytest.fail("must not wait for the running download"),
+    )
+
+    assert mfds_identity_r2._LOCAL_INDEX_CACHE_LOCK.acquire(blocking=False)
+    try:
+        assert mfds_identity_r2._local_index_path(settings) == old
+    finally:
+        mfds_identity_r2._LOCAL_INDEX_CACHE_LOCK.release()

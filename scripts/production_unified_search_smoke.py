@@ -12,7 +12,7 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v18"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v19"
 # The simplified result screen (2026-10) states counts in plain words on the price card.
 WORKSPACE_DIRECT_PATTERN = re.compile(r"같은 제품 거래\s*(\d+)건")
 REFERENCE_PATTERN = re.compile(r"비슷한 품목 거래\s*(\d+)건")
@@ -155,7 +155,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-runtime-v18 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-runtime-v19 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
