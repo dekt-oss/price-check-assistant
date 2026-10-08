@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -16,6 +17,9 @@ from purchase_price.services.track_b_db_quote_comparison import ingest_track_b_p
 from purchase_price.storage.r2_reader import R2RawEvidenceReader
 
 TRACK_B_PAGE_OPERATION = "getSpcifyPrdlstPrcureInfoList-page"
+# Reading pages one by one spent ~0.19 s per page waiting on R2 (83 min for 8,370 pages); ingest
+# itself is ~0.01 s. Fetch a listing page in parallel, then ingest in the original order.
+FETCH_WORKERS = 16
 
 
 class TrackBImportFailure(RuntimeError):
@@ -47,9 +51,19 @@ def run(
         except Exception as exc:
             raise TrackBImportFailure("<listing>", completed_cursor, exc) from exc
         has_more = page.has_more
-        for obj in page.objects:
+
+        def fetch(obj):
             try:
-                payload = reader.get_public_json(obj)
+                return reader.get_public_json(obj)
+            except Exception as exc:  # re-raised below with the object key and resume cursor
+                return exc
+
+        with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+            payloads = list(pool.map(fetch, page.objects))
+        for obj, payload in zip(page.objects, payloads, strict=True):
+            try:
+                if isinstance(payload, Exception):
+                    raise payload
                 if not isinstance(payload, Mapping):
                     raise ValueError("Track B R2 page must be a JSON object")
                 with session_factory() as session, session.begin():

@@ -36,4 +36,4 @@ def test_serving_sync_unions_base_and_supplemental_pending_keys() -> None:
     assert "supplemental_pending_keys" in text
     assert "base_pending_keys" in text
     assert "SUPPLEMENTAL_STATE_NAME" in text
-    assert "[*base_pending_keys, *supplemental_pending_keys]" in text
+    assert "[*base_pending_keys, *supplemental_pending_keys, *history_pending_keys]" in text
