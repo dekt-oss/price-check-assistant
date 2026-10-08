@@ -1,0 +1,93 @@
+name: Track B History Backfill
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/track-b-history-backfill.yml"
+      - "src/purchase_price/scripts/run_g2b_track_b_history.py"
+      - "src/purchase_price/services/track_b_history_state.py"
+  schedule:
+    # 04:10 UTC = 13:10 KST, the same quota day as the 03:10 KST base run. The base run keeps recent
+    # trades fresh first; this run spends the rest of the ~1,000 daily price-API calls on 2021-2025.
+    - cron: "10 4 * * *"
+  workflow_dispatch:
+    inputs:
+      request_budget:
+        description: Maximum G2B requests for this history batch (hard cap 900)
+        required: true
+        default: "330"
+
+concurrency:
+  # Shares the production writer group with collection and the serving-index sync.
+  group: ${{ github.event_name == 'pull_request' && format('track-b-history-pr-{0}', github.event.pull_request.number) || 'track-b-r2-pipeline' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: >-
+          python -m pip install
+          "pytest>=8,<9"
+          "httpx>=0.27,<1"
+          "tenacity>=9,<10"
+          "pydantic>=2.8,<3"
+          "pydantic-settings>=2.4,<3"
+          "boto3>=1.35,<2"
+      - name: Verify history state contracts
+        run: pytest -q tests/test_track_b_history_state.py
+
+  collect:
+    name: Track B history batch to R2
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: macos-14
+    timeout-minutes: 70
+    env:
+      PYTHONPATH: src
+      G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
+      G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install collection dependencies
+        run: >-
+          python -m pip install
+          "httpx>=0.27,<1"
+          "tenacity>=9,<10"
+          "pydantic>=2.8,<3"
+          "pydantic-settings>=2.4,<3"
+          "boto3>=1.35,<2"
+          "sqlalchemy>=2,<3"
+      - name: Run one history batch
+        run: >-
+          python -m purchase_price.scripts.run_g2b_track_b_history
+          --request-budget "${{ inputs.request_budget || vars.TRACK_B_HISTORY_REQUEST_BUDGET || '330' }}"
+          --output artifacts/track-b-history/collection-summary.json
+      - name: Upload collection evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: track-b-history-collection
+          path: artifacts/track-b-history/
+          if-no-files-found: warn
+          retention-days: 14

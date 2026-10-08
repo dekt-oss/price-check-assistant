@@ -12,10 +12,38 @@ The historical collection window remains fixed at 2025-09-12 through 2026-09-11 
 
 ## Schedule and quota
 
-- Daily schedule: 03:10 KST (`10 18 * * *` UTC).
-- G2B request budget: maximum 900 calls per run, leaving headroom below the validated 1,000/day development-account limit.
-- Backfill concurrency is serialized.
+The price API answers one 10-digit category code per request, and the development-account key
+allows about 1,000 requests a day (runs on 2026-09-16 stopped with `RATE_LIMIT_EXHAUSTED` after
+101-319 calls once the day's quota was spent). The day is shared:
+
+| Run | KST | Default budget | Override (repo variable) |
+| --- | --- | --- | --- |
+| Base: rolling recent window | 03:10 daily | 600 | `TRACK_B_DAILY_REQUEST_BUDGET` |
+| History: 2021-01-01 to 2025-09-11 | 13:10 daily | 330 | `TRACK_B_HISTORY_REQUEST_BUDGET` |
+| Supplemental verified codes | 04:40 Monday | 50 | workflow input |
+
+After a data.go.kr traffic increase, raise the two variables; no code change is needed. Each run
+is still capped at 900 requests by the collector. Backfill concurrency is serialized.
 - R2 raw evidence is immutable and content-addressed under `raw/v1/`.
+
+## History backfill (2021 onward)
+
+`run_g2b_track_b_history` walks back from 2025-09-11 to 2021-01-01 in windows of at most one
+year. When it first runs it freezes three tiers of the 5,208 validated codes into
+`state/v1/track-b/history-backfill.json`:
+
+1. `hospital_active`: segments 42/41 with at least one trade in the current serving index (about 1,670 codes);
+2. `other_active`: every other code that traded (about 1,560 codes);
+3. `no_recent_trade`: codes with no trade in the last year (about 1,980 codes).
+
+Each tier goes through all five windows before the next tier starts, so hospital-equipment
+history arrives first. New pages are recorded as pending and folded into the serving index by the
+same incremental sync as the base and supplemental collectors; the pointer carries
+`history_progress`.
+
+A full schema rebuild re-reads every raw page. Pages are fetched 16 at a time (about 0.5 s per
+40 pages instead of 7.4 s), so a rebuild that took 83 minutes for 8,370 pages stays within the
+180-minute job limit as history grows.
 
 ## Bootstrap evidence
 

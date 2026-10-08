@@ -18,6 +18,10 @@ from purchase_price.scripts.import_g2b_track_b_r2_to_db import TRACK_B_PAGE_OPER
 from purchase_price.scripts.import_g2b_track_b_r2_to_db import run as import_r2_pages
 from purchase_price.services.g2b_track_b_normalization import TrackBRawPage
 from purchase_price.services.track_b_db_quote_comparison import ingest_track_b_page
+from purchase_price.services.track_b_history_state import (
+    HISTORY_STATE_NAME,
+    TrackBHistoryState,
+)
 from purchase_price.services.track_b_pipeline_state import (
     BOOTSTRAP_LAST_OBJECT_KEY,
     BOOTSTRAP_MIN_R2_OBJECTS,
@@ -199,6 +203,10 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
         state_store=state_store,
         reader=reader,
     )
+    history_payload = state_store.read_json(HISTORY_STATE_NAME)
+    history = (
+        TrackBHistoryState.from_payload(history_payload) if history_payload is not None else None
+    )
     supplemental_payload = state_store.read_json(SUPPLEMENTAL_STATE_NAME)
     supplemental = (
         SupplementalTrackBState.from_payload(supplemental_payload)
@@ -216,7 +224,10 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
         supplemental_pending_keys = (
             list(supplemental.pending_object_keys) if supplemental is not None else []
         )
-        indexed_keys = list(dict.fromkeys([*base_pending_keys, *supplemental_pending_keys]))
+        history_pending_keys = list(history.pending_object_keys) if history is not None else []
+        indexed_keys = list(
+            dict.fromkeys([*base_pending_keys, *supplemental_pending_keys, *history_pending_keys])
+        )
 
         if pointer is not None:
             previous_ref = _ref_from_pointer(pointer)
@@ -311,6 +322,8 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             "supplemental_target_count": (
                 len(supplemental.target_codes) if supplemental is not None else 0
             ),
+            # How far the 2021-2025 history backfill has reached (None before it starts).
+            "history_progress": history.progress() if history is not None else None,
         }
         state_store.write_json(SERVING_INDEX_STATE_NAME, pointer_payload)
         pipeline.mark_pending_indexed(
@@ -324,6 +337,11 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
                 {**report, "mode": mode, "row_count": row_count},
             )
             state_store.write_json(SUPPLEMENTAL_STATE_NAME, supplemental.to_payload())
+        if history is not None:
+            history.mark_pending_indexed(
+                [key for key in indexed_keys if key in set(history_pending_keys)]
+            )
+            state_store.write_json(HISTORY_STATE_NAME, history.to_payload())
 
         if previous_ref is not None and previous_ref.key != ref.key:
             try:
