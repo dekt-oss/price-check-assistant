@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     naver_api_style: str = "apihub"
     naver_news_base_url: str | None = None
     naver_request_timeout_seconds: float = 10.0
+    # News Radar Phase 2: the collector job writes the article list to R2 (news/v1/). For a local
+    # review without R2, point both the collector (--output) and the page at a local file.
+    news_radar_index_path: str | None = None
+    news_radar_status_path: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
