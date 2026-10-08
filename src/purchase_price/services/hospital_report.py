@@ -60,8 +60,10 @@ def quality_notes(quality: benchmark.QualityReport) -> list[str]:
         )
     if any("자료 없음" in text for text in quality.bed_counts.values()):
         notes.append("병상수 자료가 없는 병원은 병상당 지표와 유사 규모 비교를 할 수 없습니다.")
-    if any("회계공시 일반현황" in text for text in quality.bed_counts.values()):
-        notes.append("병상수는 회계공시 일반현황(그해 말 심평원 자료)의 값입니다. 심평원 병원정보 연계 후 확정값으로 바뀝니다.")
+    if any("회계공시" in text for text in quality.bed_counts.values()):
+        notes.append(
+            "병상당 지표는 그해 회계공시에 적힌 병상수로 나눴고, 유사 규모 묶음은 심평원 현재 허가병상수 기준입니다."
+        )
     if quality.unverified_types:
         notes.append("종별은 심평원 연계 전 1차 입력입니다: " + ", ".join(quality.unverified_types))
     return notes

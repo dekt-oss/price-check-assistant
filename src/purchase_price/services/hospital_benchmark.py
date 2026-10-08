@@ -82,13 +82,14 @@ def metrics_for(
 
 
 def beds_for(data: BenchmarkData, hospital: master_service.Hospital, year: int) -> int | None:
-    """HIRA-confirmed beds when present, else that year's bed count printed in the disclosure."""
+    """Beds for per-bed metrics of ``year``: that year's disclosed count first, so revenue and beds
+    come from the same year; the current HIRA 허가병상수 only when the year has no disclosed count."""
 
-    if hospital.bed_count is not None:
-        return hospital.bed_count
     hy = data.get(hospital.hospital_id, year)
     value = hy.accounts.get(hm.BED_COUNT_KEY) if hy else None
-    return int(value) if value is not None else None
+    if value is not None:
+        return int(value)
+    return hospital.bed_count
 
 
 _EMPTY: dict[str, Decimal | None] = {key: None for key in hm.METRIC_SPECS}
@@ -204,10 +205,14 @@ def quality_report(
 
 
 def _bed_text(data: BenchmarkData, hospital: master_service.Hospital, year: int) -> str:
+    hy = data.get(hospital.hospital_id, year)
+    disclosed = hy.accounts.get(hm.BED_COUNT_KEY) if hy else None
+    parts = []
     if hospital.bed_count is not None:
-        return f"{hospital.bed_count:,}병상 (심평원 {hospital.bed_count_as_of} 기준)"
-    beds = beds_for(data, hospital, year)
-    return f"{beds:,}병상 ({year} 회계공시 일반현황)" if beds is not None else "병상수 자료 없음"
+        parts.append(f"현재 {hospital.bed_count:,}병상 (심평원 {hospital.bed_count_as_of} 기준)")
+    if disclosed is not None:
+        parts.append(f"{year} 회계공시 {int(disclosed):,}병상")
+    return ", ".join(parts) if parts else "병상수 자료 없음"
 
 
 def target_period(data: BenchmarkData, hospital_id: str, year: int) -> tuple[str, str] | None:

@@ -68,12 +68,21 @@ def _items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     return item if isinstance(item, list) else [item]
 
 
+# HIRA abbreviates 상급종합병원 as "상급종합"; the master and the disclosure use the full name.
+_TYPE_ALIASES = {"상급종합": "상급종합병원"}
+
+
+def normalize_type_name(value: str) -> str:
+    text = value.strip()
+    return _TYPE_ALIASES.get(text, text)
+
+
 def parse_basis_list(payload: Mapping[str, Any]) -> list[HiraHospital]:
     return [
         HiraHospital(
             ykiho=str(row.get("ykiho") or ""),
             name=str(row.get("yadmNm") or "").strip(),
-            type_name=str(row.get("clCdNm") or "").strip(),
+            type_name=normalize_type_name(str(row.get("clCdNm") or "")),
             sido=str(row.get("sidoCdNm") or "").strip(),
             address=str(row.get("addr") or "").strip(),
         )

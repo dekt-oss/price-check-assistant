@@ -24,10 +24,11 @@ def test_seed_contains_the_plan_hospitals_without_invented_bed_counts(master: hm
         "동아대학교병원",
         "고신대학교복음병원",
     } <= names
-    # HIRA-confirmed bed counts stay empty until the HIRA sync runs; the disclosure-list count is
-    # kept in its own field so the two are never confused.
-    assert all(hospital.bed_count is None for hospital in master.hospitals)
-    assert master.get("H-BUSAN-PAIK").disclosed_bed_count == 810  # type: ignore[union-attr]
+    # HIRA 허가병상수 (synced) and the 2024 disclosure-list count are kept in separate fields.
+    paik = master.get("H-BUSAN-PAIK")
+    assert paik is not None and paik.disclosed_bed_count == 810
+    assert paik.bed_count == 776 and paik.type_verified and paik.hospital_type == "상급종합병원"
+    assert all(h.bed_count_as_of for h in master.hospitals if h.bed_count is not None)
 
 
 @pytest.mark.parametrize(

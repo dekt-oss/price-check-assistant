@@ -11,6 +11,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from purchase_price.services import hospital_benchmark as benchmark
+from purchase_price.services import hospital_master as master_service
 from purchase_price.services import hospital_metrics as hm
 from purchase_price.services import khidi_financials as khidi
 
@@ -53,9 +54,23 @@ def _write_fixture(path: Path) -> Path:
     return path
 
 
+def _unsynced_master(path: Path) -> Path:
+    """The committed hospital list without HIRA bed counts, as these tests were written for."""
+
+    payload = json.loads(master_service.DEFAULT_MASTER_FILE.read_text(encoding="utf-8"))
+    for raw in payload["hospitals"]:
+        raw["bed_count"] = None
+        raw["bed_count_as_of"] = None
+        raw["type_verified"] = False
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
 @pytest.fixture()
 def data(tmp_path: Path) -> benchmark.BenchmarkData:
-    return benchmark.load_benchmark_data(_write_fixture(tmp_path / "fin.csv"))
+    return benchmark.load_benchmark_data(
+        _write_fixture(tmp_path / "fin.csv"), _unsynced_master(tmp_path / "master.json")
+    )
 
 
 def _h(data: benchmark.BenchmarkData, hospital_id: str):
