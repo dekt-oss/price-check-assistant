@@ -10,7 +10,7 @@ def test_quote_review_uses_one_upload_first_workflow() -> None:
 
     assert "render_quote_market_research(state)" in text
     assert "상세 검증·최종 판정" in text
-    assert "원문 확인 · 제품 식별 · 조건 대조 · 승인" in text
+    assert "원문 확인 · 조건 대조 · 승인" in text
     assert 'options=("자동 시장가격 조사", "정밀 비교검토")' not in text
     assert 'key="quote_review_mode"' not in text
 
@@ -93,5 +93,5 @@ def test_quote_review_keeps_reference_prices_out_of_auto_verdict() -> None:
         REPO_ROOT / "src" / "purchase_price" / "ui" / "quote_market_research.py"
     ).read_text(encoding="utf-8")
 
-    assert "견적 적정성 판정에는 자동 사용하지 않습니다" in text
+    assert "견적 판정에는 쓰지 않습니다" in text
     assert "검색 참고" in text

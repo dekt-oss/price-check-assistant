@@ -31,7 +31,6 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBReferenceCandidate,
 )
 from purchase_price.services.track_b_quote_with_live import lookup_track_b_quote_with_live
-from purchase_price.ui import result_summary
 from purchase_price.ui.market_research import (
     render_external_research_links,
     render_market_alternative_candidates,
@@ -41,10 +40,14 @@ from purchase_price.ui.market_research import (
     run_market_research,
 )
 from purchase_price.ui.quote_item_intelligence import (
+    PERMIT_VS_TRADES_NOTE,
     build_quote_item_intelligence_summary,
     quote_item_intelligence_rows,
 )
 from purchase_price.ui.quote_review_contract import build_manual_quote_item
+from purchase_price.ui.quote_review_layout import (
+    COMPACT_TABLE_COLUMNS as QUOTE_COMPACT_TABLE_COLUMNS,
+)
 from purchase_price.ui.quote_review_layout import LAYOUT_CSS as QUOTE_REVIEW_LAYOUT_CSS
 from purchase_price.ui.quote_review_layout import TABLE_COLUMNS as QUOTE_TABLE_COLUMNS
 from purchase_price.ui.quote_review_layout import (
@@ -61,7 +64,11 @@ from purchase_price.ui.quote_review_layout import (
 )
 from purchase_price.ui.quote_review_layout import table_rows as quote_review_table_rows
 from purchase_price.ui.quote_review_state import QuoteReviewState
-from purchase_price.ui.quote_review_steps import _store_extraction
+from purchase_price.ui.quote_review_steps import (
+    READ_ERROR_SESSION_KEY,
+    _store_extraction,
+    friendly_read_error,
+)
 from purchase_price.ui.quote_review_summary import render_purchase_review_summary
 from purchase_price.ui.theme import TONE_WARN, notice_html
 from purchase_price.ui.track_b_transactions import model_price_group_rows
@@ -72,6 +79,7 @@ from purchase_price.ui.widgets import (
     render_source_status,
 )
 
+QUOTE_REVIEW_ACCEPTANCE_V2 = True
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(
@@ -194,6 +202,13 @@ def _clear_research(state: QuoteReviewState) -> None:
     state.item_research_failures.clear()
     state.comparability_context.clear()
     state.approvals.clear()
+
+
+_STAGE_LABELS = {"Safety": "회수·판매중지"}
+
+
+def _stage_label(stage: str) -> str:
+    return _STAGE_LABELS.get(stage, stage)
 
 
 def _record_item_failure(
@@ -599,33 +614,31 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
         price_col, info_col = st.columns([1.25, 3.75])
         price_col.metric("견적 단가", _money(item.unit_price))
         info_col.caption(
-            "아래 표는 실제 수집된 거래가격을 우선 보여줍니다. 동일성이 충분하지 않은 행은 "
-            "'검색 참고'로 표시하며 견적 적정성 판정에는 자동 사용하지 않습니다."
+            "아래 표는 실제 수집된 거래가격을 우선 보여줍니다. 같은 제품인지 충분히 확인되지 않은 행은 "
+            "'검색 참고'로 표시하며 견적 판정에는 쓰지 않습니다."
         )
 
         failures = state.item_research_failures.get(index, {})
         if failures:
-            failure_text = " · ".join(
-                f"{stage}: {error_type}" for stage, error_type in failures.items()
-            )
+            failure_text = " · ".join(_stage_label(stage) for stage in failures)
             st.warning(
                 "이 품목의 일부 조사 단계가 실패했습니다. 다른 품목의 결과는 유지하며 "
-                f"실패 단계만 다시 시도할 수 있습니다. {failure_text}"
+                f"실패 단계만 다시 시도할 수 있습니다. 실패한 단계: {failure_text}"
             )
 
         if mfds is not None and mfds.status in {"success", "success_0"}:
             if mfds.exact_ambiguous:
-                st.warning("식약처 exact 모델이 복수 허가번호에 연결되어 확인이 필요합니다.")
+                st.warning("식약처 허가 목록에서 같은 모델명이 여러 허가번호에 걸려 있어 직접 확인해야 합니다.")
             elif mfds.exact_confirmed:
                 permits = " / ".join(mfds.permit_numbers) or "허가번호 미표기"
                 st.success(
-                    f"식약처 exact 모델 확인 · {permits} · "
-                    f"동일품목 국내 정상 등록모델 {len(mfds.active_records)}건"
+                    f"식약처 허가 목록에서 같은 모델 확인 · {permits} · "
+                    f"같은 품목의 국내 정상 등록 모델 {len(mfds.active_records)}건"
                 )
             elif mfds.records:
                 st.info(
-                    f"식약처 품목 등록모델 {len(mfds.records)}건을 조회했지만 "
-                    "입력 모델 exact 일치는 확인하지 못했습니다."
+                    f"식약처에 등록된 같은 품목의 모델 {len(mfds.records)}건을 찾았지만 "
+                    "견적서의 모델명과 같은 모델은 찾지 못했습니다."
                 )
         elif mfds is not None and mfds.status == "failure":
             st.warning("식약처 조회 실패 · 가격검색 결과와 분리해 유지합니다.")
@@ -645,10 +658,10 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             if track_b is not None:
                 grouped_rows = model_price_group_rows(track_b)
                 if grouped_rows:
-                    with st.expander("모델·규격·조건별 직접가격 요약", expanded=False):
+                    with st.expander("모델·규격·조건별 거래가 요약", expanded=False):
                         st.dataframe(grouped_rows, use_container_width=True, hide_index=True)
                         st.caption(
-                            "A/B 직접근거만 집계합니다. 검색 참고가격은 이 가격대에 합산하지 않습니다."
+                            "같은 제품으로 확인된 거래만 모아 계산합니다. 이름이 비슷한 거래는 합치지 않습니다."
                         )
             if track_b is not None and any(
                 candidate.amount_check == "inconsistent" for candidate in track_b.candidates
@@ -778,6 +791,73 @@ def _item_comparisons(state: QuoteReviewState) -> list[QuoteItemComparison]:
     return comparisons
 
 
+def _verdict_column():
+    return st.column_config.MultiselectColumn(
+        "판정",
+        options=list(VERDICT_ORDER),
+        color=[VERDICT_TABLE_COLORS[kind] for kind in VERDICT_ORDER],
+        width=86,
+    )
+
+
+def _wide_column_config() -> dict[str, object]:
+    return {
+        "번호": st.column_config.NumberColumn("번호", width=34, format="%d"),
+        "모델": st.column_config.TextColumn("모델", width=110),
+        "품명": st.column_config.TextColumn("품명"),
+        "수량": st.column_config.TextColumn("수량", width=44),
+        "견적 단가": st.column_config.NumberColumn("견적 단가", format="localized", width=78),
+        "거래 가운데 값": st.column_config.NumberColumn("거래 가운데 값", format="localized", width=88),
+        "차이 %": st.column_config.NumberColumn("차이 %", format="%+.1f%%", width=54),
+        "판정": _verdict_column(),
+    }
+
+
+def _compact_column_config() -> dict[str, object]:
+    return {
+        "모델": st.column_config.TextColumn("모델", width=108),
+        "품명": st.column_config.TextColumn("품명"),
+        "견적 단가": st.column_config.NumberColumn("견적 단가", format="localized", width=76),
+        "거래 가운데 값": st.column_config.NumberColumn("거래 가운데 값", format="localized", width=90),
+        "차이 %": st.column_config.NumberColumn("차이 %", format="%+.1f%%", width=58),
+        "판정": _verdict_column(),
+    }
+
+
+def _item_grid(
+    rows: list[dict[str, object]],
+    *,
+    name: str,
+    version: int,
+    selected: int,
+    columns: tuple[str, ...],
+    config: dict[str, object],
+) -> int | None:
+    """One selectable grid. Returns the row the reader just picked in it, if that changed."""
+
+    with st.container(key=f"qr_grid_{name}"):
+        event = st.dataframe(
+            rows,
+            key=f"quote_review_table_{name}_{version}",
+            on_select="rerun",
+            selection_mode="single-row-required",
+            selection_default={"selection": {"rows": [selected]}},
+            hide_index=True,
+            width="stretch",
+            row_height=TABLE_ROW_HEIGHT,
+            height=TABLE_ROW_HEIGHT * min(len(rows), 10) + 34,
+            column_order=columns,
+            placeholder="—",
+            column_config=config,
+        )
+    picked = list(getattr(getattr(event, "selection", None), "rows", None) or [])
+    seen_key = f"quote_review_grid_seen_{name}_{version}"
+    previous = st.session_state.get(seen_key, selected)
+    current = int(picked[0]) if picked else previous
+    st.session_state[seen_key] = current
+    return current if current != previous and 0 <= current < len(rows) else None
+
+
 def _render_item_table(
     state: QuoteReviewState,
     comparisons: list[QuoteItemComparison],
@@ -785,43 +865,32 @@ def _render_item_table(
 ) -> int:
     st.markdown(
         '<div class="qr-section-title">품목별 비교표</div>'
-        '<div class="qr-section-sub">행을 누르면 오른쪽에 그 품목의 비교 결과가 나옵니다.</div>',
+        '<div class="qr-section-sub">행을 누르면 그 품목의 비교 결과가 나옵니다.</div>',
         unsafe_allow_html=True,
     )
     version = int(st.session_state.get(TABLE_VERSION_SESSION_KEY, 0))
-    visible_rows = min(len(comparisons), 10)
-    event = st.dataframe(
-        quote_review_table_rows(comparisons, state.items),
-        key=f"quote_review_table_{version}",
-        on_select="rerun",
-        selection_mode="single-row-required",
-        selection_default={"selection": {"rows": [selected]}},
-        hide_index=True,
-        width="stretch",
-        row_height=TABLE_ROW_HEIGHT,
-        height=TABLE_ROW_HEIGHT * visible_rows + 34,
-        column_order=QUOTE_TABLE_COLUMNS,
-        placeholder="—",
-        column_config={
-            "번호": st.column_config.NumberColumn("번호", width=44, format="%d"),
-            "품목 / 모델": st.column_config.TextColumn("품목 / 모델", width=156),
-            "수량": st.column_config.TextColumn("수량", width=50),
-            "견적 단가": st.column_config.NumberColumn("견적 단가", format="localized", width=88),
-            "거래 가운데 값": st.column_config.NumberColumn(
-                "거래 가운데 값", format="localized", width=98
-            ),
-            "차이 %": st.column_config.NumberColumn("차이 %", format="%+.1f%%", width=66),
-            "판정": st.column_config.MultiselectColumn(
-                "판정",
-                options=list(VERDICT_ORDER),
-                color=[VERDICT_TABLE_COLORS[kind] for kind in VERDICT_ORDER],
-                width=92,
-            ),
-        },
+    rows = quote_review_table_rows(comparisons, state.items)
+    # Two grids, one shown at a time by CSS: the full one on wide windows, a shorter one when the
+    # side menu leaves little room (a 1024px window), so 판정 never scrolls out of sight.
+    wide_pick = _item_grid(
+        rows,
+        name="wide",
+        version=version,
+        selected=selected,
+        columns=QUOTE_TABLE_COLUMNS,
+        config=_wide_column_config(),
     )
-    rows = list(getattr(getattr(event, "selection", None), "rows", None) or [])
-    if rows and 0 <= int(rows[0]) < len(comparisons) and int(rows[0]) != selected:
-        selected = int(rows[0])
+    compact_pick = _item_grid(
+        rows,
+        name="compact",
+        version=version,
+        selected=selected,
+        columns=QUOTE_COMPACT_TABLE_COLUMNS,
+        config=_compact_column_config(),
+    )
+    picked = wide_pick if wide_pick is not None else compact_pick
+    if picked is not None and picked != selected:
+        selected = picked
         st.session_state[SELECTED_ITEM_SESSION_KEY] = selected
     st.markdown(
         '<div class="qr-foot">금액 단위는 원이고, 견적 단가와 거래 가운데 값은 1단위 가격입니다. 거래 가운데 값은 같은 제품으로 확인된 '
@@ -884,10 +953,12 @@ def _render_detail_card(state: QuoteReviewState, comparison: QuoteItemComparison
 
 def _render_empty_state(uploaded) -> None:
     if uploaded is not None:
+        reason = html.escape(
+            str(st.session_state.get(READ_ERROR_SESSION_KEY) or friendly_read_error(uploaded.name))
+        )
         st.markdown(
             notice_html(
-                "이 파일에서 견적 내용을 읽지 못했습니다. 파일이 열리는지 확인한 뒤 다시 올리거나, "
-                "PDF나 Excel로 저장해 올려 주세요. 급하면 <b>가격 조사</b> 화면에서 모델명으로 바로 찾을 수 있습니다.",
+                f"{reason} 급하면 <b>가격 조사</b> 화면에서 모델명으로 바로 찾을 수 있습니다.",
                 tone=TONE_WARN,
             ),
             unsafe_allow_html=True,
@@ -931,18 +1002,17 @@ def _render_research_details(state: QuoteReviewState, selected: int) -> None:
             )
             for index in range(len(state.items))
         ]
-        st.markdown("### 통합 품목 상태")
+        st.markdown("### 품목별 조사 상태")
         st.caption(
-            "품목마다 같은 제품 거래, 식약처 허가, 납품업체, 회수·판매중지 확인 상태를 한 번에 봅니다."
+            "품목마다 나라장터 같은 모델 거래, 식약처 허가 대조, 납품업체, 회수·판매중지 확인 상태를 "
+            "한 번에 봅니다. 거래 건수와 가격대는 위 비교표와 같은 기준(최근 거래, 가장 많이 쓰인 단위)입니다."
         )
         st.dataframe(
-            [
-                {result_summary.COLUMN_LABELS.get(key, key): value for key, value in row.items()}
-                for row in quote_item_intelligence_rows(integrated_summaries)
-            ],
+            quote_item_intelligence_rows(integrated_summaries),
             use_container_width=True,
             hide_index=True,
         )
+        st.caption(PERMIT_VS_TRADES_NOTE)
 
         render_purchase_review_summary(state)
 
@@ -968,17 +1038,17 @@ def _render_failure_retry(state: QuoteReviewState) -> None:
         "일부 품목 조사에 실패했지만 다른 품목의 결과는 유지했습니다. "
         "실패 품목: " + ", ".join(str(index + 1) for index in failed_items)
     )
-    with st.expander("실패 Source별 재시도", expanded=True):
+    with st.expander("실패한 조사만 다시 하기", expanded=True):
         for index in failed_items:
             item = state.items[index]
             label = item.product_name or item.model_name or f"품목 {index + 1}"
             st.markdown(f"**{index + 1}. {label}**")
             failures = dict(state.item_research_failures.get(index, {}))
             retry_columns = st.columns(max(len(failures), 1))
-            for column, (stage, error_type) in zip(retry_columns, failures.items()):
-                column.caption(f"{stage} · {error_type}")
+            for column, stage in zip(retry_columns, failures):
+                column.caption(f"{_stage_label(stage)} 조사 실패")
                 if column.button(
-                    f"{stage} 다시 조사",
+                    f"{_stage_label(stage)} 다시 조사",
                     key=f"quote_retry_{index}_{stage}",
                     use_container_width=True,
                 ):
@@ -1066,7 +1136,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
     )
     if newly_extracted and uploaded is not None:
         with st.spinner("견적서에서 품목을 읽고 있습니다..."):
-            _store_extraction(uploaded, state)
+            _store_extraction(uploaded, state, show_error=False)
         state.lookback_days = G2B_DEFAULT_LOOKBACK_DAYS
         # This page shows every item side by side; it no longer jumps to 가격 조사 with item 1.
         st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY, None)

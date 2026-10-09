@@ -52,8 +52,8 @@ def test_summary_reports_observed_range_and_median_without_fair_price_verdict() 
     assert row.observed_low == Decimal("10000000")
     assert row.observed_median == Decimal("12000000")
     assert row.observed_high == Decimal("14000000")
-    assert row.review_status == "조건대조·승인 전"
-    assert row.market_status == "동일성 거래 확인"
+    assert row.review_status == "검증 전 · 거래 조건을 맞춰 보지 않음"
+    assert row.market_status == "같은 모델 거래 있음"
 
 
 def test_summary_surfaces_r2_unavailable_separately_from_review_progress() -> None:
@@ -68,8 +68,8 @@ def test_summary_surfaces_r2_unavailable_separately_from_review_progress() -> No
 
     row = summary.build_purchase_review_summary_rows(state)[0]
 
-    assert row.review_status == "품목 원문 확인 필요"
-    assert row.market_status == "거래가격 DB 연결 확인"
+    assert row.review_status == "검증 전 · 견적서 원문과 맞춰 보지 않음"
+    assert row.market_status == "나라장터 가격 자료를 지금은 쓸 수 없음"
     assert row.observed_median is None
 
 
@@ -102,4 +102,4 @@ def test_summary_counts_only_current_item_pair_approvals(monkeypatch) -> None:
 
     assert row.approved_count == 1
     assert row.public_direct_count == 2
-    assert row.review_status == "담당자 승인 근거 있음"
+    assert row.review_status == "검증 완료"

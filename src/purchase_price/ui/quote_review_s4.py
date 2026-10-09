@@ -21,6 +21,8 @@ from purchase_price.ui.widgets import (
     render_source_status,
 )
 
+QUOTE_REVIEW_ACCEPTANCE_V2 = True
+
 
 def render_s4(state: QuoteReviewState, index: int) -> None:
     st.subheader("4. 근거 수집")
@@ -47,7 +49,7 @@ def render_s4(state: QuoteReviewState, index: int) -> None:
         state.reset_downstream(after_step=4)
         query = quote_item_query(item)
         with st.status("공개 가격근거를 검색하고 있습니다...", expanded=True) as status_box:
-            status_box.write("검증된 직접가격 source를 검색합니다.")
+            status_box.write("공개된 가격 자료에서 같은 제품의 가격을 찾습니다.")
             run = search_all(query, build_collectors(g2b_lookback_days=state.lookback_days))
             state.search_runs[index] = run
             g2b_status = next(
@@ -68,7 +70,7 @@ def render_s4(state: QuoteReviewState, index: int) -> None:
             discovery = None
             if research_needed and g2b_enabled and query.product_name.strip():
                 status_box.write(
-                    "직접가격이 없거나 mapping이 없어 Research Layer에서 관련 후보를 확장 탐색합니다."
+                    "같은 제품 가격을 찾지 못해 이름이 비슷한 후보까지 넓혀 찾습니다."
                 )
                 discovery = discover_unmapped_g2b_candidates(
                     query,
@@ -81,7 +83,7 @@ def render_s4(state: QuoteReviewState, index: int) -> None:
                 )
             state.discoveries[index] = discovery
             status_box.update(
-                label=f"검색 완료 · 검증근거 {len(run.results)}건",
+                label=f"검색 완료 · 같은 제품 가격 {len(run.results)}건",
                 state="complete",
                 expanded=False,
             )
@@ -104,16 +106,16 @@ def render_s4(state: QuoteReviewState, index: int) -> None:
         st.warning(" / ".join(run.errors))
 
     if run.results:
-        st.markdown("**관측가격 범위 — 출처·VAT별 분리**")
+        st.markdown("**찾은 가격 범위 — 출처·부가세 기준별**")
         render_observation_cards(run.results)
-        st.markdown("**검증 가격근거**")
+        st.markdown("**찾은 가격 자료**")
         render_evidence_table(run.results)
     else:
-        st.warning("검증된 직접 가격근거를 확보하지 못했습니다.")
+        st.warning("같은 제품으로 확인된 가격 자료를 찾지 못했습니다.")
 
     discovery = state.discoveries.get(index)
     if discovery is not None:
-        st.markdown("**나라장터 Research 후보 — 판정 미포함**")
+        st.markdown("**나라장터에서 이름이 비슷한 후보 — 판정에는 쓰지 않음**")
         render_discovery_candidates(discovery)
 
     allowed, reasons = can_enter(5, state)

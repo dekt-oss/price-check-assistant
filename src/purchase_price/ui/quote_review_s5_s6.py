@@ -27,6 +27,8 @@ from purchase_price.services.quote_extraction import parse_quote_decimal, quote_
 from purchase_price.ui.quote_review_export import build_record
 from purchase_price.ui.quote_review_state import QuoteReviewState, can_enter
 
+QUOTE_REVIEW_ACCEPTANCE_V2 = True
+
 
 def _condition_text(existing: str | None, additions: dict[str, str]) -> str:
     parts = [part.strip() for part in (existing or "").split(";") if part.strip()]
@@ -220,7 +222,7 @@ def _context_form(state: QuoteReviewState, index: int) -> None:
             quote_identity=quote_item_query(item),
         )
         st.success(
-            "견적 비교조건과 제품·구성 fingerprint를 저장했습니다. 기존 session 승인은 무효화했습니다."
+            "견적 비교 조건을 저장했습니다. 이전에 한 승인은 취소되었습니다."
         )
         st.rerun()
 
@@ -263,7 +265,7 @@ def _render_supplement_form(
                 "근거 유지보수",
                 value="" if profile.maintenance == UNKNOWN else profile.maintenance,
             )
-            submitted = st.form_submit_button("근거 조건 보완 사본 반영")
+            submitted = st.form_submit_button("보완한 조건 반영")
         if submitted:
             try:
                 amended = supplement_evidence_conditions(
@@ -286,7 +288,7 @@ def _render_supplement_form(
                 state.approvals.pop(old_key, None)
                 run.results[evidence_index] = amended
                 st.success(
-                    "원본 객체는 변경하지 않고 현재 검토용 사본에 보완 조건을 반영했습니다."
+                    "원본 자료는 그대로 두고, 이 검토에서만 보완한 조건을 반영했습니다."
                 )
                 st.rerun()
 
@@ -300,10 +302,10 @@ def render_s5(state: QuoteReviewState, index: int) -> None:
     _context_form(state, index)
     context = state.comparability_context.get(index)
     if context is None:
-        st.info("견적 비교조건을 저장하면 외부근거 candidate gate 결과가 표시됩니다.")
+        st.info("견적 비교 조건을 저장하면 가격 자료별로 조건이 같은지 비교한 결과가 나옵니다.")
         return
     if not run.results:
-        st.info("대조할 검증 가격근거가 없습니다.")
+        st.info("대조할 가격 자료가 없습니다.")
         return
 
     decisions = [
@@ -326,7 +328,7 @@ def render_s5(state: QuoteReviewState, index: int) -> None:
                 "보류 사유": decision.reason_text,
             }
         )
-    st.caption(f"직접 근거 {len(run.results)}건 · 비교가능 후보 {candidate_count}건")
+    st.caption(f"찾은 가격 자료 {len(run.results)}건 · 승인할 수 있는 자료 {candidate_count}건")
     st.dataframe(
         pd.DataFrame(rows),
         use_container_width=True,
@@ -350,16 +352,16 @@ def render_s5(state: QuoteReviewState, index: int) -> None:
         hide_index=True,
     )
     if decision.eligible_candidate:
-        st.success("이 근거는 제품·구성과 상업조건이 확인된 승인 가능한 candidate입니다.")
+        st.success("이 가격 자료는 제품·구성과 거래 조건이 확인되어 승인할 수 있습니다.")
     else:
-        st.warning("이 근거는 지금 승인할 수 없습니다. " + decision.reason_text)
+        st.warning("이 가격 자료는 지금 승인할 수 없습니다. " + decision.reason_text)
     if evidence.source_url:
         st.link_button("근거 원문 열기", evidence.source_url)
     _render_supplement_form(state, index, evidence_index, context)
 
     allowed, _ = can_enter(6, state)
     if not allowed:
-        st.info("6단계 진입이 차단되어 있습니다. 오른쪽 판정 경로의 사유를 확인하세요.")
+        st.info("아직 다음 단계로 넘어갈 수 없습니다. 오른쪽 안내를 확인하세요.")
     if st.button("6. 승인·판정으로", type="primary", disabled=not allowed):
         state.step = 6
         st.rerun()
@@ -398,7 +400,7 @@ def render_s6(state: QuoteReviewState, index: int) -> None:
     ]
     candidates = [idx for idx, decision in enumerate(decisions) if decision.eligible_candidate]
     if not candidates:
-        st.info("승인 가능한 candidate가 없습니다.")
+        st.info("승인할 수 있는 가격 자료가 없습니다.")
         return
 
     state.reviewer = st.text_input("검토 담당자", value=state.reviewer)
@@ -424,14 +426,14 @@ def render_s6(state: QuoteReviewState, index: int) -> None:
         st.link_button("승인 전 외부 원문 열기", evidence.source_url)
 
     if isinstance(existing, QuoteComparableApproval):
-        st.success(f"현재 session 승인됨 · 승인키 {existing.short_key}")
+        st.success(f"승인했습니다 · 확인번호 {existing.short_key}")
         st.caption(f"승인 메모: {existing.reviewer_note}")
-        if st.button("이 pair 승인 취소"):
+        if st.button("이 승인 취소"):
             state.approvals.pop(pair_key, None)
             st.rerun()
     else:
         confirmed = st.checkbox(
-            "견적 원문과 외부 원문을 직접 확인했고 현재 quote/evidence pair가 동일 제품·구성·비교조건임을 "
+            "견적서 원문과 가격 자료 원문을 직접 확인했고, 이 견적과 가격 자료가 같은 제품·구성·거래 조건임을 "
             "확인했습니다.",
             value=False,
             key=f"quote_approval_confirmed_{index}",
@@ -443,7 +445,7 @@ def render_s6(state: QuoteReviewState, index: int) -> None:
         )
         can_approve = confirmed and bool(note.strip()) and bool(state.reviewer.strip())
         if st.button(
-            "선택 pair 승인",
+            "선택한 가격 자료 승인",
             type="primary",
             disabled=not can_approve,
             key=f"approve_quote_pair_{index}",
@@ -463,10 +465,10 @@ def render_s6(state: QuoteReviewState, index: int) -> None:
 
     applied, approved_indices = _applied_items(state, index)
     assessment = assess_prices(applied, context.quote_unit_price)
-    st.markdown("**승인 근거 대비 위치**")
+    st.markdown("**승인한 가격 자료 대비 견적 위치**")
     if approved_indices and assessment.quote_position is not None:
         c1, c2, c3 = st.columns(3)
-        c1.metric("승인 직접비교 근거", f"{assessment.quote_comparable_count}건")
+        c1.metric("승인한 비교 가격", f"{assessment.quote_comparable_count}건")
         c2.metric("현재 견적 위치", assessment.quote_position)
         c3.metric(
             "차이율",
@@ -476,7 +478,10 @@ def render_s6(state: QuoteReviewState, index: int) -> None:
         )
         st.write(assessment.message)
     else:
-        st.info("승인된 quote/evidence pair가 없어 견적의 높고 낮음을 판정하지 않습니다.")
+        st.info(
+            "승인한 가격 자료가 없어 이 단계에서는 견적의 높고 낮음을 따로 판정하지 않습니다. "
+            "화면 위 비교표의 판정은 상세 검증과 상관없이 볼 수 있습니다."
+        )
 
     excluded: list[str] = []
     for evidence_index, gate_decision in enumerate(decisions):
@@ -485,10 +490,10 @@ def render_s6(state: QuoteReviewState, index: int) -> None:
         if not gate_decision.eligible_candidate:
             excluded.append(f"{excluded_evidence.source_name}: {gate_decision.reason_text}")
         elif key not in state.approvals:
-            excluded.append(f"{excluded_evidence.source_name}: candidate이나 담당자 미승인")
+            excluded.append(f"{excluded_evidence.source_name}: 승인할 수 있지만 아직 승인하지 않음")
     discovery = state.discoveries.get(index)
     if discovery is not None and discovery.candidates:
-        excluded.append(f"나라장터 미검증 후보 {len(discovery.candidates)}건: 판정에서 제외")
+        excluded.append(f"나라장터에서 이름이 비슷한 후보 {len(discovery.candidates)}건: 판정에서 제외")
     if excluded:
         with st.expander("판정에서 제외된 근거와 사유", expanded=False):
             for reason in excluded:
@@ -500,7 +505,7 @@ def render_s6(state: QuoteReviewState, index: int) -> None:
     )
     record_json = json.dumps(build_record(state), ensure_ascii=False, indent=2)
     st.download_button(
-        "검토 기록 JSON 다운로드",
+        "검토 기록 내려받기(JSON)",
         data=record_json,
         file_name="quote-review-record.json",
         mime="application/json",

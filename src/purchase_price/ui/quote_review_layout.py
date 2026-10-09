@@ -15,10 +15,11 @@ from __future__ import annotations
 import html
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from statistics import median
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from purchase_price.services.safety_support import SafetyCheckStatus
 from purchase_price.ui import result_summary
@@ -30,6 +31,7 @@ from purchase_price.ui.track_b_transactions import (
 )
 
 QUOTE_REVIEW_LAYOUT_V1 = True
+QUOTE_REVIEW_ACCEPTANCE_V2 = True
 
 # A quote this many percent above the median of same-product trades is flagged for a check.
 QUOTE_CHECK_THRESHOLD_PERCENT = Decimal("20")
@@ -269,6 +271,82 @@ def _check_points(
     return tuple(dict.fromkeys(points))
 
 
+@dataclass(frozen=True)
+class TradeStats:
+    """The trades one item is judged on: default period, same-product (A/B) rows, main unit only.
+
+    Every place on this page that shows a trade count or price range reads it from here, so the
+    table, the card and the folded status lists never disagree.
+    """
+
+    period_label: str
+    period_note: str | None
+    split: result_summary.UnitSplit
+    prices: tuple[Decimal, ...]
+    reference_count: int
+
+    @property
+    def count(self) -> int:
+        return len(self.prices)
+
+    @property
+    def median(self) -> Decimal | None:
+        return Decimal(str(median(self.prices))) if self.prices else None
+
+    @property
+    def low(self) -> Decimal | None:
+        return self.prices[0] if self.prices else None
+
+    @property
+    def high(self) -> Decimal | None:
+        return self.prices[-1] if self.prices else None
+
+    @property
+    def main_unit(self) -> str | None:
+        return self.split.main_unit
+
+    @property
+    def other_count(self) -> int:
+        return len(self.split.other)
+
+    @property
+    def other_units(self) -> tuple[str, ...]:
+        return tuple(self.split.other_units)
+
+
+def comparable_trade_stats(track_b: Any, *, today: date | None = None) -> TradeStats:
+    today = today or datetime.now(ZoneInfo("Asia/Seoul")).date()
+    direct = strict_comparison_candidates(track_b) if track_b is not None else ()
+    references = (
+        (*category_reference_candidates(track_b), *reference_candidates(track_b))
+        if track_b is not None
+        else ()
+    )
+    choice = result_summary.choose_period(
+        [getattr(candidate, "transaction_date", None) for candidate in direct],
+        requested=result_summary.DEFAULT_PERIOD_LABEL,
+        user_chose=False,
+        today=today,
+    )
+    direct = result_summary.filter_candidates(direct, choice.cutoff)
+    references = result_summary.filter_candidates(references, choice.cutoff)
+    split = result_summary.split_by_main_unit(direct)
+    prices = tuple(
+        sorted(
+            price
+            for price in (_decimal(getattr(candidate, "price", None)) for candidate in split.kept)
+            if price is not None and price > 0
+        )
+    )
+    return TradeStats(
+        period_label=choice.label,
+        period_note=choice.note,
+        split=split,
+        prices=prices,
+        reference_count=len(references),
+    )
+
+
 def build_item_comparison(
     index: int,
     item: Any,
@@ -286,28 +364,10 @@ def build_item_comparison(
     quote = quote if quote is not None and quote > 0 else None
     data_problem = _data_problem(track_b, failed=failed)
 
-    direct = strict_comparison_candidates(track_b) if track_b is not None else ()
-    references = (
-        (*category_reference_candidates(track_b), *reference_candidates(track_b))
-        if track_b is not None
-        else ()
-    )
-    choice = result_summary.choose_period(
-        [getattr(candidate, "transaction_date", None) for candidate in direct],
-        requested=result_summary.DEFAULT_PERIOD_LABEL,
-        user_chose=False,
-        today=today,
-    )
-    direct = result_summary.filter_candidates(direct, choice.cutoff)
-    references = result_summary.filter_candidates(references, choice.cutoff)
-    split = result_summary.split_by_main_unit(direct)
-    prices = sorted(
-        price
-        for price in (_decimal(getattr(candidate, "price", None)) for candidate in split.kept)
-        if price is not None and price > 0
-    )
-    count = len(prices)
-    mid = Decimal(str(median(prices))) if prices else None
+    stats = comparable_trade_stats(track_b, today=today)
+    split = stats.split
+    count = stats.count
+    mid = stats.median
     delta = percent_difference(quote, mid) if quote is not None and mid is not None and mid > 0 else None
 
     verdict = quote_verdict(quote_unit_price=quote, median_price=mid, comparable_count=count)
@@ -323,12 +383,12 @@ def build_item_comparison(
         quote_unit=_text(getattr(item, "unit", "")),
         comparable_count=count,
         other_unit_count=len(split.other),
-        reference_count=len(references),
+        reference_count=stats.reference_count,
         median_price=mid,
-        low_price=prices[0] if prices else None,
-        high_price=prices[-1] if prices else None,
+        low_price=stats.low,
+        high_price=stats.high,
         main_unit=split.main_unit,
-        period_label=choice.label,
+        period_label=stats.period_label,
         delta_percent=delta,
         verdict=verdict,
         data_problem=data_problem,
@@ -338,9 +398,9 @@ def build_item_comparison(
             delta=delta,
             comparable_count=count,
             other_unit_count=len(split.other),
-            reference_count=len(references),
+            reference_count=stats.reference_count,
             main_unit=split.main_unit,
-            period_note=choice.note,
+            period_note=stats.period_note,
             data_problem=data_problem,
             safety_status=safety_status,
             live_status=live_status,
@@ -409,24 +469,31 @@ def _metric_card(label: str, value: str, sub_html: str, tone: str | None) -> str
     )
 
 
-TABLE_COLUMNS = ("번호", "품목 / 모델", "수량", "견적 단가", "거래 가운데 값", "차이 %", "판정")
+# Wide screens show both name columns; narrow ones (a 1024px window with the side menu open) drop
+# 번호/수량 so 판정 stays on screen without sideways scrolling.
+TABLE_COLUMNS = ("번호", "모델", "품명", "수량", "견적 단가", "거래 가운데 값", "차이 %", "판정")
+COMPACT_TABLE_COLUMNS = ("모델", "품명", "견적 단가", "거래 가운데 값", "차이 %", "판정")
 
 
 def table_rows(comparisons: Sequence[QuoteItemComparison], items: Sequence[Any] = ()) -> list[dict[str, object]]:
     """Rows for st.dataframe. Money stays numeric so the grid right-aligns it.
 
+    The model and the item name sit in their own columns so neither is cut by the other.
     The trade count lives in the detail card; the table keeps to what fits beside it.
     """
 
     rows: list[dict[str, object]] = []
     for c in comparisons:
         item = items[c.index] if c.index < len(items) else None
+        model = _text(getattr(item, "model_name", "")) if item is not None else ""
         product = _text(getattr(item, "product_name", "")) if item is not None else ""
-        label = c.title if not product or product == c.title else f"{c.title} · {product}"
+        if item is None:
+            model, product = c.title, ""
         rows.append(
             {
                 "번호": c.number,
-                "품목 / 모델": label,
+                "모델": model or "—",
+                "품명": product or (c.title if not model else ""),
                 "수량": c.quantity_text,
                 "견적 단가": float(c.quote_unit_price) if c.quote_unit_price is not None else None,
                 "거래 가운데 값": float(c.median_price) if c.median_price is not None else None,
@@ -592,6 +659,21 @@ LAYOUT_CSS = """
 .st-key-qr_table_card,.st-key-qr_detail_card {border-radius:13px !important; box-shadow:0 2px 11px rgba(23,52,89,.035);
   border-color:#DCE4EE !important;}
 .st-key-qr_detail_card button[kind="primary"], .st-key-qr_detail_card button[kind="secondary"] {border-radius:9px;}
+.qr-cell {min-width:0;}
+.qr-prices {grid-template-columns:repeat(2,minmax(0,1fr));}
+.st-key-qr_grid_compact {display:none;}
+/* The side menu leaves little room below ~1400px: put the selected-item card under the table
+   instead of beside it, and below ~1130px swap in the shorter table so 판정 stays visible. */
+@media (max-width: 1400px) {
+  div[data-testid="stHorizontalBlock"]:has(.st-key-qr_table_card) {flex-wrap:wrap !important;}
+  div[data-testid="stHorizontalBlock"]:has(.st-key-qr_table_card) > div[data-testid="stColumn"] {
+    flex:1 1 100% !important; width:100% !important; min-width:100% !important;}
+  .qr-prices {max-width:560px;}
+}
+@media (max-width: 1130px) {
+  .st-key-qr_grid_wide {display:none;}
+  .st-key-qr_grid_compact {display:block;}
+}
 @media (max-width: 900px) { .qr-metrics {grid-template-columns:repeat(2,minmax(0,1fr));} }
 </style>
 """

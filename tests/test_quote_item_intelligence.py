@@ -107,9 +107,9 @@ def test_integrated_summary_uses_only_ab_direct_prices_and_suppliers() -> None:
     assert result.observed_high == Decimal("13200000")
     assert result.supplier_names == ("공급사A", "공급사B")
     assert "참고업체" not in result.supplier_names
-    assert result.identity_status == "모델 exact 확인"
+    assert result.identity_status == "허가 목록에서 같은 모델 확인"
     assert result.responsible_companies == ("필립스코리아",)
-    assert result.business_license_status == "제조사명 업허가 1건"
+    assert result.business_license_status == "제조·수입업 허가 1건 확인"
     assert result.safety_status == "공식 확인 필요"
 
 
@@ -134,7 +134,7 @@ def test_ambiguous_identity_is_not_presented_as_confirmed() -> None:
         mfds_identity=identity,
     )
 
-    assert result.identity_status == "복수 identity · 확인 필요"
+    assert result.identity_status == "같은 모델명이 여러 허가에 있어 직접 살펴봐야 함"
     assert result.responsible_companies == ("회사A", "회사B")
     assert set(result.permit_numbers) == {"수허 1", "수허 2"}
 
@@ -147,7 +147,7 @@ def test_no_identity_does_not_invent_company_or_safety_clearance() -> None:
         mfds_identity=None,
     )
 
-    assert result.identity_status == "미조회"
+    assert result.identity_status == "아직 조회하지 않음"
     assert result.responsible_companies == ()
     assert result.supplier_names == ()
     assert result.safety_status == "자동조회 미연결"
@@ -178,9 +178,10 @@ def test_integrated_rows_keep_evidence_roles_separate() -> None:
 
     rows = quote_item_intelligence_rows([(0, "심장충격기", summary)])
 
-    assert rows[0]["품목 책임주체"] == "품목책임회사"
-    assert rows[0]["실제 조달 공급업체"] == "납품사"
-    assert rows[0]["Safety"] == "공식 확인 필요"
+    assert rows[0]["제조·수입업체(식약처)"] == "품목책임회사"
+    assert rows[0]["납품업체(나라장터)"] == "납품사"
+    assert rows[0]["회수·판매중지"] == "공식 확인 필요"
+    assert rows[0]["나라장터 같은 모델 거래"] == "1건 · 10,000,000원"
 
 
 def test_quote_identity_lookup_is_cached_and_prefers_model(monkeypatch) -> None:
@@ -247,10 +248,8 @@ def test_quote_ui_exposes_integrated_item_status_contract() -> None:
         encoding="utf-8"
     )
 
-    assert "### 통합 품목 상태" in source
-    assert '"제조·수입업체"' in source
-    assert '"납품업체"' in source
-    assert '"회수·판매중지"' in source
+    assert "### 품목별 조사 상태" in source
+    assert "PERMIT_VS_TRADES_NOTE" in source
     assert "회수·판매중지 자동 조회가 연결되지 않은 경우" in source
     assert "_ensure_mfds_identity" in source
 

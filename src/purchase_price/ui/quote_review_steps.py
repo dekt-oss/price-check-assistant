@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import logging
 from dataclasses import replace
 
 import streamlit as st
@@ -18,9 +19,7 @@ from purchase_price.services.mfds_device_intelligence import (
 )
 from purchase_price.services.product_matching import (
     ManufacturerAliasError,
-    ProductIdentity,
     canonical_manufacturer,
-    grade_product_identity,
     load_manufacturer_aliases,
 )
 from purchase_price.services.quote_extraction import (
@@ -90,7 +89,7 @@ def render_item_list(state: QuoteReviewState) -> int:
         format_func=lambda index: (
             f"{index + 1}. "
             f"{state.items[index].product_name or state.items[index].model_name or '미확인 품목'}"
-            + (" · 확인" if state.item_confirmed.get(index) else " · 확인 필요")
+            + (" · 검증 완료" if state.item_confirmed.get(index) else " · 검증 전")
         ),
         label_visibility="collapsed",
         key="quote_review_item_selector",
@@ -111,21 +110,62 @@ def render_item_list(state: QuoteReviewState) -> int:
 
 
 def render_path_card(state: QuoteReviewState) -> None:
-    st.markdown("**판정으로 가는 길**")
+    st.markdown("**다음 단계로 가려면**")
     if state.step >= 6:
         allowed, reasons = can_enter(6, state)
     else:
         allowed, reasons = can_enter(state.step + 1, state)
     if allowed:
-        st.success("현재 단계의 진입 조건을 충족했습니다.")
+        st.success("다음 단계로 넘어갈 수 있습니다.")
     else:
         for reason in reasons:
             st.warning(reason)
-    st.caption("이 카드의 차단 사유는 can_enter() 반환값을 그대로 표시합니다.")
+    st.caption("위 안내를 마치면 다음 단계로 넘어갈 수 있습니다.")
 
 
-def _store_extraction(uploaded_file, state: QuoteReviewState) -> None:
+QUOTE_REVIEW_ACCEPTANCE_V2 = True
+READ_ERROR_SESSION_KEY = "quote_review_read_error_v1"
+
+_READ_ERROR_BY_KIND = {
+    "xlsx": "엑셀 파일이 손상됐거나 다른 형식입니다. 엑셀에서 다시 저장하거나 PDF로 올려 주세요.",
+    "xls": "엑셀 파일이 손상됐거나 다른 형식입니다. 엑셀에서 .xlsx로 다시 저장하거나 PDF로 올려 주세요.",
+    "pdf": (
+        "PDF에서 견적 내용을 읽지 못했습니다. 파일이 손상됐거나 글자를 알아볼 수 없는 스캔본일 수 있습니다. "
+        "엑셀 원본이나 더 선명한 PDF로 다시 올려 주세요."
+    ),
+    "image": (
+        "사진에서 견적 내용을 읽지 못했습니다. 더 선명한 사진을 올리거나 PDF·엑셀로 저장해 올려 주세요."
+    ),
+}
+_READ_ERROR_UNKNOWN = (
+    "이 파일은 읽을 수 없는 형식입니다. 엑셀(.xlsx/.xls), PDF, PNG, JPG 견적서를 올려 주세요."
+)
+_log = logging.getLogger(__name__)
+
+
+def friendly_read_error(file_name: str) -> str:
+    """Plain Korean reason a quote file could not be read; the technical cause goes to the log."""
+
+    suffix = file_name.rsplit(".", 1)[-1].casefold() if "." in file_name else ""
+    if suffix in {"png", "jpg", "jpeg"}:
+        suffix = "image"
+    return _READ_ERROR_BY_KIND.get(suffix, _READ_ERROR_UNKNOWN)
+
+
+def _store_extraction(uploaded_file, state: QuoteReviewState, *, show_error: bool = True) -> None:
     suffix = uploaded_file.name.rsplit(".", 1)[-1].casefold() if "." in uploaded_file.name else ""
+    st.session_state.pop(READ_ERROR_SESSION_KEY, None)
+
+    def fail(exc: Exception) -> None:
+        # The reader sees only the Korean sentence; the cause stays in the server log.
+        _log.warning("quote read failed (%s): %s: %s", suffix or "?", type(exc).__name__, exc)
+        state.extraction = None
+        state.items = []
+        message = friendly_read_error(uploaded_file.name)
+        st.session_state[READ_ERROR_SESSION_KEY] = message
+        if show_error:
+            st.error(message)
+
     try:
         with temporary_quote_upload(uploaded_file) as temp_path:
             try:
@@ -133,14 +173,13 @@ def _store_extraction(uploaded_file, state: QuoteReviewState) -> None:
                 diagnostics = diagnose_quote_extraction(temp_path, result)
             except QuoteExtractionError as exc:
                 state.diagnostics = diagnose_quote_extraction_error(temp_path, exc)
-                state.extraction = None
-                state.items = []
-                st.error(str(exc))
+                fail(exc)
+                return
+            except Exception as exc:  # noqa: BLE001 - any parser crash is a read failure for the reader
+                fail(exc)
                 return
     except ValueError as exc:
-        state.extraction = None
-        state.items = []
-        st.error(str(exc))
+        fail(exc)
         return
 
     state.file_name = uploaded_file.name
@@ -297,7 +336,7 @@ def render_s2(state: QuoteReviewState, index: int) -> None:
     )
     if original is not None:
         st.caption(f"원문 위치: {original.source_sheet} {original.source_row}행")
-        with st.expander("자동 추출 행 스니펫", expanded=True):
+        with st.expander("견적서에서 자동으로 읽은 행", expanded=True):
             st.code(build_extracted_item_snippet(original), language=None)
         changed = changed_item_field_labels(original, item)
         if changed:
@@ -331,7 +370,7 @@ def render_s2(state: QuoteReviewState, index: int) -> None:
             value=state.item_notes.get(index, ""),
         )
         other = st.text_input("기타 조건", value=item.other_conditions)
-        st.markdown("**상업조건별 원문 근거 메모**")
+        st.markdown("**거래 조건별 원문 메모**")
         n1, n2 = st.columns(2)
         vat_note = n1.text_input("VAT 근거", value=condition_notes.get("vat", ""))
         delivery_note = n2.text_input("배송 근거", value=condition_notes.get("delivery", ""))
@@ -354,7 +393,7 @@ def render_s2(state: QuoteReviewState, index: int) -> None:
             st.error("원문 대조 완료를 확인해야 이 품목을 완료할 수 있습니다.")
             return
         if state.vat_conflict and not vat.strip():
-            st.error("VAT 상충 경고가 있으므로 원문을 확인해 VAT 상태를 직접 입력하세요.")
+            st.error("부가세(VAT) 표기가 서로 달라 보입니다. 원문을 확인해 부가세 포함 여부를 직접 입력하세요.")
             return
         updated = replace(
             item,
@@ -404,9 +443,9 @@ def _mfds_exact_confirmed(item: QuoteItem) -> tuple[bool, str]:
     settings = get_settings()
     service_key = (mfds_service_key_candidates(settings) or ("",))[0]
     if not service_key:
-        return False, "MFDS 인증이 설정되지 않아 exact 모델 확인을 실행할 수 없습니다."
+        return False, "식약처 조회 설정이 없어 허가 목록 확인을 할 수 없습니다."
     if not item.product_name.strip() or not item.model_name.strip():
-        return False, "식약처 exact 모델 확인에는 품명과 모델명이 필요합니다."
+        return False, "식약처 허가 목록 확인에는 품명과 모델명이 필요합니다."
     kwargs = {
         "timeout_seconds": settings.mfds_request_timeout_seconds,
         "max_retries": settings.mfds_max_retries,
@@ -416,16 +455,16 @@ def _mfds_exact_confirmed(item: QuoteItem) -> tuple[bool, str]:
     client = MfdsModelInfoClient(service_key, client=mfds_model_info_json_client(settings), **kwargs)
     try:
         records = client.search_models(item.product_name)
-    except (PublicDataClientError, ValueError) as exc:
-        return False, f"MFDS 조회 실패: {type(exc).__name__}"
+    except (PublicDataClientError, ValueError):
+        return False, "식약처 조회에 실패했습니다. 잠시 뒤 다시 시도하세요."
     resolution = resolve_exact_model_identity(records, item.model_name)
     active = [record for record in resolution.exact_matches if record.active_for_domestic_candidate]
     if resolution.ambiguous:
-        return False, "동일 모델명이 복수 허가번호에 걸려 자동 식별하지 않았습니다."
+        return False, "같은 모델명이 여러 허가번호에 걸려 있어 자동으로 확인하지 않았습니다."
     if not active:
-        return False, "활성 국내용 exact 모델을 확인하지 못했습니다."
+        return False, "허가 목록에서 국내용으로 정상 등록된 같은 모델을 찾지 못했습니다."
     record = active[0]
-    return True, f"MFDS exact 모델 확인 · 허가번호 {record.permit_number or '-'}"
+    return True, f"식약처 허가 목록에서 같은 모델 확인 · 허가번호 {record.permit_number or '-'}"
 
 
 def render_s3(state: QuoteReviewState, index: int) -> None:
@@ -437,54 +476,40 @@ def render_s3(state: QuoteReviewState, index: int) -> None:
 
     aliases = None
     with st.container(border=True):
-        st.markdown("**제조사 alias / 식별 입력 점검**")
+        st.markdown("**제조사 이름 맞춰 보기**")
         try:
             aliases = load_manufacturer_aliases()
             canonical = canonical_manufacturer(item.manufacturer, aliases)
-        except ManufacturerAliasError as exc:
-            st.warning(f"제조사 alias 레지스트리 확인 실패: {type(exc).__name__}")
+        except ManufacturerAliasError:
+            st.warning("제조사 이름 목록을 불러오지 못했습니다.")
         else:
             st.write(f"견적 표기: **{item.manufacturer or '미확인'}**")
-            st.write(f"정규화 결과: **{canonical or '미확인'}**")
-            candidate = ProductIdentity(
-                product_name=item.product_name or None,
-                manufacturer=item.manufacturer or None,
-                model_name=item.model_name or None,
-                specification=item.specification or None,
-            )
-            decision = grade_product_identity(query, candidate, manufacturer_aliases=aliases)
-            st.caption(
-                "현재 식별 입력 점검 · "
-                f"model={decision.model_state} · manufacturer={decision.manufacturer_state} · "
-                f"specification={decision.specification_state}. "
-                "이 표시는 외부 근거의 MatchGrade를 새로 승인하지 않습니다."
-            )
+            st.write(f"표준 이름: **{canonical or '미확인'}**")
 
     with st.container(border=True):
-        st.markdown("**나라장터 verified mapping**")
+        st.markdown("**나라장터 등록 제품과의 연결**")
         if mapping is not None:
             st.success(
-                f"verified · {mapping.detail_product_name or '-'} · "
+                f"연결 확인됨 · {mapping.detail_product_name or '-'} · "
                 f"코드 {mapping.detail_product_code or '-'}"
             )
         else:
             st.warning(
-                "현재 입력 품목에 verified G2B mapping이 없습니다. "
-                "조사요청을 등록하면 다음 단계에서는 직접가격으로 승격하지 않고 "
-                "미검증 후보만 별도로 탐색합니다."
+                "이 품목은 나라장터 등록 제품과 아직 연결되어 있지 않습니다. "
+                "조사 요청을 등록하면 담당자가 확인할 때까지 이름이 비슷한 후보만 따로 찾아 보여줍니다."
             )
 
     research_required = bool(previous and previous.research_required)
     if mapping is None:
-        if st.button("나라장터 mapping 조사요청 등록", key=f"mapping_request_{index}"):
+        if st.button("나라장터 제품 연결 조사 요청하기", key=f"mapping_request_{index}"):
             try:
                 created = register_mapping_request(
                     product_name=item.product_name,
                     manufacturer=item.manufacturer,
                     model_name=item.model_name,
                 )
-            except (OSError, ValueError) as exc:
-                st.error(f"조사요청 등록 실패: {type(exc).__name__}")
+            except (OSError, ValueError):
+                st.error("조사 요청을 등록하지 못했습니다. 잠시 뒤 다시 시도하세요.")
             else:
                 research_required = True
                 state.identity[index] = IdentityResult(
@@ -496,9 +521,9 @@ def render_s3(state: QuoteReviewState, index: int) -> None:
                     research_required=True,
                 )
                 if created:
-                    st.success("mapping 조사요청을 등록했습니다.")
+                    st.success("조사 요청을 등록했습니다.")
                 else:
-                    st.info("동일 제품 식별정보의 조사요청이 이미 등록되어 있습니다.")
+                    st.info("같은 제품 정보로 이미 조사 요청이 등록되어 있습니다.")
         if research_required:
             st.caption(
                 "조사요청에는 제품명·제조사·모델명만 기록하며 견적가격·수량·조건·원문은 저장하지 않습니다."
@@ -507,17 +532,17 @@ def render_s3(state: QuoteReviewState, index: int) -> None:
         research_required = False
 
     is_medical = st.checkbox(
-        "이 품목은 의료기기이며 MFDS exact 모델 확인이 필요함",
+        "의료기기라서 식약처 허가 목록에서 같은 모델인지 확인해야 함",
         key=f"quote_medical_{index}",
     )
     previous = state.identity.get(index)
     mfds_confirmed = bool(previous and previous.mfds_confirmed)
     mfds_detail = previous.detail if previous and previous.mfds_confirmed else ""
-    if is_medical and st.button("MFDS exact 모델 확인", key=f"mfds_exact_{index}"):
+    if is_medical and st.button("식약처 허가 목록에서 확인", key=f"mfds_exact_{index}"):
         mfds_confirmed, mfds_detail = _mfds_exact_confirmed(item)
         state.identity[index] = IdentityResult(
             ready=False,
-            status="MFDS exact 확인" if mfds_confirmed else "MFDS 확인 필요",
+            status="식약처 허가 확인" if mfds_confirmed else "식약처 허가 미확인",
             detail=mfds_detail,
             source="MFDS",
             mapping_verified=mapping is not None,
@@ -535,7 +560,7 @@ def render_s3(state: QuoteReviewState, index: int) -> None:
         state.reset_downstream(after_step=3)
         state.identity[index] = IdentityResult(
             ready=ready,
-            status="식별 완료" if ready else "식별 확인 필요",
+            status="식별 완료" if ready else "식별 전",
             detail=mfds_detail or ("G2B verified mapping 조사요청 등록됨" if research_required else ""),
             source="MFDS+G2B" if is_medical else "G2B",
             mapping_verified=mapping is not None,
@@ -545,7 +570,7 @@ def render_s3(state: QuoteReviewState, index: int) -> None:
         if ready:
             st.success("제품 식별 단계를 완료했습니다.")
         else:
-            st.warning("식별 조건이 아직 충족되지 않았습니다.")
+            st.warning("아직 조건이 채워지지 않았습니다. 위 안내를 먼저 마치세요.")
 
     allowed, reasons = can_enter(4, state)
     for reason in reasons:

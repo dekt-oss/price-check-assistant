@@ -204,5 +204,5 @@ def test_quote_market_ui_exposes_status_summary_and_source_retry() -> None:
     assert '"정상 처리"' in source
     assert '"부분 실패"' in source
     assert '"대기"' in source
-    assert "실패 Source별 재시도" in source
+    assert "실패한 조사만 다시 하기" in source
     assert "_retry_failed_stage" in source
