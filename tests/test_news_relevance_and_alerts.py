@@ -75,10 +75,11 @@ def test_immediate_items_skip_body_mentions_and_route_by_group() -> None:
         "의료기기 회수": [_entry("d", "식약처, 의료기기 회수 명령", ("의료기기 회수",))],
     }
     items = alerts.immediate_items(new, groups, radar.load_source_tiers())
-    assert [i.entry.article_id for i in items] == ["a", "d"]
+    # Only 우리병원 keywords alert immediately; 회수 news now goes to the morning digest.
+    assert [i.entry.article_id for i in items] == ["a"]
     routed = alerts.route(items, groups)
     assert [i.entry.article_id for i in routed["kakao"]] == ["a"] and [i.entry.article_id for i in routed["sms"]] == ["a"]
-    assert [i.entry.article_id for i in routed["email"]] == ["a", "d"]
+    assert [i.entry.article_id for i in routed["email"]] == ["a"]
 
 
 def _items() -> list[alerts.AlertItem]:

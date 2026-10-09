@@ -25,6 +25,7 @@ def test_seed_keyword_groups_match_the_plan() -> None:
     groups = radar.load_keyword_groups()
     assert [group.name for group in groups] == [
         "우리병원",
+        "같은 의료원 병원",
         "경쟁·Benchmark 병원",
         "병원경영",
         "AI·디지털",
@@ -34,10 +35,8 @@ def test_seed_keyword_groups_match_the_plan() -> None:
     our = groups[0]
     assert [keyword.text for keyword in our.keywords] == [
         "부산백병원",
-        "인제대학교 백병원",
+        "인제대 백병원",
         "백중앙의료원",
-        "해운대백병원",
-        "부산진구 종합병원",
     ]
     assert our.keywords[0].alert_label == "즉시"
     all_texts = [keyword.text for group in groups for keyword in group.keywords]
@@ -50,7 +49,7 @@ def test_seed_keyword_groups_match_the_plan() -> None:
 def test_group_toggle_filters_active_keywords() -> None:
     groups = radar.load_keyword_groups()
     active = radar.active_keywords(groups, {"management": False, "procurement": False})
-    assert {keyword.group_key for keyword in active} == {"our_hospital", "peer_hospitals", "ai_digital"}
+    assert {keyword.group_key for keyword in active} == {"our_hospital", "paik_network", "peer_hospitals", "ai_digital"}
 
 
 def test_article_id_ignores_tracking_params_fragment_and_www() -> None:
