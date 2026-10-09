@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, aliased
 
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
+from purchase_price.services import track_b_search_index as search_index
 from purchase_price.services.g2b_product_mapping import (
     G2BMappingError,
     resolve_verified_g2b_mapping,
@@ -58,7 +59,12 @@ def _base_query(current_clause):
     )
 
 
-def _recent_rows(session: Session, statement, *, scan_limit: int = 200) -> list[TrackBDeliveryLine]:
+def _recent_rows(
+    session: Session, statement, *, scan_limit: int = 200, match=None
+) -> list[TrackBDeliveryLine]:
+    if match is not None:
+        # Substring LIKEs cannot use a B-tree index; the side index narrows the rows read.
+        return search_index.matching_rows(session, statement, match, limit=scan_limit)
     return list(
         session.scalars(
             statement.order_by(
@@ -212,12 +218,16 @@ def _strong_model_references(
     # "Flow Cytometer" -> flowcytometer in Production. Exact parsed model or the literal model
     # string in the delivered-item title is strong enough for Research-only evidence.
     conditions = [TrackBDeliveryLine.model_key == model_key]
+    # model_key equality is a special case of containing it (model_key has 4+ characters).
+    searched = [search_index.Contains("model_key", model_key)]
     if raw_model:
         conditions.append(TrackBDeliveryLine.product_title.ilike(f"%{raw_model}%"))
+        searched.append(search_index.Contains("product_title", raw_model))
 
     rows = _recent_rows(
         session,
         _base_query(current_clause).where(or_(*conditions)),
+        match=search_index.AnyOf(tuple(searched)),
     )
     if not rows:
         return ()
@@ -259,6 +269,9 @@ def _strict_product_references(
     rows = _recent_rows(
         session,
         _base_query(current_clause).where(token_clause),
+        match=search_index.AllOf(
+            tuple(search_index.Contains("product_title", token) for token in tokens)
+        ),
     )
     if not rows:
         return ()
