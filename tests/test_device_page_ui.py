@@ -378,3 +378,26 @@ def test_searched_chips_show_only_filled_conditions() -> None:
     chips = dev.searched_chips_html(params, "10-09 14:57")
     assert chips.count("class=\"pc-chip\"") == 3
     assert "&lt;b&gt;" in chips and "A<b>" not in chips
+
+
+def test_udi_input_rejects_obviously_invalid_numbers_before_any_lookup() -> None:
+    assert dev.check_udi_di_input("00000000000000")[1]
+    assert dev.check_udi_di_input("0")[1]
+    assert "13자리" in dev.check_udi_di_input("1234567890123")[1]
+    assert dev.check_udi_di_input("")[1]
+    assert dev.check_udi_di_input("가나다")[1]
+
+
+def test_udi_input_accepts_fourteen_digits_and_label_forms() -> None:
+    assert dev.check_udi_di_input("08801234567895") == ("08801234567895", "")
+    assert dev.check_udi_di_input("0880-1234 567895") == ("08801234567895", "")
+    assert dev.check_udi_di_input("+H123ABC4567890")[1] == ""
+
+
+def test_udi_match_note_shows_the_matched_number() -> None:
+    assert "08801234567895" in dev.udi_match_note_html("08801234567895", 1)
+
+
+def test_company_wording_has_no_stray_eop() -> None:
+    assert "업 허가" not in dev.SUPPLIER_NOTE.replace("업체 허가", "")
+    assert "식약처 업체 허가·신고" in dev.SUPPLIER_NOTE
