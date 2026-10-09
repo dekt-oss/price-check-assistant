@@ -53,6 +53,16 @@ def test_parts_and_repairs_are_not_equipment() -> None:
     assert cm.classify_trade(_trade("396000", spec="(부품)스탠드형보관함")).kind == cm.KIND_PARTS
 
 
+def test_exclusion_example_shows_the_text_that_matched() -> None:
+    cabinet = _trade("396000", business="미래창업원 자동심장충격기(AED) 구매", spec="(부품)스탠드형보관함")
+    market = cm.build_category_market([cabinet], product_name="저출력심장충격기")
+    assert market.exclusions[0].examples == ("(부품)스탠드형보관함",)
+    sensor = _trade("486090", business="New Flow Sensor 구입")
+    assert cm.build_category_market([sensor], product_name="가스 마취기").exclusions[0].examples == (
+        "New Flow Sensor 구입",
+    )
+
+
 def test_replacing_old_equipment_is_still_a_purchase() -> None:
     assert cm.classify_trade(_trade("90000000", business="노후 마취기 교체 구매")).kind == cm.KIND_EQUIPMENT
 

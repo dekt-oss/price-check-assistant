@@ -395,19 +395,24 @@ def year_levels(rows: Sequence[ClassifiedTrade]) -> tuple[YearLevel, ...]:
     )
 
 
+def example_text(row: ClassifiedTrade) -> str:
+    """The text that shows why the row was left out: the 규격 when the parts word is there
+    ("(부품)스탠드형보관함" under an "AED 구매" 사업명), else the 사업명."""
+
+    trade = row.trade
+    word = row.reason.strip("'").casefold()
+    if row.kind == KIND_PARTS and word and word in trade.specification.casefold() and word not in trade.business_name.casefold():
+        return trade.specification
+    return trade.business_name or trade.product_title
+
+
 def exclusions(rows: Sequence[ClassifiedTrade]) -> tuple[Exclusion, ...]:
     output: list[Exclusion] = []
     for kind in (KIND_PARTS, KIND_VETERINARY, KIND_OTHER_UNIT, KIND_PRICE_GAP):
         matched = [row for row in rows if row.kind == kind]
         if not matched:
             continue
-        examples = tuple(
-            dict.fromkeys(
-                (row.trade.business_name or row.trade.product_title)[:30]
-                for row in matched
-                if (row.trade.business_name or row.trade.product_title)
-            )
-        )[:2]
+        examples = tuple(dict.fromkeys(text[:30] for text in (example_text(row) for row in matched) if text))[:2]
         output.append(Exclusion(kind, KIND_LABELS[kind], len(matched), examples))
     return tuple(output)
 
