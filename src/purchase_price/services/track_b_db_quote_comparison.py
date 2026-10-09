@@ -29,6 +29,11 @@ from purchase_price.services.product_matching import (
     parse_g2b_identity,
 )
 
+# With the 2021-2025 history some models have over 1,000 trades (NT-381.B 1,108, CU-SP1 1,022 on
+# 2026-10-10); the old 500-row cap kept only the newest 500, so 5년/전체 counts and prices were wrong.
+MAX_LOOKUP_LIMIT = 5_000
+LOOKUP_LIMIT_5000 = True
+
 
 @dataclass(frozen=True)
 class TrackBIngestResult:
@@ -717,8 +722,8 @@ def compare_track_b_quote(
     limit: int = 50,
 ) -> TrackBQuoteComparison:
     """Read current Track B lines as observed Research, never as an automatic fair-price verdict."""
-    if limit < 1 or limit > 500:
-        raise ValueError("limit must be between 1 and 500")
+    if limit < 1 or limit > MAX_LOOKUP_LIMIT:
+        raise ValueError(f"limit must be between 1 and {MAX_LOOKUP_LIMIT}")
     model_key = normalize_text(query.model_name)
     model_keys = equivalent_model_keys(query.model_name)
     class_key = normalize_text(query.product_name)
@@ -813,8 +818,8 @@ def compare_track_b_models_batch(
     detailed evidence remains lazy until one model is opened.
     """
 
-    if limit_per_model < 1 or limit_per_model > 500:
-        raise ValueError("limit_per_model must be between 1 and 500")
+    if limit_per_model < 1 or limit_per_model > MAX_LOOKUP_LIMIT:
+        raise ValueError(f"limit_per_model must be between 1 and {MAX_LOOKUP_LIMIT}")
     queries = tuple(queries)
     if not queries:
         return ()

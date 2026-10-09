@@ -20,7 +20,8 @@ from purchase_price.storage.r2_serving_index import R2ServingIndexRef, R2Serving
 from purchase_price.storage.r2_state import R2OperationalStateStore
 from purchase_price.storage.streaming_gzip import drop_file_cache
 
-WORKSPACE_LOOKUP_LIMIT = 500
+WORKSPACE_LOOKUP_LIMIT = 5_000  # every trade of a model; see MAX_LOOKUP_LIMIT
+LOOKUP_LIMIT_5000 = True
 
 POINTER_SCHEMA = "track-b-serving-index-pointer-v1"
 _CACHE_DIR = Path(tempfile.gettempdir()) / "price-check-track-b"

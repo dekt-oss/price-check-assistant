@@ -132,7 +132,7 @@ def test_dashboard_reloads_pre_search_index_modules_in_dependency_order() -> Non
 
 
 def test_native_snapshot_lookup_reads_beyond_50_rows(tmp_path) -> None:
-    """The workspace opens the native snapshot; its lookup must use the 500-row limit."""
+    """The workspace opens the native snapshot; its lookup must use the 5,000-row limit."""
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
@@ -185,7 +185,7 @@ def test_native_snapshot_lookup_reads_beyond_50_rows(tmp_path) -> None:
 
     result = snapshot.lookup(ProductQuery(product_name="", model_name="NT-SG"), quote_unit_price=None)
 
-    assert native.WORKSPACE_LOOKUP_LIMIT == 500
+    assert native.WORKSPACE_LOOKUP_LIMIT == 5_000
     assert len(result.candidates) == 60
     session.close()
     engine.dispose()

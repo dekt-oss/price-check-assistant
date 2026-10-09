@@ -15,7 +15,8 @@ from purchase_price.schemas import ProductQuery
 from purchase_price.services import track_b_r2_quote_index as legacy_track_b_r2
 from purchase_price.storage.r2 import R2ConfigurationError, R2IntegrityError
 
-WORKSPACE_LOOKUP_LIMIT = 500
+WORKSPACE_LOOKUP_LIMIT = 5_000  # every trade of a model; see MAX_LOOKUP_LIMIT
+LOOKUP_LIMIT_5000 = True
 
 
 @dataclass
