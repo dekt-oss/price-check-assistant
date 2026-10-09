@@ -85,3 +85,44 @@ def test_index_stores_use_the_streaming_writer() -> None:
         assert "write_verified_gzip_body(" in download
         assert ".read()" not in download
         assert "gzip.decompress" not in download
+
+
+def test_written_index_is_dropped_from_the_page_cache_as_it_goes(monkeypatch, tmp_path) -> None:
+    """Streamlit Cloud counts page cache against the app's memory (2026-10-09 resource-limit stop)."""
+
+    import gzip as _gzip
+    import hashlib as _hashlib
+    import io as _io
+    import os as _os
+
+    from purchase_price.storage import streaming_gzip
+
+    advised: list[int] = []
+    synced: list[int] = []
+    monkeypatch.setattr(_os, "posix_fadvise", lambda fd, off, length, advice: advised.append(fd), raising=False)
+    monkeypatch.setattr(_os, "POSIX_FADV_DONTNEED", 4, raising=False)
+    monkeypatch.setattr(_os, "fdatasync", lambda fd: synced.append(fd), raising=False)
+    monkeypatch.setattr(streaming_gzip, "DROP_CACHE_EVERY_BYTES", 1000)
+
+    raw = b"y" * 10_500
+    streaming_gzip.write_verified_gzip_body(
+        _io.BytesIO(_gzip.compress(raw)),
+        tmp_path / "index.sqlite",
+        expected_sha256=_hashlib.sha256(raw).hexdigest(),
+        invalid_gzip_message="bad",
+        hash_mismatch_prefix="bad",
+        chunk_bytes=500,
+    )
+
+    # 10,500 bytes in 500-byte chunks: a drop every 1,000 bytes (10) plus one at the end.
+    assert len(advised) == 11 and len(synced) == 11
+    assert (tmp_path / "index.sqlite").read_bytes() == raw
+
+
+def test_drop_file_cache_is_a_no_op_without_posix_fadvise(monkeypatch) -> None:
+    import os as _os
+
+    from purchase_price.storage.streaming_gzip import drop_file_cache
+
+    monkeypatch.delattr(_os, "posix_fadvise", raising=False)
+    drop_file_cache(0)  # must not raise
