@@ -1320,14 +1320,13 @@ def _render_overview(state: dict[str, Any]) -> None:
         matched_from = str(state.get("matched_from") or "")
         if matched_from and normalize_text(matched_from) != normalize_text(heading):
             st.caption(
-                f"‘{matched_from}’와 이름이 똑같은 업체는 없어, 이름에 ‘{matched_from}’"
+                f"‘{matched_from}’와 이름이 똑같은 업체는 없어, "
                 + (
-                    "(또는 같은 회사의 다른 표기)"
-                    if search_routing.company_search_needles(matched_from)[1:]
-                    else ""
+                    f"이름에 ‘{matched_from}’가 들어간 {heading}를 보여줍니다. "
+                    if search_routing.company_matches_needle(heading, normalize_text(matched_from))
+                    else f"같은 회사를 부르는 다른 이름이 들어간 {heading}를 보여줍니다. "
                 )
-                + f"가 들어간 {heading}를 보여줍니다. 업체 이름은 바꾸지 않고 등록된 그대로 보여줍니다. "
-                "표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
+                + "업체 이름은 바꾸지 않고 등록된 그대로 보여줍니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
             )
         elif switched_from:
             st.caption(

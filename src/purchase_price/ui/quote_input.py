@@ -97,11 +97,13 @@ def parse_quote_input(text: object) -> QuoteInput:
 
 
 def quote_error_message(error: str, previous: Decimal | None) -> str:
-    """The warning under the box; it names the earlier value only when there is one."""
+    """The warning under the box (the reason itself sits next to the box): what is compared now.
+    It names the earlier value only when there is one."""
 
+    lead = "입력한 견적 단가를 쓸 수 없어" if error else "견적 단가가 없어"
     if previous is not None and previous > 0:
-        return f"{error} 직전에 넣은 {previous:,.0f}원으로 비교합니다."
-    return f"{error} 견적 위치는 표시하지 않습니다."
+        return f"{lead} 직전에 넣은 {previous:,.0f}원으로 비교합니다."
+    return f"{lead} 견적 위치는 표시하지 않습니다."
 
 
 def percent_delta(quote: Decimal, base: Decimal) -> Decimal:

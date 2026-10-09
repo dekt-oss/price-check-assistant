@@ -61,7 +61,11 @@ def test_text_is_refused_with_an_example(typed: str) -> None:
 def test_error_message_names_the_previous_value_only_when_there_is_one() -> None:
     assert "직전" not in qi.quote_error_message(qi.MSG_NOT_POSITIVE, None)
     assert "견적 위치는 표시하지 않습니다" in qi.quote_error_message(qi.MSG_NOT_POSITIVE, None)
-    assert "직전에 넣은 1,800,000원으로 비교합니다" in qi.quote_error_message(qi.MSG_NOT_NUMBER, Decimal("1800000"))
+    assert qi.quote_error_message(qi.MSG_NOT_NUMBER, Decimal("1800000")) == (
+        "입력한 견적 단가를 쓸 수 없어 직전에 넣은 1,800,000원으로 비교합니다."
+    )
+    # The reason sits next to the box; the warning only says what is compared now.
+    assert qi.MSG_NOT_NUMBER not in qi.quote_error_message(qi.MSG_NOT_NUMBER, None)
 
 
 def test_difference_phrase_has_separators_and_switches_to_times() -> None:
