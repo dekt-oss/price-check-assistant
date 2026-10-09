@@ -18,6 +18,7 @@ from purchase_price.services.track_b_pipeline_state import SERVING_INDEX_STATE_N
 from purchase_price.storage.r2 import R2ConfigurationError, R2IntegrityError
 from purchase_price.storage.r2_serving_index import R2ServingIndexRef, R2ServingIndexStore
 from purchase_price.storage.r2_state import R2OperationalStateStore
+from purchase_price.storage.streaming_gzip import drop_file_cache
 
 WORKSPACE_LOOKUP_LIMIT = 500
 
@@ -32,8 +33,11 @@ _LAST_GOOD_SNAPSHOT: tuple[Path, dict[str, object]] | None = None
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        for index, chunk in enumerate(iter(lambda: handle.read(1024 * 1024), b"")):
             digest.update(chunk)
+            if index % 64 == 63:
+                drop_file_cache(handle.fileno())  # hashing 2 GB must not fill the page cache
+        drop_file_cache(handle.fileno())
     return digest.hexdigest()
 
 

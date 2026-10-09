@@ -23,6 +23,26 @@ from typing import Any
 from purchase_price.storage.r2 import R2IntegrityError
 
 CHUNK_BYTES = 1024 * 1024
+# Streamlit Cloud counts the page cache of files the app writes against its ~2.7 GB memory limit.
+# Writing the ~2.9 GB of indexes after each restart put the app over that limit (2026-10-09), so
+# written data is flushed to disk and dropped from the cache every 64 MB.
+DROP_CACHE_EVERY_BYTES = 64 * 1024 * 1024
+
+
+def drop_file_cache(fileno: int) -> None:
+    """Write dirty pages out and tell the kernel it may forget this file's cached pages.
+
+    No-op where ``posix_fadvise`` does not exist (Windows, local development).
+    """
+
+    advise = getattr(os, "posix_fadvise", None)
+    if advise is None:
+        return
+    try:
+        os.fdatasync(fileno)
+        advise(fileno, 0, 0, os.POSIX_FADV_DONTNEED)
+    except OSError:
+        pass
 
 # The start-up prefetch reads progress of downloads it starts without threading a callback
 # through every loader: it registers one for its own thread (see report_progress_to).
@@ -90,6 +110,7 @@ def write_verified_gzip_body(
         ) as handle:
             temp_path = Path(handle.name)
             try:
+                written_since_drop = 0
                 with gzip.GzipFile(fileobj=body, mode="rb") as stream:
                     while True:
                         chunk = stream.read(chunk_bytes)
@@ -97,11 +118,15 @@ def write_verified_gzip_body(
                             break
                         digest.update(chunk)
                         handle.write(chunk)
+                        written_since_drop += len(chunk)
+                        if written_since_drop >= DROP_CACHE_EVERY_BYTES:
+                            handle.flush()
+                            drop_file_cache(handle.fileno())
+                            written_since_drop = 0
             except (gzip.BadGzipFile, EOFError, zlib.error) as exc:
                 raise R2IntegrityError(invalid_gzip_message) from exc
-            # No fsync: forcing 2 GB to disk added seconds to every cold start, and these are
-            # rebuildable caches whose SHA-256 the loaders check before first use in a process.
             handle.flush()
+            drop_file_cache(handle.fileno())
         actual = digest.hexdigest()
         if actual != expected_sha256:
             raise R2IntegrityError(f"{hash_mismatch_prefix}: expected {expected_sha256}, got {actual}")

@@ -23,6 +23,7 @@ from purchase_price.storage.r2_mfds_identity_index import (
     R2MfdsIdentityIndexStore,
 )
 from purchase_price.storage.r2_state import R2OperationalStateStore
+from purchase_price.storage.streaming_gzip import drop_file_cache
 
 MFDS_IDENTITY_POINTER_STATE = "mfds-identity-index-pointer"
 MFDS_IDENTITY_POINTER_SCHEMA = "mfds-identity-index-pointer-v1"
@@ -53,8 +54,11 @@ def _ref_from_pointer(payload: Mapping[str, Any]) -> MfdsIdentityIndexRef:
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        for index, chunk in enumerate(iter(lambda: handle.read(1024 * 1024), b"")):
             digest.update(chunk)
+            if index % 64 == 63:
+                drop_file_cache(handle.fileno())  # hashing 2 GB must not fill the page cache
+        drop_file_cache(handle.fileno())
     return digest.hexdigest()
 
 
