@@ -14,6 +14,7 @@ import html
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -774,3 +775,153 @@ def unit_group_rows(
             normalized.append({("1단위 중앙값" if k.endswith("중앙값") else k): v for k, v in r.items()})
         ordered = normalized
     return ordered[:limit]
+
+
+# ── 거래 기간: 기본 최근 3년, 거래가 없으면 5년·전체로 넓히기 ──
+
+SEARCH_PERIOD_V1 = True
+PERIOD_CHOICES: tuple[tuple[str, int | None], ...] = (
+    ("최근 3년", 3),
+    ("최근 5년", 5),
+    ("전체", None),
+)
+DEFAULT_PERIOD_LABEL = "최근 3년"
+
+
+def period_years(label: object) -> int | None:
+    return dict(PERIOD_CHOICES).get(str(label or ""), 3)
+
+
+def period_cutoff(years: int | None, today: date) -> date | None:
+    """First day included; None means every collected year."""
+
+    if years is None:
+        return None
+    try:
+        return today.replace(year=today.year - years) + timedelta(days=1)
+    except ValueError:  # 2월 29일
+        return today.replace(year=today.year - years, day=28) + timedelta(days=1)
+
+
+def _trade_date(value: object) -> date | None:
+    text = str(value or "").strip()[:10]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def in_period(value: object, cutoff: date | None) -> bool:
+    """Trades without a readable date stay visible in every period."""
+
+    if cutoff is None:
+        return True
+    traded = _trade_date(value)
+    return traded is None or traded >= cutoff
+
+
+def filter_candidates(candidates: Iterable[Any], cutoff: date | None) -> tuple[Any, ...]:
+    return tuple(c for c in candidates if in_period(getattr(c, "transaction_date", None), cutoff))
+
+
+def filter_rows(rows: Iterable[Mapping[str, object]], cutoff: date | None) -> list[Mapping[str, object]]:
+    return [row for row in rows if in_period(row.get("거래일"), cutoff)]
+
+
+@dataclass(frozen=True)
+class PeriodChoice:
+    label: str
+    cutoff: date | None
+    widened_from: str | None = None
+
+    @property
+    def note(self) -> str | None:
+        if self.widened_from is None:
+            return None
+        return f"{self.widened_from} 안에는 같은 제품 거래가 없어 {self.label}으로 넓혀 보여줍니다."
+
+
+def choose_period(
+    direct_dates: Sequence[object],
+    *,
+    requested: object,
+    user_chose: bool,
+    today: date,
+) -> PeriodChoice:
+    """Use the requested period; when the reader did not pick one, widen until a trade shows up."""
+
+    label = str(requested or DEFAULT_PERIOD_LABEL)
+    if label not in dict(PERIOD_CHOICES):
+        label = DEFAULT_PERIOD_LABEL
+    if user_chose:
+        return PeriodChoice(label, period_cutoff(period_years(label), today))
+    for candidate_label, years in PERIOD_CHOICES:
+        cutoff = period_cutoff(years, today)
+        if any(in_period(value, cutoff) for value in direct_dates):
+            widened = DEFAULT_PERIOD_LABEL if candidate_label != DEFAULT_PERIOD_LABEL else None
+            return PeriodChoice(candidate_label, cutoff, widened)
+    return PeriodChoice(DEFAULT_PERIOD_LABEL, period_cutoff(3, today))
+
+
+def period_caption(choice: PeriodChoice, *, oldest_collected: str | None = None) -> str:
+    if choice.cutoff is None:
+        since = f"{oldest_collected} 이후 수집된 " if oldest_collected else "수집된 "
+        return f"거래 기간 · 전체 ({since}모든 거래)"
+    return f"거래 기간 · {choice.label} ({choice.cutoff.isoformat()} 이후 거래)"
+
+
+def year_summary_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    main_unit: str | None,
+) -> list[dict[str, object]]:
+    """One line per year, newest first. Prices use only the main unit (대·set are never mixed)."""
+
+    main = unit_key(main_unit)
+    years: dict[str, list[Mapping[str, object]]] = {}
+    for row in rows:
+        traded = _trade_date(row.get("거래일"))
+        years.setdefault(str(traded.year) if traded else "날짜 미확인", []).append(row)
+    output: list[dict[str, object]] = []
+    ordered = sorted((y for y in years if y.isdigit()), reverse=True) + [
+        y for y in years if not y.isdigit()
+    ]
+    label = per_unit_label(main_unit).strip() or "1단위"
+    for year in ordered:
+        year_rows = years[year]
+        prices = sorted(
+            price
+            for row in year_rows
+            if (price := _decimal(row.get("가격"))) is not None
+            and (not main or unit_key(row.get("단위")) in {"", main})
+        )
+        other = sum(
+            1 for row in year_rows if main and unit_key(row.get("단위")) not in {"", main}
+        )
+        quantity = sum(
+            (q for row in year_rows if (q := _quantity(row.get("수량"))) is not None
+             and (not main or unit_key(row.get("단위")) in {"", main})),
+            Decimal("0"),
+        )
+        output.append(
+            {
+                "연도": year,
+                "거래 건수": len(year_rows),
+                "총수량": f"{_number(quantity)} {main_unit or ''}".strip() if quantity else "확인 안 됨",
+                f"{label} 중앙값": _won(_median(prices)) if prices else "—",
+                f"{label} 최저~최고": (
+                    f"{_won(prices[0])} ~ {_won(prices[-1])}" if prices else "—"
+                ),
+                "다른 단위 거래": f"{other}건" if other else "",
+            }
+        )
+    return output
+
+
+def _median(values: Sequence[Decimal]) -> Decimal | None:
+    if not values:
+        return None
+    middle = len(values) // 2
+    if len(values) % 2:
+        return values[middle]
+    return (values[middle - 1] + values[middle]) / 2

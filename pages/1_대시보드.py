@@ -191,7 +191,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10B"),
     ("purchase_price.services.g2b_delivery_record", "G2B_LINK_V1"),
-    ("purchase_price.ui.result_summary", "BUSINESS_NAME_V1"),
+    ("purchase_price.ui.result_summary", "SEARCH_PERIOD_V1"),
 )
 
 
@@ -1518,6 +1518,62 @@ def _main_unit_view(track_b: Any) -> tuple[Any, Any]:
         return track_b, split
 
 
+def _apply_search_period(track_b: Any, direct_rows, reference_rows, *, slot, quote_key: str):
+    """Filter one result to the chosen trade period (default 최근 3년, widened when empty)."""
+
+    key = f"workspace_period::{quote_key}"
+    picked_key = f"{key}::picked"
+    today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    direct_dates = [
+        getattr(candidate, "transaction_date", None)
+        for candidate in strict_comparison_candidates(track_b)
+    ] or [row.get("거래일") for row in direct_rows]
+    user_chose = bool(st.session_state.get(picked_key))
+    choice = result_summary_ui.choose_period(
+        direct_dates,
+        requested=st.session_state.get(key),
+        user_chose=user_chose,
+        today=today,
+    )
+    if not user_chose:
+        st.session_state[key] = choice.label
+
+    def _mark_picked() -> None:
+        st.session_state[picked_key] = True
+
+    slot.segmented_control(
+        "거래 기간",
+        options=[label for label, _years in result_summary_ui.PERIOD_CHOICES],
+        key=key,
+        on_change=_mark_picked,
+    )
+    if user_chose:
+        # Deselecting the active option leaves None; fall back to the default period.
+        choice = result_summary_ui.choose_period(
+            direct_dates,
+            requested=st.session_state.get(key) or result_summary_ui.DEFAULT_PERIOD_LABEL,
+            user_chose=True,
+            today=today,
+        )
+    cutoff = choice.cutoff
+    try:
+        track_b = dataclasses.replace(
+            track_b,
+            candidates=result_summary_ui.filter_candidates(getattr(track_b, "candidates", ()) or (), cutoff),
+            reference_candidates=result_summary_ui.filter_candidates(
+                getattr(track_b, "reference_candidates", ()) or (), cutoff
+            ),
+        )
+    except TypeError:
+        pass
+    return (
+        track_b,
+        result_summary_ui.filter_rows(direct_rows, cutoff),
+        result_summary_ui.filter_rows(reference_rows, cutoff),
+        choice,
+    )
+
+
 def _quote_item_summary(result: dict[str, Any]) -> dict[str, object]:
     if result.get("route") != "workspace":
         return {"needs_choice": True}
@@ -1752,7 +1808,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     conditions_key = f"workspace_quote_conditions::{quote_key}"
     if price_key not in st.session_state:
         st.session_state[price_key] = default_quote
-    quote_col, _spacer = st.columns([2.2, 5])
+    quote_col, period_col, _spacer = st.columns([2.2, 3.0, 2.0], vertical_alignment="bottom")
     quote_text = quote_col.text_input(
         "내 견적가 (원)",
         key=price_key,
@@ -1766,6 +1822,13 @@ def _render_search_result(state: dict[str, Any]) -> None:
     except ValueError:
         workspace_quote = review_input.quote_unit_price
         st.warning("내 견적가는 숫자로만 입력하세요. 직전 값으로 비교합니다.")
+
+    # Default 3 years; widen to 5 years / everything when the period holds no same-product trade.
+    track_b, direct_rows, reference_rows, period_choice = _apply_search_period(
+        track_b, direct_rows, reference_rows, slot=period_col, quote_key=quote_key
+    )
+    strict_count = len(direct_rows)
+    reference_count = len(reference_rows)
 
     stats_track_b, unit_split = _main_unit_view(track_b)
     stats = build_purchase_workspace_stats(
@@ -1783,6 +1846,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
         unit=unit_split.main_unit,
     )
     st.markdown(result_summary_ui.render_conclusion_html(conclusion), unsafe_allow_html=True)
+    if period_choice.note:
+        st.info(period_choice.note)
+    st.caption(result_summary_ui.period_caption(period_choice, oldest_collected="2021년"))
     unit_note = result_summary_ui.unit_note(unit_split)
     if unit_note:
         st.caption(unit_note)
@@ -2077,6 +2143,11 @@ def _render_search_result(state: dict[str, Any]) -> None:
                     else ""
                 )
             )
+        year_rows = result_summary_ui.year_summary_rows(direct_rows, main_unit=unit_split.main_unit)
+        if len(year_rows) > 1:
+            st.markdown("##### 연도별")
+            st.dataframe(year_rows, use_container_width=True, hide_index=True)
+            st.caption("가격은 위 결론과 같은 단위만 묶었습니다. 다른 단위 거래는 건수만 따로 셉니다.")
         record_view_key = f"workspace_record_view::{quote_key}"
         record_table_key = f"workspace_direct_table::{quote_key}"
         record_applied_key = f"workspace_direct_table_applied::{quote_key}"
@@ -2661,7 +2732,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v14" style="display:none">purchase-workspace-runtime-v14</span>'
     '<span id="purchase-workspace-runtime-v15" style="display:none">purchase-workspace-runtime-v15</span>'
     '<span id="purchase-workspace-runtime-v16" style="display:none">purchase-workspace-runtime-v16</span>'
-    '<span id="purchase-workspace-runtime-v20" style="display:none">purchase-workspace-runtime-v20</span>'
+    '<span id="purchase-workspace-runtime-v21" style="display:none">purchase-workspace-runtime-v21</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
