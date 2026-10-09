@@ -367,6 +367,32 @@ def test_mfds_check_done_line_says_what_changed():
     assert waiting == ""
 
 
+def test_mfds_check_done_line_explains_a_different_registered_count():
+    text = _text(
+        rl.mfds_check_done_html(
+            status="success",
+            active_model_count=79,
+            model_count=168,
+            companies_before=0,
+            companies_after=0,
+            registered_model_count=134,
+        )
+    )
+    assert "식약처 모델 목록의 같은 품목 모델 168개 중 판매 가능 79개" in text
+    assert "등록 모델 134개는 식약처 제품정보 기준이라 개수가 다릅니다" in text
+    same = _text(
+        rl.mfds_check_done_html(
+            status="success",
+            active_model_count=1,
+            model_count=5,
+            companies_before=0,
+            companies_after=0,
+            registered_model_count=5,
+        )
+    )
+    assert "개수가 다릅니다" not in same
+
+
 def test_settings_card_and_cards_fit_a_narrow_column():
     css = rl.RESULT_CSS
     assert ".st-key-rl_settings {container-type:inline-size;}" in css

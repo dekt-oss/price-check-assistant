@@ -91,3 +91,27 @@ def test_home_structured_quote_fields_use_identity_canonicalization() -> None:
     assert "lookup_key = raw_search or model_name.strip() or product_name.strip()" in home_source
     assert "canonicalize_product_query(base_query, identity)" in home_source
     assert "canonical.query.model_name" in home_source
+
+
+def test_handoff_remembers_where_it_came_from() -> None:
+    device = parse_purchase_workspace_handoff({"model_name": "HeartOn A16-DS", "source": "device"})
+    assert device is not None and device.source == "device"
+    assert device.to_session_payload()["source"] == "device"
+    unknown = parse_purchase_workspace_handoff({"model_name": "M40", "source": "somewhere"})
+    assert unknown is not None and unknown.source == "" and "source" not in unknown.to_session_payload()
+
+
+def test_only_a_real_quote_review_handoff_shows_the_quote_strip() -> None:
+    home = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+    device_page = Path("pages/4_의료기기_조회.py").read_text(encoding="utf-8")
+    quote = Path("src/purchase_price/ui/quote_market_research.py").read_text(encoding="utf-8")
+    assert '"source": "device"' in device_page
+    assert '"source": "quote_review"' in quote
+    branch = home[home.index('if handoff_source == "device":') :]
+    # Device: its own back link; the quote strip only with a loaded quote (file and items).
+    assert (
+        branch.index('search_state["origin"] = "device"')
+        < branch.index("elif isinstance(review_state, QuoteReviewState) and review_state.items:")
+        < branch.index('search_state["origin"] = "quote_review"')
+    )
+    assert '"의료기기 허가·안전에서 연 제품입니다", "pages/4_의료기기_조회.py"' in home

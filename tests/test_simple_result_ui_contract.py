@@ -137,7 +137,7 @@ def test_dashboard_reloads_retained_pre_simplification_ui_modules() -> None:
         ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10C"),
         ("purchase_price.ui.result_summary", "RESULT_SUMMARY_V3"),
         ("purchase_price.ui.search_overviews", "OVERVIEW_V2"),
-        ("purchase_price.ui.result_layout", "RESULT_LAYOUT_V2"),
+        ("purchase_price.ui.result_layout", "RESULT_LAYOUT_V3"),
     ):
         assert f'("{name}", "{marker}")' in source
         assert getattr(importlib.import_module(name), marker) is True

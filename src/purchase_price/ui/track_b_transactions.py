@@ -84,6 +84,23 @@ GROUP_QUANTITY_NORMALIZED = True
 # Runtime marker: rows carry 원천기록 so the dashboard can open the archived record.
 SOURCE_RECORD_COLUMN = True
 BUSINESS_NAME_COLUMN = True
+# Runtime marker: 금액검증 shows plain words instead of "consistent"/"inconsistent".
+AMOUNT_CHECK_WORDS = True
+
+# Same wording as the 견적서 검토 table (quote_market_research.amount_check_label, PR #325).
+AMOUNT_CHECK_LABELS = {
+    "consistent": "금액 일치",
+    "inconsistent": "금액 확인 필요",
+    "not_checked": "확인 불가",
+    "unknown": "확인 불가",
+}
+
+
+def amount_check_label(value: Any) -> str:
+    """단가×수량과 총액을 맞춰 본 결과를 쉬운 말로; 모르는 값은 원문 영어를 보여주지 않는다."""
+
+    text = str(getattr(value, "value", value) or "").strip().lower()
+    return AMOUNT_CHECK_LABELS.get(text, "확인 불가")
 
 
 def _number_text(value: Any) -> str:
@@ -175,7 +192,7 @@ def _transaction_row(candidate: Any, *, comparison_level: str) -> dict[str, obje
         "총액": _money_text(getattr(candidate, "total_amount", None))
         if getattr(candidate, "total_amount", None) is not None
         else "미확인",
-        "금액검증": getattr(candidate, "amount_check", None) or "미확인",
+        "금액검증": amount_check_label(getattr(candidate, "amount_check", None)),
         "제조사": getattr(candidate, "manufacturer", None) or "미확인",
         "모델": getattr(candidate, "model_name", None) or "미확인",
         "규격": getattr(candidate, "specification", None) or "미확인",

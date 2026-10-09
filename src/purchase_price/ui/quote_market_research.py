@@ -80,6 +80,8 @@ from purchase_price.ui.widgets import (
 )
 
 QUOTE_REVIEW_ACCEPTANCE_V2 = True
+# The handoff to 가격 조사 says it came from 견적서 검토 (2026-10-09).
+HANDOFF_SOURCE_V1 = True
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(
@@ -927,7 +929,7 @@ def _render_detail_card(state: QuoteReviewState, comparison: QuoteItemComparison
             type="primary",
             use_container_width=True,
         ):
-            st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = handoff.to_session_payload()
+            st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = {**handoff.to_session_payload(), "source": "quote_review"}
             st.switch_page("pages/1_대시보드.py")
     else:
         st.caption("품명이나 모델명이 없어 가격 조사 화면으로 넘길 수 없습니다.")

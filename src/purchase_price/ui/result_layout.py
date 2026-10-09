@@ -31,6 +31,8 @@ RESULT_LAYOUT_V1 = True
 # Runtime marker (2026-10-09 acceptance fixes): top-aligned conclusion with the chip row inside,
 # narrow-width settings card, empty state, record table. The dashboard reloads a retained copy.
 RESULT_LAYOUT_V2 = True
+# The 판매 가능 확인 line names its list and explains a different registered-model count.
+RESULT_LAYOUT_V3 = True
 
 RESULT_CSS = """
 <style>
@@ -623,8 +625,14 @@ def mfds_check_done_html(
     model_count: int,
     companies_before: int,
     companies_after: int,
+    registered_model_count: int | None = None,
 ) -> str:
-    """One line where the 'check sale status' button was, saying what the check changed."""
+    """One line where the 'check sale status' button was, saying what the check changed.
+
+    ``registered_model_count``: the models listed below (식약처 제품정보). The 형명 model list this
+    check reads is a different 식약처 dataset, so the two totals differ (HeartOn A16-DS: 168 here,
+    134 below); say so instead of showing two unexplained totals.
+    """
 
     if status == "failure":
         return (
@@ -635,7 +643,11 @@ def mfds_check_done_html(
         return ""
     parts = ["식약처 판매 가능·취소 확인 완료"]
     if model_count:
-        parts.append(f"같은 품목 모델 {model_count:,}개 중 판매 가능 {active_model_count:,}개")
+        parts.append(f"식약처 모델 목록의 같은 품목 모델 {model_count:,}개 중 판매 가능 {active_model_count:,}개")
+        if registered_model_count and registered_model_count != model_count:
+            parts.append(
+                f"아래 표의 등록 모델 {registered_model_count:,}개는 식약처 제품정보 기준이라 개수가 다릅니다"
+            )
     else:
         parts.append("식약처 모델 목록에서 같은 품목 모델을 찾지 못했습니다")
     if companies_before and companies_after != companies_before:
