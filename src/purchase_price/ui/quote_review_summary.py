@@ -11,6 +11,9 @@ from purchase_price.services.quote_comparable_approval import quote_evidence_pai
 from purchase_price.ui.quote_review_layout import comparable_trade_stats
 from purchase_price.ui.quote_review_state import QuoteReviewState
 
+# Runtime marker: re-imports comparable_trade_stats, which now leaves 입력 오류 의심 trades out.
+QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
+
 
 @dataclass(frozen=True)
 class PurchaseReviewSummaryRow:

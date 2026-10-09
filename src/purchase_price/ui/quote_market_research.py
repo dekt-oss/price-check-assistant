@@ -94,6 +94,8 @@ QUOTE_REVIEW_ACCEPTANCE_V3 = True
 HANDOFF_SOURCE_V1 = True
 # The selected-item card shows 견적서에 적힌 값 / 확인된 제품 grids (2026-10-10).
 QUOTE_REVIEW_IDENTITY_V1 = True
+# Runtime marker: re-imports track_b_transactions / quote_review_layout (입력 오류 의심 trades left out).
+QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(

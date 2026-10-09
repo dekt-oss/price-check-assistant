@@ -37,6 +37,9 @@ OVERVIEW_ROW_LIMIT = 10
 # Runtime marker (2026-10-09 acceptance fixes): overview_model_keys, collected-count labels,
 # quote_item_rows(current_index=...).
 RESULT_SUMMARY_V3 = True
+# Runtime marker (2026-10-10): entry_error_line / entry_error_notice and the excluded count in the
+# conclusion; 입력 오류 의심 trades never enter a price.
+ENTRY_ERRORS_V1 = True
 # Overview and same-item tables count the collected index only (no live days, all periods).
 COLLECTED_TRADES_LABEL = "같은 제품 거래(수집분)"
 
@@ -124,6 +127,13 @@ class Conclusion:
     band: PriceBand | None
 
 
+def entry_error_notice(count: int) -> str:
+    return (
+        f"단가가 10원 이하로 적힌 거래 {count}건(입력 오류 의심)은 "
+        "가격 계산에서 뺐습니다. 원문을 확인하세요."
+    )
+
+
 def _percent(value: Decimal, base: Decimal) -> Decimal:
     return ((value - base) / base * 100).quantize(Decimal("0.1"))
 
@@ -151,6 +161,7 @@ def build_conclusion(
 
     direct = int(getattr(stats, "direct_count", 0) or 0)
     references = int(getattr(stats, "reference_count", 0) or 0)
+    excluded = int(getattr(stats, "entry_error_count", 0) or 0)
     low = getattr(stats, "min_price", None)
     high = getattr(stats, "max_price", None)
     mid = getattr(stats, "median_price", None)
@@ -175,12 +186,15 @@ def build_conclusion(
         )
 
     if direct == 0 or low is None or high is None:
-        detail = (
-            f"이름이 비슷한 품목의 거래 {references}건은 같은 제품인지 확인되지 않아 "
-            "가격 비교에 넣지 않았습니다. 아래에서 참고만 하세요."
-            if references
-            else None
-        )
+        notes = []
+        if excluded:
+            notes.append(entry_error_notice(excluded))
+        if references:
+            notes.append(
+                f"이름이 비슷한 품목의 거래 {references}건은 같은 제품인지 확인되지 않아 "
+                "가격 비교에 넣지 않았습니다. 아래에서 참고만 하세요."
+            )
+        detail = " ".join(notes) or None
         return Conclusion(
             headline="같은 제품으로 확인된 나라장터 거래가 없습니다.",
             detail=detail,
@@ -624,6 +638,25 @@ def price_outlier_rows(
         if ratio >= factor:
             found.append((ratio, row))
     return [row for _ratio, row in sorted(found, key=lambda item: -item[0])]
+
+
+def entry_error_line(row: Mapping[str, object]) -> str:
+    """One 입력 오류 의심 trade for the box: when, who, what for, and the numbers as typed."""
+
+    parts = []
+    for key in ("거래일", "구매처"):
+        value = str(row.get(key) or "").strip()
+        if value and value != "미확인":
+            parts.append(value)
+    business_name = " ".join(str(row.get("사업명") or "").split())
+    if business_name:
+        if len(business_name) > BUSINESS_NAME_MAX_CHARS:
+            business_name = business_name[: BUSINESS_NAME_MAX_CHARS - 1] + "…"
+        parts.append(f"사업명 「{business_name}」")
+    total = str(row.get("총액") or "").strip()
+    if total and total != "미확인":
+        parts.append(f"거래 총액 {total}")
+    return " · ".join(parts)
 
 
 def outlier_line(row: Mapping[str, object], median_price: Decimal, main_unit: str | None = None) -> str:

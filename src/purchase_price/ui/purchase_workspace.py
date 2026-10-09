@@ -7,9 +7,13 @@ from typing import Any
 
 from purchase_price.ui.track_b_transactions import (
     category_reference_candidates,
+    grade_ab_candidates,
     reference_candidates,
     strict_comparison_candidates,
 )
+
+# Runtime marker: re-imports strict_comparison_candidates, which now leaves 입력 오류 의심 trades out.
+ENTRY_ERRORS_EXCLUDED_V1 = True
 
 
 @dataclass(frozen=True)
@@ -24,6 +28,8 @@ class PurchaseWorkspaceStats:
     max_price: Decimal | None
     latest_transaction_date: str | None
     quote_vs_median_percent: Decimal | None
+    # A/B trades left out of every figure above as 입력 오류 의심 (unit price 0~10원, swapped 단가/수량).
+    entry_error_count: int = 0
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -85,6 +91,7 @@ def build_purchase_workspace_stats(
         max_price=prices[-1] if prices else None,
         latest_transaction_date=dates[-1] if dates else None,
         quote_vs_median_percent=quote_delta,
+        entry_error_count=len(grade_ab_candidates(track_b)) - len(direct),
     )
 
 
