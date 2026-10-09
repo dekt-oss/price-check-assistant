@@ -44,6 +44,31 @@ def drop_file_cache(fileno: int) -> None:
     except OSError:
         pass
 
+
+def forget_cached_pages(path: os.PathLike[str] | str) -> bool:
+    """Ask the kernel to drop a read-only file's cached pages; True when the hint was given.
+
+    The serving indexes are read through SQLite, and every page a search touches stays in the
+    container's page cache, which Streamlit Cloud counts against the app's memory limit. No-op
+    where ``posix_fadvise`` does not exist (Windows, local development).
+    """
+
+    advise = getattr(os, "posix_fadvise", None)
+    if advise is None:
+        return False
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        advise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
 # The start-up prefetch reads progress of downloads it starts without threading a callback
 # through every loader: it registers one for its own thread (see report_progress_to).
 _PROGRESS = threading.local()
