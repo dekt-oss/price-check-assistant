@@ -94,4 +94,4 @@ def test_quote_review_page_loads_with_shared_contract() -> None:
     app.run(timeout=10)
 
     assert not app.exception
-    assert app.title[0].value == "견적 상세 검증"
+    assert any("견적서 검토" in item.value for item in app.markdown)

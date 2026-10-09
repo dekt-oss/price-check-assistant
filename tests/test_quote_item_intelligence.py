@@ -237,10 +237,10 @@ def test_quote_ui_exposes_integrated_item_status_contract() -> None:
     )
 
     assert "### 통합 품목 상태" in source
-    assert '"품목 책임주체"' in source
-    assert '"실제 조달 공급업체"' in source
-    assert '"Safety"' in source
-    assert "Safety 자동조회가 미연결인 경우" in source
+    assert '"제조·수입업체"' in source
+    assert '"납품업체"' in source
+    assert '"회수·판매중지"' in source
+    assert "회수·판매중지 자동 조회가 연결되지 않은 경우" in source
     assert "_ensure_mfds_identity" in source
 
 

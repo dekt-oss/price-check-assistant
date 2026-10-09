@@ -45,7 +45,7 @@ def test_quote_and_home_pages_share_purchase_workspace_handoff_contract() -> Non
     )
     home_source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
-    assert "일반 검색과 동일한 상세결과 열기" in quote_source
+    assert "가격 조사에서 이 품목 자세히 보기" in quote_source
     assert "PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY" in quote_source
     assert 'st.switch_page("pages/1_대시보드.py")' in quote_source
 
@@ -79,8 +79,8 @@ def test_quote_batch_page_is_explicitly_summary_not_second_search_engine() -> No
         encoding="utf-8"
     )
 
-    assert "다품목 견적의 빠른 요약·검증 화면" in quote_source
-    assert "일반 통합검색과 동일한 구매조사 Workspace" in quote_source
+    assert "each item's full research opens in the 가격 조사" in quote_source
+    assert "the same search as a typed model name" in quote_source
 
 
 def test_home_structured_quote_fields_use_identity_canonicalization() -> None:

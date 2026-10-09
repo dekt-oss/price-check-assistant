@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import replace
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -28,6 +31,7 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBReferenceCandidate,
     lookup_track_b_quote,
 )
+from purchase_price.ui import result_summary
 from purchase_price.ui.market_research import (
     render_external_research_links,
     render_market_alternative_candidates,
@@ -41,9 +45,25 @@ from purchase_price.ui.quote_item_intelligence import (
     quote_item_intelligence_rows,
 )
 from purchase_price.ui.quote_review_contract import build_manual_quote_item
+from purchase_price.ui.quote_review_layout import LAYOUT_CSS as QUOTE_REVIEW_LAYOUT_CSS
+from purchase_price.ui.quote_review_layout import TABLE_COLUMNS as QUOTE_TABLE_COLUMNS
+from purchase_price.ui.quote_review_layout import (
+    VERDICT_ORDER,
+    VERDICT_TABLE_COLORS,
+    QuoteItemComparison,
+    build_item_comparison,
+    condition_rows,
+    condition_table_html,
+    detail_card_html,
+    rule_sentence,
+    summary_cards_html,
+    verdict_counts,
+)
+from purchase_price.ui.quote_review_layout import table_rows as quote_review_table_rows
 from purchase_price.ui.quote_review_state import QuoteReviewState
 from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.quote_review_summary import render_purchase_review_summary
+from purchase_price.ui.theme import TONE_WARN, notice_html
 from purchase_price.ui.track_b_transactions import model_price_group_rows
 from purchase_price.ui.widgets import (
     render_condition_table,
@@ -249,14 +269,18 @@ def _filename_product_candidate(file_name: str) -> str:
 
 def _render_inline_manual_item_form(state: QuoteReviewState) -> None:
     product_candidate = _filename_product_candidate(state.file_name or "")
-    st.warning(
-        "자동 추출 결과가 없습니다. 다른 검토 모드로 이동할 필요 없이 이 화면에서 핵심 품목정보를 입력하면 "
-        "저장 직후 시장조사를 시작합니다."
+    st.markdown(
+        notice_html(
+            "견적서에서 품목 표를 읽지 못했습니다. 다른 화면으로 옮길 필요 없이 아래에 품명·모델명·견적 단가를 "
+            "넣고 저장하면 바로 거래가를 찾습니다.",
+            tone=TONE_WARN,
+        ),
+        unsafe_allow_html=True,
     )
     if product_candidate:
         st.info(
-            f"OCR이 품목 행을 확정하지 못해 파일명에서 품명 후보 `{product_candidate}`를 미리 채웠습니다. "
-            "파일명 기반 후보이며 OCR 확정값이나 공식 제품식별값은 아닙니다. 확인 후 저장하세요."
+            f"파일 이름에서 품명 후보 `{product_candidate}`를 미리 채웠습니다. "
+            "견적서 본문에서 읽은 값이 아니므로 맞는지 확인한 뒤 저장하세요."
         )
     with st.form("quote_auto_manual_item"):
         c1, c2 = st.columns(2)
@@ -533,29 +557,29 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
         st.caption(identity_text or "추가 식별정보 없음")
 
         status_cols = st.columns(5)
-        status_cols[0].metric("직접가격", f"{intelligence.direct_count}건")
-        status_cols[1].metric("식약처 Identity", intelligence.identity_status)
+        status_cols[0].metric("같은 제품 거래", f"{intelligence.direct_count}건")
+        status_cols[1].metric("식약처 허가 확인", intelligence.identity_status)
         status_cols[2].metric(
-            "품목 책임주체",
+            "제조·수입업체",
             f"{len(intelligence.responsible_companies)}개"
             if intelligence.responsible_companies
             else "미확인",
         )
         status_cols[3].metric(
-            "실제 조달 공급업체",
+            "납품업체",
             f"{len(intelligence.supplier_names)}개",
         )
-        status_cols[4].metric("Safety", intelligence.safety_status)
+        status_cols[4].metric("회수·판매중지", intelligence.safety_status)
         if intelligence.responsible_companies:
             st.caption(
-                "품목 책임주체 · " + " / ".join(intelligence.responsible_companies[:5])
+                "제조·수입업체(식약처) · " + " / ".join(intelligence.responsible_companies[:5])
                 + " · "
                 + intelligence.business_license_status
             )
         if intelligence.supplier_names:
-            st.caption("실제 조달 공급업체 · " + " / ".join(intelligence.supplier_names[:5]))
+            st.caption("납품업체(나라장터) · " + " / ".join(intelligence.supplier_names[:5]))
         if intelligence.permit_numbers:
-            st.caption("식약처 품목번호 · " + " / ".join(intelligence.permit_numbers[:5]))
+            st.caption("허가번호 · " + " / ".join(intelligence.permit_numbers[:5]))
         if safety_lookup is not None and safety_lookup.status in {
             "success",
             "not_authorized",
@@ -564,7 +588,7 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             st.warning(intelligence.safety_message)
         else:
             st.caption(
-                "Safety 자동조회가 미연결인 경우 공식 확인이 완료된 것으로 해석하지 않습니다."
+                "회수·판매중지 자동 조회가 연결되지 않은 경우 공식 확인이 끝난 것으로 보지 않습니다."
             )
 
         price_col, info_col = st.columns([1.25, 3.75])
@@ -600,23 +624,6 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
                 )
         elif mfds is not None and mfds.status == "failure":
             st.warning("식약처 조회 실패 · 가격검색 결과와 분리해 유지합니다.")
-
-        handoff = build_purchase_workspace_handoff(
-            product_name=item.product_name,
-            manufacturer=item.manufacturer,
-            model_name=item.model_name,
-            specification=item.specification,
-            quote_unit_price=item.unit_price,
-        )
-        if handoff is not None and st.button(
-            "일반 검색과 동일한 상세결과 열기",
-            key=f"quote_open_purchase_workspace_{index}",
-            use_container_width=True,
-        ):
-            st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = (
-                handoff.to_session_payload()
-            )
-            st.switch_page("pages/1_대시보드.py")
 
         st.markdown("**나라장터 거래가격**")
         direct_rows = _track_b_candidate_rows(track_b.candidates) if track_b is not None else []
@@ -718,147 +725,272 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
             )
 
 
-def render_quote_market_research(state: QuoteReviewState) -> None:
-    st.caption(
-        "이 화면은 다품목 견적의 빠른 요약·검증 화면입니다. "
-        "각 품목의 전체 상세조사는 일반 통합검색과 동일한 구매조사 Workspace를 사용합니다."
+SELECTED_ITEM_SESSION_KEY = "quote_review_selected_item_v1"
+TABLE_VERSION_SESSION_KEY = "quote_review_table_version_v1"
+TABLE_ROW_HEIGHT = 44
+
+
+def _selected_index(total: int) -> int:
+    try:
+        value = int(st.session_state.get(SELECTED_ITEM_SESSION_KEY, 0))
+    except (TypeError, ValueError):
+        value = 0
+    return min(max(value, 0), max(total - 1, 0))
+
+
+def _select_item(index: int) -> None:
+    """Button callback: runs before the page script, so the table redraws with the new row."""
+
+    st.session_state[SELECTED_ITEM_SESSION_KEY] = index
+    st.session_state[TABLE_VERSION_SESSION_KEY] = (
+        int(st.session_state.get(TABLE_VERSION_SESSION_KEY, 0)) + 1
     )
 
-    uploaded = st.file_uploader(
-        "견적서 파일",
-        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg"],
-        key="quote_auto_market_upload",
-    )
-    st.caption(
-        "보안: 원본은 파싱용 임시파일로만 처리 후 삭제합니다. "
-        "현재 견적 추출은 로컬 파서/Tesseract를 사용하며 원문·OCR 텍스트를 외부 AI API로 전송하지 않습니다."
-    )
-    newly_extracted = bool(
-        uploaded is not None
-        and (state.file_name != uploaded.name or state.extraction is None)
-    )
-    if newly_extracted and uploaded is not None:
-        _store_extraction(uploaded, state)
-        state.lookback_days = G2B_DEFAULT_LOOKBACK_DAYS
-        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY, None)
 
-        if state.items:
-            first_item = state.items[0]
-            handoff = build_purchase_workspace_handoff(
-                product_name=first_item.product_name,
-                manufacturer=first_item.manufacturer,
-                model_name=first_item.model_name,
-                specification=first_item.specification,
-                quote_unit_price=first_item.unit_price,
+def _item_comparisons(state: QuoteReviewState) -> list[QuoteItemComparison]:
+    today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    comparisons: list[QuoteItemComparison] = []
+    for index, item in enumerate(state.items):
+        failures = state.item_research_failures.get(index, {})
+        intelligence = build_quote_item_intelligence_summary(
+            item=item,
+            track_b=state.track_b_db.get(index),
+            mfds_workspace=state.mfds_workspace.get(index),
+            mfds_identity=state.mfds_identity.get(index),
+            safety_lookup=state.safety_lookup.get(index),
+        )
+        comparisons.append(
+            build_item_comparison(
+                index,
+                item,
+                state.track_b_db.get(index),
+                today=today,
+                failed="나라장터 가격" in failures,
+                safety_status=intelligence.safety_status,
             )
-            if handoff is not None:
-                st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = (
-                    handoff.to_session_payload()
-                )
-                st.session_state[QUOTE_AUTO_ROUTE_FILE_SESSION_KEY] = uploaded.name
-                st.switch_page("pages/1_대시보드.py")
-
-    if state.extraction is None:
-        st.caption(
-            "PDF · Excel(.xlsx/.xls) · PNG · JPG/JPEG 견적서를 올리면 품목을 추출하고 거래가격을 검색합니다."
         )
-        return
+    return comparisons
 
-    top1, top2, top3 = st.columns([1, 2.5, 1])
-    top1.metric("추출 품목", f"{len(state.items)}건")
-    top2.caption(f"파일: {state.file_name or '-'}")
-    if top3.button("새 견적서"):
-        st.session_state.pop("quote_review_state", None)
-        st.rerun()
 
-    if state.diagnostics is not None:
-        st.caption(f"추출 경로: {state.diagnostics.strategy_label}")
-
-    if state.extraction.warnings:
-        with st.expander(f"추출 경고 {len(state.extraction.warnings)}건", expanded=False):
-            for warning in state.extraction.warnings:
-                st.warning(warning)
-
-    if not state.items:
-        _render_inline_manual_item_form(state)
-        return
-
-    _render_compact_item_editor(state)
-    _ensure_mfds_identity(state)
-    _ensure_track_b_comparison(state)
-    _ensure_mfds_workspace(state)
-    _ensure_safety_lookup(state)
-
-    integrated_summaries = [
-        (
-            index,
-            state.items[index].product_name
-            or state.items[index].model_name
-            or f"품목 {index + 1}",
-            build_quote_item_intelligence_summary(
-                item=state.items[index],
-                track_b=state.track_b_db.get(index),
-                mfds_workspace=state.mfds_workspace.get(index),
-                mfds_identity=state.mfds_identity.get(index),
-                safety_lookup=state.safety_lookup.get(index),
+def _render_item_table(
+    state: QuoteReviewState,
+    comparisons: list[QuoteItemComparison],
+    selected: int,
+) -> int:
+    st.markdown(
+        '<div class="qr-section-title">품목별 비교표</div>'
+        '<div class="qr-section-sub">행을 누르면 오른쪽에 그 품목의 비교 결과가 나옵니다.</div>',
+        unsafe_allow_html=True,
+    )
+    version = int(st.session_state.get(TABLE_VERSION_SESSION_KEY, 0))
+    visible_rows = min(len(comparisons), 10)
+    event = st.dataframe(
+        quote_review_table_rows(comparisons, state.items),
+        key=f"quote_review_table_{version}",
+        on_select="rerun",
+        selection_mode="single-row-required",
+        selection_default={"selection": {"rows": [selected]}},
+        hide_index=True,
+        width="stretch",
+        row_height=TABLE_ROW_HEIGHT,
+        height=TABLE_ROW_HEIGHT * visible_rows + 34,
+        column_order=QUOTE_TABLE_COLUMNS,
+        placeholder="—",
+        column_config={
+            "번호": st.column_config.NumberColumn("번호", width=44, format="%d"),
+            "품목 / 모델": st.column_config.TextColumn("품목 / 모델", width=156),
+            "수량": st.column_config.TextColumn("수량", width=50),
+            "견적 단가": st.column_config.NumberColumn("견적 단가", format="localized", width=88),
+            "거래 가운데 값": st.column_config.NumberColumn(
+                "거래 가운데 값", format="localized", width=98
             ),
+            "차이 %": st.column_config.NumberColumn("차이 %", format="%+.1f%%", width=66),
+            "판정": st.column_config.MultiselectColumn(
+                "판정",
+                options=list(VERDICT_ORDER),
+                color=[VERDICT_TABLE_COLORS[kind] for kind in VERDICT_ORDER],
+                width=92,
+            ),
+        },
+    )
+    rows = list(getattr(getattr(event, "selection", None), "rows", None) or [])
+    if rows and 0 <= int(rows[0]) < len(comparisons) and int(rows[0]) != selected:
+        selected = int(rows[0])
+        st.session_state[SELECTED_ITEM_SESSION_KEY] = selected
+    st.markdown(
+        '<div class="qr-foot">금액 단위는 원이고, 견적 단가와 거래 가운데 값은 1단위 가격입니다. 거래 가운데 값은 같은 제품으로 확인된 '
+        "나라장터 거래만, 가장 많이 쓰인 단위 하나로 계산합니다. 차이 %가 있어도 거래가 3건 미만이면 판정하지 않습니다.</div>",
+        unsafe_allow_html=True,
+    )
+
+    item = state.items[selected]
+    st.markdown(
+        f'<div class="qr-subhead">{selected + 1}번 품목 견적 조건</div>'
+        + condition_table_html(condition_rows(item, main_unit=comparisons[selected].main_unit)),
+        unsafe_allow_html=True,
+    )
+    return selected
+
+
+def _render_detail_card(state: QuoteReviewState, comparison: QuoteItemComparison) -> None:
+    total = len(state.items)
+    index = comparison.index
+    st.markdown(detail_card_html(comparison, total=total), unsafe_allow_html=True)
+
+    item = state.items[index]
+    handoff = build_purchase_workspace_handoff(
+        product_name=item.product_name,
+        manufacturer=item.manufacturer,
+        model_name=item.model_name,
+        specification=item.specification,
+        quote_unit_price=item.unit_price,
+    )
+    if handoff is not None:
+        if st.button(
+            "가격 조사에서 이 품목 자세히 보기 →",
+            key=f"quote_open_purchase_workspace_{index}",
+            type="primary",
+            use_container_width=True,
+        ):
+            st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = handoff.to_session_payload()
+            st.switch_page("pages/1_대시보드.py")
+    else:
+        st.caption("품명이나 모델명이 없어 가격 조사 화면으로 넘길 수 없습니다.")
+
+    previous_col, next_col = st.columns(2)
+    previous_col.button(
+        "← 이전 품목",
+        key="quote_review_previous_item",
+        disabled=index <= 0,
+        on_click=_select_item,
+        args=(index - 1,),
+        use_container_width=True,
+    )
+    next_col.button(
+        "다음 품목 →",
+        key="quote_review_next_item",
+        disabled=index >= total - 1,
+        on_click=_select_item,
+        args=(index + 1,),
+        use_container_width=True,
+    )
+
+
+def _render_empty_state(uploaded) -> None:
+    if uploaded is not None:
+        st.markdown(
+            notice_html(
+                "이 파일에서 견적 내용을 읽지 못했습니다. 파일이 열리는지 확인한 뒤 다시 올리거나, "
+                "PDF나 Excel로 저장해 올려 주세요. 급하면 <b>가격 조사</b> 화면에서 모델명으로 바로 찾을 수 있습니다.",
+                tone=TONE_WARN,
+            ),
+            unsafe_allow_html=True,
         )
-        for index in range(len(state.items))
-    ]
-    with st.container(border=True):
+        return
+    st.markdown(
+        notice_html(
+            "견적서 파일을 올리면 품목을 모두 읽어, 품목마다 나라장터에서 같은 제품이 거래된 가격과 "
+            "견적 단가를 나란히 보여줍니다. 품목이 여러 개여도 한 번에 비교합니다.",
+            tone="info",
+            icon="i",
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_research_details(state: QuoteReviewState, selected: int) -> None:
+    """Older per-item research views, folded so the comparison stays the first thing seen."""
+
+    item = state.items[selected]
+    label = item.model_name or item.product_name or f"품목 {selected + 1}"
+    with st.expander(f"{selected + 1}번 품목({label}) 가격 · 거래 이력과 조사 자료", expanded=False):
+        _render_item_result(state, selected)
+
+    with st.expander("모든 품목 조사 상태", expanded=False):
+        if state.diagnostics is not None:
+            st.caption(f"견적서를 읽은 방법: {state.diagnostics.strategy_label}")
+        integrated_summaries = [
+            (
+                index,
+                state.items[index].product_name
+                or state.items[index].model_name
+                or f"품목 {index + 1}",
+                build_quote_item_intelligence_summary(
+                    item=state.items[index],
+                    track_b=state.track_b_db.get(index),
+                    mfds_workspace=state.mfds_workspace.get(index),
+                    mfds_identity=state.mfds_identity.get(index),
+                    safety_lookup=state.safety_lookup.get(index),
+                ),
+            )
+            for index in range(len(state.items))
+        ]
         st.markdown("### 통합 품목 상태")
         st.caption(
-            "견적 품목별로 A/B 직접가격, 식약처 Identity·품목 책임주체, 실제 조달 공급업체, "
-            "Safety 확인상태를 한 번에 봅니다. 각 근거의 의미는 서로 합치지 않습니다."
+            "품목마다 같은 제품 거래, 식약처 허가, 납품업체, 회수·판매중지 확인 상태를 한 번에 봅니다."
         )
         st.dataframe(
-            quote_item_intelligence_rows(integrated_summaries),
+            [
+                {result_summary.COLUMN_LABELS.get(key, key): value for key, value in row.items()}
+                for row in quote_item_intelligence_rows(integrated_summaries)
+            ],
             use_container_width=True,
             hide_index=True,
         )
 
-    render_purchase_review_summary(state)
+        render_purchase_review_summary(state)
 
-    total, completed, partial_failure, pending = _quote_processing_counts(state)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("전체 품목", f"{total}건")
-    c2.metric("정상 처리", f"{completed}건")
-    c3.metric("부분 실패", f"{partial_failure}건")
-    c4.metric("대기", f"{pending}건")
-    if partial_failure:
-        st.caption(
-            "부분 실패 품목이 있어도 성공한 품목 결과는 유지됩니다. "
-            "아래에서 실패 Source만 선택해 다시 조사할 수 있습니다."
-        )
+        total, completed, partial_failure, pending = _quote_processing_counts(state)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("전체 품목", f"{total}건")
+        c2.metric("정상 처리", f"{completed}건")
+        c3.metric("부분 실패", f"{partial_failure}건")
+        c4.metric("대기", f"{pending}건")
 
-    st.subheader("가격 · 거래 이력")
-    for index in range(len(state.items)):
-        _render_item_result(state, index)
-
-    missing_market = [
-        index for index in range(len(state.items)) if index not in state.search_runs
-    ]
-    if missing_market:
-        zero_trade_items = [
-            index
-            for index in missing_market
-            if (
-                state.track_b_db.get(index) is None
-                or (
-                    not state.track_b_db[index].candidates
-                    and not state.track_b_db[index].reference_candidates
-                )
-            )
-        ]
-        if zero_trade_items and len(state.items) <= 3:
-            st.caption("거래가격이 없는 품목은 입찰·계약·웹 공개자료를 추가로 자동 조사합니다.")
-            if _ensure_market_research(state):
-                st.rerun()
-        else:
+        if any(index not in state.search_runs for index in range(len(state.items))):
+            st.caption("입찰·계약·웹에 공개된 가격 자료를 품목마다 더 찾아볼 수 있습니다. 몇 분 걸릴 수 있습니다.")
             if st.button("추가 공개자료 더 찾기", key="quote_auto_start_external_research"):
                 if _ensure_market_research(state):
                     st.rerun()
 
+
+def _render_failure_retry(state: QuoteReviewState) -> None:
+    failed_items = sorted(state.item_research_failures)
+    if not failed_items:
+        return
+    st.warning(
+        "일부 품목 조사에 실패했지만 다른 품목의 결과는 유지했습니다. "
+        "실패 품목: " + ", ".join(str(index + 1) for index in failed_items)
+    )
+    with st.expander("실패 Source별 재시도", expanded=True):
+        for index in failed_items:
+            item = state.items[index]
+            label = item.product_name or item.model_name or f"품목 {index + 1}"
+            st.markdown(f"**{index + 1}. {label}**")
+            failures = dict(state.item_research_failures.get(index, {}))
+            retry_columns = st.columns(max(len(failures), 1))
+            for column, (stage, error_type) in zip(retry_columns, failures.items()):
+                column.caption(f"{stage} · {error_type}")
+                if column.button(
+                    f"{stage} 다시 조사",
+                    key=f"quote_retry_{index}_{stage}",
+                    use_container_width=True,
+                ):
+                    _retry_failed_stage(state, index, stage)
+                    st.rerun()
+    if st.button("실패 품목 전체 다시 조사", key="quote_retry_failed_items"):
+        for index in failed_items:
+            state.track_b_db.pop(index, None)
+            state.mfds_workspace.pop(index, None)
+            state.safety_lookup.pop(index, None)
+            state.search_runs.pop(index, None)
+            state.discoveries.pop(index, None)
+            state.market_bundles.pop(index, None)
+        state.item_research_failures.clear()
+        st.rerun()
+
+
+def _render_search_settings(state: QuoteReviewState) -> None:
     with st.expander("검색 설정", expanded=False):
         selected_lookback = int(
             st.selectbox(
@@ -881,35 +1013,107 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
             _clear_research(state)
             st.rerun()
 
-    failed_items = sorted(state.item_research_failures)
-    if failed_items:
-        st.warning(
-            "일부 품목 조사에 실패했지만 성공한 품목의 결과는 유지했습니다. "
-            "실패 품목: " + ", ".join(str(index + 1) for index in failed_items)
+
+def _run_external_research_for_empty_items(state: QuoteReviewState) -> None:
+    missing_market = [
+        index for index in range(len(state.items)) if index not in state.search_runs
+    ]
+    if not missing_market:
+        return
+    zero_trade_items = [
+        index
+        for index in missing_market
+        if (
+            state.track_b_db.get(index) is None
+            or (
+                not state.track_b_db[index].candidates
+                and not state.track_b_db[index].reference_candidates
+            )
         )
-        with st.expander("실패 Source별 재시도", expanded=True):
-            for index in failed_items:
-                item = state.items[index]
-                label = item.product_name or item.model_name or f"품목 {index + 1}"
-                st.markdown(f"**{index + 1}. {label}**")
-                failures = dict(state.item_research_failures.get(index, {}))
-                retry_columns = st.columns(max(len(failures), 1))
-                for column, (stage, error_type) in zip(retry_columns, failures.items()):
-                    column.caption(f"{stage} · {error_type}")
-                    if column.button(
-                        f"{stage} 다시 조사",
-                        key=f"quote_retry_{index}_{stage}",
-                        use_container_width=True,
-                    ):
-                        _retry_failed_stage(state, index, stage)
-                        st.rerun()
-        if st.button("실패 품목 전체 다시 조사", key="quote_retry_failed_items"):
-            for index in failed_items:
-                state.track_b_db.pop(index, None)
-                state.mfds_workspace.pop(index, None)
-                state.safety_lookup.pop(index, None)
-                state.search_runs.pop(index, None)
-                state.discoveries.pop(index, None)
-                state.market_bundles.pop(index, None)
-            state.item_research_failures.clear()
+    ]
+    if zero_trade_items and len(state.items) <= 3:
+        st.caption("거래가격이 없는 품목은 입찰·계약·웹 공개자료를 추가로 자동 조사합니다.")
+        if _ensure_market_research(state):
             st.rerun()
+
+
+def render_quote_market_research(state: QuoteReviewState) -> None:
+    """견적서 검토: upload, summary cards, item table + selected item, then folded details.
+
+    The table is a summary of several items; each item's full research opens in the 가격 조사
+    screen (the same search as a typed model name) through the purchase-workspace handoff.
+    """
+
+    st.markdown(QUOTE_REVIEW_LAYOUT_CSS, unsafe_allow_html=True)
+    uploaded = st.file_uploader(
+        "견적서 파일",
+        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg"],
+        key="quote_auto_market_upload",
+        help="PDF · Excel(.xlsx/.xls) · PNG · JPG/JPEG 견적서를 올릴 수 있습니다.",
+    )
+    st.caption(
+        "올린 파일은 품목을 읽은 뒤 바로 지우고, 원문을 외부 AI 서비스로 보내지 않습니다."
+    )
+    newly_extracted = bool(
+        uploaded is not None
+        and (state.file_name != uploaded.name or state.extraction is None)
+    )
+    if newly_extracted and uploaded is not None:
+        with st.spinner("견적서에서 품목을 읽고 있습니다..."):
+            _store_extraction(uploaded, state)
+        state.lookback_days = G2B_DEFAULT_LOOKBACK_DAYS
+        # This page shows every item side by side; it no longer jumps to 가격 조사 with item 1.
+        st.session_state.pop(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY, None)
+        _select_item(0)
+
+    if state.extraction is None:
+        _render_empty_state(uploaded)
+        st.caption(
+            "PDF · Excel(.xlsx/.xls) · PNG · JPG/JPEG 견적서를 올리면 품목을 추출하고 거래가격을 검색합니다."
+        )
+        return
+
+    if not state.items:
+        _render_inline_manual_item_form(state)
+        return
+
+    if any(index not in state.track_b_db for index in range(len(state.items))):
+        with st.spinner(f"품목 {len(state.items)}개의 나라장터 거래가와 허가정보를 찾고 있습니다..."):
+            _ensure_mfds_identity(state)
+            _ensure_track_b_comparison(state)
+            _ensure_mfds_workspace(state)
+            _ensure_safety_lookup(state)
+    else:
+        _ensure_mfds_identity(state)
+        _ensure_track_b_comparison(state)
+        _ensure_mfds_workspace(state)
+        _ensure_safety_lookup(state)
+
+    comparisons = _item_comparisons(state)
+    st.markdown(
+        summary_cards_html(verdict_counts(comparisons), file_name=state.file_name or ""),
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div class="qr-rule"><b>판정 기준</b> · {html.escape(rule_sentence())}</div>',
+        unsafe_allow_html=True,
+    )
+
+    selected = _selected_index(len(comparisons))
+    table_col, detail_col = st.columns([67, 33], gap="small")
+    with table_col:
+        with st.container(border=True, key="qr_table_card"):
+            selected = _render_item_table(state, comparisons, selected)
+    with detail_col:
+        with st.container(border=True, key="qr_detail_card"):
+            _render_detail_card(state, comparisons[selected])
+
+    if state.extraction.warnings:
+        with st.expander(f"견적서를 읽을 때 확인할 점 {len(state.extraction.warnings)}건", expanded=False):
+            for warning in state.extraction.warnings:
+                st.warning(warning)
+    _render_compact_item_editor(state)
+    _render_failure_retry(state)
+    _render_research_details(state, selected)
+    _render_search_settings(state)
+    _run_external_research_for_empty_items(state)
