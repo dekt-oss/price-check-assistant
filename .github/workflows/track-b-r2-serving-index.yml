@@ -178,6 +178,10 @@ jobs:
     runs-on: ubuntu-latest
     # A schema rebuild re-reads every R2 raw page: 83 min for 650k rows on 2026-09-23.
     timeout-minutes: 180
+    permissions:
+      contents: read
+      # Starts the next collection job (see "Start the next collection job").
+      actions: write
     env:
       PYTHONPATH: src
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -204,6 +208,20 @@ jobs:
           python -m purchase_price.scripts.sync_g2b_track_b_r2_index
           --max-bootstrap-objects "${{ inputs.max_bootstrap_objects || '100000' }}"
           --output artifacts/track-b-daily/r2-serving-index.json
+      - name: Start the next collection job
+        # GitHub's schedule skipped or delayed most collector runs on 2026-10-09, so each sync
+        # starts the next job itself: the daily collection when the index is >2 days behind,
+        # otherwise the next history batch (next_track_b_job.py). The crons stay as a fallback.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last_daily=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow track-b-daily-backfill.yml -L 10             --json createdAt,event --jq '[.[] | select(.event != "pull_request")][0].createdAt // ""')
+          next_job=$(python -m purchase_price.scripts.next_track_b_job --last-daily-started "$last_daily")
+          echo "next collection job: ${next_job}"
+          case "$next_job" in
+            daily) gh workflow run track-b-daily-backfill.yml --repo "$GITHUB_REPOSITORY" --ref main ;;
+            history) gh workflow run track-b-history-backfill.yml --repo "$GITHUB_REPOSITORY" --ref main ;;
+          esac
       - name: Verify R2 serving lookup with FLOW-C
         run: |
           python - <<'PY'
