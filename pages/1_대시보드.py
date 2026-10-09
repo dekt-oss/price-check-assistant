@@ -26,6 +26,7 @@ from purchase_price.evidence_domain import (
     SafetyEvidenceStatus,
 )
 from purchase_price.schemas import ProductQuery
+from purchase_price.services import category_market as category_market_service
 from purchase_price.services import g2b_delivery_record as delivery_record_service
 from purchase_price.services import index_prefetch as index_prefetch_service
 from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
@@ -111,6 +112,7 @@ from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
     interpret_unified_search,
 )
+from purchase_price.ui import category_market as category_market_ui
 from purchase_price.ui import result_layout as result_layout_ui
 from purchase_price.ui import result_summary as result_summary_ui
 from purchase_price.ui import same_item_compare as same_item_ui
@@ -178,7 +180,7 @@ _TRACK_B_RUNTIME_MARKERS = (
     (track_b_r2_index_service, "_LAST_GOOD_SNAPSHOT"),
     (track_b_snapshot_service, "WORKSPACE_LOOKUP_LIMIT"),
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
-    (track_b_transactions_ui, "BUSINESS_NAME_COLUMN"),
+    (track_b_transactions_ui, "AMOUNT_CHECK_WORDS"),
     (same_item_ui, "ITEM_STATUS_AWARE"),
 )
 
@@ -195,7 +197,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.g2b_delivery_record", "G2B_LINK_V1"),
     ("purchase_price.ui.result_summary", "RESULT_SUMMARY_V3"),
     ("purchase_price.ui.search_overviews", "OVERVIEW_V2"),
-    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_V2"),
+    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_V3"),
 )
 
 
@@ -624,7 +626,14 @@ def _build_mfds_procurement_crosslinks(
     *,
     track_b_snapshot,
     current_model: str = "",
+    stats_out: dict[str, Any] | None = None,
 ) -> list[dict[str, object]]:
+    """One row per registered model with its same-model 나라장터 trades.
+
+    ``stats_out`` (optional) receives what the 같은 품목 시장 view needs beyond the row:
+    ``medians`` {(permit_key, model_key): main-unit median} and ``detail_codes`` {code: trades}.
+    """
+
     unique: dict[tuple[str, str, str], object] = {}
     for item in records:
         model = str(getattr(item, "model_name", "") or "").strip()
@@ -673,6 +682,17 @@ def _build_mfds_procurement_crosslinks(
             for candidate in direct
             if getattr(candidate, "transaction_date", None)
         )
+        if stats_out is not None and direct:
+            medians = stats_out.setdefault("medians", {})
+            codes = stats_out.setdefault("detail_codes", {})
+            if prices:
+                medians[(normalize_text(getattr(item, "permit_number", "") or ""), normalize_text(model))] = (
+                    category_market_service.median(prices)
+                )
+            for candidate in direct:
+                code = str(getattr(candidate, "detail_code", "") or "").strip()
+                if code:
+                    codes[code] = codes.get(code, 0) + 1
         rows.append(
             {
                 "유형": mfds_item_authorization_type(item).value,
@@ -769,6 +789,90 @@ def _identity_product_names_containing(text: str) -> list[dict[str, object]]:
     return [{"product_name": row[0], "models": row[1], "companies": row[2]} for row in rows if row[0]]
 
 
+def _build_category_market(
+    snapshot: Any,
+    *,
+    product_names: tuple[str, ...],
+    records: tuple[Any, ...] | list[Any],
+    crosslinks: list[dict[str, object]],
+    model_stats: dict[str, Any],
+) -> category_market_service.CategoryMarket | None:
+    """같은 품목 시장 for the searched product's 식약처 품목; None when it cannot be built.
+
+    An optional section: any failure leaves the rest of the result as it was.
+    """
+
+    session = getattr(snapshot, "session", None)
+    names = tuple(dict.fromkeys(name for name in product_names if str(name or "").strip()))
+    if session is None or not (names or crosslinks):
+        return None
+    try:
+        codes = category_market_service.resolve_detail_codes(
+            session, names, model_code_counts=model_stats.get("detail_codes") or {}
+        )
+        trades, truncated = category_market_service.load_category_trades(session, [code.code for code in codes])
+        market = category_market_service.build_category_market(
+            trades,
+            product_name=names[0] if names else "",
+            codes=codes,
+            crosslinks=crosslinks,
+            identity_records=tuple(records),
+            model_medians=model_stats.get("medians") or {},
+            data_as_of=str(getattr(snapshot, "data_as_of", "") or ""),
+            truncated=truncated,
+        )
+    except Exception:
+        return None
+    return market if market.has_content else None
+
+
+def _item_status_labels(permits: list[str]) -> dict[str, str]:
+    """판매 가능/취소 labels from the item-status index (fail-closed); empty on any failure."""
+
+    try:
+        found = mfds_item_status_service.lookup_item_status_from_r2([p for p in permits if p])
+    except Exception:
+        return {}
+    labels: dict[str, str] = {}
+    for status_key, item_status in found.statuses.items():
+        label = mfds_item_status_service.item_status_label(item_status, cycle_verified=found.cycle_verified)
+        if label:
+            labels[status_key] = label
+    return labels
+
+
+def _open_category_model(model: category_market_service.CategoryModel, records: list[Any] | tuple[Any, ...]) -> None:
+    """A model row of 같은 품목 시장 opens that registration's price result (the same view again)."""
+
+    token = _overview_identity_token(list(records), (model.permit_number, model.model, model.company))
+    _open_model_from_overview(model.model, identity_token=token)
+
+
+def _render_category_market(
+    market: category_market_service.CategoryMarket,
+    *,
+    key: str,
+    records: list[Any] | tuple[Any, ...],
+    searched_model: str = "",
+    has_direct: bool = False,
+    section_heading: bool = False,
+    show_headline: bool = True,
+    model_count_note: str = "",
+) -> None:
+    category_market_ui.render_category_market(
+        market,
+        key=key,
+        searched_model=searched_model,
+        has_direct=has_direct,
+        section_heading=section_heading,
+        show_headline=show_headline,
+        on_open_model=lambda model: _open_category_model(model, records),
+        on_open_trade=_open_trade_dialog,
+        render_company_lookup=_render_business_license_lookup,
+        model_count_note=model_count_note,
+    )
+
+
 def _build_overview_state(
     raw_search: str,
     identity: MfdsIdentityLookup,
@@ -809,8 +913,20 @@ def _build_overview_state(
                 {"name": name, "models": len(models), "more": len(found.records) >= 200}
             )
     switched_from: str | None = None
+    category_market = None
     with snapshot_runtime.open_track_b_serving_snapshot() as snapshot:
-        crosslinks = _build_mfds_procurement_crosslinks(records, track_b_snapshot=snapshot, current_model="")
+        model_stats: dict[str, Any] = {}
+        crosslinks = _build_mfds_procurement_crosslinks(
+            records, track_b_snapshot=snapshot, current_model="", stats_out=model_stats
+        )
+        if route == "product_overview":
+            category_market = _build_category_market(
+                snapshot,
+                product_names=tuple(dict.fromkeys([heading, *(r.product_name for r in records if r.product_name)])),
+                records=records,
+                crosslinks=crosslinks,
+                model_stats=model_stats,
+            )
         if route == "company_overview" and similar_companies and prefer_traded_company:
             # Show the spelling with 나라장터 trades first; the exact-name one stays one click away.
             current_priced = _priced_model_count(crosslinks)
@@ -855,6 +971,7 @@ def _build_overview_state(
         "overview_supplier": supplier,
         "overview_record_limit_hit": len(records) >= OVERVIEW_RECORD_LIMIT,
         "track_b_data_as_of": data_as_of,
+        "category_market": category_market,
     }
 
 
@@ -903,6 +1020,10 @@ def _render_overview(state: dict[str, Any]) -> None:
         if int(row.get("나라장터 직접거래") or 0) > 0
     ]
     all_models = list(dict.fromkeys(priced_models + [str(r.model_name) for r in records if r.model_name]))
+
+    market = state.get("category_market") if route == "product_overview" else None
+    if not isinstance(market, category_market_service.CategoryMarket):
+        market = None
 
     st.divider()
     st.subheader(heading)
@@ -953,7 +1074,12 @@ def _render_overview(state: dict[str, Any]) -> None:
             ),
         ]
     else:
-        st.caption("품목 이름으로 찾은 결과입니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다.")
+        st.caption(
+            "품목 이름으로 찾은 결과입니다. 이 품목의 다른 모델, 참고 시세, 도입 기관, 구할 수 있는 곳을 모았습니다. "
+            "모델을 누르면 그 모델의 가격 조사로 이동합니다."
+            if market is not None
+            else "품목 이름으로 찾은 결과입니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
+        )
         class_rows = overview_ui.classification_rows(records)
         companies = {r.registered_company for r in records if r.registered_company}
         cards = [
@@ -971,10 +1097,11 @@ def _render_overview(state: dict[str, Any]) -> None:
                 workspace_header_ui.TONE_NEUTRAL,
             ),
         ]
-    st.markdown(
-        workspace_header_ui.HEADER_CSS + workspace_header_ui.render_cards_html(cards),
-        unsafe_allow_html=True,
-    )
+    if market is None:
+        st.markdown(
+            workspace_header_ui.HEADER_CSS + workspace_header_ui.render_cards_html(cards),
+            unsafe_allow_html=True,
+        )
     collection_status = _load_mfds_collection_status()
     basis = result_summary_ui.short_basis_line(
         track_b_data_as_of=str(state.get("track_b_data_as_of") or "") or None,
@@ -991,7 +1118,13 @@ def _render_overview(state: dict[str, Any]) -> None:
         st.caption(basis)
 
     model_rows = result_summary_ui.overview_model_rows(crosslinks)
-    if model_rows:
+    if market is not None:
+        # 같은 품목 시장 replaces the short model table: every model, price level, buyers, sellers.
+        market = category_market_service.with_status_labels(
+            market, _item_status_labels([model.permit_number for model in market.models])
+        )
+        _render_category_market(market, key=f"overview::{heading}", records=records)
+    elif model_rows:
         st.markdown(f"#### 모델별 나라장터 거래 · 전체 {len(all_models)}개 중 {len(model_rows)}개")
         event = st.dataframe(
             model_rows,
@@ -1291,6 +1424,28 @@ def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
         st.rerun()
 
 
+def _identity_found(identity: object) -> bool:
+    return isinstance(identity, MfdsIdentityLookup) and identity.status == "success"
+
+
+def _retry_model_identity(model_name: str, query: ProductQuery) -> MfdsIdentityLookup | None:
+    """One more 식약처 index lookup of the model; only a single, corroborated registration counts."""
+
+    try:
+        found = _lookup_mfds_identity_runtime(model_name)
+    except Exception:
+        return None
+    if (
+        not isinstance(found, MfdsIdentityLookup)
+        or found.status != "success"
+        or found.match_type != "model"
+        or mfds_identity_status(found) != IdentityEvidenceStatus.FOUND
+        or identity_needs_review(found, manufacturer=query.manufacturer, product_name=query.product_name)
+    ):
+        return None
+    return found
+
+
 def _execute_search(
     *,
     search_text: str,
@@ -1465,6 +1620,12 @@ def _execute_search(
             except Exception:
                 live_detail_codes = ()
 
+        if selected_identity is None and not _identity_found(indexed_identity) and (query.model_name or "").strip():
+            # A cold start can miss the 식약처 index on the first lookup (card "확인 못 함") while the
+            # same-품목 table below still marks the model; ask the index once more.
+            retried = _retry_model_identity(query.model_name or "", query)
+            if retried is not None:
+                indexed_identity = retried
         identity_product = (
             indexed_identity.product_names[0]
             if isinstance(indexed_identity, MfdsIdentityLookup)
@@ -1486,11 +1647,38 @@ def _execute_search(
         same_product_identity = (
             _lookup_same_mfds_product_runtime(identity_product) if identity_product else ()
         )
+        if selected_identity is None and not _identity_found(indexed_identity) and same_product_identity:
+            # The ▶ row and the 식약처 card must agree: one registration of this exact model in the
+            # same-품목 list is the identity.
+            matched = category_market_service.identity_from_same_product(
+                same_product_identity, query.model_name or ""
+            )
+            if matched:
+                indexed_identity = MfdsIdentityLookup("success", raw_search or query.model_name or "", "model", matched)
+        model_stats: dict[str, Any] = {}
         mfds_procurement_crosslinks = _build_mfds_procurement_crosslinks(
             same_product_identity,
             track_b_snapshot=track_b_snapshot,
             current_model=query.model_name or "",
+            stats_out=model_stats,
         )
+        category_started = monotonic()
+        category_market = (
+            _build_category_market(
+                track_b_snapshot,
+                product_names=tuple(
+                    dict.fromkeys(
+                        [identity_product or "", *(r.product_name for r in same_product_identity if r.product_name)]
+                    )
+                ),
+                records=same_product_identity,
+                crosslinks=mfds_procurement_crosslinks,
+                model_stats=model_stats,
+            )
+            if same_product_identity
+            else None
+        )
+        search_timings["category_market"] = round(monotonic() - category_started, 3)
     search_timings["track_b"] = round(monotonic() - track_b_started, 3)
 
     if (
@@ -1604,6 +1792,7 @@ def _execute_search(
         "exact_identity_crosslinks": exact_identity_crosslinks,
         "same_product_identity": same_product_identity,
         "mfds_procurement_crosslinks": mfds_procurement_crosslinks,
+        "category_market": category_market,
         "track_b_data_as_of": track_b_data_as_of,
         "track_b_live": track_b_live,
         "track_b_index_updated_at": track_b_index_updated_at,
@@ -1906,16 +2095,36 @@ def _render_quote_review_strip(state: dict[str, Any]) -> None:
         parts.append(f"<b>{result_layout_ui.esc(file_name)}</b>")
     if isinstance(index, int):
         parts.append(f"{index + 1}번 품목" + (f" (전체 {count}개)" if isinstance(count, int) else ""))
+    _render_back_strip(" · ".join(parts), "pages/2_견적_검토.py", "견적서 검토로 돌아가기", "📋")
+
+
+# The note and its link share one row; Streamlit's markdown/page-link blocks carry their own
+# vertical margins, which put the text a few pixels below the link (2026-10-09 acceptance).
+BACK_STRIP_CSS = """
+<style>
+.st-key-rl_quote_strip [data-testid="stHorizontalBlock"] {align-items:center;}
+.st-key-rl_quote_strip [data-testid="stMarkdownContainer"] {margin:0;}
+.st-key-rl_quote_strip [data-testid="stMarkdownContainer"] > div {margin:0;}
+.st-key-rl_quote_strip .rl-quote-strip {line-height:32px;}
+.st-key-rl_quote_strip [data-testid="stPageLink"] a {padding-top:0; padding-bottom:0; min-height:32px; align-items:center;}
+.st-key-rl_quote_strip [data-testid="stElementContainer"] {margin:0;}
+</style>
+"""
+
+
+def _render_back_strip(note_html: str, page: str, label: str, icon: str) -> None:
+    """One line saying where this result was opened from, with a link back (already-escaped note)."""
+
     st.divider()
-    st.markdown(result_layout_ui.RESULT_CSS, unsafe_allow_html=True)
+    st.markdown(result_layout_ui.RESULT_CSS + BACK_STRIP_CSS, unsafe_allow_html=True)
     with st.container(key="rl_quote_strip"):
         note_col, link_col = st.columns([3.2, 1.4], vertical_alignment="center")
         note_col.markdown(
-            '<div class="rl-quote-strip rl-keep">' + " · ".join(parts) + "</div>",
+            '<div class="rl-quote-strip rl-keep">' + note_html + "</div>",
             unsafe_allow_html=True,
         )
         with link_col:
-            st.page_link("pages/2_견적_검토.py", label="견적서 검토로 돌아가기", icon="📋")
+            st.page_link(page, label=label, icon=icon)
 
 
 def _render_mfds_collection_status_body(status: MfdsIdentityCollectionStatus) -> None:
@@ -2002,11 +2211,17 @@ def _render_price_sections(
     outliers: list[Mapping[str, object]],
     period_label: str,
     quote_key: str,
+    market_shown: bool = False,
 ) -> None:
-    """얼마에 거래됐나: tabs 연도별 · 단위·조건별 · 거래 전체 N건 (a row opens its record)."""
+    """얼마에 거래됐나: tabs 연도별 · 단위·조건별 · 거래 전체 N건 (a row opens its record).
+
+    ``market_shown``: no same-model trade and 같은 품목 시장 already fills the body above, so the
+    empty heading and its "no trade" box are left out (the 비슷한 품목 expander stays).
+    """
 
     st.markdown('<div id="rl-trades"></div>', unsafe_allow_html=True)
-    st.markdown("#### 얼마에 거래됐나")
+    if not (market_shown and not direct_rows):
+        st.markdown("#### 얼마에 거래됐나")
     notes: list[str] = []
     if (
         isinstance(indexed_identity, MfdsIdentityLookup)
@@ -2096,6 +2311,8 @@ def _render_price_sections(
                 st.session_state[record_applied_key] = picked
                 if picked is not None and 0 <= picked < len(direct_rows):
                     _open_trade_dialog(direct_rows[picked])
+    elif market_shown:
+        pass
     elif track_b.status == "unavailable":
         st.warning("가격 자료에 연결하지 못했습니다.")
     elif track_b.status == "not_ingested":
@@ -2152,8 +2369,46 @@ def _render_supplier_and_models(
     query: object,
     quote_key: str,
     track_b_data_as_of: str | None = None,
+    category_market: category_market_service.CategoryMarket | None = None,
+    market_main: bool = False,
+    model_count_note: str = "",
 ) -> None:
-    """누가 파는가 and 같은 품목의 다른 모델 side by side; the long lists open below them."""
+    """누가 파는가 and 같은 품목의 다른 모델 side by side; the long lists open below them.
+
+    With a 같은 품목 시장 view, it replaces the small model table and the two long lists (models,
+    companies): as the main body above when the model has no trade, else as a section here.
+    """
+
+    if category_market is not None:
+        if not market_main:
+            st.markdown("#### 누가 파는가")
+            procurement_suppliers = supplier_rows(track_b)
+            if procurement_suppliers:
+                st.dataframe(
+                    result_summary_ui.supplier_summary_rows(procurement_suppliers),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                hidden_suppliers = len(procurement_suppliers) - result_summary_ui.SUMMARY_ROW_LIMIT
+                st.caption(
+                    "같은 제품을 나라장터에 납품한 업체입니다. 납품 실적이 있다고 공식 총판이라는 뜻은 아닙니다."
+                    + (f" 나머지 {hidden_suppliers}곳은 Excel에 있습니다." if hidden_suppliers > 0 else "")
+                )
+            elif track_b_unavailable:
+                st.warning("나라장터 가격 자료를 읽지 못해 납품업체를 확인하지 못했습니다.")
+            else:
+                st.caption("같은 제품 거래가 없어 납품업체도 없습니다.")
+            _render_category_market(
+                category_market,
+                key=quote_key,
+                records=same_product_identity,
+                searched_model=str(getattr(query, "model_name", "") or ""),
+                has_direct=True,
+                section_heading=True,
+                model_count_note=model_count_note,
+            )
+        _render_medical_lookup_link(indexed_identity, mfds, query)
+        return
 
     show_models = bool(mfds_procurement_crosslinks or identity_known)
     if show_models:
@@ -2371,6 +2626,11 @@ def _render_search_result(state: dict[str, Any]) -> None:
     track_b_index_updated_at = str(state.get("track_b_index_updated_at") or "").strip() or None
     interpretation = state.get("interpretation")
     quote_key = str(heading or "result").strip()
+    category_market = state.get("category_market")
+    if not isinstance(category_market, category_market_service.CategoryMarket):
+        category_market = None
+    # Same-model trades in any period (before the period filter below).
+    any_direct = bool(direct_rows)
     default_quote = (
         f"{review_input.quote_unit_price:,f}"
         if review_input.quote_unit_price is not None
@@ -2644,6 +2904,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
         )
         if label:
             item_status_labels[status_key] = label
+    if category_market is not None:
+        category_market = category_market_service.with_status_labels(category_market, item_status_labels)
+    # No same-model trade: 같은 품목 시장 becomes the main body right after the conclusion.
+    market_main = bool(category_market is not None and not any_direct and not track_b_unavailable)
     identity_status_label = next(
         (
             item_status_labels["".join(permit.split())]
@@ -2750,6 +3014,17 @@ def _render_search_result(state: dict[str, Any]) -> None:
         warn_count=sum(1 for point in points if point.tone in {"warn", "danger"}),
         unavailable=track_b_unavailable,
     )
+    if market_main and category_market is not None:
+        # No same-model trade: the conclusion points straight at the category market below it.
+        lead = dataclasses.replace(
+            lead,
+            headline_html=result_layout_ui.esc(
+                category_market_ui.no_trade_headline(
+                    category_market, str(getattr(query, "model_name", "") or "") or heading
+                )
+            ),
+            basis=category_market_ui.no_trade_basis(category_market),
+        )
     if conclusion.band is not None:
         price_html = result_layout_ui.price_rail_html(
             low=conclusion.band.low,
@@ -2789,8 +3064,29 @@ def _render_search_result(state: dict[str, Any]) -> None:
         unsafe_allow_html=True,
     )
 
-    # ── 카드 4장 (같은 높이, 오른쪽 위 상태 점) ──
-    st.markdown(result_layout_ui.cards_html(header_cards), unsafe_allow_html=True)
+    mfds_live_count_note = ""
+    if isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "success" and mfds.records:
+        mfds_live_count_note = (
+            f"'판매 가능·취소 확인'의 식약처 모델 목록({len(mfds.records):,}개)은 이 표(식약처 제품정보)와 "
+            "다른 식약처 자료라 개수가 다를 수 있습니다."
+        )
+    if market_main and category_market is not None:
+        # ── 같은 품목 시장 (본문): 시세 카드 · 연도별 시세 · 다른 모델 · 도입 기관 · 구할 수 있는 곳 ──
+        # Right under the conclusion; the grey 거래가·납품업체 cards say nothing with 0 trades, so
+        # only 식약처 허가 and 안전·회수 follow, as one line.
+        _render_category_market(
+            category_market,
+            key=quote_key,
+            records=same_product_identity,
+            searched_model=str(getattr(query, "model_name", "") or "") or heading,
+            has_direct=False,
+            show_headline=False,
+            model_count_note=mfds_live_count_note,
+        )
+        st.markdown(category_market_ui.status_strip_html(header_cards[2:]), unsafe_allow_html=True)
+    else:
+        # ── 카드 4장 (같은 높이, 오른쪽 위 상태 점) ──
+        st.markdown(result_layout_ui.cards_html(header_cards), unsafe_allow_html=True)
     if isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"deferred", "failure"}:
         if mfds.status == "failure":
             st.markdown(
@@ -2834,7 +3130,11 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 status=mfds.status,
                 active_model_count=len(mfds.active_records),
                 model_count=len(mfds.records),
-                companies_before=len(
+                # 같은 품목 시장 lists every company (no live filter), so the "kept N of M" note is
+                # only for the older company list.
+                companies_before=0
+                if category_market is not None
+                else len(
                     build_registered_company_summaries(
                         same_product_identity, procurement_crosslinks=mfds_procurement_crosslinks
                     )
@@ -2845,6 +3145,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
                         procurement_crosslinks=mfds_procurement_crosslinks,
                         active_live_keys=live_keys,
                     )
+                ),
+                registered_model_count=(
+                    len(category_market.models) if category_market is not None else len(mfds_procurement_crosslinks)
                 ),
             ),
             unsafe_allow_html=True,
@@ -2942,6 +3245,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
             outliers=outliers,
             period_label=period_choice.label,
             quote_key=quote_key,
+            market_shown=market_main,
         )
         _render_supplier_and_models(
             track_b=track_b,
@@ -2956,6 +3260,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
             query=query,
             quote_key=quote_key,
             track_b_data_as_of=track_b_data_as_of,
+            category_market=category_market,
+            market_main=market_main,
+            model_count_note=mfds_live_count_note,
         )
 
     # ── 2단계 · 상세 자료 (한 묶음) ──
@@ -3370,6 +3677,7 @@ if not existing_result and not handoff_pending:
 
 handoff_payload = st.session_state.pop(PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY, None)
 handoff = parse_purchase_workspace_handoff(handoff_payload)
+handoff_source = str(handoff_payload.get("source") or "") if isinstance(handoff_payload, Mapping) else ""
 if handoff is not None:
     try:
         with _search_status("견적서 품목의 거래가·허가정보를 찾고 있습니다...") as status:
@@ -3387,10 +3695,13 @@ if handoff is not None:
                 lookback_days=G2B_DEFAULT_LOOKBACK_DAYS,
             )
             # Opened from 견적서 검토, which already lists and compares every item: show which item
-            # this is and a way back, not a second item table with "조사 전" rows.
-            search_state["origin"] = "quote_review"
+            # this is and a way back, not a second item table with "조사 전" rows. From the device
+            # page, say so and link back there; never claim a quote that was not opened.
             review_state = st.session_state.get(QUOTE_REVIEW_STATE_SESSION_KEY)
-            if isinstance(review_state, QuoteReviewState) and review_state.items:
+            if handoff_source == "device":
+                search_state["origin"] = "device"
+            elif isinstance(review_state, QuoteReviewState) and review_state.items:
+                search_state["origin"] = "quote_review"
                 search_state["quote_file_name"] = review_state.file_name or ""
                 search_state["quote_item_index"] = _match_quote_item(review_state.items, handoff)
                 search_state["quote_item_count"] = len(review_state.items)
@@ -3595,6 +3906,8 @@ if isinstance(search_state, dict):
         _render_quote_items(search_state)
     elif search_state.get("origin") == "quote_review":
         _render_quote_review_strip(search_state)
+    elif search_state.get("origin") == "device":
+        _render_back_strip("의료기기 허가·안전에서 연 제품입니다", "pages/4_의료기기_조회.py", "의료기기 허가·안전으로 돌아가기", "🏥")
     if search_state.get("route") == "candidate_selection":
         _render_identity_candidate_selection(search_state)
     elif search_state.get("route") in overview_ui.OVERVIEW_ROUTES:

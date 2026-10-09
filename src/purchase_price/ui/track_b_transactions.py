@@ -5,6 +5,8 @@ from decimal import Decimal
 from statistics import median
 from typing import Any
 
+from purchase_price.ui.amount_check import amount_check_label
+
 
 def comparison_candidates(track_b: Any) -> tuple[Any, ...]:
     """Return graded comparison candidates from current or older runtime objects.
@@ -84,6 +86,9 @@ GROUP_QUANTITY_NORMALIZED = True
 # Runtime marker: rows carry 원천기록 so the dashboard can open the archived record.
 SOURCE_RECORD_COLUMN = True
 BUSINESS_NAME_COLUMN = True
+# Runtime marker: 금액검증 shows plain words instead of "consistent"/"inconsistent".
+AMOUNT_CHECK_WORDS = True
+
 
 
 def _number_text(value: Any) -> str:
@@ -175,7 +180,7 @@ def _transaction_row(candidate: Any, *, comparison_level: str) -> dict[str, obje
         "총액": _money_text(getattr(candidate, "total_amount", None))
         if getattr(candidate, "total_amount", None) is not None
         else "미확인",
-        "금액검증": getattr(candidate, "amount_check", None) or "미확인",
+        "금액검증": amount_check_label(getattr(candidate, "amount_check", None)),
         "제조사": getattr(candidate, "manufacturer", None) or "미확인",
         "모델": getattr(candidate, "model_name", None) or "미확인",
         "규격": getattr(candidate, "specification", None) or "미확인",

@@ -34,7 +34,7 @@ def test_legacy_comparison_without_reference_candidates_does_not_crash() -> None
             "수량": "미확인",
             "VAT": "미확인",
             "총액": "미확인",
-            "금액검증": "미확인",
+            "금액검증": "확인 불가",
             "제조사": "미확인",
             "모델": "미확인",
             "규격": "미확인",
@@ -169,7 +169,7 @@ def test_transaction_row_exposes_unit_price_total_and_identity_details() -> None
     assert row["수량"] == "2"
     assert row["VAT"] == "미확인"
     assert row["총액"] == "26,400,000원"
-    assert row["금액검증"] == "consistent"
+    assert row["금액검증"] == "금액 일치"
     assert row["수량/단위"] == "2 대"
     assert row["제조사"] == "Philips goldway"
     assert row["모델"] == "Efficia DFM100"
@@ -227,3 +227,20 @@ def test_model_price_group_rows_use_direct_evidence_only() -> None:
     assert rows[0]["최고단가"] == "13,200,000원"
     assert rows[0]["총수량"] == "3"
     assert rows[0]["최근거래일"] == "2026-08-02"
+
+
+def test_amount_check_is_shown_in_plain_words() -> None:
+    from purchase_price.ui.track_b_transactions import amount_check_label
+
+    assert amount_check_label("consistent") == "금액 일치"
+    assert amount_check_label("INCONSISTENT") == "금액 확인 필요"
+    assert amount_check_label("not_checked") == "확인 불가"
+    assert amount_check_label(None) == "확인 불가"
+    assert amount_check_label("something-new") == "확인 불가"
+
+
+def test_price_and_quote_pages_share_one_amount_check_wording() -> None:
+    from purchase_price.ui import amount_check, quote_market_research, track_b_transactions
+
+    assert track_b_transactions.amount_check_label is amount_check.amount_check_label
+    assert quote_market_research.amount_check_label is amount_check.amount_check_label

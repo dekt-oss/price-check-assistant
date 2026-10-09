@@ -31,6 +31,9 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBReferenceCandidate,
 )
 from purchase_price.services.track_b_quote_with_live import lookup_track_b_quote_with_live
+
+# 금액검증 wording shared with the 가격 조사 tables (one definition, re-exported here).
+from purchase_price.ui.amount_check import AMOUNT_CHECK_LABELS, amount_check_label  # noqa: F401
 from purchase_price.ui.market_research import (
     render_external_research_links,
     render_market_alternative_candidates,
@@ -81,6 +84,8 @@ from purchase_price.ui.widgets import (
 )
 
 QUOTE_REVIEW_ACCEPTANCE_V3 = True
+# The handoff to 가격 조사 says it came from 견적서 검토 (2026-10-09).
+HANDOFF_SOURCE_V1 = True
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(
@@ -116,23 +121,6 @@ def _condition_text(candidate) -> str:
         if value and str(value).strip()
     ]
     return " · ".join(dict.fromkeys(parts)) if parts else "미확인"
-
-
-AMOUNT_CHECK_LABELS = {
-    "consistent": "금액 일치",
-    "inconsistent": "금액 확인 필요",
-    "not_checked": "확인 불가",
-    "unknown": "확인 불가",
-}
-
-
-def amount_check_label(value: object) -> str:
-    """단가×수량과 총액이 맞는지 검산한 결과를 쉬운 말로. 모르는 값은 원문을 노출하지 않는다."""
-
-    text = str(value or "").strip()
-    if not text:
-        return "확인 불가"
-    return AMOUNT_CHECK_LABELS.get(text.lower(), "확인 불가")
 
 
 def _comparison_label(candidate: TrackBQuoteCandidate) -> str:
@@ -935,7 +923,7 @@ def _render_detail_card(state: QuoteReviewState, comparison: QuoteItemComparison
             type="primary",
             use_container_width=True,
         ):
-            st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = handoff.to_session_payload()
+            st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = {**handoff.to_session_payload(), "source": "quote_review"}
             st.switch_page("pages/1_대시보드.py")
     else:
         st.caption("품명이나 모델명이 없어 가격 조사 화면으로 넘길 수 없습니다.")

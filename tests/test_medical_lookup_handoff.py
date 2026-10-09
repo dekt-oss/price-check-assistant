@@ -69,5 +69,6 @@ def test_pages_use_the_shared_widget_keys() -> None:
     for name in ("WIDGET_PRODUCT", "WIDGET_MODEL", "WIDGET_MANUFACTURER", "WIDGET_UDI"):
         assert f"key={name}" in medical
     assert "apply_handoff(st.session_state)" in medical
-    assert dashboard.count("_render_medical_lookup_link(indexed_identity, mfds, query)") == 2
+    # Once beside the model table, once with 같은 품목 시장, once in the detail section.
+    assert dashboard.count("_render_medical_lookup_link(indexed_identity, mfds, query)") == 3
     assert 'label="의료기기 상세 조회 화면 열기"' not in dashboard

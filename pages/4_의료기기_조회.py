@@ -361,7 +361,7 @@ def _open_price_research(params: dev.MarketParams) -> None:
         specification=params.specification,
     )
     if handoff is not None:
-        st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = handoff.to_session_payload()
+        st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = {**handoff.to_session_payload(), "source": "device"}
         st.switch_page("pages/1_대시보드.py")
 
 
