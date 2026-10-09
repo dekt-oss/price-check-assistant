@@ -35,7 +35,7 @@ from purchase_price.services.track_b_live_gap_fill import indexed_detail_codes
 from purchase_price.services.track_b_reference_quality import refine_track_b_reference_quality
 from purchase_price.services.track_b_supplier_summary import supplier_trade_summary
 
-WORKSPACE_LOOKUP_LIMIT = 500
+WORKSPACE_LOOKUP_LIMIT = 5_000
 
 
 def _lookup(query: ProductQuery) -> Callable[[Session], Any]:

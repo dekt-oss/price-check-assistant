@@ -427,8 +427,17 @@ def test_workspace_lookup_reads_beyond_the_old_50_row_default() -> None:
 
     from purchase_price.services import track_b_serving_snapshot as snapshot
 
-    assert snapshot.WORKSPACE_LOOKUP_LIMIT == 500
+    assert snapshot.WORKSPACE_LOOKUP_LIMIT == 5_000
     source = _Path("src/purchase_price/services/track_b_serving_snapshot.py").read_text(encoding="utf-8")
     assert "limit=WORKSPACE_LOOKUP_LIMIT" in source
     dashboard = _Path("pages/1_대시보드.py").read_text(encoding="utf-8")
     assert '건 기준 (더 오래된 거래 있음)' in dashboard
+
+
+def test_lookup_limit_covers_models_with_over_a_thousand_trades() -> None:
+    from purchase_price.services import track_b_db_quote_comparison as comparison
+
+    # NT-381.B had 1,108 trades after the 2021-2025 history; 500 dropped the oldest 600.
+    assert comparison.MAX_LOOKUP_LIMIT >= 5_000
+    with pytest.raises(ValueError):
+        comparison.compare_track_b_quote(None, ProductQuery(model_name="X"), quote_unit_price=None, limit=5_001)

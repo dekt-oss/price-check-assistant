@@ -188,8 +188,10 @@ _TRACK_B_RUNTIME_MARKERS = (
     (track_b_reference_quality_service, "SEARCH_INDEX_V1"),
     (supplier_summary_service, "SEARCH_INDEX_V1"),
     (track_b_comparison_service, "_BUSINESS_NAME_COLUMN"),
-    (track_b_r2_index_service, "_LAST_GOOD_SNAPSHOT"),
-    (track_b_snapshot_service, "WORKSPACE_LOOKUP_LIMIT"),
+    # 500 -> 5,000 rows per model lookup (2026-10-10): comparison first, then its callers.
+    (track_b_comparison_service, "LOOKUP_LIMIT_5000"),
+    (track_b_r2_index_service, "LOOKUP_LIMIT_5000"),
+    (track_b_snapshot_service, "LOOKUP_LIMIT_5000"),
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
     (track_b_transactions_ui, "AMOUNT_CHECK_WORDS"),
     (same_item_ui, "ITEM_STATUS_AWARE"),
