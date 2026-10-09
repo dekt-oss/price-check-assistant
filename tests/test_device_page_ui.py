@@ -54,7 +54,7 @@ class _Recall:
 def test_tab_names_match_the_production_smoke_script() -> None:
     smoke = (ROOT / "scripts" / "production_browser_smoke.py").read_text(encoding="utf-8")
     for name in dev.TAB_NAMES:
-        assert f'name="{name}"' in smoke
+        assert f'("{name}"' in smoke
     page = PAGE.read_text(encoding="utf-8")
     assert "st.tabs(list(dev.TAB_NAMES))" in page
     assert "page_header_html(dev.PAGE_TITLE" in page

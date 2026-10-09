@@ -54,6 +54,14 @@ def _wake_streamlit_cloud_if_sleeping(page: Any, *, timeout: int = 60_000) -> bo
     return True
 
 
+# Current tab name first; the older name is accepted until Production runs the renamed page.
+MEDICAL_DEVICE_TABS = (
+    ("허가·시장조사", "등록·시장조사"),
+    ("안전·공급사", "Safety·공급사"),
+    ("UDI-DI",),
+)
+
+
 def _wait_heading(context: Any, name: str, *, timeout: int = 30_000) -> None:
     context.get_by_role("heading", name=name, exact=True).wait_for(state="visible", timeout=timeout)
 
@@ -378,13 +386,9 @@ def main() -> None:
 
                 _open_page(page, "의료기기_조회")
                 app = _app_frame(page)
-                app.get_by_role("tab", name="허가·시장조사", exact=True).wait_for(
-                    state="visible"
-                )
-                app.get_by_role("tab", name="안전·공급사", exact=True).wait_for(
-                    state="visible"
-                )
-                app.get_by_role("tab", name="UDI-DI", exact=True).wait_for(state="visible")
+                for tab_names in MEDICAL_DEVICE_TABS:
+                    tab_pattern = re.compile("^(" + "|".join(map(re.escape, tab_names)) + ")$")
+                    app.get_by_role("tab", name=tab_pattern).wait_for(state="visible")
                 report["checks"].append("medical_device_tabs_rendered")
 
                 final_label = "medical-device-page"
