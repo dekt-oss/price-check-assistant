@@ -280,3 +280,28 @@ def test_until_done_stops_before_the_job_deadline(monkeypatch, tmp_path) -> None
     # 0 -> 40 -> 80 min; a third batch (estimated 1000 x 1.3 s) would pass the 100-minute deadline.
     assert len(report["batches"]) == 2
     assert report["history_complete"] is False
+
+
+def test_until_done_uses_the_slowest_batch_when_batches_run_slower_than_estimated(
+    monkeypatch, tmp_path
+) -> None:
+    states = _MemoryStates()
+    now = [0.0]
+
+    def fake_collect(**kwargs):
+        now[0] += 60 * 60  # 2026-10-09: a batch took far longer than 100 x 1.3 s
+        state = TrackBHistoryState.from_payload(states.values[HISTORY_STATE_NAME])
+        return _summary(state, next_index=1)
+
+    _wire_runner(monkeypatch, tmp_path, states, fake_collect)
+    runner.run(
+        request_budget=100,
+        output=tmp_path / "s.json",
+        max_minutes=140,
+        clock=lambda: now[0],
+        pause=lambda _s: None,
+    )
+
+    report = json.loads((tmp_path / "s.json").read_text(encoding="utf-8"))
+    # 0 -> 60 -> 120 min; the estimate alone (130 s) would start a third batch ending at 180 min.
+    assert len(report["batches"]) == 2

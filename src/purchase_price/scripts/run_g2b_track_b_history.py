@@ -129,6 +129,7 @@ def run(
         max_retries=settings.g2b_max_retries,
     )
     started = clock()
+    batch_seconds: list[float] = []
     deadline = started + max_minutes * 60 if max_minutes > 0 else None
     batches: list[dict[str, Any]] = []
     exit_code = 0
@@ -137,7 +138,12 @@ def run(
     cap_reached = False
     while not state.complete:
         if deadline is not None and batches:
-            if clock() + request_budget * SECONDS_PER_REQUEST_ESTIMATE > deadline:
+            # A batch took longer than the per-request estimate on 2026-10-09, so the 140-minute
+            # runs overran the job timeout and ended "cancelled": also use the slowest batch so far.
+            next_batch_seconds = max(
+                request_budget * SECONDS_PER_REQUEST_ESTIMATE, max(batch_seconds, default=0.0)
+            )
+            if clock() + next_batch_seconds > deadline:
                 break
         # Leave part of the shared daily quota for the production app's live lookups.
         batch_budget = min(request_budget, remaining_today(state_store))
@@ -147,6 +153,7 @@ def run(
         tier, begin, end = state.current_pass
         codes = state.current_codes
         store = ManifestingRawStore(R2RawEvidenceStore.from_settings(settings))
+        batch_started = clock()
         summary = collect_track_b_batch(
             catalog_client=client,
             shopping_client=client,
@@ -162,6 +169,7 @@ def run(
         )
         state.apply_collection(summary, object_keys=store.object_keys)
         state_store.write_json(HISTORY_STATE_NAME, state.to_payload())
+        batch_seconds.append(clock() - batch_started)
         record_calls(state_store, summary.total_requests)
         batches.append(
             {
