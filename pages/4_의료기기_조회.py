@@ -5,15 +5,25 @@ import sys
 import pandas as pd
 import streamlit as st
 
-# A Streamlit process that started before a deploy keeps the old copy of device_page (the page file
-# updates, its imports do not). Reload it once so the page can use its new helpers.
-_stale_device_page = sys.modules.get("purchase_price.ui.device_page")
-if _stale_device_page is not None and not hasattr(_stale_device_page, "DEVICE_PAGE_IDENTITY_V1"):
-    try:
-        importlib.invalidate_caches()
-        importlib.reload(_stale_device_page)
-    except Exception:
-        pass
+# A Streamlit process that started before a deploy keeps the old copies of imported modules (the page
+# file updates, its imports do not). Reload the ones this page uses, in dependency order, so the 거래가격
+# section applies the same 입력 오류 의심 rule as 가격 조사 and the page can use the new helpers.
+_UI_RUNTIME_MARKERS = (
+    ("purchase_price.services.price_entry_check", "ENTRY_CHECK_V1"),
+    ("purchase_price.ui.track_b_transactions", "ENTRY_ERRORS_EXCLUDED_V1"),
+    ("purchase_price.ui.track_b_transactions", "QUANTITY_COMMAS_V1"),
+    ("purchase_price.ui.device_page", "DEVICE_PAGE_UDI_INPUT_V1"),
+    ("purchase_price.ui.device_page", "DEVICE_PAGE_IDENTITY_V1"),
+    ("purchase_price.ui.device_page", "DEVICE_PAGE_ENTRY_ERRORS_V1"),
+)
+for _name, _marker in _UI_RUNTIME_MARKERS:
+    _stale = sys.modules.get(_name)
+    if _stale is not None and not hasattr(_stale, _marker):
+        try:
+            importlib.invalidate_caches()
+            importlib.reload(_stale)
+        except Exception:
+            pass
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.config import get_settings
@@ -402,6 +412,7 @@ def _render_trades(result: dev.MarketResult) -> None:
     if result.track_b_live == "failure":
         st.markdown(notice_html(dev.LIVE_FAILURE_NOTE, TONE_WARN), unsafe_allow_html=True)
     st.markdown(dev.trade_summary_cards(summary), unsafe_allow_html=True)
+    st.markdown(dev.entry_error_note_html(summary), unsafe_allow_html=True)
     if summary.period_note:
         st.markdown(f'<div class="pc-dev-hint">{summary.period_note}</div>', unsafe_allow_html=True)
     if summary.other_unit_count:

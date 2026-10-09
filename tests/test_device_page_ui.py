@@ -257,6 +257,36 @@ def test_trade_cards_and_rows_write_money_with_commas_and_won() -> None:
     assert dev.won_text(None) == "미확인"
 
 
+def test_trade_summary_leaves_entry_errors_out_and_says_how_many() -> None:
+    swapped = _trade(MatchGrade.A, "1", "2026-09-20")
+    swapped.quantity = Decimal("1731000")
+    swapped.total_amount = Decimal("1731000")
+    summary = dev.build_trade_summary(
+        _track_b(
+            _trade(MatchGrade.A, "1980000", "2026-09-29"),
+            _trade(MatchGrade.A, "297000", "2026-09-17"),
+            swapped,
+        ),
+        TODAY,
+    )
+
+    assert summary.count == 2 and summary.entry_error_count == 1
+    assert (summary.low_price, summary.high_price) == (Decimal("297000"), Decimal("1980000"))
+    cards = dev.trade_summary_cards(summary)
+    assert "297,000 ~ 1,980,000원" in cards and "1 ~" not in cards
+    note = dev.entry_error_note_html(summary)
+    assert "입력 오류 의심 1건" in note
+    assert dev.entry_error_note_html(dev.build_trade_summary(_track_b(), TODAY)) == ""
+
+
+def test_device_page_reloads_stale_trade_modules_before_importing_them() -> None:
+    source = PAGE.read_text(encoding="utf-8")
+    entry = source.index("purchase_price.ui.track_b_transactions\", \"ENTRY_ERRORS_EXCLUDED_V1\"")
+    page_marker = source.index("purchase_price.ui.device_page\", \"DEVICE_PAGE_ENTRY_ERRORS_V1\"")
+    assert entry < page_marker
+    assert dev.DEVICE_PAGE_ENTRY_ERRORS_V1 is True
+
+
 def test_trade_summary_without_same_product_trades_shows_dashes_not_zero_prices() -> None:
     summary = dev.build_trade_summary(_track_b(_trade(MatchGrade.C, "100", "2026-09-01")), TODAY)
     assert summary.count == 0 and summary.reference_count == 1

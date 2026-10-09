@@ -40,6 +40,7 @@ from purchase_price.ui.theme import (
 )
 from purchase_price.ui.track_b_transactions import (
     category_reference_candidates,
+    entry_error_candidates,
     reference_candidates,
     strict_comparison_candidates,
 )
@@ -48,6 +49,8 @@ DEVICE_PAGE_LAYOUT_V1 = True
 DEVICE_PAGE_UDI_INPUT_V1 = True
 # 2026-10-10: the result header is the shared labelled product block (ui/product_identity.py).
 DEVICE_PAGE_IDENTITY_V1 = True
+# 2026-10-10: the trade summary counts 입력 오류 의심 lines out and says so (same rule as 가격 조사).
+DEVICE_PAGE_ENTRY_ERRORS_V1 = True
 
 PAGE_TITLE = "의료기기 허가·안전"
 PAGE_SUBTITLE = (
@@ -125,7 +128,7 @@ DEVICE_CSS = """
 .pc-dev-section .pc-subtitle {margin:0 0 10px 0;}
 .pc-dev-hint {font-size:12px; color:var(--pc-muted); line-height:1.6; margin:6px 0 0 0;}
 .pc-notice.pc-ok {background:#EFFAF5; border-color:#BDE5D3; color:#0F5F46;}
-.pc-dev-trades .pc-metric .pc-value {font-size:18px; white-space:nowrap;}
+.pc-dev-trades .pc-metric .pc-value {font-size:18px; overflow-wrap:anywhere;}
 .pc-dev-one {max-width:280px; margin:0 0 14px 0;}
 .pc-dev-detail {display:block; margin-top:4px; font-size:11.5px; opacity:.85;}
 </style>
@@ -681,6 +684,7 @@ class TradeSummary:
     reference_count: int
     other_unit_count: int
     trades: tuple[Any, ...] = ()
+    entry_error_count: int = 0
 
 
 def _positive_decimal(value: object) -> Decimal | None:
@@ -704,6 +708,9 @@ def build_trade_summary(track_b: Any, today: date | None = None) -> TradeSummary
     direct = result_summary.filter_candidates(direct, choice.cutoff)
     references = result_summary.filter_candidates(references, choice.cutoff)
     split = result_summary.split_by_main_unit(direct)
+    entry_errors = result_summary.filter_candidates(
+        [candidate for candidate, _error in entry_error_candidates(track_b)], choice.cutoff
+    )
     priced = [
         (candidate, price)
         for candidate in split.kept
@@ -726,11 +733,24 @@ def build_trade_summary(track_b: Any, today: date | None = None) -> TradeSummary
         reference_count=len(references),
         other_unit_count=len(split.other),
         trades=tuple(ordered),
+        entry_error_count=len(entry_errors),
     )
 
 
 def track_b_unavailable(track_b: Any) -> bool:
     return str(getattr(track_b, "status", "") or "") in {"unavailable", "not_ingested"}
+
+
+def entry_error_note_html(summary: TradeSummary) -> str:
+    """Says how many lines were left out of the price as 입력 오류 의심 (same wording as 가격 조사)."""
+
+    if not summary.entry_error_count:
+        return ""
+    return (
+        '<div class="pc-dev-hint">입력 오류 의심 '
+        f"{summary.entry_error_count:,}건은 단가가 10원 이하로 적혀 있어 가격 계산에서 뺐습니다. "
+        "가격 조사 화면에서 원문을 확인하세요.</div>"
+    )
 
 
 def trade_summary_cards(summary: TradeSummary) -> str:
@@ -739,7 +759,7 @@ def trade_summary_cards(summary: TradeSummary) -> str:
     per = result_summary.per_unit_label(summary.main_unit).strip()
     count_card = metric_card_html(
         "같은 제품 거래",
-        f"{summary.count}건",
+        f"{summary.count:,}건",
         f"나라장터 · {summary.period_label}",
         TONE_OK if summary.count else TONE_MUTED,
     )
