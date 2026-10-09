@@ -16,11 +16,13 @@ recorded and swallowed: the search path still downloads on demand exactly as bef
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
+from pathlib import Path
 from time import monotonic
 
 from purchase_price.config import Settings
@@ -29,6 +31,12 @@ from purchase_price.storage import streaming_gzip
 PREFETCH_V1 = True
 PROGRESS_V1 = True
 REFRESH_SECONDS = 600.0
+# The Track B index grew to 2.5 GB with the 2021-2024 history (2026-10-09). Pages that searches
+# read stayed cached and held the container at its 3.2 GB limit, the pattern that showed
+# Streamlit Cloud's resource-limit page earlier, so the cache of the index files is dropped this often.
+TRIM_SECONDS = 120.0
+INDEX_CACHE_DIRS = ("price-check-track-b", "price-check-mfds", "price-check-mfds-item-status")
+PAGE_CACHE_TRIM_V1 = True
 DISABLE_ENV = "PRICE_CHECK_INDEX_PREFETCH"
 
 _LOCK = threading.Lock()
@@ -131,11 +139,33 @@ def warm_indexes_once(
     return prefetch_status()
 
 
-def _run(settings: Settings, refresh_seconds: float, stop: threading.Event) -> None:
+def index_files(root: Path | None = None) -> list[Path]:
+    base = root or Path(tempfile.gettempdir())
+    return [path for name in INDEX_CACHE_DIRS for path in sorted((base / name).glob("*.sqlite"))]
+
+
+def trim_index_page_cache(root: Path | None = None) -> int:
+    """Drop the cached pages of every local index file; returns how many files got the hint."""
+
+    return sum(1 for path in index_files(root) if streaming_gzip.forget_cached_pages(path))
+
+
+def _run(
+    settings: Settings,
+    refresh_seconds: float,
+    stop: threading.Event,
+    trim_seconds: float = TRIM_SECONDS,
+) -> None:
     while True:
         warm_indexes_once(settings)
-        if stop.wait(refresh_seconds):
-            return
+        next_refresh = monotonic() + refresh_seconds
+        while True:
+            trim_index_page_cache()
+            remaining = next_refresh - monotonic()
+            if remaining <= 0:
+                break
+            if stop.wait(min(trim_seconds, remaining)):
+                return
 
 
 def prefetch_disabled() -> bool:

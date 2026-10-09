@@ -222,3 +222,47 @@ def test_mfds_search_uses_the_copy_on_disk_while_a_refresh_downloads(monkeypatch
         assert mfds_identity_r2._local_index_path(settings) == old
     finally:
         mfds_identity_r2._LOCAL_INDEX_CACHE_LOCK.release()
+
+
+def test_trim_drops_the_cache_of_every_local_index_file(tmp_path, monkeypatch) -> None:
+    for name in ("price-check-track-b", "price-check-mfds", "price-check-mfds-item-status"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "abc.sqlite").write_bytes(b"x")
+    (tmp_path / "price-check-track-b" / "abc.sqlite.gz.tmp").write_bytes(b"x")
+    seen: list[str] = []
+    monkeypatch.setattr(
+        index_prefetch.streaming_gzip,
+        "forget_cached_pages",
+        lambda path: seen.append(Path(path).parent.name) or True,
+    )
+
+    assert index_prefetch.trim_index_page_cache(tmp_path) == 3
+    assert sorted(seen) == ["price-check-mfds", "price-check-mfds-item-status", "price-check-track-b"]
+
+
+def test_forget_cached_pages_is_a_no_op_without_fadvise(tmp_path, monkeypatch) -> None:
+    from purchase_price.storage import streaming_gzip
+
+    target = tmp_path / "a.sqlite"
+    target.write_bytes(b"x")
+    monkeypatch.delattr(streaming_gzip.os, "posix_fadvise", raising=False)
+    assert streaming_gzip.forget_cached_pages(target) is False
+
+
+def test_run_trims_between_refreshes_and_stops(monkeypatch) -> None:
+    warmed: list[int] = []
+    trims: list[int] = []
+    stop = threading.Event()
+    monkeypatch.setattr(index_prefetch, "warm_indexes_once", lambda _settings: warmed.append(1))
+
+    def trim():
+        trims.append(1)
+        if len(trims) >= 3:
+            stop.set()
+        return 0
+
+    monkeypatch.setattr(index_prefetch, "trim_index_page_cache", trim)
+    index_prefetch._run(SimpleNamespace(), 600.0, stop, trim_seconds=0.01)
+
+    assert warmed == [1]
+    assert len(trims) == 3

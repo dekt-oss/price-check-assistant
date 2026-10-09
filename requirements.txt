@@ -1,6 +1,7 @@
 -e .
 
 # Streamlit Community Cloud runtime parser manifest.
+# Revision 2026-10-09i: restart so the index prefetch thread drops index page cache every 2 minutes.
 # Revision 2026-10-09h: restart so 견적서 검토 loads the shared live-trade lookup.
 # Revision 2026-10-09g: restart so the new blue theme in .streamlit/config.toml loads.
 # Revision 2026-10-09f: add the ?_memdiag=1 memory readout to confirm the page-cache fix (#311).
