@@ -136,6 +136,7 @@ from purchase_price.ui.quote_review_state import (
 )
 from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
+from purchase_price.ui.theme import page_header_html
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
     has_transaction_candidates,
@@ -356,6 +357,10 @@ def _run_deferred_mfds_model_info(state: dict[str, Any]) -> MfdsWorkspaceResult:
 
 HOME_SEARCH_STATE_KEY = "home_unified_search_result"
 HOME_SEARCH_DETAILS_KEY = "home_search_details"
+# Searches made in this browser session; nothing is stored on the server.
+HOME_RECENT_SEARCHES_KEY = "home_recent_searches"
+HOME_RECENT_SEARCH_LIMIT = 5
+HOME_EXAMPLE_QUERIES = ("HeartOn A16-DS", "DFM100", "심장충격기")
 HOME_WORKSPACE_VIEW_KEY = "home_workspace_view"
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
@@ -2737,30 +2742,99 @@ st.markdown(
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
     '<span id="purchase-workspace-v3-shell" style="display:none">purchase-workspace-v3-shell</span>'
-    '<span id="purchase-simple-result-v1" style="display:none">purchase-simple-result-v1</span>',
+    '<span id="purchase-simple-result-v1" style="display:none">purchase-simple-result-v1</span>'
+    '<span id="purchase-home-v2" style="display:none">purchase-home-v2</span>',
     unsafe_allow_html=True,
 )
 
 st.markdown(
     """
 <style>
-.block-container {max-width: 1180px; padding-top: 2.2rem;}
 [data-testid="stForm"] {border: 0; padding: 0;}
+.st-key-home_search_box [data-testid="stTextInputRootElement"] {height:50px;}
+.st-key-home_search_box input {font-size:15px;}
+.st-key-home_search_box button {height:50px; font-size:15px; font-weight:700;}
 [data-testid="stFileUploader"] {margin-top: 0.2rem;}
-.home-title {text-align:center; font-size:2.35rem; font-weight:750; margin:1.2rem 0 0.35rem 0;}
-.home-subtitle {text-align:center; color:#6b7280; margin-bottom:1.4rem;}
 .home-section {margin-top:1.15rem;}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
+
+def _remember_search(query: str) -> None:
+    query = query.strip()
+    if not query:
+        return
+    recent = [item for item in st.session_state.get(HOME_RECENT_SEARCHES_KEY, []) if item[0] != query]
+    recent.insert(0, (query, datetime.now(ZoneInfo("Asia/Seoul")).strftime("%H:%M")))
+    st.session_state[HOME_RECENT_SEARCHES_KEY] = recent[:HOME_RECENT_SEARCH_LIMIT]
+
+
+def _open_query(query: str) -> None:
+    """Search ``query`` through the shared-link path so examples and recent searches act alike."""
+
+    st.session_state.pop(HOME_SEARCH_STATE_KEY, None)
+    st.query_params.clear()
+    st.query_params["q"] = query
+    st.rerun()
+
+
+def _render_home_shortcuts() -> None:
+    picked = st.pills(
+        "예시",
+        HOME_EXAMPLE_QUERIES,
+        selection_mode="single",
+        key="home_example_pick",
+    )
+    if picked:
+        st.session_state.pop("home_example_pick", None)
+        _open_query(str(picked))
+
+
+def _render_home_other_work() -> None:
+    with st.container(border=True):
+        st.markdown(
+            '<div class="pc-eyebrow pc-muted">다른 업무</div>'
+            '<div class="pc-feature"><h4>허가·안전과 병원 정보</h4>'
+            "<p>식약처 허가·회수 정보를 따로 확인하거나, 병원 뉴스와 경영 비교로 이동합니다.</p></div>",
+            unsafe_allow_html=True,
+        )
+        for path, label, icon in (
+            ("pages/4_의료기기_조회.py", "의료기기 허가·안전 확인", "🏥"),
+            ("pages/20_병원_News_Radar.py", "병원 뉴스 보기", "📰"),
+            ("pages/21_병원_경영_Benchmark.py", "병원 경영 비교 보기", "📈"),
+        ):
+            try:
+                st.page_link(path, label=label, icon=icon)
+            except Exception:
+                st.caption(label)
+
+
+def _render_home_recent() -> None:
+    recent = st.session_state.get(HOME_RECENT_SEARCHES_KEY) or []
+    if not recent:
+        return
+    st.markdown('<div class="pc-section-title" style="margin-top:22px">최근 조사</div>', unsafe_allow_html=True)
+    st.caption("이 브라우저 창에서 조사한 것만 보입니다.")
+    for index, (query, at) in enumerate(recent):
+        query_col, time_col = st.columns([10, 1])
+        if query_col.button(query, key=f"home_recent_{index}", type="tertiary", icon="🔎"):
+            _open_query(query)
+        time_col.caption(at)
+
+
 existing_result = isinstance(st.session_state.get(HOME_SEARCH_STATE_KEY), dict)
 handoff_pending = PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY in st.session_state
 if not existing_result and not handoff_pending:
-    st.markdown('<div class="home-title">무엇을 조사할까요?</div>', unsafe_allow_html=True)
+    today = datetime.now(ZoneInfo("Asia/Seoul"))
+    weekday = "월화수목금토일"[today.weekday()]
     st.markdown(
-        '<div class="home-subtitle">모델명, 품목명, 업체명 중 하나만 넣으면 나라장터 거래가와 식약처 허가정보를 함께 찾습니다.</div>',
+        page_header_html(
+            "무엇을 조사할까요?",
+            subtitle="모델명, 품목명, 업체명 중 하나만 넣으면 나라장터 거래가와 식약처 허가정보를 함께 찾습니다.",
+            eyebrow=f"{today.year}년 {today.month}월 {today.day}일 ({weekday})",
+        ),
         unsafe_allow_html=True,
     )
 
@@ -2804,6 +2878,7 @@ if not isinstance(search_state, dict) and shared_query and handoff is None:
                 selected_identity_token=str(st.query_params.get("identity") or ""),
             )
             st.session_state[HOME_SEARCH_STATE_KEY] = search_state
+            _remember_search(shared_query)
             status.update(label="검색 결과를 불러왔습니다", state="complete")
             st.rerun()
     except ValueError as exc:
@@ -2852,8 +2927,8 @@ if result_mode:
             key="home_quote_upload_result",
         )
 else:
-    with st.form("home_unified_search"):
-        search_col, button_col = st.columns([8, 1.35], gap="small")
+    with st.form("home_unified_search"), st.container(key="home_search_box"):
+        search_col, button_col = st.columns([8, 1.35], gap="small", vertical_alignment="bottom")
         search_text = search_col.text_input(
             "통합 검색",
             value=default_query,
@@ -2861,7 +2936,6 @@ else:
             label_visibility="collapsed",
         )
         submitted = button_col.form_submit_button("검색", type="primary", use_container_width=True)
-        st.caption("예: HeartOn A16-DS · 심장충격기 · (주)메디아나")
 
         with st.expander("조건 직접 입력", expanded=False):
             a1, a2 = st.columns(2)
@@ -2877,16 +2951,25 @@ else:
                 format_func=g2b_lookback_label,
             )
 
+    _render_home_shortcuts()
     st.markdown('<div class="home-section"></div>', unsafe_allow_html=True)
-    with st.container(border=True):
-        st.markdown("**견적서로 시작하기**")
-        st.caption("PDF · Excel · 사진 견적서를 올리면 품목을 뽑아 품목마다 거래가를 찾습니다.")
+    quote_col, other_col = st.columns([1.15, 1], gap="medium")
+    with quote_col, st.container(border=True):
+        st.markdown(
+            '<div class="pc-eyebrow pc-muted">구매 업무</div>'
+            '<div class="pc-feature"><h4>견적서로 시작하기</h4>'
+            "<p>PDF · Excel · 사진 견적서를 올리면 품목을 뽑아 품목마다 나라장터 거래가를 찾습니다.</p></div>",
+            unsafe_allow_html=True,
+        )
         uploaded = st.file_uploader(
             "견적서 업로드",
             type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg"],
             label_visibility="collapsed",
             key="home_quote_upload",
         )
+    with other_col:
+        _render_home_other_work()
+    _render_home_recent()
 
 if uploaded is not None:
     if QUOTE_REVIEW_STATE_SESSION_KEY not in st.session_state:
@@ -2955,6 +3038,7 @@ if submitted:
             )
             st.session_state[HOME_SEARCH_STATE_KEY] = search_state
             st.session_state[HOME_SEARCH_DETAILS_KEY] = False
+            _remember_search(search_text)
             st.query_params["q"] = search_text.strip()
             st.query_params.pop("view", None)
             st.query_params.pop("identity", None)

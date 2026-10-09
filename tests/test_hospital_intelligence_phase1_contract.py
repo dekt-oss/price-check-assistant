@@ -33,7 +33,7 @@ def test_root_url_still_opens_the_price_search() -> None:
     assert 'url_path="home"' in source
     assert 'url_path="news-radar"' in source
     assert 'url_path="hospital-benchmark"' in source
-    for label in ("홈", "구매가격 조사", "병원 News Radar", "병원 경영 Benchmark"):
+    for label in ("홈", "가격 조사", "견적서 검토", "의료기기 허가·안전", "병원 뉴스", "병원 경영 비교"):
         assert f'label="{label}"' in source
 
 
