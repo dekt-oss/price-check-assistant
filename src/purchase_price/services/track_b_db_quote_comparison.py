@@ -14,6 +14,7 @@ from purchase_price.domain import MatchGrade
 from purchase_price.evidence_domain import PriceEvidenceStatus, UnitPriceBasis
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
+from purchase_price.services import track_b_search_index as search_index
 from purchase_price.services.g2b_track_b_normalization import (
     NormalizedTrackBRecord,
     TrackBIdentityConflictError,
@@ -612,28 +613,33 @@ def _find_reference_candidates(
 ) -> tuple[TrackBReferenceCandidate, ...]:
     """Return broad observed-price references without promoting them to comparable evidence."""
     conditions = []
+    searched: list[search_index.Contains] = []
     if model_key:
         conditions.append(TrackBDeliveryLine.model_key.like(f"%{model_key}%"))
+        searched.append(search_index.Contains("model_key", model_key))
     if class_key:
         conditions.append(TrackBDeliveryLine.class_key.like(f"%{class_key}%"))
+        searched.append(search_index.Contains("class_key", class_key))
     tokens = _reference_tokens(query.product_name)
     for token in tokens:
         conditions.append(TrackBDeliveryLine.product_title.ilike(f"%{token}%"))
+        searched.append(search_index.Contains("product_title", token))
     if not conditions:
         return ()
 
-    rows = session.scalars(
-        select(TrackBDeliveryLine)
-        .where(
+    # Substring LIKEs cannot use a B-tree index; the side index narrows the rows read.
+    rows = search_index.matching_rows(
+        session,
+        select(TrackBDeliveryLine).where(
             current_clause,
             or_(*conditions),
             _not_cancelled_clause(),
             TrackBDeliveryLine.unit_price > 0,
             TrackBDeliveryLine.identity_conflict.is_(False),
-        )
-        .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
-        .limit(200)
-    ).all()
+        ),
+        search_index.AnyOf(tuple(searched)),
+        limit=200,
+    )
 
     ranked = sorted(
         rows,

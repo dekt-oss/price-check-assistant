@@ -29,6 +29,10 @@ from purchase_price.services.track_b_pipeline_state import (
     STATE_NAME,
     TrackBPipelineState,
 )
+from purchase_price.services.track_b_search_index import (
+    SEARCH_INDEX_VERSION,
+    ensure_search_index,
+)
 from purchase_price.services.track_b_supplemental_state import (
     SUPPLEMENTAL_STATE_NAME,
     SupplementalTrackBState,
@@ -269,12 +273,23 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
                 row_count = int(
                     session.scalar(select(func.count()).select_from(TrackBDeliveryLine)) or 0
                 )
+            # Substring side index for the price search (built once on an older file, then
+            # extended with the new rows). Derived from the table, so no R2 re-read is needed.
+            with engine.begin() as connection:
+                search_report = ensure_search_index(connection)
+            if search_report["indexed_rows"] != row_count:
+                raise RuntimeError(
+                    "Track B search side index does not cover every serving row: "
+                    f"{search_report['indexed_rows']} != {row_count}"
+                )
             with engine.begin() as connection:
                 connection.exec_driver_sql("PRAGMA optimize")
         finally:
             engine.dispose()
 
-        if mode == "incremental" and not indexed_keys:
+        search_summary = {"version": SEARCH_INDEX_VERSION, **search_report}
+        # A file that only gained the side index (or new rows in it) must still be published.
+        if mode == "incremental" and not indexed_keys and not search_report["added"]:
             if pointer is not None:
                 refreshed_pointer = dict(pointer)
                 refreshed_pointer["data_as_of"] = _data_as_of(pipeline)
@@ -286,6 +301,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
                 "serving_schema": SERVING_INDEX_SCHEMA,
                 "state_recovered": state_recovered,
                 "row_count": row_count,
+                "search_index": search_summary,
                 **report,
             }
             if state_recovered:
@@ -314,6 +330,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             "data_as_of": _data_as_of(pipeline),
             "mode": mode,
             "serving_schema": SERVING_INDEX_SCHEMA,
+            "search_index": search_summary,
             "state_recovered": state_recovered,
             "collection_cursor": {
                 "code_index": pipeline.collection_cursor.code_index,
@@ -361,6 +378,7 @@ def sync(*, max_bootstrap_objects: int, output: Path) -> int:
             "index_sha256": ref.sha256,
             "stored_bytes": ref.stored_bytes,
             "uncompressed_bytes": ref.uncompressed_bytes,
+            "search_index": search_summary,
             **report,
         }
         output.parent.mkdir(parents=True, exist_ok=True)

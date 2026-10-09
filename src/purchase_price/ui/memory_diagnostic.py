@@ -26,6 +26,18 @@ class MemorySnapshot:
     container_limit_mb: float | None
     container_file_mb: float | None  # page cache / tmpfs share of the container figure
     cache_files_mb: dict[str, float]
+    # e.g. "3.45.1 부분검색 색인 사용 가능": whether this runtime can use the Track B search side index.
+    sqlite_search: str | None = None
+
+
+def _sqlite_search() -> str | None:
+    try:
+        from purchase_price.services.track_b_search_index import sqlite_search_support
+
+        version, supported = sqlite_search_support()
+    except Exception:  # noqa: BLE001 - diagnostics never break the page
+        return None
+    return f"{version} 부분검색 색인 {'사용 가능' if supported else '사용 불가'}"
 
 
 def _read_int(path: Path) -> int | None:
@@ -100,6 +112,7 @@ def take_snapshot() -> MemorySnapshot:
         container_limit_mb=_mb(limit),
         container_file_mb=_mb(file_backed),
         cache_files_mb={name: _mb(_dir_bytes(root / name)) or 0.0 for name in CACHE_DIR_NAMES},
+        sqlite_search=_sqlite_search(),
     )
 
 
@@ -112,4 +125,5 @@ def format_snapshot(snapshot: MemorySnapshot) -> str:
         f"MEMORY_DIAGNOSTIC 프로세스 {show(snapshot.process_rss_mb)} · "
         f"컨테이너 사용 {show(snapshot.container_used_mb)} / 한도 {show(snapshot.container_limit_mb)} "
         f"(그중 파일 캐시 {show(snapshot.container_file_mb)}) · 임시폴더 인덱스 파일 {files}"
+        f" · SQLite {snapshot.sqlite_search or '읽을 수 없음'}"
     )

@@ -16,6 +16,7 @@ from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from purchase_price.models import TrackBDeliveryLine
+from purchase_price.services import track_b_search_index as search_index
 from purchase_price.services.mfds_business_license_view import company_core_key
 
 _LEGAL_FORMS = ("주식회사", "(주)", "㈜", "(유)", "유한회사", "(재)", "재단법인")
@@ -43,14 +44,16 @@ def supplier_trade_summary(session: Session | None, company_name: str) -> dict[s
         )
     )
     try:
-        rows = session.execute(
+        # A substring LIKE cannot use a B-tree index; the side index narrows the rows read
+        # and keeps the full scan's row order (by id), so the 20000-row cut is unchanged.
+        rows = search_index.matching_rows(
+            session,
             select(
                 TrackBDeliveryLine.supplier,
                 TrackBDeliveryLine.model_name,
                 TrackBDeliveryLine.demand_institution,
                 TrackBDeliveryLine.transaction_date,
-            )
-            .where(
+            ).where(
                 current,
                 TrackBDeliveryLine.supplier.like(f"%{needle}%"),
                 TrackBDeliveryLine.identity_conflict.is_(False),
@@ -59,9 +62,12 @@ def supplier_trade_summary(session: Session | None, company_name: str) -> dict[s
                     TrackBDeliveryLine.unit_price > 0,
                     and_(TrackBDeliveryLine.total_amount > 0, TrackBDeliveryLine.quantity > 0),
                 ),
-            )
-            .limit(CANDIDATE_LIMIT)
-        ).all()
+            ),
+            search_index.Contains("supplier", needle),
+            limit=CANDIDATE_LIMIT,
+            order="id",
+            scalars=False,
+        )
     except Exception:  # optional section; never break the search
         return {"status": "unavailable", "trade_count": 0}
 
