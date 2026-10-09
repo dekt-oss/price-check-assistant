@@ -651,7 +651,7 @@ LAYOUT_CSS = """
 .qr-metrics {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:4px 0 12px 0;}
 .qr-metric {display:flex; flex-direction:column;}
 .qr-metric .pc-sub {overflow-wrap:anywhere; word-break:keep-all;}
-.qr-filetag {display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+.qr-filetag {display:inline-block; max-width:100%; overflow-wrap:anywhere; word-break:break-all;
   vertical-align:bottom; font-size:11px; color:#567399; border:1px solid #D2E0F0; background:#F3F8FD;
   padding:3px 8px; border-radius:6px;}
 .qr-rule {font-size:12px; color:#5B6C82; line-height:1.6; margin:0 0 14px 0; padding:10px 14px;

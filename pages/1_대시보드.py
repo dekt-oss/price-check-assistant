@@ -213,6 +213,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_STACK_V1"),
     ("purchase_price.services.category_market", "CATEGORY_MARKET_PERIOD_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_PERIOD_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_NARROW_V1"),
 )
 
 

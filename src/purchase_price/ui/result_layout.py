@@ -165,7 +165,8 @@ RESULT_CSS = """
   .st-key-rl_settings [data-testid="stColumn"]:nth-child(3) {order:1; flex:0 0 100% !important; width:100% !important;}
 }
 .st-key-rl_mfds_action {margin-top:-10px;}
-.st-key-rl_mfds_action button p {font-size:12px; color:#1D4ED8; font-weight:700; white-space:nowrap;}
+.st-key-rl_mfds_action button p {font-size:12px; color:#1D4ED8; font-weight:700; white-space:normal;}
+.st-key-rl_mfds_action button {height:auto; min-height:2rem;}
 .st-key-rl_result h4 {margin-top:18px;}
 .st-key-rl_outliers, .st-key-rl_entry_errors {background:#FFF9EA; border:1px solid #F8E2B5; border-radius:10px; padding:12px 16px;}
 .st-key-rl_entry_errors {margin:0 0 12px 0;}

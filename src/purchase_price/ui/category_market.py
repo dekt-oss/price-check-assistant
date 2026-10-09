@@ -42,6 +42,8 @@ CATEGORY_MARKET_V1 = True
 CATEGORY_MARKET_PERIOD_V1 = True
 # Runtime marker: the 계산에서 뺀 거래 box lists 입력 오류 의심 lines with their reason.
 CATEGORY_MARKET_ENTRY_ERRORS_V1 = True
+# Runtime marker: the block fits a 390px phone (stacked, wrapping, tables scroll inside their card).
+CATEGORY_MARKET_NARROW_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -96,12 +98,28 @@ CSS = """
 .st-key-cm_block [data-baseweb="tab-highlight"] {height:3px;}
 .st-key-cm_block h4 {font-size:17px; font-weight:700; color:var(--pc-navy); letter-spacing:-0.4px; padding:0;
   margin-top:18px;}
+.cm-excluded li, .cm-excluded li span, .cm-basis, .cm-headline, .cm-rule {overflow-wrap:anywhere;}
 @container (max-width: 760px) {
-  .cm-grid {grid-template-columns:1fr;}
+  .cm-grid {grid-template-columns:minmax(0,1fr);}
+  .cm-grid > .pc-card {min-width:0; overflow-x:auto;}
   .cm-cq .pc-metrics {grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@container (max-width: 520px) {
+  .cm-head {padding:18px 16px !important;}
+  .cm-headline {font-size:19px;}
+  .cm-headline.cm-small {font-size:17px;}
+  .cm-grid > .pc-card {padding:16px 14px;}
+  .cm-card-title span {display:block; margin:2px 0 0 0;}
+  .cm-grid .pc-table td, .cm-grid .pc-table th {white-space:nowrap; padding:9px 7px;}
+  .cm-recent-row {flex-wrap:wrap; row-gap:1px;}
+  .cm-recent-row .cm-price {margin-left:auto;}
+  .cm-recent-row .cm-who {order:3; flex:1 1 100%; white-space:normal; overflow:visible;}
+  .cm-strip-item {flex-wrap:wrap;}
+  .cm-strip-note {white-space:normal; overflow:visible;}
 }
 @container (max-width: 420px) {
   .cm-cq .pc-metrics {grid-template-columns:1fr;}
+  .cm-cq .pc-metric .pc-value {white-space:normal;}
 }
 </style>
 """
