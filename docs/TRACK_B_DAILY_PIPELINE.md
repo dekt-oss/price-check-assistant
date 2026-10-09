@@ -23,6 +23,9 @@ that KST day without a rate-limit stop, at about 1.1 s per call.
 | History: 2021-01-01 to 2025-09-11 | every 3 h at :40 UTC; each run loops 2,000-call batches for up to 320 min | 2,000 per batch | `TRACK_B_HISTORY_REQUEST_BUDGET` |
 | Supplemental verified codes | 04:40 KST Monday | 50 | workflow input |
 
+Each base cycle re-reads the last 31 days, because 납품요구 rows can be registered weeks after
+their request date (R26TB02339713, dated 2026-09-21, was missing after the 09-19~10-05 cycle).
+
 The collector caps a single run at 10,000 requests. All writers share one concurrency group, so
 runs are serialized; a scheduled run that is still waiting when a newer one queues is dropped by
 GitHub and simply runs at its next slot.
