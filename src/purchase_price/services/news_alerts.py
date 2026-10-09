@@ -150,12 +150,18 @@ def send_email(
     body: str,
     env: Mapping[str, str],
     *,
+    to: Sequence[str] | None = None,
     smtp_factory: Callable[[str, int], smtplib.SMTP] = lambda host, port: smtplib.SMTP(host, port, timeout=20),
 ) -> SendResult:
+    """Send one message. ``to`` overrides ALERT_EMAIL_TO (used for each confirmed subscriber, so
+    subscribers never see each other's addresses)."""
+
     host = (env.get("SMTP_HOST") or "").strip()
     user = (env.get("SMTP_USER") or "").strip()
     password = env.get("SMTP_PASSWORD") or ""
-    to = [a.strip() for a in (env.get("ALERT_EMAIL_TO") or "").split(",") if a.strip()]
+    if to is None:
+        to = [a.strip() for a in (env.get("ALERT_EMAIL_TO") or "").split(",") if a.strip()]
+    to = [a for a in to if a]
     if not (host and user and password and to):
         return SendResult("email", "skipped (not configured)")
     message = EmailMessage()

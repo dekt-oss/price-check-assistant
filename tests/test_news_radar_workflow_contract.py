@@ -16,10 +16,10 @@ def _job(name: str) -> str:
 
 
 def test_schedules_and_manual_trigger() -> None:
-    assert 'cron: "*/30 * * * *"' in TEXT
+    assert 'cron: "*/10 * * * *"' in TEXT
     assert 'cron: "30 23 * * *"' in TEXT  # 08:30 KST
     assert "workflow_dispatch:" in TEXT
-    assert "github.event.schedule == '*/30 * * * *'" in _job("collect")
+    assert "github.event.schedule == '*/10 * * * *'" in _job("collect")
     assert "github.event.schedule == '30 23 * * *'" in _job("daily-digest")
 
 

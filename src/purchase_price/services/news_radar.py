@@ -69,6 +69,8 @@ class Keyword:
     # "every word of the keyword text". NAVER returns articles that mention the words anywhere in
     # the body, so without this most results are unrelated (measured 2026-10-09: 40 of 1,624).
     title_terms: tuple[tuple[str, ...], ...] = ()
+    # Words that disqualify a title even when the required words are there (e.g. "부산백화점").
+    exclude_terms: tuple[str, ...] = ()
 
     @property
     def required_terms(self) -> tuple[tuple[str, ...], ...]:
@@ -104,6 +106,7 @@ def load_keyword_groups(path: Path = DEFAULT_KEYWORD_FILE) -> tuple[KeywordGroup
                     tuple(str(t) for t in (group if isinstance(group, list) else [group]))
                     for group in item.get("title_terms") or []
                 ),
+                exclude_terms=tuple(str(t) for t in item.get("exclude_terms") or []),
             )
             for item in raw.get("keywords") or []
             if str(item.get("text") or "").strip()
@@ -129,6 +132,8 @@ def title_matches(title: str, keyword: Keyword) -> bool:
     """True when the title contains the keyword's required words (spaces and case ignored)."""
 
     squashed = _squash(title)
+    if any(_squash(term) in squashed for term in keyword.exclude_terms):
+        return False
     return all(any(_squash(term) in squashed for term in group) for group in keyword.required_terms)
 
 

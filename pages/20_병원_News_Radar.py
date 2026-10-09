@@ -22,6 +22,7 @@ from purchase_price.clients.naver_news import NaverNewsClient, NaverNewsClientEr
 from purchase_price.config import get_settings
 from purchase_price.services import news_radar as radar
 from purchase_price.services import news_radar_index as nri
+from purchase_price.services import news_subscriptions as subs
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 
 hydrate_streamlit_runtime_secrets()
@@ -34,7 +35,7 @@ def _reload_retained_modules() -> None:
     import importlib
     import sys
 
-    if hasattr(radar, "rank_entries") and hasattr(radar.Keyword, "required_terms"):
+    if hasattr(radar, "rank_entries") and hasattr(radar.Keyword, "exclude_terms"):
         return
     for name in (
         "purchase_price.clients.naver_news",
@@ -58,7 +59,7 @@ SESSION_STATUSES_KEY = "news_radar_session_statuses"
 SAVED_STATUSES_KEY = "news_radar_saved_statuses"
 STATUS_SESSION_ONLY_KEY = "news_radar_status_session_only"
 INDEX_CACHE_SECONDS = 300
-STALE_AFTER = timedelta(hours=2)
+STALE_AFTER = timedelta(hours=1)
 
 
 def _secret(name: str) -> str | None:
@@ -75,6 +76,49 @@ def _secret(name: str) -> str | None:
     except (FileNotFoundError, KeyError, StreamlitSecretNotFoundError):
         return None
     return str(candidate).strip() if candidate else None
+
+
+SUBSCRIBER_ENV_NAMES = (
+    "SUBSCRIBER_R2_BUCKET",
+    "SUBSCRIBER_R2_ACCESS_KEY_ID",
+    "SUBSCRIBER_R2_SECRET_ACCESS_KEY",
+    "R2_ENDPOINT_URL",
+    "R2_ACCOUNT_ID",
+)
+
+
+def _subscriber_store() -> subs.SubscriberStore | None:
+    local = _secret("SUBSCRIBER_STORE_PATH")
+    if local:
+        return subs.LocalSubscriberStore(local)
+    env = {name: value for name in SUBSCRIBER_ENV_NAMES if (value := _secret(name))}
+    try:
+        return subs.R2SubscriberStore.from_env(env)
+    except Exception:  # noqa: BLE001 - a broken store must not break the news page
+        return None
+
+
+def _handle_subscription_links(store: subs.SubscriberStore | None) -> None:
+    """``?confirm=`` and ``?unsubscribe=`` links from the emails."""
+
+    params = st.query_params
+    for name in ("confirm", "unsubscribe"):
+        token = params.get(name)
+        if not token:
+            continue
+        if store is None:
+            st.warning("이메일 알림 저장소가 아직 연결되지 않아 처리하지 못했습니다. 관리자에게 알려 주세요.")
+        else:
+            try:
+                if name == "confirm":
+                    person = subs.confirm(store, token)
+                    chosen = ", ".join(subs.PREF_LABELS[p] for p in person.prefs)
+                    st.success(f"{person.email} 주소로 알림을 보내 드립니다: {chosen}")
+                else:
+                    st.success(subs.unsubscribe(store, token))
+            except subs.SubscriptionError as exc:
+                st.warning(str(exc))
+        del st.query_params[name]
 
 
 def _naver_credentials() -> tuple[str, str] | None:
@@ -174,6 +218,9 @@ nri.seed_state(
     state, stored_index, _saved_statuses(store), session_statuses=_session_statuses()
 )
 
+subscriber_store = _subscriber_store()
+_handle_subscription_links(subscriber_store)
+
 st.title("병원 News Radar")
 st.caption("등록한 키워드로 새 기사를 자동 확인합니다. 기사 제목·시간·링크를 그대로 보여 주고 요약하지 않습니다.")
 
@@ -199,13 +246,13 @@ if store is not None:
         last_text = radar.seoul_time_text(last_run.finished_at, "%H:%M" if same_day else "%m-%d %H:%M")
         status_text = (
             f"자동 수집 상태: 마지막 자동 확인 {last_text} · 키워드 {last_run.keyword_count}개 중 "
-            f"{last_run.ok_count}개 확인 · 새 기사 {last_run.new_count}건 · 30분마다 자동 확인"
+            f"{last_run.ok_count}개 확인 · 새 기사 {last_run.new_count}건 · 10분마다 자동 확인"
         )
         if last_run.failed_keywords:
             status_text += " · 확인 못 한 키워드: " + ", ".join(last_run.failed_keywords)
         st.caption(status_text)
         if datetime.now(UTC) - last_run.finished_at > STALE_AFTER:
-            st.warning("자동 확인이 2시간 넘게 멈춰 있습니다. 새 기사 확인 버튼으로 직접 확인할 수 있습니다.")
+            st.warning("자동 확인이 1시간 넘게 멈춰 있습니다. 새 기사 확인 버튼으로 직접 확인할 수 있습니다.")
     if st.session_state.get(STATUS_SESSION_ONLY_KEY):
         st.caption("읽음·중요 표시는 이 화면을 연 동안만 유지됩니다 (저장 권한이 없는 연결).")
     else:
@@ -365,3 +412,30 @@ if len(entries) > len(visible_entries):
     if st.button(f"기사 {PAGE_SIZE}건 더 보기"):
         st.session_state["news_radar_page_size"] = page_size + PAGE_SIZE
         st.rerun()
+
+st.divider()
+st.subheader("이메일 알림 받기")
+st.caption(
+    "우리병원(부산백병원·인제대 백병원·백중앙의료원) 기사가 제목에 나오면 좋은 기사든 나쁜 기사든 약 10분 안에 "
+    "메일로 보내 드립니다. 매일 아침 8시 30분에는 병원 전체 동향 요약을 보내 드립니다."
+)
+if subscriber_store is None:
+    st.info("이메일 알림 신청은 관리자 설정이 끝나면 열립니다.")
+else:
+    with st.form("news_subscribe", clear_on_submit=True):
+        email = st.text_input("이메일 주소", placeholder="name@example.com")
+        want_immediate = st.checkbox(subs.PREF_LABELS[subs.PREF_IMMEDIATE], value=True)
+        want_daily = st.checkbox(subs.PREF_LABELS[subs.PREF_DAILY], value=False)
+        st.caption(
+            "입력한 주소로 확인 메일을 먼저 보내고, 메일 속 링크를 눌러야 알림이 시작됩니다. 주소는 알림 발송에만 "
+            "쓰고, 확인하지 않은 신청은 7일 뒤, 수신 거부하면 즉시 지웁니다. 모든 알림 메일에 수신 거부 링크가 있습니다."
+        )
+        submitted = st.form_submit_button("알림 신청")
+    if submitted:
+        prefs = [p for p, on in ((subs.PREF_IMMEDIATE, want_immediate), (subs.PREF_DAILY, want_daily)) if on]
+        try:
+            subs.request_subscription(subscriber_store, email, prefs)
+        except subs.SubscriptionError as exc:
+            st.warning(str(exc))
+        else:
+            st.success("신청을 받았습니다. 10분 안에 확인 메일이 갑니다. 메일 속 링크를 눌러 주세요.")

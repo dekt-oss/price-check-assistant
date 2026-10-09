@@ -22,6 +22,7 @@ import json
 import os
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ from purchase_price.config import Settings
 from purchase_price.services import news_alerts
 from purchase_price.services import news_radar as radar
 from purchase_price.services import news_radar_index as nri
+from purchase_price.services import news_subscriptions as subs
 
 WEBHOOK_ENV = "NEWS_ALERT_WEBHOOK_URL"
 
@@ -50,6 +52,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--display", type=int, default=MAX_DISPLAY)
     parser.add_argument("--no-alert", action="store_true", help="Never post to the alert webhook.")
     parser.add_argument("--summary-json", type=Path, help="Also write the run summary to this file.")
+    parser.add_argument(
+        "--subscribers-dir",
+        type=Path,
+        help="Local subscriber records (default: the SUBSCRIBER_R2_* bucket when configured).",
+    )
     return parser.parse_args(argv)
 
 
@@ -95,6 +102,53 @@ def _kakao_token_io(store: nri.NewsRadarStore):
         )
 
     return load, save
+
+
+def _subscriber_store(args: argparse.Namespace) -> subs.SubscriberStore | None:
+    if getattr(args, "subscribers_dir", None) is not None:
+        return subs.LocalSubscriberStore(args.subscribers_dir)
+    return subs.R2SubscriberStore.from_env(os.environ)
+
+
+def _page_url() -> str:
+    return (os.getenv(news_alerts.PAGE_URL_ENV) or news_alerts.DEFAULT_PAGE_URL).strip()
+
+
+def run_subscriber_upkeep(store: subs.SubscriberStore | None, *, now: datetime | None = None) -> str:
+    """Send confirmation mails for new requests and drop week-old unconfirmed ones."""
+
+    if store is None:
+        return "not configured"
+    now = now or datetime.now(UTC)
+    sent = failed = 0
+    for subscriber in store.all():
+        if not subscriber.needs_confirmation_mail:
+            continue
+        subject, body = subs.confirmation_mail(subscriber, _page_url())
+        result = news_alerts.send_email(subject, body, os.environ, to=[subscriber.email])
+        if result.status == "sent":
+            store.put(replace(subscriber, confirm_sent_at=now))
+            sent += 1
+        else:
+            failed += 1
+    purged = subs.purge_stale(store, now=now)
+    return f"확인 메일 {sent}건 발송, 실패 {failed}건, 만료 삭제 {purged}건"
+
+
+def send_to_subscribers(
+    store: subs.SubscriberStore | None, pref: str, subject: str, body: str
+) -> str:
+    """One message per confirmed subscriber (no shared To list), each with its unsubscribe link."""
+
+    if store is None:
+        return "구독 저장소 없음"
+    people = subs.recipients(store, pref)
+    results = [
+        news_alerts.send_email(subject, body + subs.unsubscribe_footer(p, _page_url()), os.environ, to=[p.email])
+        for p in people
+    ]
+    ok = sum(1 for r in results if r.status == "sent")
+    return f"구독자 {len(people)}명 중 {ok}명 발송"
 
 
 def post_webhook(url: str, text: str, *, transport: httpx.BaseTransport | None = None) -> str:
@@ -165,6 +219,16 @@ def run_collect(
             save_kakao_refresh_token=save_token,
         )
         alert = f"{len(items)}건 → " + ", ".join(f"{r.channel} {r.status}" for r in sent)
+        ours = [i for i in items if "email" in {c for g in groups if g.key == i.group_key for c in g.notify}]
+        if ours:
+            subject = f"[병원 News Radar] {ours[0].keyword} 등 새 기사 {len(ours)}건"
+            alert += ", " + send_to_subscribers(
+                _subscriber_store(args),
+                subs.PREF_IMMEDIATE,
+                subject,
+                news_alerts.long_text(ours, _page_url()),
+            )
+    upkeep = "skipped (--no-alert)" if args.no_alert else run_subscriber_upkeep(_subscriber_store(args))
 
     run = result.run
     summary = {
@@ -174,6 +238,7 @@ def run_collect(
         "item_count": len(index.items),
         "status_count": len(pruned),
         "alert": alert,
+        "subscribers": upkeep,
         **run.to_payload(include_logs=True),
     }
     lines = [
@@ -182,6 +247,7 @@ def run_collect(
         f"- 키워드 {run.keyword_count}개 중 {run.ok_count}개 확인, 실패 {run.failed_count}개",
         f"- 새 기사 {run.new_count}건, 21일 지나 지운 기사 {run.purged_count}건, 보관 중 {len(index.items)}건",
         f"- 즉시 알림: {alert}",
+        f"- 이메일 구독: {upkeep}",
     ]
     if run.failed_keywords:
         lines.append("- 실패 키워드: " + ", ".join(run.failed_keywords))
@@ -199,8 +265,15 @@ def run_digest(args: argparse.Namespace, store: nri.NewsRadarStore, *, now: date
     written = store.write_digest(day, text)
     removed = store.prune_digests(day - timedelta(days=nri.RETENTION_DAYS))
     _append_step_summary(text)
+    mailed = send_to_subscribers(
+        _subscriber_store(args),
+        subs.PREF_DAILY,
+        f"[병원 News Radar] {day.isoformat()} 병원 동향 요약",
+        text,
+    )
     return {
         "mode": "digest",
+        "mailed": mailed,
         "store": store.describe(),
         "written": written,
         "day": day.isoformat(),

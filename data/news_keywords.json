@@ -1,69 +1,408 @@
 {
-  "_note": "title_terms: 기사 제목에 반드시 있어야 하는 단어. 안쪽 목록은 '이 중 하나', 바깥 목록은 '모두'. 비워 두면 키워드의 모든 단어가 제목에 있어야 한다. notify: 즉시 알림을 보낼 채널(email, kakao, sms, webhook).",
+  "_note": "title_terms: 기사 제목에 반드시 있어야 하는 단어(안쪽 목록은 '이 중 하나', 바깥 목록은 '모두'). exclude_terms: 제목에 있으면 제외. alert: immediate(10분마다 즉시 알림) / daily(매일 아침 요약) / none. 우리병원 즉시 알림은 좋은 기사·나쁜 기사 구분 없이 제목에 우리병원이 나오면 모두 보낸다.",
   "groups": [
     {
       "key": "our_hospital",
       "name": "우리병원",
       "enabled": true,
-      "notify": ["kakao", "email", "sms", "webhook"],
+      "notify": [
+        "kakao",
+        "email",
+        "sms",
+        "webhook"
+      ],
       "keywords": [
-        {"text": "부산백병원", "alert": "immediate", "title_terms": [["부산백병원", "부산백"]]},
-        {"text": "인제대학교 백병원", "alert": "immediate", "title_terms": [["백병원"]]},
-        {"text": "백중앙의료원", "alert": "immediate", "title_terms": [["백중앙의료원"]]},
-        {"text": "해운대백병원", "alert": "immediate", "title_terms": [["해운대백병원", "해운대백"]]},
-        {"text": "부산진구 종합병원", "alert": "daily", "title_terms": [["부산진구"], ["병원"]]}
+        {
+          "text": "부산백병원",
+          "alert": "immediate",
+          "title_terms": [
+            [
+              "부산백병원",
+              "부산백",
+              "인제대부산백",
+              "인제대학교부산백"
+            ]
+          ],
+          "exclude_terms": [
+            "백화점"
+          ]
+        },
+        {
+          "text": "인제대 백병원",
+          "alert": "immediate",
+          "title_terms": [
+            [
+              "인제대",
+              "백병원"
+            ],
+            [
+              "백병원",
+              "의료원",
+              "병원",
+              "분원"
+            ]
+          ],
+          "exclude_terms": [
+            "해운대백",
+            "일산백",
+            "상계백",
+            "서울백"
+          ]
+        },
+        {
+          "text": "백중앙의료원",
+          "alert": "immediate",
+          "title_terms": [
+            [
+              "백중앙의료원",
+              "백의료원"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "key": "paik_network",
+      "name": "같은 의료원 병원",
+      "enabled": true,
+      "notify": [
+        "email",
+        "webhook"
+      ],
+      "keywords": [
+        {
+          "text": "해운대백병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "해운대백병원",
+              "해운대백"
+            ]
+          ]
+        },
+        {
+          "text": "일산백병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "일산백병원",
+              "일산백"
+            ]
+          ]
+        },
+        {
+          "text": "상계백병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "상계백병원",
+              "상계백"
+            ]
+          ]
+        },
+        {
+          "text": "부산진구 종합병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "부산진구"
+            ],
+            [
+              "병원"
+            ]
+          ]
+        }
       ]
     },
     {
       "key": "peer_hospitals",
       "name": "경쟁·Benchmark 병원",
       "enabled": true,
-      "notify": ["email", "webhook"],
+      "notify": [
+        "email",
+        "webhook"
+      ],
       "keywords": [
-        {"text": "부산 상급종합병원", "alert": "immediate", "title_terms": [["부산"], ["상급종합", "대학병원"]]},
-        {"text": "부산대학교병원", "alert": "daily", "title_terms": [["부산대병원", "부산대학교병원"]]},
-        {"text": "동아대학교병원", "alert": "daily", "title_terms": [["동아대병원", "동아대학교병원"]]},
-        {"text": "고신대학교복음병원", "alert": "daily", "title_terms": [["고신대", "복음병원"]]},
-        {"text": "양산부산대학교병원", "alert": "daily", "title_terms": [["양산부산대"]]}
+        {
+          "text": "부산 상급종합병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "부산"
+            ],
+            [
+              "상급종합",
+              "대학병원"
+            ]
+          ]
+        },
+        {
+          "text": "부산대학교병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "부산대병원",
+              "부산대학교병원"
+            ]
+          ]
+        },
+        {
+          "text": "동아대학교병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "동아대병원",
+              "동아대학교병원"
+            ]
+          ]
+        },
+        {
+          "text": "고신대학교복음병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "고신대",
+              "복음병원"
+            ]
+          ]
+        },
+        {
+          "text": "양산부산대학교병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "양산부산대"
+            ]
+          ]
+        }
       ]
     },
     {
       "key": "management",
       "name": "병원경영",
       "enabled": true,
-      "notify": ["email", "webhook"],
+      "notify": [
+        "email",
+        "webhook"
+      ],
       "keywords": [
-        {"text": "상급종합병원 지정", "alert": "immediate", "title_terms": [["상급종합병원"], ["지정", "평가"]]},
-        {"text": "병원 경영 적자", "alert": "daily", "title_terms": [["병원"], ["적자", "경영난", "손실"]]},
-        {"text": "병원 수가 인상", "alert": "daily", "title_terms": [["수가"]]},
-        {"text": "대학병원 투자", "alert": "daily", "title_terms": [["병원"], ["투자"]]},
-        {"text": "병원 의료인력 부족", "alert": "daily", "title_terms": [["병원", "의료"], ["인력", "전공의", "간호사", "의사 부족"]]}
+        {
+          "text": "상급종합병원 지정",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "상급종합병원"
+            ],
+            [
+              "지정",
+              "평가"
+            ]
+          ]
+        },
+        {
+          "text": "병원 경영 적자",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "병원"
+            ],
+            [
+              "적자",
+              "경영난",
+              "손실"
+            ]
+          ]
+        },
+        {
+          "text": "병원 수가 인상",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "수가"
+            ]
+          ]
+        },
+        {
+          "text": "대학병원 투자",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "병원"
+            ],
+            [
+              "투자"
+            ]
+          ]
+        },
+        {
+          "text": "병원 의료인력 부족",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "병원",
+              "의료"
+            ],
+            [
+              "인력",
+              "전공의",
+              "간호사",
+              "의사 부족"
+            ]
+          ]
+        }
       ]
     },
     {
       "key": "ai_digital",
       "name": "AI·디지털",
       "enabled": true,
-      "notify": ["email", "webhook"],
+      "notify": [
+        "email",
+        "webhook"
+      ],
       "keywords": [
-        {"text": "병원 AI 도입", "alert": "daily", "title_terms": [["병원"], ["AI", "인공지능"]]},
-        {"text": "의료 AI 병원", "alert": "daily", "title_terms": [["의료", "병원", "진료"], ["AI", "인공지능"]]},
-        {"text": "생성형 AI 병원", "alert": "daily", "title_terms": [["생성형", "LLM", "챗GPT"], ["병원", "의료", "진료"]]},
-        {"text": "EMR AI", "alert": "daily", "title_terms": [["EMR", "전자의무기록"]]},
-        {"text": "디지털헬스 병원", "alert": "none", "title_terms": [["디지털헬스", "디지털 헬스", "스마트병원", "스마트 병원"]]}
+        {
+          "text": "병원 AI 도입",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "병원"
+            ],
+            [
+              "AI",
+              "인공지능"
+            ]
+          ]
+        },
+        {
+          "text": "의료 AI 병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "의료",
+              "병원",
+              "진료"
+            ],
+            [
+              "AI",
+              "인공지능"
+            ]
+          ]
+        },
+        {
+          "text": "생성형 AI 병원",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "생성형",
+              "LLM",
+              "챗GPT"
+            ],
+            [
+              "병원",
+              "의료",
+              "진료"
+            ]
+          ]
+        },
+        {
+          "text": "EMR AI",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "EMR",
+              "전자의무기록"
+            ]
+          ]
+        },
+        {
+          "text": "디지털헬스 병원",
+          "alert": "none",
+          "title_terms": [
+            [
+              "디지털헬스",
+              "디지털 헬스",
+              "스마트병원",
+              "스마트 병원"
+            ]
+          ]
+        }
       ]
     },
     {
       "key": "procurement",
       "name": "구매·관리",
       "enabled": true,
-      "notify": ["email", "webhook"],
+      "notify": [
+        "email",
+        "webhook"
+      ],
       "keywords": [
-        {"text": "병원 의료장비 도입", "alert": "none", "title_terms": [["병원"], ["장비", "도입"]]},
-        {"text": "의료기기 회수", "alert": "immediate", "title_terms": [["의료기기", "의료제품"], ["회수", "판매중지", "리콜"]]},
-        {"text": "식약처 회수 의료기기", "alert": "immediate", "title_terms": [["식약처"], ["회수", "판매중지", "리콜"]]},
-        {"text": "신의료기술 평가", "alert": "daily", "title_terms": [["신의료기술"]]},
-        {"text": "의료기기 안전성 정보", "alert": "daily", "title_terms": [["의료기기"], ["안전", "부작용", "이상사례"]]}
+        {
+          "text": "병원 의료장비 도입",
+          "alert": "none",
+          "title_terms": [
+            [
+              "병원"
+            ],
+            [
+              "장비",
+              "도입"
+            ]
+          ]
+        },
+        {
+          "text": "의료기기 회수",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "의료기기",
+              "의료제품"
+            ],
+            [
+              "회수",
+              "판매중지",
+              "리콜"
+            ]
+          ]
+        },
+        {
+          "text": "식약처 회수 의료기기",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "식약처"
+            ],
+            [
+              "회수",
+              "판매중지",
+              "리콜"
+            ]
+          ]
+        },
+        {
+          "text": "신의료기술 평가",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "신의료기술"
+            ]
+          ]
+        },
+        {
+          "text": "의료기기 안전성 정보",
+          "alert": "daily",
+          "title_terms": [
+            [
+              "의료기기"
+            ],
+            [
+              "안전",
+              "부작용",
+              "이상사례"
+            ]
+          ]
+        }
       ]
     }
   ]
