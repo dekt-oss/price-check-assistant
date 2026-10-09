@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,400,0,0&display=swap" rel="stylesheet">
+<style>
+/* ── 디자인 토큰 (Streamlit theme + st.markdown CSS로 옮기는 값) ── */
+:root{
+  --color-primary:#1f6f8b;        /* 주 색 · Streamlit theme.primaryColor */
+  --color-primary-soft:#e6f0f4;   /* 주 색 바탕 */
+  --color-ink:#1c1b19;            /* 글자 · theme.textColor */
+  --color-ink-2:#52514e;          /* 보조 글자 */
+  --color-muted:#6b6862;          /* 안내 글자 */
+  --color-muted-2:#898781;        /* 표 머리글 */
+  --color-bg:#ffffff;             /* theme.backgroundColor */
+  --color-bg-2:#f6f5f1;           /* theme.secondaryBackgroundColor · 사이드바·입력칸 */
+  --color-bg-3:#efeee9;           /* 표 머리글 바탕 */
+  --color-border:#e1e0d9;
+  --color-border-2:#c3c2b7;
+  --color-ok:#2e7d5b;   --color-ok-soft:#e9f3ee;
+  --color-warn:#b45309; --color-warn-soft:#fdf3e4;
+  --color-danger:#b91c1c; --color-danger-soft:#fbeaea;
+  --color-neutral:#94a3b8;
+  --font:"Pretendard Variable",Pretendard,-apple-system,"Malgun Gothic",sans-serif;
+  --fs-12:12px; --fs-13:13px; --fs-14:14px; --fs-16:16px; --fs-18:18px; --fs-22:22px; --fs-28:28px; --fs-34:34px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px; --sp-7:48px;
+  --r-s:6px; --r-m:10px;
+}
+body{margin:0;background:var(--color-bg);font-family:var(--font);color:var(--color-ink);}
+a{color:var(--color-primary);text-decoration:none}a:hover{text-decoration:underline}
+select{font:inherit}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:100vh;width:100%;max-width:1440px;margin:0 auto;font-size:14px;line-height:1.55;color:var(--color-ink);background:var(--color-bg)">
+  <!-- 프로토타입 조작 막대 (실제 화면 아님) -->
+  <div style="display:flex;align-items:center;gap:20px;height:40px;padding:0 16px;background:#2b2a27;color:#d9d7d0;font-size:12px;flex:0 0 40px">
+    <span style="font-weight:600;color:#fff">프로토타입 보기</span>
+    <label style="display:flex;align-items:center;gap:6px">상태 보기 <select value="{{ stateView }}" onChange="{{ setStateView }}" style="height:26px;border-radius:4px;border:1px solid #55534d;background:#3a3934;color:#fff;padding:0 6px">
+      <option value="normal">기본</option><option value="loading">자료 내려받는 중</option><option value="empty">결과 없음</option><option value="widened">최근 3년 거래 없어 5년으로 넓힘</option><option value="livefail">실시간 확인 실패</option><option value="units">단위가 섞여 따로 보여줌</option><option value="outlier">가운데 값과 크게 다른 거래</option></select></label>
+    <label style="display:flex;align-items:center;gap:6px">결과 첫 화면 <select value="{{ variant }}" onChange="{{ setVariant }}" style="height:26px;border-radius:4px;border:1px solid #55534d;background:#3a3934;color:#fff;padding:0 6px"><option value="A">A · 결론 중심</option><option value="B">B · 표 중심</option></select></label>
+    <label style="display:flex;align-items:center;gap:6px">제품 자료 <select value="{{ productKey }}" onChange="{{ setProduct }}" style="height:26px;border-radius:4px;border:1px solid #55534d;background:#3a3934;color:#fff;padding:0 6px"><option value="M40">M40 환자감시장치</option><option value="PNB704">PNB-704 생물안전작업대</option><option value="DFM100">Efficia DFM100 심장충격기</option></select></label>
+    <span style="margin-left:auto;color:#a09d95">{{ screenTitle }}</span>
+  </div>
+
+  <div style="display:flex;flex:1">
+  <!-- 사이드바: 두 묶음 -->
+  <aside style="width:256px;flex:0 0 256px;background:var(--color-bg-2);border-right:1px solid var(--color-border);padding:24px 16px;box-sizing:border-box;display:flex;flex-direction:column;gap:20px">
+    <button onClick="{{ goHome }}" style="display:flex;align-items:center;gap:10px;height:40px;padding:0 10px;border:0;border-radius:var(--r-s);background:{{ homeBg }};cursor:pointer;text-align:left;font:inherit;font-size:15px;font-weight:700;color:var(--color-ink)"><span style="width:26px;height:26px;border-radius:6px;background:var(--color-primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">구</span>구매 도우미</button>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <div style="font-size:12px;font-weight:600;color:var(--color-muted);padding:0 10px 6px;letter-spacing:0.02em">구매 업무</div>
+      <sc-for list="{{ navBuy }}" as="n" hint-placeholder-count="3">
+        <button onClick="{{ n.go }}" style="display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border:0;border-radius:var(--r-s);cursor:pointer;text-align:left;font:inherit;font-size:14px;color:{{ n.color }};background:{{ n.bg }};font-weight:{{ n.weight }}" style-hover="background:#ebeae4"><span style="font-family:'Material Symbols Rounded';font-size:20px;line-height:1;color:{{ n.color }}">{{ n.icon }}</span><span>{{ n.label }}</span></button>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <div style="font-size:12px;font-weight:600;color:var(--color-muted);padding:0 10px 6px;letter-spacing:0.02em">병원 경영 정보</div>
+      <sc-for list="{{ navMgmt }}" as="n" hint-placeholder-count="2">
+        <button onClick="{{ n.go }}" style="display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border:0;border-radius:var(--r-s);cursor:pointer;text-align:left;font:inherit;font-size:14px;color:{{ n.color }};background:{{ n.bg }};font-weight:{{ n.weight }}" style-hover="background:#ebeae4"><span style="font-family:'Material Symbols Rounded';font-size:20px;line-height:1;color:{{ n.color }}">{{ n.icon }}</span><span>{{ n.label }}</span></button>
+      </sc-for>
+    </div>
+    <div style="margin-top:auto;font-size:12px;color:var(--color-muted-2);padding:0 10px;line-height:1.5">자료 · 나라장터 2026-10-05 수집분<br>식약처 허가정보 · 내부 시험판</div>
+  </aside>
+
+  <main style="flex:1;min-width:0;padding:40px 48px 96px;box-sizing:border-box">
+  <div style="max-width:1040px;margin:0 auto">
+
+    <!-- 자료 내려받는 중 (상태 H1) -->
+    <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+      <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:16px 20px;margin-bottom:24px;background:var(--color-bg-2)">
+        <div style="display:flex;justify-content:space-between;font-size:14px"><span style="font-weight:600">가격 자료를 내려받는 중입니다</span><span style="color:var(--color-muted)">77% (246/319 MB) · 남은 자료: 식약처 제품 자료</span></div>
+        <div style="height:6px;background:var(--color-border);border-radius:3px;margin-top:10px;overflow:hidden"><div style="width:77%;height:100%;background:var(--color-primary)"></div></div>
+        <div style="font-size:13px;color:var(--color-muted);margin-top:8px">내려받기가 끝나면 검색을 바로 쓸 수 있습니다. 보통 1분 안에 끝납니다.</div>
+      </div>
+    </sc-if>
+
+    <!-- B. 홈 -->
+    <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="B 홈">
+      <div style="font-size:13px;color:var(--color-muted);margin-bottom:6px">2026년 10월 9일 (목)</div>
+      <h1 style="font-size:var(--fs-28);font-weight:700;margin:0 0 28px;letter-spacing:-0.01em">무엇을 조사할까요?</h1>
+      <div style="display:flex;gap:12px">
+        <div style="flex:1;display:flex;align-items:center;gap:10px;height:48px;border:1px solid var(--color-border-2);border-radius:var(--r-s);padding:0 14px;background:#fff"><span style="font-family:'Material Symbols Rounded';font-size:22px;color:var(--color-muted)">search</span><input value="{{ query }}" onChange="{{ setQuery }}" placeholder="모델명 · 품목명 · 업체명 · 허가번호" style="flex:1;border:0;outline:0;font:inherit;font-size:16px;color:var(--color-ink);background:transparent"></div>
+        <button onClick="{{ runSearch }}" style="height:48px;padding:0 28px;background:var(--color-primary);color:#fff;border:0;border-radius:var(--r-s);font:inherit;font-size:16px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0">가격 조사</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin:12px 0 0;font-size:13px;color:var(--color-muted)">예시
+        <sc-for list="{{ examples }}" as="e" hint-placeholder-count="3"><button onClick="{{ e.go }}" style="height:28px;padding:0 12px;border:1px solid var(--color-border);border-radius:14px;background:#fff;font:inherit;font-size:13px;color:var(--color-ink-2);cursor:pointer" style-hover="border-color:var(--color-primary);color:var(--color-primary)">{{ e.label }}</button></sc-for>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:40px">
+        <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:20px 24px">
+          <div style="font-size:12px;font-weight:600;color:var(--color-muted);margin-bottom:6px">구매 업무</div>
+          <h3 style="font-size:var(--fs-18);font-weight:700;margin:0 0 6px">견적서 검토</h3>
+          <p style="margin:0 0 16px;color:var(--color-ink-2)">PDF · Excel · 사진 견적서를 올리면 품목마다 나라장터 거래가를 찾아 한 표로 보여줍니다.</p>
+          <div style="display:flex;gap:10px"><button onClick="{{ goQuote }}" style="height:36px;padding:0 14px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0"><span style="font-family:'Material Symbols Rounded';font-size:18px">upload</span>견적서 올리기</button><button onClick="{{ goDevice }}" style="height:36px;padding:0 14px;border:0;border-radius:var(--r-s);background:transparent;font:inherit;font-size:14px;color:var(--color-primary);cursor:pointer">의료기기 허가·안전 확인 →</button></div>
+        </div>
+        <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:20px 24px">
+          <div style="font-size:12px;font-weight:600;color:var(--color-muted);margin-bottom:6px">병원 경영 정보</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <button onClick="{{ goNews }}" style="text-align:left;border:0;background:transparent;padding:0;cursor:pointer;font:inherit;color:var(--color-ink)"><div style="font-size:var(--fs-28);font-weight:700;line-height:1.2">6건</div><div style="font-size:13px;color:var(--color-ink-2);margin-top:4px">오늘 새 기사 · 뉴스 레이더 →</div></button>
+            <button onClick="{{ goBench }}" style="text-align:left;border:0;background:transparent;padding:0;cursor:pointer;font:inherit;color:var(--color-ink)"><div style="font-size:var(--fs-28);font-weight:700;line-height:1.2">38개</div><div style="font-size:13px;color:var(--color-ink-2);margin-top:4px">비교 가능한 병원 · 경영 비교 →</div></button>
+          </div>
+          <p style="margin:14px 0 0;font-size:13px;color:var(--color-muted)">경영 공시 자료는 아직 연계 전입니다. 뉴스는 제목·시간·링크만 그대로 보여 줍니다.</p>
+        </div>
+      </div>
+      <h3 style="font-size:var(--fs-16);font-weight:700;margin:40px 0 12px">최근 조사</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <thead><tr><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px;border-bottom:1px solid var(--color-border)">제품</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px;border-bottom:1px solid var(--color-border)">1단위 가운데 값</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px;border-bottom:1px solid var(--color-border)">거래</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px;border-bottom:1px solid var(--color-border)">조사한 때</th></tr></thead>
+        <tbody>
+          <sc-for list="{{ recent }}" as="r" hint-placeholder-count="3"><tr onClick="{{ r.go }}" style="cursor:pointer" style-hover="background:var(--color-bg-2)"><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)"><span style="font-weight:600">{{ r.name }}</span> <span style="color:var(--color-muted)">· {{ r.item }}</span></td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">{{ r.median }}</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">{{ r.count }}</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border);color:var(--color-muted)">{{ r.when }}</td></tr></sc-for>
+        </tbody>
+      </table>
+    </div>
+    </sc-if>
+
+    <!-- C. 가격 조사 · 검색 시작 / 상단 검색줄 -->
+    <sc-if value="{{ isPriceFlow }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="C 가격 조사">
+      <div style="display:flex;align-items:center;gap:12px">
+        <h1 style="font-size:var(--fs-22);font-weight:700;margin:0;white-space:nowrap">가격 조사</h1>
+        <div style="flex:1;display:flex;align-items:center;gap:10px;height:44px;border:1px solid var(--color-border-2);border-radius:var(--r-s);padding:0 14px;background:#fff"><span style="font-family:'Material Symbols Rounded';font-size:22px;color:var(--color-muted)">search</span><input value="{{ query }}" onChange="{{ setQuery }}" placeholder="모델명 · 품목명 · 업체명 · 허가번호" style="flex:1;border:0;outline:0;font:inherit;font-size:15px;color:var(--color-ink);background:transparent"></div>
+        <button onClick="{{ runSearch }}" style="height:44px;padding:0 22px;background:var(--color-primary);color:#fff;border:0;border-radius:var(--r-s);font:inherit;font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0">검색</button>
+        <button onClick="{{ goQuote }}" style="height:44px;padding:0 16px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0"><span style="font-family:'Material Symbols Rounded';font-size:18px">upload</span>견적서 올리기</button>
+      </div>
+      <sc-if value="{{ isSearchStart }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;gap:8px;align-items:center;margin:12px 0 0;font-size:13px;color:var(--color-muted)">예시
+          <sc-for list="{{ examples }}" as="e" hint-placeholder-count="3"><button onClick="{{ e.go }}" style="height:28px;padding:0 12px;border:1px solid var(--color-border);border-radius:14px;background:#fff;font:inherit;font-size:13px;color:var(--color-ink-2);cursor:pointer" style-hover="border-color:var(--color-primary);color:var(--color-primary)">{{ e.label }}</button></sc-for>
+        </div>
+        <div style="margin-top:56px;max-width:640px">
+          <div style="display:flex;flex-direction:column;gap:14px;color:var(--color-ink-2)">
+            <div style="display:flex;gap:14px"><span style="width:24px;height:24px;border-radius:50%;background:var(--color-primary-soft);color:var(--color-primary);font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px">1</span><span>모델명 하나만 넣어도 됩니다. 같은 이름 제품이 여럿이면 고르는 화면이 먼저 나옵니다.</span></div>
+            <div style="display:flex;gap:14px"><span style="width:24px;height:24px;border-radius:50%;background:var(--color-primary-soft);color:var(--color-primary);font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px">2</span><span>나라장터에서 같은 제품이 얼마에 거래됐는지, 1대당 가운데 값과 범위를 한 문장으로 보여줍니다.</span></div>
+            <div style="display:flex;gap:14px"><span style="width:24px;height:24px;border-radius:50%;background:var(--color-primary-soft);color:var(--color-primary);font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px">3</span><span>식약처 허가·회수 여부를 함께 확인하고, 결과는 Excel로 저장할 수 있습니다.</span></div>
+          </div>
+          <details style="margin-top:28px;border:1px solid var(--color-border);border-radius:var(--r-s)"><summary style="cursor:pointer;padding:10px 14px;font-size:14px;list-style:none;display:flex;align-items:center;gap:8px"><span style="font-family:'Material Symbols Rounded';font-size:18px;color:var(--color-muted)">chevron_right</span>조건 직접 입력 (품목명·제조사·규격을 따로 넣기)</summary><div style="padding:0 14px 14px;display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><div style="font-size:13px;margin-bottom:6px">품목명</div><div style="height:38px;background:var(--color-bg-2);border-radius:var(--r-s)"></div></div><div><div style="font-size:13px;margin-bottom:6px">제조·수입업체</div><div style="height:38px;background:var(--color-bg-2);border-radius:var(--r-s)"></div></div><div><div style="font-size:13px;margin-bottom:6px">모델명</div><div style="height:38px;background:var(--color-bg-2);border-radius:var(--r-s)"></div></div><div><div style="font-size:13px;margin-bottom:6px">규격</div><div style="height:38px;background:var(--color-bg-2);border-radius:var(--r-s)"></div></div></div></details>
+        </div>
+      </sc-if>
+
+      <!-- D. 제품 고르기 -->
+      <sc-if value="{{ isChoose }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:32px">
+          <div style="display:flex;align-items:baseline;gap:12px"><h2 style="font-size:var(--fs-22);font-weight:700;margin:0">"{{ query }}" 이름의 제품이 4개 있습니다</h2><span style="color:var(--color-muted)">조사할 제품을 고르세요</span></div>
+          <div style="margin-top:12px;padding:12px 16px;border-radius:var(--r-s);background:var(--color-warn-soft);color:#7c3a06;font-size:14px;display:flex;gap:10px"><span style="font-family:'Material Symbols Rounded';font-size:20px">info</span><span>모델명이 짧아 다른 제품과 겹칩니다. 제품을 고르기 전에는 어느 제품의 거래가도 보여주지 않습니다. 찾는 제품이 없으면 제조사나 품목명을 함께 넣어 다시 검색하세요.</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
+            <sc-for list="{{ candidates }}" as="c" hint-placeholder-count="4">
+              <button onClick="{{ c.go }}" style="display:grid;grid-template-columns:20px 1.6fr 1fr 0.6fr 1.2fr 0.5fr 1fr;gap:12px;align-items:center;text-align:left;padding:14px 16px;border:1px solid {{ c.border }};border-radius:var(--r-s);background:{{ c.bg }};font:inherit;font-size:14px;color:var(--color-ink);cursor:pointer" style-hover="border-color:var(--color-primary)">
+                <span style="width:16px;height:16px;border-radius:50%;border:2px solid {{ c.dot }};box-sizing:border-box;background:{{ c.dotFill }};box-shadow:inset 0 0 0 3px #fff"></span>
+                <span><span style="font-weight:600">{{ c.item }}</span><div style="font-size:12px;color:var(--color-muted)">품목</div></span>
+                <span>{{ c.permit }}<div style="font-size:12px;color:var(--color-muted)">허가번호 · {{ c.type }}</div></span>
+                <span style="font-weight:600">{{ c.model }}<div style="font-size:12px;color:var(--color-muted);font-weight:400">모델</div></span>
+                <span>{{ c.maker }}<div style="font-size:12px;color:var(--color-muted)">제조·수입업체</div></span>
+                <span>{{ c.grade }}등급<div style="font-size:12px;color:var(--color-muted)">등급</div></span>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--color-ink-2)">{{ c.udi }}<div style="font-size:12px;color:var(--color-muted);font-family:var(--font)">UDI-DI</div></span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:12px;align-items:center;margin-top:20px"><button onClick="{{ confirmChoice }}" style="height:40px;padding:0 20px;background:var(--color-primary);color:#fff;border:0;border-radius:var(--r-s);font:inherit;font-size:15px;font-weight:600;cursor:pointer">이 제품으로 조사</button><span style="color:var(--color-muted);font-size:13px">선택: {{ chosenLabel }}</span></div>
+        </div>
+      </sc-if>
+
+      <!-- E. 결과 -->
+      <sc-if value="{{ isResult }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="E 결과" style="margin-top:28px">
+        <!-- 제품 머리글 -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding-bottom:16px;border-bottom:1px solid var(--color-border)">
+          <div>
+            <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:var(--fs-28);font-weight:700;margin:0;letter-spacing:-0.01em">{{ p.name }}</h2><span style="font-size:13px;padding:2px 8px;border-radius:4px;background:var(--color-ok-soft);color:var(--color-ok);font-weight:600">{{ p.mfds }}</span></div>
+            <div style="color:var(--color-ink-2);margin-top:4px">{{ p.item }} · {{ p.permit }} · 제조·수입 {{ p.maker }} <button onClick="{{ goDevice }}" style="border:0;background:transparent;color:var(--color-primary);font:inherit;font-size:13px;cursor:pointer;padding:0 4px">허가·안전 상세 →</button></div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-end;flex-shrink:0">
+            <div><div style="font-size:12px;color:var(--color-muted);margin-bottom:4px">거래 기간</div><div style="display:inline-flex;border:1px solid var(--color-border-2);border-radius:var(--r-s);overflow:hidden;font-size:13px">
+              <sc-for list="{{ periods }}" as="pe" hint-placeholder-count="3"><button onClick="{{ pe.go }}" style="height:36px;padding:0 14px;border:0;border-left:1px solid var(--color-border);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;background:{{ pe.bg }};color:{{ pe.color }};font-weight:{{ pe.weight }}">{{ pe.label }}</button></sc-for>
+            </div></div>
+            <button style="height:36px;padding:0 14px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0"><span style="font-family:'Material Symbols Rounded';font-size:18px">download</span>Excel로 저장</button>
+          </div>
+        </div>
+
+        <!-- 상태 H3: 기간 넓힘 -->
+        <sc-if value="{{ isWidened }}" hint-placeholder-val="{{ false }}"><div style="margin-top:16px;padding:10px 14px;border-radius:var(--r-s);background:var(--color-primary-soft);color:#174f63;font-size:14px;display:flex;gap:10px;align-items:center"><span style="font-family:'Material Symbols Rounded';font-size:20px">history</span>최근 3년 안에는 같은 제품 거래가 없어 <b style="margin:0 4px">최근 5년</b>으로 넓혀 보여줍니다. 기간 버튼으로 바꿀 수 있습니다.</div></sc-if>
+
+        <!-- 결과 없음 (상태 H2) -->
+        <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:20px;border:1px solid var(--color-border);border-left:4px solid var(--color-neutral);border-radius:var(--r-m);padding:20px 24px">
+            <div style="font-size:var(--fs-18);font-weight:700;line-height:1.45">같은 제품으로 확인된 나라장터 거래가 없습니다.</div>
+            <div style="color:var(--color-ink-2);margin-top:6px">이름이 비슷한 품목의 거래 3건은 같은 제품인지 확인되지 않아 가격 비교에 넣지 않았습니다. 아래 "같은 품목의 다른 모델"에서 참고만 하세요.</div>
+            <div style="display:flex;gap:10px;margin-top:16px"><button onClick="{{ setPeriodAll }}" style="height:36px;padding:0 14px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:14px;cursor:pointer">거래 기간을 전체로 넓히기</button><button onClick="{{ goDevice }}" style="height:36px;padding:0 14px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:14px;cursor:pointer">식약처 같은 품목의 다른 모델 보기</button></div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ hasTrades }}" hint-placeholder-val="{{ true }}">
+        <!-- A안: 결론 중심 -->
+        <sc-if value="{{ isA }}" hint-placeholder-val="{{ true }}">
+          <div style="display:grid;grid-template-columns:1fr 300px;gap:16px;margin-top:20px;align-items:stretch">
+            <div style="border:1px solid var(--color-border);border-left:4px solid {{ tone.color }};border-radius:var(--r-m);padding:20px 24px 16px">
+              <div style="font-size:var(--fs-18);font-weight:700;line-height:1.45;word-break:keep-all">{{ conclusion.headline }}</div>
+              <div style="color:var(--color-ink-2);margin-top:4px">{{ conclusion.detail }}</div>
+              <sc-if value="{{ hasQuoteLine }}" hint-placeholder-val="{{ false }}"><div style="margin-top:10px;font-size:15px;font-weight:600;color:{{ quoteTone }};word-break:keep-all">{{ conclusion.quoteLine }}</div><div style="font-size:12px;color:var(--color-muted);margin-top:2px">VAT·설치·옵션 같은 조건이 같은지는 확인하지 않은 비교입니다.</div></sc-if>
+              <sc-if value="{{ hasBand }}" hint-placeholder-val="{{ true }}">
+              <div style="position:relative;height:78px;margin:14px 8px 0">
+                <div style="position:absolute;top:40px;left:0;right:0;height:4px;background:var(--color-border);border-radius:2px"></div>
+                <div style="position:absolute;top:34px;height:16px;left:{{ band.lowAt }}%;width:{{ band.width }}%;background:var(--color-primary-soft);border:1px solid var(--color-primary);border-radius:8px;box-sizing:border-box"></div>
+                <div style="position:absolute;top:33px;left:{{ band.midAt }}%;width:18px;height:18px;margin-left:-9px;border-radius:50%;background:var(--color-primary);border:2px solid #fff;box-sizing:border-box"></div>
+                <sc-if value="{{ hasQuote }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;top:18px;left:{{ band.quoteAt }}%;margin-left:-7px;width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:12px solid var(--color-warn)"></div><div style="position:absolute;top:0;left:{{ band.quoteLabelAt }}%;transform:translateX(-50%);font-size:12px;font-weight:600;color:var(--color-warn);white-space:nowrap">내 견적 {{ quoteWon }}</div></sc-if>
+                <div style="position:absolute;top:58px;left:{{ band.lowLabelAt }}%;transform:translateX(-50%);font-size:12px;color:var(--color-muted);white-space:nowrap">최저 {{ p.lowWon }}</div>
+                <div style="position:absolute;top:58px;left:{{ band.midAt }}%;transform:translateX(-50%);font-size:12px;color:var(--color-primary);font-weight:600;white-space:nowrap">가운데 값 {{ p.medianWon }}</div>
+                <div style="position:absolute;top:58px;left:{{ band.highLabelAt }}%;transform:translateX(-50%);font-size:12px;color:var(--color-muted);white-space:nowrap">최고 {{ p.highWon }}</div>
+              </div>
+              </sc-if>
+            </div>
+            <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:16px 18px;background:var(--color-bg-2)">
+              <div style="font-size:13px;font-weight:600">내 견적가 ({{ p.unit }}당, 원)</div>
+              <input value="{{ quoteText }}" onChange="{{ setQuote }}" placeholder="숫자만, 예: 6500000" style="margin-top:8px;width:100%;box-sizing:border-box;height:40px;border:1px solid var(--color-border-2);border-radius:var(--r-s);padding:0 12px;font:inherit;font-size:16px;background:#fff;color:var(--color-ink)">
+              <div style="margin-top:12px;font-size:13px;color:var(--color-muted);line-height:1.5">{{ quoteHint }}</div>
+              <sc-if value="{{ hasQuote }}" hint-placeholder-val="{{ false }}"><div style="margin-top:12px;display:flex;align-items:baseline;gap:8px"><span style="font-size:var(--fs-28);font-weight:700;color:{{ quoteTone }}">{{ quoteDelta }}</span><span style="font-size:13px;color:var(--color-ink-2)">가운데 값 대비</span></div></sc-if>
+            </div>
+          </div>
+          <!-- 카드 4장 -->
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px">
+            <sc-for list="{{ cards }}" as="c" hint-placeholder-count="4"><div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:14px 16px;display:flex;flex-direction:column;gap:2px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--color-muted)"><span>{{ c.label }}</span><span style="width:8px;height:8px;border-radius:50%;background:{{ c.color }}"></span></div><div style="font-size:var(--fs-22);font-weight:700;line-height:1.3;word-break:keep-all">{{ c.value }}</div><div style="font-size:12px;color:var(--color-ink-2);line-height:1.4">{{ c.note }}</div></div></sc-for>
+          </div>
+        </sc-if>
+
+        <!-- B안: 표 중심 -->
+        <sc-if value="{{ isB }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:16px;display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:var(--r-s);background:var(--color-bg-2);border-left:4px solid {{ tone.color }}">
+            <div style="flex:1;font-size:15px;font-weight:700;word-break:keep-all">{{ conclusion.headline }} <span style="font-weight:400;color:var(--color-ink-2)">{{ conclusion.detail }}</span></div>
+            <div style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="font-size:13px">내 견적가</span><input value="{{ quoteText }}" onChange="{{ setQuote }}" placeholder="원" style="width:130px;height:34px;border:1px solid var(--color-border-2);border-radius:var(--r-s);padding:0 10px;font:inherit;font-size:14px;background:#fff;color:var(--color-ink)"><sc-if value="{{ hasQuote }}" hint-placeholder-val="{{ false }}"><span style="font-weight:700;color:{{ quoteTone }}">{{ quoteDelta }}</span></sc-if></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 260px;gap:16px;margin-top:12px">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--color-muted);margin-bottom:6px">연도별 · {{ p.unit }} 단위</div>
+              <table style="width:100%;border-collapse:collapse;font-size:14px;border:1px solid var(--color-border);border-radius:var(--r-s)">
+                <thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">연도</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">건수</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">총수량</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">1{{ p.unit }}당 가운데 값</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">최저 ~ 최고</th></tr></thead>
+                <tbody><sc-for list="{{ p.years }}" as="y" hint-placeholder-count="3"><tr><td style="padding:9px 12px;border-top:1px solid var(--color-border)">{{ y.year }}</td><td style="padding:9px 12px;border-top:1px solid var(--color-border);text-align:right">{{ y.count }}</td><td style="padding:9px 12px;border-top:1px solid var(--color-border);text-align:right">{{ y.qty }}</td><td style="padding:9px 12px;border-top:1px solid var(--color-border);text-align:right;font-weight:600">{{ y.median }}</td><td style="padding:9px 12px;border-top:1px solid var(--color-border);text-align:right">{{ y.range }}</td></tr></sc-for></tbody>
+              </table>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <sc-for list="{{ cards }}" as="c" hint-placeholder-count="4"><div style="border:1px solid var(--color-border);border-radius:var(--r-s);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px"><div><div style="font-size:12px;color:var(--color-muted)">{{ c.label }}</div><div style="font-size:15px;font-weight:700">{{ c.value }}</div></div><span style="width:8px;height:8px;border-radius:50%;background:{{ c.color }};flex:0 0 8px"></span></div></sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- 알아 둘 것: 기간·단위·자료 기준 한 줄 -->
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;font-size:12px">
+          <span style="padding:4px 10px;border-radius:12px;background:var(--color-bg-2);color:var(--color-ink-2)">거래 기간 · {{ periodCaption }}</span>
+          <sc-if value="{{ p.mixed }}" hint-placeholder-val="{{ false }}"><span style="padding:4px 10px;border-radius:12px;background:var(--color-warn-soft);color:#7c3a06">단위가 다른 거래 {{ p.otherCount }}건({{ p.otherUnit }})은 따로 보여줌</span></sc-if>
+          <sc-if value="{{ hasOutliers }}" hint-placeholder-val="{{ false }}"><span style="padding:4px 10px;border-radius:12px;background:var(--color-warn-soft);color:#7c3a06">가운데 값과 3배 넘게 다른 거래 {{ p.outlierCount }}건</span></sc-if>
+          <sc-if value="{{ isLiveFail }}" hint-placeholder-val="{{ false }}"><span style="padding:4px 10px;border-radius:12px;background:var(--color-warn-soft);color:#7c3a06;display:inline-flex;align-items:center;gap:4px"><span style="font-family:'Material Symbols Rounded';font-size:14px">warning</span>자료 기준 · 나라장터 2026-10-05 수집분 · 최근 며칠 실시간 확인 실패 (10-06 이후 거래는 빠질 수 있음)</span></sc-if>
+          <sc-if value="{{ notLiveFail }}" hint-placeholder-val="{{ true }}"><span style="padding:4px 10px;border-radius:12px;background:var(--color-bg-2);color:var(--color-ink-2)">자료 기준 · 나라장터 2026-10-05 수집분 + 2026-10-09까지 실시간 확인</span></sc-if>
+          <sc-if value="{{ isLiveFail }}" hint-placeholder-val="{{ false }}"><button style="padding:4px 10px;border-radius:12px;border:1px solid var(--color-border-2);background:#fff;font:inherit;font-size:12px;cursor:pointer">다시 확인</button></sc-if>
+        </div>
+
+        <!-- 얼마에 거래됐나 -->
+        <h3 style="font-size:var(--fs-18);font-weight:700;margin:40px 0 12px">얼마에 거래됐나</h3>
+        <div style="display:flex;gap:4px;border-bottom:1px solid var(--color-border)">
+          <sc-for list="{{ tradeTabs }}" as="t" hint-placeholder-count="3"><button onClick="{{ t.go }}" style="height:38px;padding:0 14px;border:0;border-bottom:2px solid {{ t.line }};background:transparent;font:inherit;font-size:14px;color:{{ t.color }};font-weight:{{ t.weight }};cursor:pointer;margin-bottom:-1px">{{ t.label }}</button></sc-for>
+        </div>
+
+        <sc-if value="{{ tabYears }}" hint-placeholder-val="{{ true }}">
+          <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:12px">
+            <thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">연도</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">거래 건수</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">총수량</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">1{{ p.unit }}당 가운데 값</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">1{{ p.unit }}당 최저 ~ 최고</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">다른 단위 거래</th></tr></thead>
+            <tbody><sc-for list="{{ p.years }}" as="y" hint-placeholder-count="3"><tr><td style="padding:9px 12px;border-bottom:1px solid var(--color-border)">{{ y.year }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right">{{ y.count }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right">{{ y.qty }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right;font-weight:600">{{ y.median }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right">{{ y.range }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right;color:var(--color-muted)">{{ y.other }}</td></tr></sc-for></tbody>
+          </table>
+        </sc-if>
+        <sc-if value="{{ tabConditions }}" hint-placeholder-val="{{ false }}">
+          <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:12px">
+            <thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">단위</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">거래조건</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">건수</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">총수량</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">거래 총액 합계</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">1단위 가운데 값</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">1단위 최저 ~ 최고</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">최근 거래</th></tr></thead>
+            <tbody><sc-for list="{{ p.conditions }}" as="g" hint-placeholder-count="3"><tr style="background:{{ g.bg }}"><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);font-weight:600">{{ g.unit }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border)">{{ g.cond }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right">{{ g.count }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right">{{ g.qty }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right">{{ g.total }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right;font-weight:600">{{ g.median }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right">{{ g.range }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border)">{{ g.latest }}</td></tr></sc-for></tbody>
+          </table>
+          <sc-if value="{{ p.mixed }}" hint-placeholder-val="{{ false }}"><p style="font-size:13px;color:var(--color-muted);margin:10px 0 0">{{ p.otherUnit }} 단위 거래는 {{ p.unit }} 단위 가격과 섞지 않았습니다. 1세트가 몇 대인지는 원문에 없어 대당 가격으로 나누지 않습니다.</p></sc-if>
+        </sc-if>
+        <sc-if value="{{ tabTrades }}" hint-placeholder-val="{{ false }}">
+          <sc-if value="{{ hasOutliers }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:12px;border:1px solid #f0d9b5;border-left:4px solid var(--color-warn);border-radius:var(--r-s);padding:12px 16px;background:var(--color-warn-soft)">
+              <div style="font-weight:700;color:#7c3a06">가운데 값과 3배 넘게 다른 거래 {{ p.outlierCount }}건 · 원문으로 이유를 확인하세요</div>
+              <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+                <sc-for list="{{ p.outliers }}" as="o" hint-placeholder-count="2"><button onClick="{{ o.open }}" style="text-align:left;border:0;background:transparent;padding:0;font:inherit;font-size:14px;color:var(--color-ink);cursor:pointer;display:flex;gap:8px;align-items:baseline" style-hover="color:var(--color-primary)"><span style="font-weight:600;white-space:nowrap">{{ o.calc }}</span><span style="color:var(--color-ink-2)">· 가운데 값의 {{ o.ratio }}배 · 사업명 「{{ o.business }}」 · {{ o.cond }} · {{ o.buyer }} · {{ o.date }}</span><span style="color:var(--color-primary);white-space:nowrap;margin-left:auto">원문 보기 →</span></button></sc-for>
+              </div>
+            </div>
+          </sc-if>
+          <p style="font-size:13px;color:var(--color-muted);margin:12px 0 8px">행을 누르면 그 거래의 조달청 원문이 열립니다. 모두 {{ p.tradeCount }}건.</p>
+          <div style="overflow-x:auto"><table style="width:100%;min-width:900px;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">거래일</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 10px">거래 총액</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 10px">수량</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 10px">1단위 가격</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">사업명</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">거래조건</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">납품업체</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">구매 기관</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">원문</th></tr></thead>
+            <tbody><sc-for list="{{ p.trades }}" as="t" hint-placeholder-count="6"><tr onClick="{{ t.open }}" style="cursor:pointer;background:{{ t.bg }}" style-hover="background:var(--color-primary-soft)"><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);white-space:nowrap">{{ t.date }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);text-align:right;white-space:nowrap">{{ t.total }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);text-align:right;white-space:nowrap">{{ t.qty }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);text-align:right;white-space:nowrap;font-weight:600;color:{{ t.priceColor }}">{{ t.price }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);min-width:180px">{{ t.business }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);min-width:160px">{{ t.cond }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);white-space:nowrap">{{ t.seller }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);white-space:nowrap">{{ t.buyer }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);color:var(--color-primary);white-space:nowrap">열기</td></tr></sc-for></tbody>
+          </table></div>
+        </sc-if>
+
+        <!-- 누가 파는가 / 다른 모델 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px">
+          <div>
+            <h3 style="font-size:var(--fs-18);font-weight:700;margin:0 0 12px">누가 파는가 <span style="font-weight:400;color:var(--color-muted);font-size:14px">납품업체 {{ p.suppliers }}곳</span></h3>
+            <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">납품업체</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 10px">건수</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 10px">최저</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 10px">최고</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">최근 거래</th></tr></thead>
+            <tbody><sc-for list="{{ p.supplierRows }}" as="s" hint-placeholder-count="4"><tr><td style="padding:8px 10px;border-bottom:1px solid var(--color-border)">{{ s.name }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);text-align:right">{{ s.count }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);text-align:right">{{ s.low }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);text-align:right">{{ s.high }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border)">{{ s.latest }}</td></tr></sc-for></tbody></table>
+          </div>
+          <div>
+            <h3 style="font-size:var(--fs-18);font-weight:700;margin:0 0 12px">같은 품목의 다른 모델 <span style="font-weight:400;color:var(--color-muted);font-size:14px">식약처 「{{ p.item }}」 등록 기준</span></h3>
+            <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">모델</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 10px">제조·수입업체</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 10px">거래</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 10px">가격범위</th></tr></thead>
+            <tbody><sc-for list="{{ p.otherModels }}" as="m" hint-placeholder-count="3"><tr><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);font-weight:{{ m.weight }}">{{ m.model }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border)">{{ m.maker }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);text-align:right">{{ m.count }}</td><td style="padding:8px 10px;border-bottom:1px solid var(--color-border);text-align:right">{{ m.range }}</td></tr></sc-for></tbody></table>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- 상세 자료 / 입찰 참고 -->
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:32px">
+          <details style="border:1px solid var(--color-border);border-radius:var(--r-s)"><summary style="cursor:pointer;padding:10px 14px;font-size:14px;list-style:none;display:flex;align-items:center;gap:8px"><span style="font-family:'Material Symbols Rounded';font-size:18px;color:var(--color-muted)">chevron_right</span>상세 자료 <span style="color:var(--color-muted)">· 견적 조건 대조, 안전정보 원문, 식약처 원자료, 자료 기준</span></summary>
+            <div style="padding:4px 14px 16px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px;font-size:13px">
+              <div><div style="font-weight:600;margin-bottom:4px">견적 조건</div><div style="color:var(--color-ink-2)">VAT · 배송 · 설치 · 옵션 · 보증 · 유지보수를 거래 조건과 맞춤 / 충돌 / 미확인으로 대조합니다.</div></div>
+              <div><div style="font-weight:600;margin-bottom:4px">안전정보</div><div style="color:var(--color-ink-2)">식약처 회수·판매중지 공식 자료. 이 모델과 일치하는 기록 없음 (2026-10-09 확인).</div></div>
+              <div><div style="font-weight:600;margin-bottom:4px">식약처 원자료</div><div style="color:var(--color-ink-2)">{{ p.permit }} · {{ p.maker }} · 등급 2 · UDI-DI 18800003462138</div></div>
+              <div><div style="font-weight:600;margin-bottom:4px">자료 기준</div><div style="color:var(--color-ink-2)">나라장터 종합쇼핑몰 납품요구 2021-01 ~ 2026-10-05 수집, 2026-10-09까지 실시간 확인. 식약처 제품정보 전체 수집 완료.</div></div>
+            </div>
+          </details>
+          <div style="border:1px solid var(--color-border);border-radius:var(--r-s);padding:10px 14px;display:flex;align-items:center;gap:12px"><span style="font-family:'Material Symbols Rounded';font-size:18px;color:var(--color-muted)">gavel</span><span>입찰·계약 참고자료 <span style="color:var(--color-muted)">· 같은 품목의 입찰 공고와 계약 정보. 불러오는 데 수십 초 걸립니다.</span></span><button style="margin-left:auto;height:32px;padding:0 12px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:13px;cursor:pointer">불러오기</button></div>
+        </div>
+      </div>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- G. 견적서 검토 (여러 품목) -->
+    <sc-if value="{{ isQuote }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="G 견적서 검토">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><h1 style="font-size:var(--fs-22);font-weight:700;margin:0">견적서 검토</h1><p style="margin:4px 0 0;color:var(--color-ink-2)">견적서 한 장의 품목을 모두 뽑아 품목마다 나라장터 거래가와 견줍니다. 원본은 처리 뒤 바로 지우고 외부로 보내지 않습니다.</p></div>
+        <button style="height:36px;padding:0 14px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0"><span style="font-family:'Material Symbols Rounded';font-size:18px">download</span>요약표 Excel로 저장</button>
+      </div>
+      <div style="margin-top:20px;border:1px dashed var(--color-border-2);border-radius:var(--r-m);padding:14px 18px;display:flex;align-items:center;gap:16px;background:var(--color-bg-2)">
+        <span style="font-family:'Material Symbols Rounded';font-size:24px;color:var(--color-primary)">description</span>
+        <div style="flex:1"><div style="font-weight:600">견적서_환자감시장치외_2026-10-08.pdf</div><div style="font-size:13px;color:var(--color-muted)">3품목 추출 · 표 구조로 읽음 · 2026-10-09 09:41</div></div>
+        <button style="height:36px;padding:0 14px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0"><span style="font-family:'Material Symbols Rounded';font-size:18px">upload</span>다른 견적서 올리기</button>
+      </div>
+      <div style="display:flex;gap:16px;margin:24px 0 10px;font-size:13px">
+        <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:50%;background:var(--color-ok)"></span>거래 범위 안 1</span>
+        <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:50%;background:var(--color-warn)"></span>범위 밖·확인 필요 1</span>
+        <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:50%;background:var(--color-neutral)"></span>판단 부족 1</span>
+        <span style="margin-left:auto;color:var(--color-muted)">행을 누르면 아래에 그 품목의 결과가 나옵니다</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px;width:32px">#</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">품목 · 모델</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">견적 단가</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">거래 가운데 값</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">차이</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">판정</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">근거</th></tr></thead>
+        <tbody><sc-for list="{{ quoteRows }}" as="q" hint-placeholder-count="3"><tr onClick="{{ q.go }}" style="cursor:pointer;background:{{ q.bg }}" style-hover="background:var(--color-primary-soft)"><td style="padding:12px;border-bottom:1px solid var(--color-border);color:var(--color-muted)">{{ q.n }}</td><td style="padding:12px;border-bottom:1px solid var(--color-border)"><span style="font-weight:600">{{ q.item }}</span> <span style="color:var(--color-muted)">· {{ q.model }}</span></td><td style="padding:12px;border-bottom:1px solid var(--color-border);text-align:right">{{ q.quote }}</td><td style="padding:12px;border-bottom:1px solid var(--color-border);text-align:right">{{ q.median }}</td><td style="padding:12px;border-bottom:1px solid var(--color-border);text-align:right;font-weight:700;color:{{ q.color }}">{{ q.delta }}</td><td style="padding:12px;border-bottom:1px solid var(--color-border)"><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:50%;background:{{ q.color }}"></span>{{ q.verdict }}</span></td><td style="padding:12px;border-bottom:1px solid var(--color-border);color:var(--color-ink-2)">{{ q.basis }}</td></tr></sc-for></tbody>
+      </table>
+      <p style="font-size:13px;color:var(--color-muted);margin:10px 0 0">"거래 범위 안·밖"은 같은 제품 거래가 3건 이상일 때만 씁니다. VAT·설치·옵션 조건이 같은지는 아래 "원문 확인·조건 대조"에서 확인합니다.</p>
+
+      <div style="margin-top:32px;padding:14px 18px;border-radius:var(--r-s);background:var(--color-bg-2);display:flex;align-items:center;gap:12px"><span style="font-size:13px;color:var(--color-muted)">선택한 품목</span><span style="font-weight:700;font-size:16px">{{ p.name }} · {{ p.item }}</span><span style="color:var(--color-muted)">견적 단가 {{ quoteWon }}</span><button onClick="{{ openResultFromQuote }}" style="margin-left:auto;height:32px;padding:0 12px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:13px;cursor:pointer">가격 조사 화면에서 전체 보기 →</button></div>
+      <div style="margin-top:12px;border:1px solid var(--color-border);border-left:4px solid {{ tone.color }};border-radius:var(--r-m);padding:18px 22px 14px">
+        <div style="font-size:var(--fs-16);font-weight:700;line-height:1.45;word-break:keep-all">{{ conclusion.headline }}</div>
+        <div style="color:var(--color-ink-2);margin-top:4px">{{ conclusion.detail }}</div>
+        <sc-if value="{{ hasQuoteLine }}" hint-placeholder-val="{{ true }}"><div style="margin-top:8px;font-size:15px;font-weight:600;color:{{ quoteTone }};word-break:keep-all">{{ conclusion.quoteLine }}</div></sc-if>
+        <sc-if value="{{ hasBand }}" hint-placeholder-val="{{ true }}">
+        <div style="position:relative;height:78px;margin:14px 8px 0">
+          <div style="position:absolute;top:40px;left:0;right:0;height:4px;background:var(--color-border);border-radius:2px"></div>
+          <div style="position:absolute;top:34px;height:16px;left:{{ band.lowAt }}%;width:{{ band.width }}%;background:var(--color-primary-soft);border:1px solid var(--color-primary);border-radius:8px;box-sizing:border-box"></div>
+          <div style="position:absolute;top:33px;left:{{ band.midAt }}%;width:18px;height:18px;margin-left:-9px;border-radius:50%;background:var(--color-primary);border:2px solid #fff;box-sizing:border-box"></div>
+          <sc-if value="{{ hasQuote }}" hint-placeholder-val="{{ true }}"><div style="position:absolute;top:18px;left:{{ band.quoteAt }}%;margin-left:-7px;width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:12px solid var(--color-warn)"></div><div style="position:absolute;top:0;left:{{ band.quoteLabelAt }}%;transform:translateX(-50%);font-size:12px;font-weight:600;color:var(--color-warn);white-space:nowrap">내 견적 {{ quoteWon }}</div></sc-if>
+          <div style="position:absolute;top:58px;left:{{ band.lowLabelAt }}%;transform:translateX(-50%);font-size:12px;color:var(--color-muted);white-space:nowrap">최저 {{ p.lowWon }}</div>
+          <div style="position:absolute;top:58px;left:{{ band.highLabelAt }}%;transform:translateX(-50%);font-size:12px;color:var(--color-muted);white-space:nowrap">최고 {{ p.highWon }}</div>
+        </div>
+        </sc-if>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px">
+        <sc-for list="{{ cards }}" as="c" hint-placeholder-count="4"><div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:12px 14px"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--color-muted)"><span>{{ c.label }}</span><span style="width:8px;height:8px;border-radius:50%;background:{{ c.color }}"></span></div><div style="font-size:var(--fs-18);font-weight:700;line-height:1.3">{{ c.value }}</div><div style="font-size:12px;color:var(--color-ink-2)">{{ c.note }}</div></div></sc-for>
+      </div>
+
+      <!-- 견적 상세 검증 (옛 '견적 상세 검증' 화면 → 펼침) -->
+      <details style="margin-top:28px;border:1px solid var(--color-border);border-radius:var(--r-m)"><summary style="cursor:pointer;padding:14px 18px;font-size:15px;font-weight:600;list-style:none;display:flex;align-items:center;gap:10px"><span style="font-family:'Material Symbols Rounded';font-size:20px;color:var(--color-muted)">chevron_right</span>원문 확인 · 조건 대조 · 승인 <span style="font-weight:400;color:var(--color-muted);font-size:13px">결재 문서에 붙일 때만 필요합니다. 품목마다 담당자가 확인합니다.</span></summary>
+        <div style="padding:0 18px 20px">
+          <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 18px">
+            <sc-for list="{{ steps }}" as="s" hint-placeholder-count="6"><div style="display:flex;align-items:center;gap:7px;font-size:13px;color:{{ s.color }};font-weight:{{ s.weight }}"><span style="width:24px;height:24px;border-radius:50%;border:2px solid {{ s.ring }};background:{{ s.fill }};color:{{ s.numColor }};display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;box-sizing:border-box">{{ s.mark }}</span>{{ s.label }}</div></sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:220px 1fr 260px;gap:20px">
+            <div><div style="font-weight:600;margin-bottom:8px">품목 3건</div>
+              <sc-for list="{{ quoteRows }}" as="q" hint-placeholder-count="3"><div style="padding:8px 10px;border-radius:var(--r-s);background:{{ q.bg }};font-size:13px;margin-bottom:4px"><span style="font-weight:600">{{ q.n }}. {{ q.item }}</span><div style="color:var(--color-muted)">{{ q.model }} · {{ q.quote }} · {{ q.check }}</div></div></sc-for>
+            </div>
+            <div><div style="font-weight:600;margin-bottom:8px">3. 거래 조건 대조 · {{ p.name }}</div>
+              <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:6px 10px">조건</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:6px 10px">견적서</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:6px 10px">나라장터 거래</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:6px 10px">대조</th></tr></thead>
+              <tbody><sc-for list="{{ condRows }}" as="r" hint-placeholder-count="5"><tr><td style="padding:7px 10px;border-bottom:1px solid var(--color-border)">{{ r.k }}</td><td style="padding:7px 10px;border-bottom:1px solid var(--color-border)">{{ r.q }}</td><td style="padding:7px 10px;border-bottom:1px solid var(--color-border)">{{ r.g }}</td><td style="padding:7px 10px;border-bottom:1px solid var(--color-border);color:{{ r.color }};font-weight:600">{{ r.res }}</td></tr></sc-for></tbody></table>
+              <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px"><span style="width:16px;height:16px;border:1px solid var(--color-border-2);border-radius:3px;display:inline-block;background:#fff"></span>견적서 원문과 추출값을 직접 대조했습니다.</label>
+              <button style="margin-top:12px;height:36px;padding:0 16px;background:var(--color-primary);color:#fff;border:0;border-radius:var(--r-s);font:inherit;font-size:14px;font-weight:600;cursor:pointer">이 품목 조건 확인</button>
+            </div>
+            <div style="border:1px solid var(--color-border);border-radius:var(--r-s);padding:12px 14px;font-size:13px;align-self:start"><div style="font-weight:600;margin-bottom:8px">판정까지 남은 일</div><div style="padding:8px 10px;border-radius:var(--r-s);background:var(--color-warn-soft);color:#7c3a06;margin-bottom:6px">VAT 표기가 견적서에 없습니다. 원문을 보고 포함·별도를 입력하세요.</div><div style="padding:8px 10px;border-radius:var(--r-s);background:var(--color-bg-2);color:var(--color-ink-2)">조건이 미확인이거나 충돌인 거래는 판정에서 빼고 참고로만 남깁니다.</div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    </sc-if>
+
+    <!-- I. 의료기기 허가·안전 -->
+    <sc-if value="{{ isDevice }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="I 의료기기 허가·안전">
+      <h1 style="font-size:var(--fs-22);font-weight:700;margin:0">의료기기 허가·안전</h1>
+      <p style="margin:4px 0 0;color:var(--color-ink-2)">식약처 허가정보, 회수·판매중지 이력, UDI-DI를 한곳에서 확인합니다. 모델명이 정확히 같은 등록만 같은 제품으로 봅니다.</p>
+      <div style="display:flex;gap:4px;border-bottom:1px solid var(--color-border);margin-top:24px">
+        <sc-for list="{{ deviceTabs }}" as="t" hint-placeholder-count="3"><button onClick="{{ t.go }}" style="height:38px;padding:0 14px;border:0;border-bottom:2px solid {{ t.line }};background:transparent;font:inherit;font-size:14px;color:{{ t.color }};font-weight:{{ t.weight }};cursor:pointer;margin-bottom:-1px">{{ t.label }}</button></sc-for>
+      </div>
+      <sc-if value="{{ devTabPermit }}" hint-placeholder-val="{{ true }}">
+      <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:20px;margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:14px 16px">
+        <div><div style="font-size:13px;margin-bottom:6px">품목명 <span style="color:var(--color-muted)">식약처 공식 품목명</span></div><div style="height:40px;border:1px solid var(--color-border-2);border-radius:var(--r-s);display:flex;align-items:center;padding:0 12px;background:#fff">환자 감시장치</div></div>
+        <div><div style="font-size:13px;margin-bottom:6px">모델명 <span style="color:var(--color-muted)">(선택)</span></div><div style="height:40px;border:1px solid var(--color-border-2);border-radius:var(--r-s);display:flex;align-items:center;padding:0 12px;background:#fff">M40</div></div>
+        <div><div style="font-size:13px;margin-bottom:6px">제조·수입업체 <span style="color:var(--color-muted)">(선택)</span></div><div style="height:40px;border:1px solid var(--color-border-2);border-radius:var(--r-s);display:flex;align-items:center;padding:0 12px;color:var(--color-muted);background:#fff">예: (주)메디아나</div></div>
+        <div><div style="font-size:13px;margin-bottom:6px">규격 <span style="color:var(--color-muted)">(선택)</span></div><div style="height:40px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff"></div></div>
+        <div style="grid-column:1/-1;display:flex;gap:12px;align-items:center"><button style="height:40px;padding:0 20px;background:var(--color-primary);color:#fff;border:0;border-radius:var(--r-s);font:inherit;font-size:15px;font-weight:600;cursor:pointer">허가정보 조회</button><span style="font-size:13px;color:var(--color-muted)">식약처·나라장터 연결됨</span></div>
+      </div>
+      <h3 style="font-size:var(--fs-18);font-weight:700;margin:32px 0 12px">식약처 등록 · 환자 감시장치 <span style="font-weight:400;color:var(--color-muted);font-size:14px">모델명 M40과 정확히 같은 등록 1건</span></h3>
+      <table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">모델</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">허가번호</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">제조·수입업체</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">등급</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">판매 상태</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">나라장터 거래</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px"></th></tr></thead>
+        <tbody>
+          <tr style="background:var(--color-primary-soft)"><td style="padding:10px 12px;border-bottom:1px solid var(--color-border);font-weight:700">M40</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">인증 제인 20-5001 호</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">(주)메디아나</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">2</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)"><span style="padding:2px 8px;border-radius:4px;background:var(--color-ok-soft);color:var(--color-ok);font-weight:600;font-size:12px">판매 가능</span></td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border);text-align:right">16건 · 4,389,000~6,585,500원</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)"><button onClick="{{ goResultM40 }}" style="border:0;background:transparent;color:var(--color-primary);font:inherit;font-size:13px;cursor:pointer">가격 조사 →</button></td></tr>
+          <tr><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">M30</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">인증 제인 19-4410 호</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">(주)메디아나</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">2</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)"><span style="padding:2px 8px;border-radius:4px;background:var(--color-ok-soft);color:var(--color-ok);font-weight:600;font-size:12px">판매 가능</span></td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border);text-align:right;color:var(--color-muted)">같은 품목 · 참고</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)"></td></tr>
+        </tbody></table>
+      <p style="font-size:13px;color:var(--color-muted);margin:10px 0 0">같은 품목의 다른 모델은 참고용입니다. 등록이 취소·취하되었거나 수출 전용인 모델은 자동으로 같은 제품으로 연결하지 않습니다.</p>
+      </sc-if>
+      <sc-if value="{{ devTabSafety }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:20px;border:1px solid var(--color-border);border-left:4px solid var(--color-ok);border-radius:var(--r-m);padding:18px 22px"><div style="font-size:var(--fs-18);font-weight:700">M40 · 확인된 회수·판매중지 없음</div><div style="color:var(--color-ink-2);margin-top:4px">식약처 회수·판매중지 공식 자료 기준 · 2026-10-09 확인. 품목·업체 수준의 관련 기록도 없습니다.</div></div>
+        <h3 style="font-size:var(--fs-18);font-weight:700;margin:32px 0 12px">업체 허가 · 납품 이력</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">업체</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">식약처 업 허가</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">관계</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">나라장터 납품</th></tr></thead>
+        <tbody><tr><td style="padding:10px 12px;border-bottom:1px solid var(--color-border);font-weight:600">(주)메디아나</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">제조업 허가</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">허가증상 제조·수입업체</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border);text-align:right">6건</td></tr><tr><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">그 외 납품업체 6곳</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border)">판매업 신고 (각각 확인)</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border);color:var(--color-muted)">공식 총판 여부는 확인하지 않음</td><td style="padding:10px 12px;border-bottom:1px solid var(--color-border);text-align:right">10건</td></tr></tbody></table>
+      </sc-if>
+      <sc-if value="{{ devTabUdi }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:20px;display:flex;gap:12px;max-width:560px"><div style="flex:1;height:40px;border:1px solid var(--color-border-2);border-radius:var(--r-s);display:flex;align-items:center;padding:0 12px;font-family:ui-monospace,Menlo,monospace">18800003462138</div><button style="height:40px;padding:0 20px;background:var(--color-primary);color:#fff;border:0;border-radius:var(--r-s);font:inherit;font-size:15px;font-weight:600;cursor:pointer">UDI-DI 조회</button></div>
+        <div style="margin-top:20px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;font-size:13px"><div><div style="color:var(--color-muted)">모델</div><div style="font-weight:600;font-size:15px">M40</div></div><div><div style="color:var(--color-muted)">허가번호</div><div style="font-weight:600;font-size:15px">인증 제인 20-5001 호</div></div><div><div style="color:var(--color-muted)">제조·수입업체</div><div style="font-weight:600;font-size:15px">(주)메디아나</div></div><div><div style="color:var(--color-muted)">등급</div><div style="font-weight:600;font-size:15px">2등급</div></div></div>
+        <p style="font-size:13px;color:var(--color-muted);margin:16px 0 0">모델명으로 UDI를 거꾸로 찾는 기능은 공식 자료가 열릴 때까지 제공하지 않습니다.</p>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- I. 뉴스 레이더 -->
+    <sc-if value="{{ isNews }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="I 뉴스 레이더">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><h1 style="font-size:var(--fs-22);font-weight:700;margin:0">뉴스 레이더</h1><p style="margin:4px 0 0;color:var(--color-ink-2)">등록한 키워드로 새 기사를 자동 확인합니다. 제목·시간·링크를 그대로 보여 주고 요약하지 않습니다.</p></div>
+        <div style="display:flex;gap:8px"><button style="height:36px;padding:0 14px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:13px;cursor:pointer">관심 키워드 27개</button><button style="height:36px;padding:0 14px;background:var(--color-primary);color:#fff;border:0;border-radius:var(--r-s);font:inherit;font-size:13px;font-weight:600;cursor:pointer">새 기사 확인</button></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:24px">
+        <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:14px 16px"><div style="font-size:12px;color:var(--color-muted)">오늘</div><div style="font-size:var(--fs-28);font-weight:700;line-height:1.2">6건</div></div>
+        <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:14px 16px"><div style="font-size:12px;color:var(--color-muted)">이번 주</div><div style="font-size:var(--fs-28);font-weight:700;line-height:1.2">120건</div></div>
+        <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:14px 16px"><div style="font-size:12px;color:var(--color-muted)">중요 표시</div><div style="font-size:var(--fs-28);font-weight:700;line-height:1.2">0건</div></div>
+        <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:14px 16px"><div style="font-size:12px;color:var(--color-muted)">아직 안 읽음</div><div style="font-size:var(--fs-28);font-weight:700;line-height:1.2">231건</div></div>
+      </div>
+      <div style="margin-top:12px;padding:10px 14px;border-radius:var(--r-s);background:var(--color-warn-soft);color:#7c3a06;font-size:13px;display:flex;gap:8px;align-items:center"><span style="font-family:'Material Symbols Rounded';font-size:18px">schedule</span>자동 확인이 1시간 넘게 멈춰 있습니다 (마지막 10:17). "새 기사 확인"으로 직접 확인할 수 있습니다.</div>
+      <div style="display:flex;gap:12px;align-items:center;margin-top:28px">
+        <div style="height:36px;min-width:220px;border:1px solid var(--color-border-2);border-radius:var(--r-s);display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:14px"><span>전체 키워드</span><span style="font-family:'Material Symbols Rounded';font-size:18px;color:var(--color-muted)">expand_more</span></div>
+        <div style="display:inline-flex;border:1px solid var(--color-border-2);border-radius:var(--r-s);overflow:hidden;font-size:13px"><span style="height:34px;padding:0 14px;display:inline-flex;align-items:center;background:var(--color-primary-soft);color:var(--color-primary);font-weight:600">중요도순</span><span style="height:34px;padding:0 14px;display:inline-flex;align-items:center;border-left:1px solid var(--color-border)">최신순</span></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--color-ink-2)"><span style="width:16px;height:16px;border:1px solid var(--color-border-2);border-radius:3px;display:inline-block;background:#fff"></span>본문에서만 언급된 기사도 보기 (1,559건)</label>
+        <span style="margin-left:auto;font-size:13px;color:var(--color-muted)">50건 표시 · 전체 231건</span>
+      </div>
+      <div style="display:flex;flex-direction:column;margin-top:12px;border-top:1px solid var(--color-border)">
+        <sc-for list="{{ news }}" as="a" hint-placeholder-count="4"><div style="display:grid;grid-template-columns:110px 1fr 120px;gap:16px;padding:14px 4px;border-bottom:1px solid var(--color-border);align-items:start"><div style="font-size:13px;color:var(--color-muted)"><span style="font-weight:700;color:{{ a.newColor }}">{{ a.flag }}</span> {{ a.time }}<div style="margin-top:4px;padding:1px 6px;border-radius:4px;background:var(--color-bg-2);display:inline-block">{{ a.keyword }}</div></div><div><a href="#" style="font-weight:600;color:var(--color-ink);font-size:15px">{{ a.title }}</a><div style="font-size:12px;color:var(--color-muted);margin-top:4px">{{ a.source }} · {{ a.kind }}</div></div><div style="display:flex;gap:6px;justify-content:flex-end"><button style="height:30px;padding:0 10px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:12px;cursor:pointer">읽음</button><button style="height:30px;padding:0 10px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:12px;cursor:pointer">중요</button></div></div></sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- I. 경영 비교 -->
+    <sc-if value="{{ isBench }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="I 경영 비교">
+      <h1 style="font-size:var(--fs-22);font-weight:700;margin:0">경영 비교</h1>
+      <p style="margin:4px 0 0;color:var(--color-ink-2)">공개 회계자료로 병원을 같은 기준에서 비교합니다. 숫자는 모두 프로그램이 계산합니다.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px">
+        <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:16px 20px">
+          <div style="font-size:12px;color:var(--color-muted);margin-bottom:6px">기준 병원</div>
+          <div style="height:40px;border:1px solid var(--color-border-2);border-radius:var(--r-s);display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-weight:600">○○대학교○○병원<span style="font-family:'Material Symbols Rounded';font-size:18px;color:var(--color-muted)">expand_more</span></div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px 16px;margin-top:14px;font-size:13px"><div><div style="color:var(--color-muted)">법인</div><div style="font-weight:600">학교법인 ○○학원</div></div><div><div style="color:var(--color-muted)">의료원</div><div style="font-weight:600">○○의료원</div></div><div><div style="color:var(--color-muted)">지역 · 종별</div><div style="font-weight:600">부산 · 상급종합병원</div></div><div><div style="color:var(--color-muted)">병상수</div><div style="font-weight:600">776 <span style="font-weight:400;color:var(--color-muted)">심평원 2026-10-09</span></div></div></div>
+        </div>
+        <div style="border:1px solid var(--color-border);border-radius:var(--r-m);padding:16px 20px">
+          <div style="font-size:12px;color:var(--color-muted);margin-bottom:6px">비교군 · 비교 방식</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><sc-for list="{{ benchModes }}" as="m" hint-placeholder-count="5"><span style="height:30px;padding:0 12px;border-radius:15px;border:1px solid {{ m.border }};background:{{ m.bg }};color:{{ m.color }};font-size:13px;display:inline-flex;align-items:center;font-weight:{{ m.weight }}">{{ m.label }}</span></sc-for></div>
+          <div style="margin-top:14px;font-size:13px;color:var(--color-ink-2)">부산 지역 상급종합·종합병원 4곳이 평균에 들어갑니다. 표의 체크를 풀면 평균에서 빠집니다.</div>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:16px"><thead><tr style="background:var(--color-bg-3)"><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px;width:90px">평균에 포함</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">병원</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">종별</th><th style="text-align:left;font-weight:500;color:var(--color-muted-2);padding:8px 12px">설립형태</th><th style="text-align:right;font-weight:500;color:var(--color-muted-2);padding:8px 12px">병상수</th></tr></thead>
+        <tbody><sc-for list="{{ peers }}" as="h" hint-placeholder-count="4"><tr><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:center"><span style="display:inline-flex;width:16px;height:16px;border-radius:3px;background:var(--color-primary);color:#fff;font-size:11px;align-items:center;justify-content:center">✓</span></td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border)">{{ h.name }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border)">{{ h.kind }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border)">{{ h.form }}</td><td style="padding:9px 12px;border-bottom:1px solid var(--color-border);text-align:right">{{ h.beds }}</td></tr></sc-for></tbody></table>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin:36px 0 12px"><h3 style="font-size:var(--fs-18);font-weight:700;margin:0">주요 경영지표 <span style="font-weight:400;color:var(--color-muted);font-size:14px">회계연도 2024 (최신)</span></h3><span style="font-size:13px;color:var(--color-muted)">2025년 자료는 2027년 1월 전후 공개 예정</span></div>
+      <div style="border:1px dashed var(--color-border-2);border-radius:var(--r-m);padding:28px;text-align:center;color:var(--color-muted)">회계자료는 아직 연계 전입니다. 연계되면 기준 병원 · 비교군 평균 · 위치(상위 %)가 지표마다 한 줄로 나옵니다.</div>
+    </div>
+    </sc-if>
+
+  </div>
+  </main>
+  </div>
+
+  <!-- F. 거래 원문 패널 (st.dialog) -->
+  <sc-if value="{{ hasRecord }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeRecord }}" style="position:fixed;inset:0;background:rgba(28,27,25,0.45);display:flex;align-items:flex-start;justify-content:center;padding-top:60px;z-index:10">
+    <div onClick="{{ stop }}" style="width:720px;max-height:calc(100vh - 120px);overflow:auto;background:#fff;border-radius:var(--r-m);box-shadow:0 20px 60px rgba(0,0,0,0.25);padding:24px 28px;box-sizing:border-box">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div style="font-size:12px;color:var(--color-muted)">나라장터 거래 원문 · 납품요구</div><h3 style="font-size:var(--fs-18);font-weight:700;margin:4px 0 0;word-break:keep-all">{{ record.business }}</h3></div>
+        <button onClick="{{ closeRecord }}" style="border:0;background:transparent;font-family:'Material Symbols Rounded';font-size:22px;color:var(--color-muted);cursor:pointer">close</button>
+      </div>
+      <div style="margin-top:16px;padding:14px 16px;border-radius:var(--r-s);background:var(--color-bg-2);display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+        <div><div style="font-size:12px;color:var(--color-muted)">거래 총액</div><div style="font-size:var(--fs-18);font-weight:700">{{ record.total }}</div></div>
+        <div><div style="font-size:12px;color:var(--color-muted)">수량</div><div style="font-size:var(--fs-18);font-weight:700">{{ record.qty }}</div></div>
+        <div><div style="font-size:12px;color:var(--color-muted)">1단위 가격</div><div style="font-size:var(--fs-18);font-weight:700">{{ record.price }}</div></div>
+      </div>
+      <sc-if value="{{ record.isOutlier }}" hint-placeholder-val="{{ false }}"><div style="margin-top:10px;padding:10px 14px;border-radius:var(--r-s);background:var(--color-warn-soft);color:#7c3a06;font-size:13px">이 거래는 {{ record.unit }} 단위라 대당 가격과 섞지 않았습니다. 1{{ record.unit }}에 몇 대가 들어가는지는 원문 규격을 확인하세요.</div></sc-if>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;margin-top:16px;font-size:13px">
+        <sc-for list="{{ record.fields }}" as="f" hint-placeholder-count="10"><div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--color-border)"><span style="color:var(--color-muted);white-space:nowrap">{{ f.k }}</span><span style="text-align:right;word-break:keep-all">{{ f.v }}</span></div></sc-for>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:20px"><a href="#" style="height:38px;padding:0 16px;background:var(--color-primary);color:#fff;border-radius:var(--r-s);font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:6px">나라장터에서 이 거래 보기<span style="font-family:'Material Symbols Rounded';font-size:18px">open_in_new</span></a><button onClick="{{ closeRecord }}" style="height:38px;padding:0 16px;border:1px solid var(--color-border-2);border-radius:var(--r-s);background:#fff;font:inherit;font-size:14px;cursor:pointer">닫기</button><span style="margin-left:auto;font-size:12px;color:var(--color-muted);align-self:center">원문 확인값 {{ record.hash }}</span></div>
+    </div>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:1000}}">
+const won = (n) => n == null ? '미확인' : n.toLocaleString('ko-KR') + '원';
+const num = (n) => n.toLocaleString('ko-KR');
+const C = { primary:'var(--color-primary)', ok:'var(--color-ok)', warn:'var(--color-warn)', danger:'var(--color-danger)', neutral:'var(--color-neutral)' };
+
+const m40Trades = (() => {
+  const buyers = ['○○소방본부','○○소방본부','○○공항공사','○○소방본부','○○소방안전본부','○○공항공사','○○소방본부','○○소방본부','○○소방본부','○○공항공사','○○소방본부','○○소방본부','○○소방본부','○○소방본부'];
+  const sellers = ['(주)메디아나','○○메디칼','(주)메디아나','○○의료기','○○메디칼','(주)메디아나','○○헬스케어','○○메디칼','(주)메디아나','○○의료기','○○메디텍','(주)메디아나','○○메디칼','(주)메디아나'];
+  const dates = ['2026-08-05','2026-07-21','2026-06-11','2026-05-02','2026-03-19','2026-02-14','2026-01-08','2025-12-02','2025-10-15','2025-09-03','2025-06-20','2025-04-11','2024-11-06','2024-05-14'];
+  const qty = [2,3,1,4,2,3,5,2,1,2,3,4,3,4];
+  const rows = dates.map((d,i)=>({ date:d, unit:'대', q:qty[i], price:4400000, total:4400000*qty[i], business: i%3===0 ? '2026년 특수구급차 조달 구매' : (i%3===1 ? '구급차 장비 보강 사업' : '공항 응급의료장비 구매'), cond:'납품요구 · 제3자단가계약 · 생산공장도(상차제외)', seller:sellers[i], buyer:buyers[i] }));
+  rows.push({ date:'2025-11-12', unit:'대', q:1, price:6585500, total:6585500, business:'응급실 환자감시장치 교체', cond:'납품요구 · 총액계약', seller:'○○메디칼', buyer:'○○군 보건의료원' });
+  rows.push({ date:'2024-09-02', unit:'대', q:2, price:4389000, total:8778000, business:'보건소 진료장비 구매', cond:'납품요구 · 총액계약', seller:'(주)메디아나', buyer:'○○시 보건소' });
+  rows.push({ date:'2025-03-18', unit:'set', q:2, price:36513000, total:73026000, business:'취약지 응급의료기관 장비지원사업', cond:'납품요구 · 총액계약', seller:'○○메디칼', buyer:'○○군 보건의료원', outlier:true, ratio:'8.3' });
+  rows.push({ date:'2024-12-09', unit:'SET', q:8, price:4747080, total:37976640, business:'(병원부) 음압격리병동 환자감시장치 구매', cond:'납품요구 · 총액계약', seller:'○○헬스케어', buyer:'○○대학교병원', other:true });
+  return rows.sort((a,b)=>a.date<b.date?1:-1);
+})();
+
+const PRODUCTS = {
+  M40: { key:'M40', name:'M40', item:'환자 감시장치', permit:'인증 제인 20-5001 호', maker:'(주)메디아나', unit:'대', count:16, median:4400000, low:4389000, high:6585500, latest:'2026-08-05', suppliers:7, buyers:12, mfds:'허가 확인', mfdsNote:'판매 가능(허가 기준) · 제인 20-5001 호 · (주)메디아나', mixed:true, otherUnit:'SET', otherCount:2,
+    years:[{year:'2026',count:7,qty:'20 대',median:won(4400000),range:'4,400,000원',other:''},{year:'2025',count:6,qty:'15 대',median:won(4400000),range:'4,389,000 ~ 6,585,500원',other:'1건'},{year:'2024',count:3,qty:'9 대',median:won(4400000),range:'4,389,000 ~ 4,400,000원',other:'1건'}],
+    conditions:[{unit:'대',cond:'납품요구 · 제3자단가계약 · 생산공장도(상차제외)',count:14,qty:'39 대',total:won(171600000),median:won(4400000),range:'4,400,000원',latest:'2026-08-05'},{unit:'대',cond:'납품요구 · 총액계약',count:2,qty:'3 대',total:won(15363500),median:won(5487250),range:'4,389,000 ~ 6,585,500원',latest:'2025-11-12'},{unit:'SET',cond:'납품요구 · 총액계약',count:2,qty:'10 SET',total:won(111002640),median:won(20630040),range:'4,747,080 ~ 36,513,000원',latest:'2025-03-18',bg:'var(--color-warn-soft)'}],
+    trades:m40Trades,
+    supplierRows:[{name:'(주)메디아나',count:6,low:won(4389000),high:won(4400000),latest:'2026-08-05'},{name:'○○메디칼',count:5,low:won(4400000),high:won(6585500),latest:'2026-07-21'},{name:'○○의료기',count:2,low:won(4400000),high:won(4400000),latest:'2026-05-02'},{name:'○○헬스케어',count:2,low:won(4400000),high:won(4400000),latest:'2026-01-08'},{name:'○○메디텍 외 2곳',count:3,low:won(4400000),high:won(4400000),latest:'2025-06-20'}],
+    otherModels:[{model:'▶ M40 (검색한 모델)',maker:'(주)메디아나',count:'16건',range:'4,389,000 ~ 6,585,500원',weight:700},{model:'M30',maker:'(주)메디아나',count:'9건',range:'2,900,000 ~ 3,300,000원'},{model:'M50',maker:'(주)메디아나',count:'4건',range:'6,100,000 ~ 6,600,000원'}] },
+  PNB704: { key:'PNB704', name:'PNB-704', item:'생물안전작업대', permit:'허가 제허 15-320 호', maker:'씨에이치씨 바이오텍', unit:'대', count:57, median:11880000, low:10500000, high:11880000, latest:'2026-09-24', suppliers:4, buyers:31, mfds:'허가 확인', mfdsNote:'판매 가능(허가 기준) · 씨에이치씨 바이오텍', mixed:false,
+    years:[{year:'2026',count:18,qty:'22 대',median:won(10500000),range:'10,500,000 ~ 11,880,000원',other:''},{year:'2025',count:27,qty:'34 대',median:won(11880000),range:'10,692,000 ~ 11,880,000원',other:''},{year:'2024',count:12,qty:'14 대',median:won(11880000),range:'11,880,000원',other:''}],
+    conditions:[{unit:'대',cond:'납품요구 · 제3자단가계약',count:51,qty:'62 대',total:won(718740000),median:won(11880000),range:'10,500,000 ~ 11,880,000원',latest:'2026-09-24'},{unit:'대',cond:'납품요구 · 다수공급자계약 2단계경쟁',count:6,qty:'8 대',total:won(85536000),median:won(10692000),range:'10,500,000 ~ 10,692,000원',latest:'2026-04-02'}],
+    trades:[{date:'2026-09-24',unit:'대',q:1,price:10500000,total:10500000,business:'연구실 생물안전작업대 구매',cond:'납품요구 · 제3자단가계약',seller:'씨에이치씨 바이오텍',buyer:'○○대학교'},{date:'2026-08-13',unit:'대',q:2,price:11880000,total:23760000,business:'감염병 검사실 장비 보강',cond:'납품요구 · 제3자단가계약',seller:'○○사이언스',buyer:'○○보건환경연구원'},{date:'2026-06-30',unit:'대',q:1,price:10692000,total:10692000,business:'진단검사의학과 장비 교체',cond:'납품요구 · 다수공급자계약 2단계경쟁',seller:'씨에이치씨 바이오텍',buyer:'○○의료원'},{date:'2025-12-18',unit:'대',q:3,price:11880000,total:35640000,business:'2025년 실험실 안전장비 구매',cond:'납품요구 · 제3자단가계약',seller:'씨에이치씨 바이오텍',buyer:'○○대학교'}],
+    supplierRows:[{name:'씨에이치씨 바이오텍',count:38,low:won(10500000),high:won(11880000),latest:'2026-09-24'},{name:'○○사이언스',count:11,low:won(11880000),high:won(11880000),latest:'2026-08-13'},{name:'○○랩 외 1곳',count:8,low:won(10692000),high:won(11880000),latest:'2026-03-05'}],
+    otherModels:[{model:'▶ PNB-704 (검색한 모델)',maker:'씨에이치씨 바이오텍',count:'57건',range:'10,500,000 ~ 11,880,000원',weight:700},{model:'PNB-604',maker:'씨에이치씨 바이오텍',count:'22건',range:'8,900,000 ~ 9,900,000원'}] },
+  DFM100: { key:'DFM100', name:'Efficia DFM100', item:'저출력 심장충격기', permit:'수입 제수 16-1021 호', maker:'필립스코리아(주)', unit:'식', count:1, median:13200000, low:13200000, high:13200000, latest:'2025-02-27', suppliers:1, buyers:1, mfds:'허가 확인', mfdsNote:'판매 가능(허가 기준) · 필립스코리아(주)', mixed:false,
+    years:[{year:'2025',count:1,qty:'1 식',median:won(13200000),range:'13,200,000원',other:''}],
+    conditions:[{unit:'식',cond:'납품요구 · 총액계약',count:1,qty:'1 식',total:won(13200000),median:won(13200000),range:'13,200,000원',latest:'2025-02-27'}],
+    trades:[{date:'2025-02-27',unit:'식',q:1,price:13200000,total:13200000,business:'응급의료장비(제세동기) 구매',cond:'납품요구 · 총액계약',seller:'○○메디칼',buyer:'○○소방본부'}],
+    supplierRows:[{name:'○○메디칼',count:1,low:won(13200000),high:won(13200000),latest:'2025-02-27'}],
+    otherModels:[{model:'▶ Efficia DFM100 (검색한 모델)',maker:'필립스코리아(주)',count:'1건',range:'13,200,000원',weight:700},{model:'HeartStart XL+',maker:'필립스코리아(주)',count:'7건',range:'9,800,000 ~ 12,100,000원'}] },
+};
+const QUOTE_DEFAULT = { M40:'6500000', PNB704:'11000000', DFM100:'12000000' };
+
+class Component extends DCLogic {
+  state = { screen:'home', stateView:'normal', variant:'A', productKey:'M40', query:'', period:'3', quote:{M40:'',PNB704:'',DFM100:''}, tradeTab:'years', devTab:'permit', chosen:0, record:null };
+  go(screen, extra) { return () => this.setState({ screen, record:null, ...(extra||{}) }); }
+  pct(q, base) { return ((q - base) / base * 100); }
+  conclusion(p, q, state) {
+    const per = `1${p.unit}당 `;
+    if (state === 'empty') return { headline:'같은 제품으로 확인된 나라장터 거래가 없습니다.', detail:'', quoteLine:'' , tone:'neutral', band:false };
+    if (p.count === 1) {
+      const ql = q ? `내 견적가 ${won(q)}은 이 1건보다 ${Math.abs(this.pct(q,p.low)).toFixed(1)}% ${q>=p.low?'높습니다':'낮습니다'}. 1건뿐이라 가격대를 판단하기에는 부족합니다.` : '';
+      return { headline:`같은 제품의 나라장터 거래는 1건이고, ${per}${won(p.low)}에 거래됐습니다.`, detail:`최근 거래 ${p.latest}`, quoteLine:ql, tone:'neutral', band:false };
+    }
+    let ql = '';
+    if (q) {
+      const d = this.pct(q, p.median);
+      const where = q > p.high ? '지금까지 거래된 가장 높은 값보다도 높습니다' : q < p.low ? '지금까지 거래된 가장 낮은 값보다도 낮습니다' : '거래된 가격 범위 안에 있습니다';
+      ql = `내 견적가 ${won(q)}은 가운데 값보다 ${Math.abs(d).toFixed(1)}% ${d>=0?'높습니다':'낮습니다'}. ${where}.`;
+    }
+    return { headline:`같은 제품이 나라장터에서 ${p.count}번 거래됐고, ${per}가운데 값(중앙값)은 ${won(p.median)}입니다.`, detail:`${per}거래가 ${won(p.low)} ~ ${won(p.high)} · 최근 거래 ${p.latest}`, quoteLine:ql, tone:'ok', band:true };
+  }
+  openRecord(t) { return (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.setState({ record:t }); }; }
+  renderVals() {
+    const s = this.state;
+    const p0 = PRODUCTS[s.productKey];
+    const sv = s.stateView;
+    const quoteText = s.quote[s.productKey];
+    const q = parseInt(String(quoteText).replace(/[^0-9]/g,''),10) || 0;
+    const con = this.conclusion(p0, q, sv);
+    const tone = { color: C[con.tone] || C.ok };
+    const axisLow = q ? Math.min(p0.low, q) : p0.low, axisHigh = q ? Math.max(p0.high, q) : p0.high;
+    const pos = (v) => axisHigh <= axisLow ? 50 : (v - axisLow) / (axisHigh - axisLow) * 100;
+    const clamp = (v) => Math.min(Math.max(v, 8), 92);
+    const lowAt = pos(p0.low), highAt = pos(p0.high);
+    const band = { lowAt: lowAt.toFixed(2), width: Math.max(highAt - lowAt, 1).toFixed(2), midAt: pos(p0.median).toFixed(2), quoteAt: pos(q).toFixed(2), quoteLabelAt: clamp(pos(q)).toFixed(2), lowLabelAt: clamp(lowAt).toFixed(2), highLabelAt: clamp(highAt).toFixed(2) };
+    const delta = q ? this.pct(q, p0.median) : 0;
+    const quoteTone = !q ? C.ok : p0.count < 3 ? C.neutral : (q > p0.high || q < p0.low) ? C.warn : C.ok;
+    const outliers = p0.trades.filter(t=>t.outlier);
+    const trades = p0.trades.map(t => ({ date:t.date, total:won(t.total), qty:`${num(t.q)} ${t.unit}`, price:`${won(t.price)} / ${t.unit}`, business:t.business, cond:t.cond, seller:t.seller, buyer:t.buyer, open:this.openRecord(t), bg: t.outlier ? 'var(--color-warn-soft)' : (t.other ? 'var(--color-bg-2)' : 'transparent'), priceColor: t.outlier ? C.warn : 'var(--color-ink)' }));
+    const p = { ...p0, lowWon:won(p0.low), medianWon:won(p0.median), highWon:won(p0.high), tradeCount:p0.trades.length, trades, outlierCount:outliers.length, mixed: p0.mixed, otherCount:p0.otherCount||0, otherUnit:p0.otherUnit||'',
+      outliers: outliers.map(o=>({ calc:`${won(o.total)} ÷ ${o.q} ${o.unit} = 1 ${o.unit}당 ${won(o.price)}`, ratio:o.ratio, business:o.business, cond:o.cond, buyer:o.buyer, date:o.date, open:this.openRecord(o) })) };
+    const periodLabel = sv==='widened' ? '최근 5년' : (s.period==='3'?'최근 3년':s.period==='5'?'최근 5년':'전체');
+    const periodKey = sv==='widened' ? '5' : s.period;
+    const periods = [['3','최근 3년'],['5','최근 5년'],['all','전체']].map(([k,label])=>({ label, go:()=>this.setState({period:k, stateView: sv==='widened'?'normal':sv}), bg:k===periodKey?'var(--color-primary-soft)':'#fff', color:k===periodKey?'var(--color-primary)':'var(--color-ink)', weight:k===periodKey?700:400 }));
+    const periodCaption = periodKey==='3' ? '최근 3년 (2023-10-10 이후 거래)' : periodKey==='5' ? '최근 5년 (2021-10-10 이후 거래)' : '전체 (2021-01 이후 수집된 모든 거래)';
+    const cards = sv==='empty' ? [
+      { label:'거래가', value:'같은 제품 거래 0건', note:'비슷한 품목 거래 3건은 비교에서 제외', color:C.neutral },
+      { label:'납품업체', value:'확인 안 됨', note:'같은 제품 거래의 납품업체 없음', color:C.neutral },
+      { label:'식약처 허가', value:p0.mfds, note:p0.mfdsNote, color:C.ok },
+      { label:'안전정보', value:'확인된 회수 없음', note:'식약처 회수·판매중지 공식 자료 기준', color:C.ok } ] : [
+      { label:'거래가', value: p0.count>=3 ? won(p0.median) : won(p0.low), note: p0.count>=3 ? `가운데 값 · 같은 제품 거래 ${p0.count}건 · 최근 ${p0.latest}` : `같은 제품 거래 ${p0.count}건 · 최근 ${p0.latest}`, color: p0.count>=3 ? C.ok : C.neutral },
+      { label:'납품업체', value:`${p0.suppliers}곳`, note:`${p0.buyers}개 기관에 납품`, color:C.ok },
+      { label:'식약처 허가', value:p0.mfds, note:p0.mfdsNote, color:C.ok },
+      { label:'안전정보', value:'확인된 회수 없음', note:'식약처 회수·판매중지 공식 자료 기준', color:C.ok } ];
+    const tradeTabKey = (sv==='outlier'||sv==='units') && s.tradeTab==='years' ? (sv==='units'?'conditions':'trades') : s.tradeTab;
+    const tabs = (list, cur, key) => list.map(([k,label])=>({ label, go:()=>this.setState({[key]:k, stateView: (key==='tradeTab' && (sv==='outlier'||sv==='units')) ? 'normal' : sv}), line:k===cur?'var(--color-primary)':'transparent', color:k===cur?'var(--color-primary)':'var(--color-ink-2)', weight:k===cur?700:400 }));
+    const navItem = (k, icon, label, match) => ({ icon, label, go:this.go(k), bg: match ? '#e6e4dc' : 'transparent', color: match ? 'var(--color-primary)' : 'var(--color-ink)', weight: match ? 700 : 500 });
+    const inPrice = ['search','choose','result'].includes(s.screen);
+    const cand = [
+      { item:'환자 감시장치', permit:'제인 20-5001 호', type:'인증', model:'M40', maker:'(주)메디아나', grade:'2', udi:'18800003462138' },
+      { item:'고형이식의료용실리콘재료', permit:'제허 12-1069 호', type:'허가', model:'M40', maker:'주식회사 비스툴', grade:'3', udi:'08800055501222' },
+      { item:'고형이식의료용실리콘재료', permit:'제허 12-1069 호', type:'허가', model:'M40α', maker:'주식회사 비스툴', grade:'3', udi:'08800055503226' },
+      { item:'고형이식의료용실리콘재료', permit:'제허 22-131 호', type:'허가', model:'M40', maker:'주식회사 비스툴', grade:'3', udi:'08800055500621' } ];
+    const quoteRows = [
+      { key:'M40', n:1, item:'환자 감시장치', model:'M40', quote:won(6500000), median:won(4400000), delta:'+47.7%', verdict:'범위 밖 · 확인 필요', basis:'같은 제품 거래 16건 · 최고 6,585,500원보다 낮지만 가운데 값보다 크게 높음', color:C.warn, check:'확인 필요' },
+      { key:'PNB704', n:2, item:'생물안전작업대', model:'PNB-704', quote:won(11000000), median:won(11880000), delta:'−7.4%', verdict:'거래 범위 안', basis:'같은 제품 거래 57건 · 10,500,000 ~ 11,880,000원', color:C.ok, check:'확인' },
+      { key:'DFM100', n:3, item:'저출력 심장충격기', model:'Efficia DFM100', quote:won(12000000), median:won(13200000), delta:'−9.1%', verdict:'판단 부족 (1건뿐)', basis:'같은 제품 거래 1건 · 13,200,000원', color:C.neutral, check:'확인 필요' },
+    ].map(r => ({ ...r, go:()=>this.setState({ productKey:r.key, quote:{...s.quote, [r.key]: s.quote[r.key] || QUOTE_DEFAULT[r.key]} }), bg: r.key===s.productKey ? 'var(--color-primary-soft)' : 'transparent' }));
+    const rec = s.record;
+    const record = rec ? { business:rec.business, total:won(rec.total), qty:`${num(rec.q)} ${rec.unit}`, price:`${won(rec.price)} / ${rec.unit}`, unit:rec.unit, isOutlier: !!(rec.outlier||rec.other), hash:'a91f…3c0e',
+      fields:[ {k:'거래일(납품요구일)',v:rec.date},{k:'계약방법',v:rec.cond.split(' · ')[1]||'총액계약'},{k:'납품조건',v:rec.cond.split(' · ')[2]||'도착도'},{k:'구매 기관',v:rec.buyer},{k:'납품업체',v:rec.seller},{k:'품명',v:p0.item},{k:'모델',v:p0.name},{k:'규격',v: rec.unit==='대'||rec.unit==='식' ? '본체, 표준 구성' : '본체 + 거치대 + 센서 세트 (원문 참조)'},{k:'단위',v:rec.unit},{k:'수량',v:num(rec.q)},{k:'단가',v:won(rec.price)},{k:'금액',v:won(rec.total)},{k:'납품기한',v:'납품요구일로부터 30일'},{k:'제조·수입업체',v:p0.maker},{k:'우수조달 여부',v:'해당 없음'},{k:'물품식별번호',v:'2345xxxx'},{k:'세부품명',v:p0.item},{k:'계약번호',v:'000xx-2025-0xxx'},{k:'수집일',v:'2026-10-05'},{k:'원문 종류',v:'종합쇼핑몰 납품요구 상세'} ] } : { fields:[] };
+    const news = [
+      { flag:'NEW', newColor:C.primary, time:'10-08 23:50', keyword:'○○병원', title:'[10월 8일 병원계 이모저모③] 단국대, ○○, 성빈센트병원, 한양대의…', source:'medicalworldnews.co.kr', kind:'의학·병원 전문지' },
+      { flag:'NEW', newColor:C.primary, time:'10-08 18:12', keyword:'상급종합병원', title:'제6기 상급종합병원 지정 평가 기준 개정안 행정예고', source:'korea.kr', kind:'정부·정책' },
+      { flag:'', newColor:C.primary, time:'10-08 11:40', keyword:'의료기기 구매', title:'공공의료기관 의료장비 공동구매 확대… 조달청 "단가계약 품목 늘린다"', source:'dailymedi.com', kind:'의학·병원 전문지' },
+      { flag:'', newColor:C.primary, time:'10-07 16:05', keyword:'○○대학교병원', title:'○○대학교병원, 음압격리병동 증축 착공', source:'yna.co.kr', kind:'종합지' } ];
+    const steps = ['업로드·추출','품목 확인','조건 대조','근거 수집','승인','판정'].map((label,i)=>{ const n=i+1, now=3; return { label, mark:n<now?'✓':String(n), color:n<now?'#1f5e42':n===now?'var(--color-ink)':'#8a877f', weight:n===now?700:400, ring:n<now?'#2e7d5b':n===now?'#1f6f8b':'#cfcbc2', fill:n<now?'#2e7d5b':'transparent', numColor:n<now?'#fff':n===now?'#1f6f8b':'#8a877f' }; });
+    const condRows = [ {k:'VAT',q:'표기 없음',g:'부가세 포함',res:'미확인',color:C.warn},{k:'수량 · 단위',q:'1 대',g:'1~5 대',res:'맞음',color:C.ok},{k:'배송',q:'무상',g:'생산공장도(상차제외)',res:'충돌',color:C.danger},{k:'설치',q:'포함',g:'표기 없음',res:'미확인',color:C.warn},{k:'보증',q:'2년',g:'1년',res:'충돌',color:C.danger} ];
+    const screenTitles = { home:'B 홈', search:'C 검색 시작', choose:'D 제품 고르기', result:'E 결과 화면', quote:'G 견적서 검토 (+ 상세 검증)', device:'I 의료기기 허가·안전', news:'I 뉴스 레이더', bench:'I 경영 비교' };
+    const chosenC = cand[s.chosen];
+    return {
+      screenTitle: screenTitles[s.screen], stateView:sv, variant:s.variant, productKey:s.productKey,
+      setStateView:(e)=>{ const v=e.target.value; const patch={stateView:v}; if (v==='loading') patch.screen='search'; else if (['empty','widened','livefail','units','outlier'].includes(v)) { patch.screen='result'; if (v==='units'||v==='outlier') { patch.productKey='M40'; patch.tradeTab = v==='units' ? 'conditions' : 'trades'; } if (v==='widened') patch.productKey='DFM100'; } this.setState(patch); },
+      setVariant:(e)=>this.setState({variant:e.target.value}), setProduct:(e)=>this.setState({productKey:e.target.value, screen: s.screen==='home'?'result':s.screen, stateView: sv==='empty'?'normal':sv}),
+      homeBg: s.screen==='home' ? '#e6e4dc' : 'transparent',
+      navBuy:[ navItem('search','search','가격 조사', inPrice), navItem('quote','request_quote','견적서 검토', s.screen==='quote'), navItem('device','verified','의료기기 허가·안전', s.screen==='device') ],
+      navMgmt:[ navItem('news','newspaper','뉴스 레이더', s.screen==='news'), navItem('bench','bar_chart','경영 비교', s.screen==='bench') ],
+      goHome:this.go('home'), goQuote:this.go('quote', {productKey:'M40', quote:{...s.quote, M40: s.quote.M40||QUOTE_DEFAULT.M40}}), goDevice:this.go('device'), goNews:this.go('news'), goBench:this.go('bench'), goResultM40:this.go('result',{productKey:'M40'}),
+      openResultFromQuote:this.go('result'),
+      isLoading: sv==='loading', isHome:s.screen==='home', isPriceFlow:inPrice, isSearchStart:s.screen==='search', isChoose:s.screen==='choose', isResult:s.screen==='result', isQuote:s.screen==='quote', isDevice:s.screen==='device', isNews:s.screen==='news', isBench:s.screen==='bench',
+      query:s.query, setQuery:(e)=>this.setState({query:e.target.value}),
+      runSearch:()=>{ const t=(s.query||'').trim().toLowerCase(); if (!t) return; if (t==='m40') this.setState({screen:'choose', chosen:0}); else if (t.includes('pnb')) this.setState({screen:'result', productKey:'PNB704'}); else if (t.includes('dfm')||t.includes('efficia')) this.setState({screen:'result', productKey:'DFM100'}); else this.setState({screen:'result', stateView:'empty'}); },
+      examples:[ {label:'M40', go:()=>this.setState({query:'M40', screen:'choose', chosen:0})}, {label:'PNB-704', go:()=>this.setState({query:'PNB-704', screen:'result', productKey:'PNB704', stateView:'normal'})}, {label:'Efficia DFM100', go:()=>this.setState({query:'Efficia DFM100', screen:'result', productKey:'DFM100', stateView:'normal'})} ],
+      recent:[ {name:'M40',item:'환자 감시장치',median:'4,400,000원 / 대',count:'16건',when:'오늘 09:41', go:this.go('result',{productKey:'M40'})}, {name:'PNB-704',item:'생물안전작업대',median:'11,880,000원 / 대',count:'57건',when:'어제', go:this.go('result',{productKey:'PNB704'})}, {name:'Efficia DFM100',item:'저출력 심장충격기',median:'13,200,000원 / 식 (1건)',count:'1건',when:'10-06', go:this.go('result',{productKey:'DFM100'})} ],
+      candidates: cand.map((c,i)=>({ ...c, go:()=>this.setState({chosen:i}), border: i===s.chosen?'var(--color-primary)':'var(--color-border)', bg: i===s.chosen?'var(--color-primary-soft)':'#fff', dot: i===s.chosen?'var(--color-primary)':'var(--color-border-2)', dotFill: i===s.chosen?'var(--color-primary)':'#fff' })),
+      chosenLabel:`${chosenC.item} · ${chosenC.model} · ${chosenC.maker}`, confirmChoice:()=>this.setState({screen:'result', productKey:'M40', stateView: s.chosen===0?'normal':'empty'}),
+      p, conclusion:con, tone, hasQuoteLine: !!con.quoteLine, hasBand: con.band && sv!=='empty', hasQuote: q>0, quoteWon: won(q||0), quoteText, setQuote:(e)=>this.setState({quote:{...s.quote,[s.productKey]:e.target.value}}),
+      quoteHint: p0.count < 3 ? `거래가 ${p0.count}건뿐이라 싸다·비싸다를 판단하기에는 부족합니다. 위치만 보여줍니다.` : '넣으면 결론 문장과 가격 막대에 내 견적 위치가 표시됩니다.',
+      quoteDelta: `${delta>=0?'+':'−'}${Math.abs(delta).toFixed(1)}%`, quoteTone, band,
+      isA:s.variant==='A', isB:s.variant==='B', isEmpty: sv==='empty', hasTrades: sv!=='empty', isWidened: sv==='widened', isLiveFail: sv==='livefail', notLiveFail: sv!=='livefail', hasOutliers: outliers.length>0,
+      periods, periodCaption, setPeriodAll:()=>this.setState({period:'all'}), cards,
+      tradeTabs: tabs([['years','연도별'],['conditions','단위·거래조건별'],['trades',`거래 전체 ${p0.trades.length}건`]], tradeTabKey, 'tradeTab'), tabYears:tradeTabKey==='years', tabConditions:tradeTabKey==='conditions', tabTrades:tradeTabKey==='trades',
+      quoteRows, steps, condRows,
+      deviceTabs: tabs([['permit','허가·등록'],['safety','안전정보 · 업체'],['udi','UDI-DI']], s.devTab, 'devTab'), devTabPermit:s.devTab==='permit', devTabSafety:s.devTab==='safety', devTabUdi:s.devTab==='udi',
+      news,
+      benchModes: ['지역 경쟁군','동일 의료원','유사 규모','동일 유형','직접 선택'].map((label,i)=>({label, border:i===0?'var(--color-primary)':'var(--color-border-2)', bg:i===0?'var(--color-primary-soft)':'#fff', color:i===0?'var(--color-primary)':'var(--color-ink)', weight:i===0?700:400})),
+      peers:[ {name:'○○대학교○○병원',kind:'종합병원',form:'사립대학병원',beds:'872'},{name:'○○대학교병원',kind:'상급종합병원',form:'국립대학병원',beds:'1,051'},{name:'○○대학교병원',kind:'상급종합병원',form:'사립대학병원',beds:'909'},{name:'○○대학교○○병원',kind:'상급종합병원',form:'사립대학병원',beds:'840'} ],
+      hasRecord: !!rec, record, closeRecord:()=>this.setState({record:null}), stop:(e)=>e.stopPropagation(),
+    };
+  }
+}
+</script>
+</body>
+</html>
