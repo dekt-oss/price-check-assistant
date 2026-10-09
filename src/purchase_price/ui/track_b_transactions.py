@@ -14,6 +14,8 @@ from purchase_price.ui.amount_check import amount_check_label
 # Runtime marker: A/B direct trades exclude 입력 오류 의심 lines (unit price 0~10원, swapped
 # 단가/수량); entry_error_candidates / entry_error_rows list them instead.
 ENTRY_ERRORS_EXCLUDED_V1 = True
+# Quantities in the trade tables carry thousands separators (1,071, not 1071).
+QUANTITY_COMMAS_V1 = True
 
 
 def comparison_candidates(track_b: Any) -> tuple[Any, ...]:
@@ -124,10 +126,10 @@ AMOUNT_CHECK_WORDS = True
 
 
 def _number_text(value: Any) -> str:
-    """1.000 -> 1, 2.50 -> 2.5, 100 -> 100 (Decimal keeps trailing zeros under :g)."""
+    """1.000 -> 1, 2.50 -> 2.5, 100 -> 100, 1071 -> 1,071 (Decimal keeps trailing zeros under :g)."""
 
     try:
-        return format(Decimal(str(value)).normalize(), "f")
+        return format(Decimal(str(value)).normalize(), ",f")
     except (ArithmeticError, TypeError, ValueError):
         return str(value)
 

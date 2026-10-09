@@ -257,6 +257,36 @@ def test_trade_cards_and_rows_write_money_with_commas_and_won() -> None:
     assert dev.won_text(None) == "미확인"
 
 
+def test_trade_summary_leaves_entry_errors_out_and_says_how_many() -> None:
+    swapped = _trade(MatchGrade.A, "1", "2026-09-20")
+    swapped.quantity = Decimal("1731000")
+    swapped.total_amount = Decimal("1731000")
+    summary = dev.build_trade_summary(
+        _track_b(
+            _trade(MatchGrade.A, "1980000", "2026-09-29"),
+            _trade(MatchGrade.A, "297000", "2026-09-17"),
+            swapped,
+        ),
+        TODAY,
+    )
+
+    assert summary.count == 2 and summary.entry_error_count == 1
+    assert (summary.low_price, summary.high_price) == (Decimal("297000"), Decimal("1980000"))
+    cards = dev.trade_summary_cards(summary)
+    assert "297,000 ~ 1,980,000원" in cards and "1 ~" not in cards
+    note = dev.entry_error_note_html(summary)
+    assert "입력 오류 의심 1건" in note
+    assert dev.entry_error_note_html(dev.build_trade_summary(_track_b(), TODAY)) == ""
+
+
+def test_device_page_reloads_stale_trade_modules_before_importing_them() -> None:
+    source = PAGE.read_text(encoding="utf-8")
+    entry = source.index("purchase_price.ui.track_b_transactions\", \"ENTRY_ERRORS_EXCLUDED_V1\"")
+    page_marker = source.index("purchase_price.ui.device_page\", \"DEVICE_PAGE_ENTRY_ERRORS_V1\"")
+    assert entry < page_marker
+    assert dev.DEVICE_PAGE_ENTRY_ERRORS_V1 is True
+
+
 def test_trade_summary_without_same_product_trades_shows_dashes_not_zero_prices() -> None:
     summary = dev.build_trade_summary(_track_b(_trade(MatchGrade.C, "100", "2026-09-01")), TODAY)
     assert summary.count == 0 and summary.reference_count == 1
@@ -401,3 +431,72 @@ def test_udi_match_note_shows_the_matched_number() -> None:
 def test_company_wording_has_no_stray_eop() -> None:
     assert "업 허가" not in dev.SUPPLIER_NOTE.replace("업체 허가", "")
     assert "식약처 업체 허가·신고" in dev.SUPPLIER_NOTE
+
+
+def _identity_lookup(*, udi: str | None = "08801234567895"):
+    from purchase_price.services.mfds_identity_index import MfdsIdentityLookup, MfdsIdentityRecord
+
+    record = MfdsIdentityRecord(
+        udi_di=udi,
+        product_name="저출력심장충격기",
+        classification_no=None,
+        grade="3",
+        permit_number="제허 19-527 호",
+        permit_date=None,
+        model_name="DFM100",
+        trade_name=None,
+        registered_company="(주)메디아나",
+    )
+    return MfdsIdentityLookup("success", "DFM100", "model", (record,))
+
+
+def test_result_header_uses_the_shared_labelled_product_block() -> None:
+    result = dev.MarketResult(
+        params=dev.MarketParams(product_name="저출력심장충격기", model_name="DFM100"),
+        identity=_identity_lookup(),
+        status_labels={"제허19-527호": "국내 정상(품목)"},
+    )
+
+    html = dev.identity_header_html(result)
+
+    for label in ("모델명", "품목명(식약처)", "제조·수입업체", "식약처 허가번호", "등급", "UDI-DI"):
+        assert label in html, label
+    for value in ("DFM100", "저출력심장충격기", "(주)메디아나", "제허 19-527 호", "3등급", "08801234567895"):
+        assert value in html, value
+    assert "판매 가능" in html
+
+
+def test_result_header_leaves_out_udi_when_unknown_and_keeps_typed_values() -> None:
+    result = dev.MarketResult(
+        params=dev.MarketParams(product_name="심장충격기", manufacturer="필립스코리아"),
+    )
+
+    fields = {field.key: field for field in dev.identity_header_fields(result)}
+
+    assert "udi" not in fields
+    assert fields["model"].empty_text == "입력 안 함"
+    assert fields["mfds_product"].value == "심장충격기"
+    assert fields["company"].value == "필립스코리아" and "확인 전" in fields["company"].note
+
+
+def test_meta_chips_keep_only_what_the_block_does_not_show() -> None:
+    params = dev.MarketParams(product_name="심장충격기", model_name="A", specification="2 채널")
+    chips = dev.meta_chips_html(params, "10-09 14:57")
+
+    assert chips.count('class="pc-chip"') == 2
+    assert "심장충격기" not in chips
+
+
+def test_card_and_notice_agree_with_the_header_when_the_full_index_confirms_the_model() -> None:
+    result = dev.MarketResult(
+        params=dev.MarketParams(product_name="저출력심장충격기", model_name="DFM100"),
+        identity=_identity_lookup(),
+        exact=resolve_exact_model_identity((), "DFM100"),
+    )
+
+    cards = dev.permit_summary_cards(result)
+    notice = dev.identity_notice_html("DFM100", result.exact, dev.index_exact_permits(result))
+
+    assert "전체 허가 목록에서 확인" in cards and "찾지 못함" not in cards
+    assert "pc-ok" in notice and "제허 19-527 호" in notice
+    assert "찾지 못했습니다" in dev.identity_notice_html("DFM100", result.exact)

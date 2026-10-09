@@ -387,3 +387,15 @@ def test_dashboard_wires_the_view_into_result_overview_and_handoff() -> None:
     assert "render_company_lookup=_render_business_license_lookup" in source
     assert 'search_timings["category_market"]' in source
     assert "identity_from_same_product" in source and "_retry_model_identity" in source
+
+
+def test_block_fits_a_390px_phone_without_cutting_text():
+    css = ui.CSS
+    assert ui.CATEGORY_MARKET_NARROW_V1 is True
+    narrow = css[css.index("@container (max-width: 520px)"): css.index("@container (max-width: 420px)")]
+    # the year table scrolls inside its own card; recent purchases and the status strip wrap
+    assert ".cm-grid > .pc-card {padding" in narrow and "grid-template-columns:minmax(0,1fr)" in css
+    assert "overflow-x:auto" in css
+    assert ".cm-recent-row .cm-who {order:3; flex:1 1 100%; white-space:normal" in narrow
+    assert ".cm-strip-note {white-space:normal" in narrow
+    assert "overflow-wrap:anywhere" in css

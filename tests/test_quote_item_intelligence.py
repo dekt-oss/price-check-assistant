@@ -13,7 +13,10 @@ from purchase_price.services.mfds_recall import MfdsRecallLookupResult
 from purchase_price.services.quote_extraction import QuoteItem
 from purchase_price.ui import quote_market_research
 from purchase_price.ui.quote_item_intelligence import (
+    QuoteItemIntelligenceSummary,
     build_quote_item_intelligence_summary,
+    item_status_cards,
+    item_status_cards_html,
     mfds_permit_note,
     quote_item_intelligence_rows,
 )
@@ -485,3 +488,40 @@ def test_amount_check_labels_are_plain_korean() -> None:
     assert amount_check_label("unknown") == "확인 불가"
     assert amount_check_label(None) == "확인 불가"
     assert amount_check_label("something_new") == "확인 불가"
+
+
+def _summary(**overrides) -> QuoteItemIntelligenceSummary:
+    values = dict(
+        direct_count=267,
+        observed_low=None,
+        observed_high=None,
+        other_unit_count=0,
+        other_units=(),
+        main_unit="대",
+        supplier_names=("가", "나", "다"),
+        identity_status="같은 모델명이 여러 허가에 있어 직접 살펴봐야 함",
+        permit_numbers=(),
+        responsible_companies=("(주)메디아나",),
+        business_license_status="식약처에서 직접 확인",
+        safety_status="공식 안전정보 일치 미확인",
+        safety_message="",
+    )
+    values.update(overrides)
+    return QuoteItemIntelligenceSummary(**values)
+
+
+def test_status_cards_use_short_values_and_keep_the_full_sentence_below() -> None:
+    cards = {label: (value, sub) for label, value, sub, _ in item_status_cards(_summary())}
+
+    assert cards["식약처 허가 확인"] == ("허가 여러 건", "같은 모델명이 여러 허가에 있어 직접 살펴봐야 함")
+    assert cards["회수·판매중지"] == ("일치 기록 없음", "공식 안전정보 일치 미확인")
+    assert cards["같은 제품 거래"][0] == "267건"
+    assert all(len(value) <= 10 for value, _ in cards.values())
+
+
+def test_status_cards_html_has_wrapping_grid_and_comma_counts() -> None:
+    html = item_status_cards_html(_summary(direct_count=1234, supplier_names=tuple("가" * 1)))
+
+    assert "qi-cards" in html and "max-width: 1200px" in html
+    assert "1,234건" in html
+    assert "…" not in html and "nowrap" not in html

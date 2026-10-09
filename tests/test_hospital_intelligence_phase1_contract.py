@@ -37,6 +37,16 @@ def test_root_url_still_opens_the_price_search() -> None:
         assert f'label="{label}"' in source
 
 
+def test_home_management_card_states_the_loaded_fiscal_year_not_pending_wording() -> None:
+    from purchase_price.services import hospital_benchmark
+
+    source = (REPO_ROOT / "pages" / "0_홈.py").read_text(encoding="utf-8")
+    assert "아직 연계 전" not in source
+    assert "hospital_benchmark.load_benchmark_data().fiscal_years" in source
+    assert "회계공시까지 반영돼 있습니다" in source
+    assert hospital_benchmark.load_benchmark_data().fiscal_years  # the sentence is true for the committed data
+
+
 def test_home_uses_the_app_name_and_the_new_menu_names() -> None:
     source = (REPO_ROOT / "pages" / "0_홈.py").read_text(encoding="utf-8")
     assert "page_header_html(APP_NAME" in source

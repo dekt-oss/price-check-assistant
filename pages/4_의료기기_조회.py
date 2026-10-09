@@ -5,15 +5,25 @@ import sys
 import pandas as pd
 import streamlit as st
 
-# A Streamlit process that started before a deploy keeps the old copy of device_page (the page file
-# updates, its imports do not). Reload it once so the page can use its new helpers.
-_stale_device_page = sys.modules.get("purchase_price.ui.device_page")
-if _stale_device_page is not None and not hasattr(_stale_device_page, "DEVICE_PAGE_UDI_INPUT_V1"):
-    try:
-        importlib.invalidate_caches()
-        importlib.reload(_stale_device_page)
-    except Exception:
-        pass
+# A Streamlit process that started before a deploy keeps the old copies of imported modules (the page
+# file updates, its imports do not). Reload the ones this page uses, in dependency order, so the 거래가격
+# section applies the same 입력 오류 의심 rule as 가격 조사 and the page can use the new helpers.
+_UI_RUNTIME_MARKERS = (
+    ("purchase_price.services.price_entry_check", "ENTRY_CHECK_V1"),
+    ("purchase_price.ui.track_b_transactions", "ENTRY_ERRORS_EXCLUDED_V1"),
+    ("purchase_price.ui.track_b_transactions", "QUANTITY_COMMAS_V1"),
+    ("purchase_price.ui.device_page", "DEVICE_PAGE_UDI_INPUT_V1"),
+    ("purchase_price.ui.device_page", "DEVICE_PAGE_IDENTITY_V1"),
+    ("purchase_price.ui.device_page", "DEVICE_PAGE_ENTRY_ERRORS_V1"),
+)
+for _name, _marker in _UI_RUNTIME_MARKERS:
+    _stale = sys.modules.get(_name)
+    if _stale is not None and not hasattr(_stale, _marker):
+        try:
+            importlib.invalidate_caches()
+            importlib.reload(_stale)
+        except Exception:
+            pass
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.config import get_settings
@@ -42,6 +52,11 @@ from purchase_price.services.mfds_device_intelligence import (
     MfdsBusinessLicenseClient,
     MfdsModelInfoClient,
     resolve_exact_model_identity,
+)
+from purchase_price.services.mfds_identity_r2 import lookup_mfds_identity_from_r2
+from purchase_price.services.mfds_item_status_r2 import (
+    item_status_label,
+    lookup_item_status_from_r2,
 )
 from purchase_price.services.mfds_recall import lookup_mfds_recall
 from purchase_price.services.mfds_udi import (
@@ -196,6 +211,21 @@ def _collect_market(params: dev.MarketParams, step) -> dev.MarketResult:
         exact = resolve_exact_model_identity(result.records, params.model_name) if params.model_name else None
         result.exact = exact
 
+    if params.model_name:
+        # Same index as 가격 조사 and 견적서 검토: permit number, company, grade and UDI-DI of the model.
+        try:
+            result.identity = lookup_mfds_identity_from_r2(params.model_name)
+            if getattr(result.identity, "status", "") == "success":
+                permits = result.identity.permit_numbers
+                statuses = lookup_item_status_from_r2(permits) if permits else None
+                for permit in permits:
+                    found = statuses.get(permit) if statuses is not None else None
+                    label = item_status_label(found, cycle_verified=bool(statuses and statuses.cycle_verified))
+                    if label:
+                        result.status_labels["".join(permit.split())] = label
+        except Exception:  # noqa: BLE001 - optional enrichment; the grid still draws without it
+            result.identity = None
+
     if params.manufacturer:
         step("식약처 업체 허가·신고를 확인하는 중입니다.")
         businesses = ()
@@ -254,7 +284,8 @@ def _render_market(result: dev.MarketResult) -> None:
     if recall.is_hit:
         st.markdown(recall.banner, unsafe_allow_html=True)
 
-    st.markdown(dev.searched_chips_html(params, result.checked_at), unsafe_allow_html=True)
+    st.markdown(dev.identity_header_html(result), unsafe_allow_html=True)
+    st.markdown(dev.meta_chips_html(params, result.checked_at), unsafe_allow_html=True)
     st.markdown(dev.permit_summary_cards(result), unsafe_allow_html=True)
 
     if recall.is_hit:
@@ -288,7 +319,7 @@ def _render_market(result: dev.MarketResult) -> None:
         st.markdown(dev.permit_not_found_html(params), unsafe_allow_html=True)
     else:
         _table(dev.permit_rows(result.records, params.model_name))
-        st.markdown(dev.identity_notice_html(params.model_name, result.exact), unsafe_allow_html=True)
+        st.markdown(dev.identity_notice_html(params.model_name, result.exact, dev.index_exact_permits(result)), unsafe_allow_html=True)
         if not result.active_count:
             st.markdown(
                 dev.idle_html(
@@ -381,6 +412,7 @@ def _render_trades(result: dev.MarketResult) -> None:
     if result.track_b_live == "failure":
         st.markdown(notice_html(dev.LIVE_FAILURE_NOTE, TONE_WARN), unsafe_allow_html=True)
     st.markdown(dev.trade_summary_cards(summary), unsafe_allow_html=True)
+    st.markdown(dev.entry_error_note_html(summary), unsafe_allow_html=True)
     if summary.period_note:
         st.markdown(f'<div class="pc-dev-hint">{summary.period_note}</div>', unsafe_allow_html=True)
     if summary.other_unit_count:

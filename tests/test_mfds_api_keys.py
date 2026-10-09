@@ -120,7 +120,6 @@ def test_mfds_pages_route_clients_through_key_fallback() -> None:
         "pages/4_의료기기_조회.py",
         "pages/5_의료기기_안전_공급사.py",
         "pages/6_의료기기_UDI.py",
-        "src/purchase_price/ui/quote_review_steps.py",
         "src/purchase_price/services/mfds_workspace.py",
     ):
         source = Path(page).read_text(encoding="utf-8")

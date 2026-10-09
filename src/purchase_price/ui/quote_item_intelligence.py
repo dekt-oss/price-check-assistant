@@ -8,9 +8,12 @@ from purchase_price.evidence_domain import IdentityEvidenceStatus
 from purchase_price.services import safety_support as safety_support_service
 from purchase_price.services.safety_support import build_manual_safety_check_state
 from purchase_price.ui.quote_review_layout import comparable_trade_stats
+from purchase_price.ui.theme import metric_card_html
 
 # Runtime marker: re-imports comparable_trade_stats, which now leaves 입력 오류 의심 trades out.
 QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
+# Runtime marker: the per-item status row is now wrapping cards with a short value (no "…" cut-off).
+QUOTE_REVIEW_ITEM_STATUS_V1 = True
 
 
 @dataclass(frozen=True)
@@ -250,3 +253,66 @@ def quote_item_intelligence_rows(
             }
         )
     return rows
+
+
+# The long sentences stay as the card's second line; the big value is a few words so it never
+# gets cut with "…" in a narrow card.
+_IDENTITY_SHORT = {
+    "아직 조회하지 않음": "확인 전",
+    "지금은 조회할 수 없음": "조회 불가",
+    "허가 목록에서 같은 모델을 못 찾음": "찾지 못함",
+    "확인하지 못함": "확인 못 함",
+    "같은 모델명이 여러 허가에 있어 직접 살펴봐야 함": "허가 여러 건",
+    "허가 목록에서 같은 모델 확인": "허가 확인",
+    "허가번호로 확인": "허가 확인",
+    "UDI 코드로 확인": "허가 확인",
+    "품목 단위 허가 정보만 있음": "품목만 확인",
+    "업체 단위 허가 정보만 있음": "업체만 확인",
+    "확인함": "확인함",
+}
+_SAFETY_SHORT = {
+    "자동조회 미연결": "자동조회 안 됨",
+    "공식 API 인증 미승인": "인증 미승인",
+    "공식 확인 필요": "직접 확인 필요",
+    "공식 안전조치 일치": "회수·판매중지 해당",
+    "공식 안전정보 일치 미확인": "일치 기록 없음",
+    "공식 안전정보 조회 실패": "조회 실패",
+}
+_IDENTITY_TONE = {"허가 확인": "ok", "허가 여러 건": "warn", "찾지 못함": "muted"}
+_SAFETY_TONE = {"일치 기록 없음": "ok", "회수·판매중지 해당": "danger"}
+
+ITEM_STATUS_CSS = """
+<style>
+.qi-cards {display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin:2px 0 12px 0;}
+.qi-cards .pc-metric {min-height:0; padding:14px 16px;}
+.qi-cards .pc-value {font-size:18px; margin:6px 0 4px 0;}
+.qi-cards .pc-sub {overflow-wrap:anywhere; word-break:keep-all;}
+@media (max-width: 1200px) { .qi-cards {grid-template-columns:repeat(3,minmax(0,1fr));} }
+@media (max-width: 640px) { .qi-cards {grid-template-columns:repeat(2,minmax(0,1fr));} }
+</style>
+"""
+
+
+def item_status_cards(summary: QuoteItemIntelligenceSummary) -> list[tuple[str, str, str, str | None]]:
+    """(label, value, sub, tone) for the five status cards of one quote item."""
+
+    identity_value = _IDENTITY_SHORT.get(summary.identity_status, summary.identity_status)
+    identity_sub = "" if identity_value == summary.identity_status else summary.identity_status
+    safety_value = _SAFETY_SHORT.get(summary.safety_status, summary.safety_status)
+    safety_sub = "" if safety_value == summary.safety_status else summary.safety_status
+    makers = len(summary.responsible_companies)
+    return [
+        ("같은 제품 거래", f"{summary.direct_count:,}건", "", "ok" if summary.direct_count else "muted"),
+        ("식약처 허가 확인", identity_value, identity_sub, _IDENTITY_TONE.get(identity_value, "muted")),
+        ("제조·수입업체", f"{makers:,}개" if makers else "미확인", "", None),
+        ("납품업체", f"{len(summary.supplier_names):,}개", "", None),
+        ("회수·판매중지", safety_value, safety_sub, _SAFETY_TONE.get(safety_value, "warn")),
+    ]
+
+
+def item_status_cards_html(summary: QuoteItemIntelligenceSummary) -> str:
+    cards = "".join(
+        metric_card_html(label, value, sub, tone)
+        for label, value, sub, tone in item_status_cards(summary)
+    )
+    return ITEM_STATUS_CSS + f'<div class="qi-cards">{cards}</div>'

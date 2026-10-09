@@ -378,3 +378,15 @@ def test_settings_card_and_cards_fit_a_narrow_column():
     assert "@container (max-width: 860px)" in css
     assert "white-space:nowrap; overflow:hidden; text-overflow:ellipsis" in css
     assert 'class="rl-cq rl-keep"' in rl.cards_html([])
+
+
+def test_who_sells_and_other_models_stack_below_1200px():
+    from pathlib import Path
+
+    css = rl.RESULT_CSS
+    start = css.index("@media (max-width: 1200px)")
+    block = css[start : css.index("@media (max-width: 900px)", start)]
+    assert ".st-key-rl_who_models" in block
+    assert "flex-wrap:wrap" in block and "flex:1 1 100%" in block
+    page = Path(__file__).resolve().parents[1] / "pages" / "1_대시보드.py"
+    assert 'st.container(key="rl_who_models")' in page.read_text(encoding="utf-8")
