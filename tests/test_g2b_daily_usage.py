@@ -45,10 +45,9 @@ def test_remaining_respects_the_cap_from_the_environment(monkeypatch) -> None:
 
 
 def test_history_runner_stops_when_the_day_is_spent(monkeypatch, tmp_path: Path) -> None:
-    from tests.test_track_b_history_state import _MemoryStates, _summary, _wire_runner
-
     from purchase_price.scripts import run_g2b_track_b_history as runner
     from purchase_price.services.track_b_history_state import HISTORY_STATE_NAME, TrackBHistoryState
+    from tests.test_track_b_history_state import _MemoryStates, _summary, _wire_runner
 
     states = _MemoryStates()
     budgets: list[int] = []
