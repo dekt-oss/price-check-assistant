@@ -1,0 +1,12 @@
+name = "news-radar-cron"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+GITHUB_REPO = "dekt-oss/price-check-assistant"
+WORKFLOW_FILE = "news-radar-collect.yml"
+GIT_REF = "main"
+
+[triggers]
+# Every 10 minutes: collect (and 우리병원 즉시 알림). 23:30 UTC = 08:30 KST: daily digest.
+crons = ["*/10 * * * *", "30 23 * * *"]

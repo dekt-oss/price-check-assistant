@@ -1,6 +1,6 @@
 # 병원 News Radar 즉시 알림 설정 (카카오톡 · 이메일 · 문자)
 
-10분마다 도는 수집 작업(`.github/workflows/news-radar-collect.yml`)이 새 기사를 찾으면, **제목에 키워드가
+10분마다 도는 수집 작업(`.github/workflows/news-radar-collect.yml`, 정확한 10분 간격은 `cloudflare/news-radar-cron` 타이머가 맡음)이 새 기사를 찾으면, **제목에 키워드가
 실제로 들어 있는** "즉시" 키워드 기사만 알림으로 보냅니다. 본문에만 단어가 있는 기사는 보내지 않습니다.
 채널은 `data/news_keywords.json`의 그룹별 `notify`로 정합니다.
 
