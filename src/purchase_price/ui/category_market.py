@@ -37,6 +37,8 @@ from purchase_price.ui.theme import (
 )
 
 CATEGORY_MARKET_V1 = True
+# Runtime marker: the block names the 거래 기간 it was limited to (2026-10-10).
+CATEGORY_MARKET_PERIOD_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -123,11 +125,32 @@ def product_label(market: CategoryMarket) -> str:
     return market.product_name or market.code_names or "같은 품목"
 
 
+def period_text(market: CategoryMarket) -> str:
+    """'최근 3년(2023-10-10 이후)' / '전체 기간' / '' when the market was not limited."""
+
+    if not market.period_label:
+        return ""
+    if not market.period_start:
+        return "전체 기간"
+    return f"{market.period_label}({market.period_start} 이후)"
+
+
+def _empty_in_period(market: CategoryMarket, product: str) -> str:
+    """No equipment purchase: say whether a wider 거래 기간 has some."""
+
+    if market.outside_period and market.period_start:
+        return (
+            f"같은 품목({product})의 나라장터 장비 구매는 {period_text(market)} 안에 없습니다 · "
+            f"거래 기간을 넓히면 {market.outside_period:,}건이 있습니다"
+        )
+    return f"같은 품목({product})의 나라장터 장비 구매는 수집한 자료에 아직 없습니다"
+
+
 def headline_text(market: CategoryMarket, *, searched_model: str = "", has_direct: bool = False) -> str:
     product = product_label(market)
     count = len(market.equipment)
     if not count:
-        return f"같은 품목({product})의 나라장터 장비 구매는 수집한 자료에 아직 없습니다"
+        return _empty_in_period(market, product)
     if searched_model and not has_direct:
         return f"{searched_model}의 나라장터 거래는 없지만, 같은 품목({product}) 장비 구매가 {count:,}건 있습니다"
     if searched_model:
@@ -137,6 +160,9 @@ def headline_text(market: CategoryMarket, *, searched_model: str = "", has_direc
 
 def basis_text(market: CategoryMarket) -> str:
     parts: list[str] = []
+    period = period_text(market)
+    if period:
+        parts.append(f"거래 기간 {period}")
     codes = " · ".join(f"{code.name}({code.code})" if code.name else code.code for code in market.codes)
     if codes:
         excluded = len(market.trades) - len(market.equipment)
@@ -157,9 +183,11 @@ def basis_text(market: CategoryMarket) -> str:
 def headline_html(market: CategoryMarket, *, searched_model: str = "", has_direct: bool = False) -> str:
     small = " cm-small" if has_direct else ""
     eyebrow = "다른 모델까지 본 시장" if has_direct else SECTION_TITLE
+    if market.period_label:
+        eyebrow += f" · {market.period_label}"
     return (
         '<div class="pc-card cm-head" id="category-market-head-v1">'
-        f'<div class="cm-eyebrow">{eyebrow} · 참고 시세</div>'
+        f'<div class="cm-eyebrow">{esc(eyebrow)} · 참고 시세</div>'
         f'<div class="cm-headline{small}">{esc(headline_text(market, searched_model=searched_model, has_direct=has_direct))}</div>'
         f'<div class="cm-basis">{esc(basis_text(market))}</div></div>'
     )
@@ -178,7 +206,7 @@ def metric_cards_html(market: CategoryMarket) -> str:
     equipment = market.equipment
     latest = level.latest_date
     buyers = metric_card_html(
-        "장비 구매",
+        f"장비 구매 · {market.period_label}" if market.period_label else "장비 구매",
         f"{len(equipment):,}건",
         f"구매 기관 {market.institutions:,}곳" + (f" · 최근 {latest}" if latest else ""),
         tone=TONE_OK if equipment else TONE_MUTED,
@@ -200,9 +228,13 @@ def metric_cards_html(market: CategoryMarket) -> str:
 
 def year_table_html(market: CategoryMarket) -> str:
     per = unit_text(market.level.unit)
-    title = f'<div class="cm-card-title">연도별 시세<span>장비 구매 · {esc(per)} 가격</span></div>'
+    period = f" · {market.period_label}" if market.period_label else ""
+    title = f'<div class="cm-card-title">연도별 시세<span>장비 구매 · {esc(per)} 가격{esc(period)}</span></div>'
     if not market.years:
-        return f'<div class="pc-card">{title}<p class="cm-empty">가격을 셀 장비 구매가 없습니다.</p></div>'
+        empty = "가격을 셀 장비 구매가 없습니다."
+        if market.outside_period and market.period_start:
+            empty = f"{period_text(market)} 안에는 가격을 셀 장비 구매가 없습니다. 위 거래 기간을 넓혀 보세요."
+        return f'<div class="pc-card">{title}<p class="cm-empty">{esc(empty)}</p></div>'
     rows = "".join(
         f'<tr><td>{esc(year.year)}년</td><td class="pc-num">{year.count:,}건</td>'
         f'<td class="pc-num">{esc(won(year.median))}</td>'
@@ -260,8 +292,17 @@ def no_trade_headline(market: CategoryMarket, searched_model: str) -> str:
     product = product_label(market)
     count = len(market.equipment)
     if not count:
+        if market.outside_period and market.period_start:
+            return (
+                f"{searched_model}의 나라장터 거래는 없습니다 · 같은 품목({product}) 장비 구매도 "
+                f"{market.period_label} 안에는 없고, 거래 기간을 넓히면 {market.outside_period:,}건이 있습니다"
+            )
         return f"{searched_model}의 나라장터 거래는 없습니다 · 같은 품목({product})의 다른 모델을 아래에 모았습니다"
-    return f"{searched_model}의 나라장터 거래는 없습니다 · 같은 품목({product}) 장비 구매 {count:,}건으로 시세를 보여 드립니다"
+    within = f"{market.period_label} " if market.period_label and market.period_start else ""
+    return (
+        f"{searched_model}의 나라장터 거래는 없습니다 · 같은 품목({product}) {within}장비 구매 {count:,}건으로 "
+        "시세를 보여 드립니다"
+    )
 
 
 def no_trade_basis(market: CategoryMarket) -> str:
@@ -474,7 +515,7 @@ def render_category_market(
 ) -> None:
     with st.container(key="cm_block"):
         if section_heading:
-            st.markdown(f"#### {SECTION_TITLE}")
+            st.markdown(f"#### {SECTION_TITLE}" + (f" · {market.period_label}" if market.period_label else ""))
         st.markdown(
             summary_html(market, searched_model=searched_model, has_direct=has_direct, show_headline=show_headline),
             unsafe_allow_html=True,
@@ -521,8 +562,9 @@ def _render_models(
         "식약처에 같은 품목으로 등록된 모델 전부입니다. 나라장터 거래가 있는 모델이 위에 오고, ▶ 표시는 검색한 모델입니다. "
         "행을 누르면 그 모델의 가격 조사로 이동합니다. 성능이나 대체 가능 여부는 판단하지 않습니다. "
         "거래 건수는 모델명이 같은 나라장터 거래만"
-        + (f" {market.data_as_of} 수집분 전체 기간으로" if market.data_as_of else "")
-        + " 셉니다."
+        + (f" {market.data_as_of} 수집분 전체 기간으로" if market.data_as_of else " 전체 기간으로")
+        + " 셉니다"
+        + (" (위 거래 기간과 상관없이)." if market.period_start else ".")
         + (f" {count_note}" if count_note else "")
     )
 

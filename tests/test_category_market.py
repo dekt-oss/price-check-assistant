@@ -290,6 +290,39 @@ def test_no_trade_conclusion_points_at_the_category_market() -> None:
     assert "category-market-head-v1" not in ui.summary_html(market, show_headline=False)
 
 
+def test_market_follows_the_chosen_trade_period() -> None:
+    from datetime import date
+
+    trades = [
+        _trade("90000000", number="1", date="2021-05-01", supplier="옛 상사"),
+        _trade("100000000", number="2", date="2022-03-04"),
+        _trade("110000000", number="3", date="2024-06-16"),
+        _trade("120000000", number="4", date="2026-02-01"),
+    ]
+    market = cm.build_category_market(trades, product_name="가스 마취기")
+    recent = cm.within_period(market, date(2023, 10, 10), label="최근 3년")
+
+    assert len(recent.equipment) == 2 and recent.outside_period == 2
+    assert [year.year for year in recent.years] == ["2026", "2024"]
+    assert recent.level.median == Decimal("115000000")
+    assert "옛 상사" not in {supplier.name for supplier in recent.suppliers}
+    assert ui.period_text(recent) == "최근 3년(2023-10-10 이후)"
+    assert ui.basis_text(recent).startswith("거래 기간 최근 3년(2023-10-10 이후)")
+    assert "최근 3년" in ui.headline_html(recent)
+    assert "장비 구매 · 최근 3년" in ui.metric_cards_html(recent)
+    assert ui.no_trade_headline(recent, "Flow-c") == (
+        "Flow-c의 나라장터 거래는 없습니다 · 같은 품목(가스 마취기) 최근 3년 장비 구매 2건으로 시세를 보여 드립니다"
+    )
+
+    everything = cm.within_period(market, None, label="전체")
+    assert len(everything.equipment) == 4 and ui.period_text(everything) == "전체 기간"
+
+    empty = cm.within_period(market, date(2026, 6, 1), label="최근 3년")
+    assert not empty.equipment and empty.outside_period == 4
+    assert "거래 기간을 넓히면 4건이 있습니다" in ui.headline_text(empty)
+    assert "거래 기간을 넓히면 4건" in ui.no_trade_headline(empty, "Flow-c")
+
+
 def test_status_strip_keeps_a_word_next_to_every_dot() -> None:
     @dataclass(frozen=True)
     class Card:

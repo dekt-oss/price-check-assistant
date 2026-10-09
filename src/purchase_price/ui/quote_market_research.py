@@ -42,6 +42,9 @@ from purchase_price.ui.market_research import (
     render_procurement_research,
     run_market_research,
 )
+from purchase_price.ui.product_identity import matched_product_fields
+from purchase_price.ui.product_identity import pair_html as identity_pair_html
+from purchase_price.ui.product_identity import quote_fields as quote_identity_fields
 from purchase_price.ui.quote_item_intelligence import (
     PERMIT_VS_TRADES_NOTE,
     build_quote_item_intelligence_summary,
@@ -75,7 +78,10 @@ from purchase_price.ui.quote_review_steps import (
 )
 from purchase_price.ui.quote_review_summary import render_purchase_review_summary
 from purchase_price.ui.theme import TONE_WARN, notice_html
-from purchase_price.ui.track_b_transactions import model_price_group_rows
+from purchase_price.ui.track_b_transactions import (
+    model_price_group_rows,
+    strict_comparison_candidates,
+)
 from purchase_price.ui.widgets import (
     render_condition_table,
     render_evidence_table,
@@ -86,6 +92,8 @@ from purchase_price.ui.widgets import (
 QUOTE_REVIEW_ACCEPTANCE_V3 = True
 # The handoff to 가격 조사 says it came from 견적서 검토 (2026-10-09).
 HANDOFF_SOURCE_V1 = True
+# The selected-item card shows 견적서에 적힌 값 / 확인된 제품 grids (2026-10-10).
+QUOTE_REVIEW_IDENTITY_V1 = True
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(
@@ -903,10 +911,29 @@ def _render_item_table(
     return selected
 
 
+def _identity_pair_html(state: QuoteReviewState, index: int) -> str:
+    """견적서에 적힌 값 next to 확인된 제품 (식약처 허가 대조 + 같은 제품 나라장터 거래)."""
+
+    item = state.items[index]
+    track_b = state.track_b_db.get(index)
+    matched = matched_product_fields(
+        identity=state.mfds_identity.get(index),
+        workspace=state.mfds_workspace.get(index),
+        candidates=strict_comparison_candidates(track_b) if track_b is not None else (),
+        fallback_model=item.model_name or "",
+    )
+    return identity_pair_html(quote_identity_fields(item), matched)
+
+
 def _render_detail_card(state: QuoteReviewState, comparison: QuoteItemComparison) -> None:
     total = len(state.items)
     index = comparison.index
-    st.markdown(detail_card_html(comparison, total=total), unsafe_allow_html=True)
+    try:
+        identity = _identity_pair_html(state, index)
+    except Exception:
+        # An older cached result shape must never hide the comparison itself.
+        identity = ""
+    st.markdown(detail_card_html(comparison, total=total, identity_html=identity), unsafe_allow_html=True)
 
     item = state.items[index]
     handoff = build_purchase_workspace_handoff(

@@ -40,9 +40,6 @@ RESULT_CSS = """
 [data-testid="stElementContainer"]:has(span[id^="purchase-"]):not(:has(.rl-keep)) {display:none;}
 .rl-sr {position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
   clip:rect(0,0,0,0); white-space:nowrap; border:0;}
-.rl-head .pc-title {margin:0 0 6px 0; line-height:1.25;}
-.rl-head .pc-subtitle {font-size:12.5px; margin:0;}
-.rl-head .pc-chips {margin:10px 0 0 0;}
 /* Width-aware blocks: the main column is ~1040px at 1440 but ~620px at 1024 (sidebar open). */
 .rl-cq {container-type:inline-size;}
 .rl-lead {display:grid; grid-template-columns:minmax(0,1fr) 265px; gap:13px; margin:0 0 13px 0;}
@@ -206,61 +203,6 @@ def unit_phrase(unit: str | None) -> str:
 def _per(unit: str | None) -> str:
     phrase = unit_phrase(unit)
     return f"{phrase}당 " if phrase else ""
-
-
-# ── Header ──
-
-
-def header_title(heading: str, product_name: str | None) -> str:
-    """'환자감시장치 M40': the product name in front of the model when it is short and new."""
-
-    heading = " ".join(str(heading or "").split())
-    product = " ".join(str(product_name or "").split())
-    if not product or len(product) > 14 or product.casefold() in heading.casefold():
-        return heading
-    return f"{product} {heading}"
-
-
-def header_subtitle(
-    *,
-    title: str,
-    identity_product: str | None = None,
-    procurement_product: str | None = None,
-    procurement_maker: str | None = None,
-    companies: Sequence[str] = (),
-    permit_type: str | None = None,
-    permit_numbers: Sequence[str] = (),
-) -> str:
-    """One muted line: 나라장터 품명 · 제조사 · 식약처 허가번호, whatever is known."""
-
-    parts: list[str] = []
-    for label, name in (("식약처 품목", identity_product), ("나라장터 품명", procurement_product)):
-        if name and name not in title and not any(name in part for part in parts):
-            parts.append(f"{label} {name}")
-    unique_companies = list(dict.fromkeys(c for c in companies if c))
-    if unique_companies:
-        extra = f" 외 {len(unique_companies) - 1}곳" if len(unique_companies) > 1 else ""
-        parts.append(f"제조·수입 {unique_companies[0]}{extra}")
-    elif procurement_maker:
-        parts.append(f"제조사 {procurement_maker}")
-    unique_permits = list(dict.fromkeys(p for p in permit_numbers if p))
-    if unique_permits:
-        extra = f" 외 {len(unique_permits) - 1}건" if len(unique_permits) > 1 else ""
-        parts.append(f"식약처 {permit_type or '허가'} {unique_permits[0]}{extra}")
-    return " · ".join(parts)
-
-
-def header_html(*, title: str, subtitle: str, chips: Iterable[str], marker_heading: str) -> str:
-    chip_items = "".join(f'<span class="pc-chip">{esc(chip)}</span>' for chip in chips if chip)
-    return (
-        '<div class="rl-head rl-keep">'
-        # The production smoke waits for the "<검색어> 거래가격" heading; screen readers read it too.
-        f'<div class="rl-sr"><h2>{esc(marker_heading)}</h2></div>'
-        f'<div class="pc-title">{esc(title)}</div>'
-        + (f'<div class="pc-subtitle">{esc(subtitle)}</div>' if subtitle else "")
-        + (f'<div class="pc-chips">{chip_items}</div>' if chip_items else "")
-        + "</div>"
-    )
 
 
 # ── 최종 판단 전에 확인하세요 ──

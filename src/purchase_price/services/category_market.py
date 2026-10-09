@@ -34,6 +34,8 @@ from typing import Any
 
 from purchase_price.services.matching import normalize_text
 
+# Runtime marker: the market follows the result screen's 거래 기간 (within_period, 2026-10-10).
+CATEGORY_MARKET_PERIOD_V1 = True
 CATEGORY_TRADE_LIMIT = 6000
 PRICE_FACTOR = Decimal("3")
 PRICE_RULE_MIN_ROWS = 4
@@ -347,6 +349,11 @@ class CategoryMarket:
     companies: tuple[CompanySummary, ...] = ()
     data_as_of: str = ""
     truncated: bool = False
+    # The 거래 기간 the trades were limited to (within_period); "" = every collected trade.
+    period_label: str = ""
+    period_start: str = ""
+    # Equipment purchases of the category that fall before period_start.
+    outside_period: int = 0
 
     @property
     def equipment(self) -> tuple[ClassifiedTrade, ...]:
@@ -594,6 +601,46 @@ def with_status_labels(market: CategoryMarket, status_labels: Mapping[str, str])
         for model in market.models
     )
     return CategoryMarket(**{**market.__dict__, "models": models})
+
+
+def _trade_day(value: object) -> date | None:
+    try:
+        return date.fromisoformat(str(value or "").strip()[:10])
+    except ValueError:
+        return None
+
+
+def within_period(market: CategoryMarket, cutoff: date | None, *, label: str = "") -> CategoryMarket:
+    """The same market limited to the chosen 거래 기간 (trades on or after ``cutoff``).
+
+    The trades are classified again inside the period, so the price level, the year table, the
+    left-out counts and the 납품업체 list all follow the period the result screen shows. A trade
+    without a readable date stays (as in the same-product tables). The 식약처 model list does not
+    depend on the period; its trade counts come from the per-model rows (see the screen note).
+    """
+
+    if cutoff is None:
+        return CategoryMarket(**{**market.__dict__, "period_label": label, "period_start": "", "outside_period": 0})
+    kept: list[CategoryTrade] = []
+    for row in market.trades:
+        day = _trade_day(row.trade.transaction_date)
+        if day is None or day >= cutoff:
+            kept.append(row.trade)
+    rows, unit = classify_trades(kept)
+    outside = len(market.equipment) - sum(1 for row in rows if row.is_equipment)
+    return CategoryMarket(
+        **{
+            **market.__dict__,
+            "trades": rows,
+            "level": price_level(rows, unit),
+            "years": year_levels(rows),
+            "exclusions": exclusions(rows),
+            "suppliers": supplier_summaries(rows),
+            "period_label": label,
+            "period_start": cutoff.isoformat(),
+            "outside_period": max(outside, 0),
+        }
+    )
 
 
 # ── Category codes ──
