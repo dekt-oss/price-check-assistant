@@ -16,6 +16,7 @@ from decimal import Decimal
 import streamlit as st
 
 from purchase_price.services.category_market import (
+    KIND_ENTRY_ERROR,
     KIND_EQUIPMENT,
     KIND_OTHER_UNIT,
     KIND_PRICE_GAP,
@@ -39,6 +40,8 @@ from purchase_price.ui.theme import (
 CATEGORY_MARKET_V1 = True
 # Runtime marker: the block names the 거래 기간 it was limited to (2026-10-10).
 CATEGORY_MARKET_PERIOD_V1 = True
+# Runtime marker: the 계산에서 뺀 거래 box lists 입력 오류 의심 lines with their reason.
+CATEGORY_MARKET_ENTRY_ERRORS_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -276,7 +279,11 @@ def exclusion_box_html(market: CategoryMarket) -> str:
     items = []
     for exclusion in market.exclusions:
         where = "시세에서만 뺌" if exclusion.kind in {KIND_OTHER_UNIT, KIND_PRICE_GAP} else "시세·도입 기관에서 뺌"
-        example = f"<br><span>예: 「{esc(exclusion.examples[0])}」</span>" if exclusion.examples else ""
+        if exclusion.kind == KIND_ENTRY_ERROR:
+            # The reason itself is the example: it names the typed 단가·수량 and says to check the 원문.
+            example = f"<br><span>{esc(exclusion.examples[0])}</span>" if exclusion.examples else ""
+        else:
+            example = f"<br><span>예: 「{esc(exclusion.examples[0])}」</span>" if exclusion.examples else ""
         items.append(f"<li><b>{esc(exclusion.label)} {exclusion.count:,}건</b> · {where}{example}</li>")
     body = "<ul>" + "".join(items) + "</ul>" if items else '<p class="cm-empty">뺀 거래가 없습니다.</p>'
     return (
@@ -436,7 +443,7 @@ def buyer_rows(
     return table, picked
 
 
-_KIND_LABEL = {"parts": "부품·수리", "veterinary": "동물용"}
+_KIND_LABEL = {"parts": "부품·수리", "veterinary": "동물용", KIND_ENTRY_ERROR: "입력 오류 의심"}
 
 
 def supplier_rows(market: CategoryMarket) -> list[dict[str, object]]:
@@ -579,7 +586,7 @@ def _render_buyers(
     include = False
     if excluded:
         include = st.checkbox(
-            f"부품·수리·동물용 거래 {excluded}건도 보기",
+            f"부품·수리·동물용·입력 오류 의심 거래 {excluded}건도 보기",
             value=False,
             key=f"cm_buyers_all::{key}",
         )

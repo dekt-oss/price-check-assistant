@@ -33,6 +33,9 @@ RESULT_LAYOUT_V1 = True
 RESULT_LAYOUT_V2 = True
 # The 판매 가능 확인 line names its list and explains a different registered-model count.
 RESULT_LAYOUT_V3 = True
+# Runtime marker (2026-10-10): 입력 오류 의심 trades are counted in the check panel, the headline basis
+# and the chip row; they get their own box (rl_entry_errors).
+RESULT_LAYOUT_ENTRY_ERRORS_V1 = True
 
 RESULT_CSS = """
 <style>
@@ -162,10 +165,12 @@ RESULT_CSS = """
 .st-key-rl_mfds_action {margin-top:-10px;}
 .st-key-rl_mfds_action button p {font-size:12px; color:#1D4ED8; font-weight:700; white-space:nowrap;}
 .st-key-rl_result h4 {margin-top:18px;}
-.st-key-rl_outliers {background:#FFF9EA; border:1px solid #F8E2B5; border-radius:10px; padding:12px 16px;}
-.st-key-rl_outliers [data-testid="stMarkdownContainer"] p {font-size:12.5px; color:#5A4210;}
-.st-key-rl_outliers button [data-testid="stMarkdownContainer"] p {color:#1D4ED8; font-weight:700; font-size:12.5px;}
-.st-key-rl_outliers button:hover [data-testid="stMarkdownContainer"] p {text-decoration:underline;}
+.st-key-rl_outliers, .st-key-rl_entry_errors {background:#FFF9EA; border:1px solid #F8E2B5; border-radius:10px; padding:12px 16px;}
+.st-key-rl_entry_errors {margin:0 0 12px 0;}
+.st-key-rl_outliers [data-testid="stMarkdownContainer"] p, .st-key-rl_entry_errors [data-testid="stMarkdownContainer"] p {font-size:12.5px; color:#5A4210;}
+.st-key-rl_outliers button [data-testid="stMarkdownContainer"] p, .st-key-rl_entry_errors button [data-testid="stMarkdownContainer"] p {color:#1D4ED8; font-weight:700; font-size:12.5px;}
+.st-key-rl_outliers button:hover [data-testid="stMarkdownContainer"] p, .st-key-rl_entry_errors button:hover [data-testid="stMarkdownContainer"] p {text-decoration:underline;}
+.rl-entry-reason {color:#8A5207; font-weight:700;}
 .st-key-rl_result h4 {font-size:17px; font-weight:700; color:var(--pc-navy); letter-spacing:-0.4px; padding:0;}
 .st-key-rl_result [data-baseweb="tab-list"] {gap:20px;}
 .st-key-rl_result [data-baseweb="tab"] p {font-size:13px;}
@@ -264,6 +269,7 @@ def check_points(
     live_failed: bool = False,
     widened_note: str | None = None,
     partial: bool = False,
+    entry_error_count: int = 0,
 ) -> list[CheckPoint]:
     """What to check before deciding, computed from the comparison trades only.
 
@@ -297,6 +303,14 @@ def check_points(
                 TONE_WARN if share >= BUNDLE_WARN_SHARE else TONE_INFO,
                 f"비교 거래 {total}건 중 {matched}건({share_text})의 사업명에 {quoted}이 들어 있습니다. "
                 "묶음 구매일 수 있어 구성품·설치 조건을 확인하세요.",
+            )
+        )
+    if entry_error_count:
+        points.append(
+            CheckPoint(
+                TONE_WARN,
+                f"단가가 10원 이하로 적힌 거래 {entry_error_count}건"
+                "(입력 오류 의심)은 가격 계산에서 뺐습니다. 아래 '입력 오류 의심' 상자에서 원문을 확인하세요.",
             )
         )
     if outlier_count:
@@ -393,6 +407,8 @@ def lead_view(
     mid = getattr(stats, "median_price", None)
     latest = getattr(stats, "latest_transaction_date", None)
     quote = quote if quote is not None and quote > 0 else None
+    excluded = int(getattr(stats, "entry_error_count", 0) or 0)
+    excluded_text = f" (입력 오류 의심 {excluded}건 제외)" if excluded else ""
     eyebrow = "나라장터 같은 제품 거래 비교"
     tone = TONE_OK
     if warn_count:
@@ -411,9 +427,9 @@ def lead_view(
     latest_text = f" · 최근 거래 {latest}" if latest else ""
     if quote is None:
         if direct >= 3 and low != high:
-            basis = f"{scope} {direct}건 기준 · {_per(unit)}거래가 {_won(low)} ~ {_won(high)}{latest_text}"
+            basis = f"{scope} {direct}건 기준{excluded_text} · {_per(unit)}거래가 {_won(low)} ~ {_won(high)}{latest_text}"
         else:
-            basis = f"{scope} {direct}건 기준{latest_text}"
+            basis = f"{scope} {direct}건 기준{excluded_text}{latest_text}"
         return LeadView(eyebrow, tone, esc(conclusion.headline), basis)
 
     quote_text = esc(_won(quote))
@@ -421,7 +437,7 @@ def lead_view(
         headline = (
             f"내 견적가 {quote_text}은 {esc(_per(unit))}거래 가운데 값보다 {_delta_html(_delta(quote, mid))}."
         )
-        basis = f"{scope} {direct}건 기준 · 가운데 값 {_won(mid)}{latest_text}"
+        basis = f"{scope} {direct}건 기준{excluded_text} · 가운데 값 {_won(mid)}{latest_text}"
     elif direct == 2 and low != high:
         if quote > high:
             where = "두 거래가보다 모두 높습니다"
@@ -430,11 +446,11 @@ def lead_view(
         else:
             where = "두 거래가 사이에 있습니다"
         headline = f"내 견적가 {quote_text}은 {where}."
-        basis = f"{scope} 2건 기준{latest_text}"
+        basis = f"{scope} 2건 기준{excluded_text}{latest_text}"
     else:
         target = "이 1건" if direct == 1 else "이 거래가"
         headline = f"내 견적가 {quote_text}은 {target}보다 {_delta_html(_delta(quote, low))}."
-        basis = f"{scope} {direct}건 기준{latest_text}"
+        basis = f"{scope} {direct}건 기준{excluded_text}{latest_text}"
     return LeadView(eyebrow, tone, headline, basis)
 
 
@@ -711,6 +727,14 @@ def unit_chip(split: Any) -> Chip | None:
     if main:
         return Chip("단위", f"모두 {main} 단위")
     return None
+
+
+def entry_error_chip(count: int) -> Chip | None:
+    """Only shown when something was left out: 입력 오류 의심 trades never enter a price."""
+
+    if not count:
+        return None
+    return Chip("입력 오류 의심", f"{count}건 가격 계산에서 뺌 · 원문 확인", TONE_WARN)
 
 
 def outlier_chip(count: int, *, has_median: bool) -> Chip | None:

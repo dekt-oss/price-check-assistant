@@ -9,6 +9,9 @@ from purchase_price.services import safety_support as safety_support_service
 from purchase_price.services.safety_support import build_manual_safety_check_state
 from purchase_price.ui.quote_review_layout import comparable_trade_stats
 
+# Runtime marker: re-imports comparable_trade_stats, which now leaves 입력 오류 의심 trades out.
+QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
+
 
 @dataclass(frozen=True)
 class QuoteItemIntelligenceSummary:

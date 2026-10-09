@@ -26,6 +26,7 @@ from purchase_price.ui import result_summary
 from purchase_price.ui.theme import TONE_MUTED, TONE_OK, TONE_WARN, pill_html
 from purchase_price.ui.track_b_transactions import (
     category_reference_candidates,
+    entry_error_candidates,
     reference_candidates,
     strict_comparison_candidates,
 )
@@ -34,6 +35,9 @@ QUOTE_REVIEW_LAYOUT_V1 = True
 QUOTE_REVIEW_ACCEPTANCE_V3 = True
 # Runtime marker: the selected-item card shows 견적서에 적힌 값 / 확인된 제품 grids (2026-10-10).
 QUOTE_REVIEW_IDENTITY_V1 = True
+# Runtime marker: 입력 오류 의심 trades (unit price 0~10원, swapped 단가/수량) stay out of the median
+# and are counted in the check points (2026-10-10).
+QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
 
 # A quote this many percent above the median of same-product trades is flagged for a check.
 QUOTE_CHECK_THRESHOLD_PERCENT = Decimal("20")
@@ -152,6 +156,8 @@ class QuoteItemComparison:
     verdict: QuoteVerdict
     data_problem: str | None
     check_points: tuple[str, ...]
+    # Same-product trades left out of the prices as 입력 오류 의심 (counted in the same period).
+    entry_error_count: int = 0
 
     @property
     def number(self) -> int:
@@ -234,6 +240,7 @@ def _check_points(
     data_problem: str | None,
     safety_status: str,
     live_status: str = "",
+    entry_error_count: int = 0,
 ) -> tuple[str, ...]:
     points: list[str] = []
     if safety_status == SafetyCheckStatus.MATCH.value:
@@ -264,6 +271,11 @@ def _check_points(
         points.append(
             f"단위가 다른 거래 {other_unit_count}건은 {main_unit} 단위 가격과 섞지 않았습니다."
         )
+    if entry_error_count:
+        points.append(
+            f"단가가 10원 이하로 적힌 거래 {entry_error_count}건"
+            "(입력 오류 의심)은 가격 계산에서 뺐습니다. 가격 조사 화면에서 원문을 확인하세요."
+        )
     if period_note:
         points.append(period_note)
     if live_status == "failure":
@@ -286,6 +298,7 @@ class TradeStats:
     split: result_summary.UnitSplit
     prices: tuple[Decimal, ...]
     reference_count: int
+    entry_error_count: int = 0
 
     @property
     def count(self) -> int:
@@ -333,6 +346,10 @@ def comparable_trade_stats(track_b: Any, *, today: date | None = None) -> TradeS
     direct = result_summary.filter_candidates(direct, choice.cutoff)
     references = result_summary.filter_candidates(references, choice.cutoff)
     split = result_summary.split_by_main_unit(direct)
+    entry_errors = result_summary.filter_candidates(
+        [candidate for candidate, _error in entry_error_candidates(track_b)] if track_b is not None else (),
+        choice.cutoff,
+    )
     prices = tuple(
         sorted(
             price
@@ -346,6 +363,7 @@ def comparable_trade_stats(track_b: Any, *, today: date | None = None) -> TradeS
         split=split,
         prices=prices,
         reference_count=len(references),
+        entry_error_count=len(entry_errors),
     )
 
 
@@ -406,7 +424,9 @@ def build_item_comparison(
             data_problem=data_problem,
             safety_status=safety_status,
             live_status=live_status,
+            entry_error_count=stats.entry_error_count,
         ),
+        entry_error_count=stats.entry_error_count,
     )
 
 

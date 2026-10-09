@@ -5,7 +5,15 @@ from decimal import Decimal
 from statistics import median
 from typing import Any
 
+from purchase_price.services.price_entry_check import (
+    EntryError,
+    candidate_entry_error,
+)
 from purchase_price.ui.amount_check import amount_check_label
+
+# Runtime marker: A/B direct trades exclude 입력 오류 의심 lines (unit price 0~10원, swapped
+# 단가/수량); entry_error_candidates / entry_error_rows list them instead.
+ENTRY_ERRORS_EXCLUDED_V1 = True
 
 
 def comparison_candidates(track_b: Any) -> tuple[Any, ...]:
@@ -25,14 +33,38 @@ def _grade_value(candidate: Any) -> str:
     return str(value or "").strip().upper()
 
 
-def strict_comparison_candidates(track_b: Any) -> tuple[Any, ...]:
-    """Return only A/B candidates eligible for direct observed-price display."""
+def grade_ab_candidates(track_b: Any) -> tuple[Any, ...]:
+    """Every A/B candidate, including lines that look mistyped (see strict_comparison_candidates)."""
 
     return tuple(
         candidate
         for candidate in comparison_candidates(track_b)
         if _grade_value(candidate) in {"A", "B"}
     )
+
+
+def strict_comparison_candidates(track_b: Any) -> tuple[Any, ...]:
+    """Return only A/B candidates eligible for direct observed-price display and statistics.
+
+    Lines whose unit price cannot be real (0~10원, or a swapped 단가/수량 such as 1원 x 1,731,000대)
+    are left out here, so every count, median, range, unit group and supplier price built from this
+    function ignores them. entry_error_candidates lists what was left out.
+    """
+
+    return tuple(
+        candidate for candidate in grade_ab_candidates(track_b) if candidate_entry_error(candidate) is None
+    )
+
+
+def entry_error_candidates(track_b: Any) -> tuple[tuple[Any, EntryError], ...]:
+    """(candidate, reason) for each A/B line left out of the prices as 입력 오류 의심."""
+
+    found = []
+    for candidate in grade_ab_candidates(track_b):
+        error = candidate_entry_error(candidate)
+        if error is not None:
+            found.append((candidate, error))
+    return tuple(found)
 
 
 def category_reference_candidates(track_b: Any) -> tuple[Any, ...]:
@@ -232,6 +264,17 @@ def reference_transaction_rows(track_b: Any) -> list[dict[str, object]]:
         )
         for candidate in reference_candidates(track_b)
     )
+    return rows
+
+
+def entry_error_rows(track_b: Any) -> list[dict[str, object]]:
+    """Table rows of the lines left out as 입력 오류 의심, with the reason in ``입력 오류 사유``."""
+
+    rows = []
+    for candidate, error in entry_error_candidates(track_b):
+        row = _transaction_row(candidate, comparison_level="입력 오류 의심")
+        row["입력 오류 사유"] = error.reason
+        rows.append(row)
     return rows
 
 

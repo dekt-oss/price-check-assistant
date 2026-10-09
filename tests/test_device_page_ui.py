@@ -269,9 +269,9 @@ def test_trade_summary_without_same_product_trades_shows_dashes_not_zero_prices(
 def test_trade_suppliers_are_ranked_by_same_product_trades() -> None:
     summary = dev.build_trade_summary(
         _track_b(
-            _trade(MatchGrade.A, "1", "2026-09-01", supplier="가사"),
-            _trade(MatchGrade.A, "1", "2026-09-05", supplier="나사"),
-            _trade(MatchGrade.A, "1", "2026-09-09", supplier="나사"),
+            _trade(MatchGrade.A, "1000000", "2026-09-01", supplier="가사"),
+            _trade(MatchGrade.A, "1000000", "2026-09-05", supplier="나사"),
+            _trade(MatchGrade.A, "1000000", "2026-09-09", supplier="나사"),
         ),
         TODAY,
     )

@@ -33,9 +33,12 @@ from decimal import Decimal
 from typing import Any
 
 from purchase_price.services.matching import normalize_text
+from purchase_price.services.price_entry_check import entry_error
 
 # Runtime marker: the market follows the result screen's 거래 기간 (within_period, 2026-10-10).
 CATEGORY_MARKET_PERIOD_V1 = True
+# Runtime marker: 입력 오류 의심 lines (KIND_ENTRY_ERROR) are left out of every price level.
+CATEGORY_MARKET_ENTRY_ERRORS_V1 = True
 CATEGORY_TRADE_LIMIT = 6000
 PRICE_FACTOR = Decimal("3")
 PRICE_RULE_MIN_ROWS = 4
@@ -46,6 +49,8 @@ KIND_OTHER_UNIT = "other_unit"
 KIND_PRICE_GAP = "price_gap"
 KIND_PARTS = "parts"
 KIND_VETERINARY = "veterinary"
+# 단가 0~10원 or a swapped 단가/수량 (price_entry_check): never part of a price level.
+KIND_ENTRY_ERROR = "entry_error"
 EQUIPMENT_KINDS = (KIND_EQUIPMENT, KIND_OTHER_UNIT, KIND_PRICE_GAP)
 
 KIND_LABELS = {
@@ -54,6 +59,7 @@ KIND_LABELS = {
     KIND_PRICE_GAP: "장비 구매 · 가격이 크게 다름",
     KIND_PARTS: "부품·수리",
     KIND_VETERINARY: "동물용",
+    KIND_ENTRY_ERROR: "입력 오류 의심",
 }
 
 PART_KEYWORDS = (
@@ -112,7 +118,8 @@ _UNIT_ALIASES = {
 RULE_NOTE = (
     "사업명·구매 기관·품명에 '동물용·동물병원·실험동물·수의과' 등이 있으면 동물용, '부품·소모품·수리·점검·센서·필터' "
     "등이 있으면 부품·수리로 보고 시세와 도입 기관에서 뺐습니다. 대·세트·식은 장비 1대로 보고, 시세는 가장 많은 단위 거래만 씁니다. "
-    "가운데 값과 3배 넘게 차이 나는 거래(묶음 계약·부품일 수 있음)는 시세 계산에서만 뺐습니다."
+    "가운데 값과 3배 넘게 차이 나는 거래(묶음 계약·부품일 수 있음)는 시세 계산에서만 뺐습니다. "
+    "단가가 10원 이하로 적힌 거래(단가와 수량이 뒤바뀐 입력 오류인 경우가 많음)는 입력 오류 의심으로 시세에서 뺐습니다."
 )
 
 
@@ -199,8 +206,11 @@ def parts_reason(trade: CategoryTrade) -> str:
 
 
 def classify_trade(trade: CategoryTrade) -> ClassifiedTrade:
-    """Text rules only; the unit and price rules need the whole category (see classify_trades)."""
+    """Per-trade rules only; the unit and price-gap rules need the whole category (classify_trades)."""
 
+    mistyped = entry_error(trade.unit_price, trade.quantity, trade.total_amount, trade.unit)
+    if mistyped is not None:
+        return ClassifiedTrade(trade, KIND_ENTRY_ERROR, mistyped.reason)
     reason = veterinary_reason(trade)
     if reason:
         return ClassifiedTrade(trade, KIND_VETERINARY, reason)
@@ -415,9 +425,14 @@ def example_text(row: ClassifiedTrade) -> str:
 
 def exclusions(rows: Sequence[ClassifiedTrade]) -> tuple[Exclusion, ...]:
     output: list[Exclusion] = []
-    for kind in (KIND_PARTS, KIND_VETERINARY, KIND_OTHER_UNIT, KIND_PRICE_GAP):
+    for kind in (KIND_ENTRY_ERROR, KIND_PARTS, KIND_VETERINARY, KIND_OTHER_UNIT, KIND_PRICE_GAP):
         matched = [row for row in rows if row.kind == kind]
         if not matched:
+            continue
+        if kind == KIND_ENTRY_ERROR:
+            # The reason is the example: it names the typed 단가·수량 and says to check the 원문.
+            examples = tuple(dict.fromkeys(row.reason for row in matched if row.reason))[:2]
+            output.append(Exclusion(kind, KIND_LABELS[kind], len(matched), examples))
             continue
         examples = tuple(dict.fromkeys(text[:30] for text in (example_text(row) for row in matched) if text))[:2]
         output.append(Exclusion(kind, KIND_LABELS[kind], len(matched), examples))

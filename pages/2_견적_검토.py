@@ -9,6 +9,7 @@ import streamlit as st
 # dependency order, before this page imports names from them.
 _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.quote_upload_security", "QUOTE_UPLOAD_IMAGES_V1"),
+    ("purchase_price.ui.track_b_transactions", "ENTRY_ERRORS_EXCLUDED_V1"),
     ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_ACCEPTANCE_V3"),
     ("purchase_price.ui.quote_item_intelligence", "QUOTE_REVIEW_ACCEPTANCE_V3"),
     ("purchase_price.ui.quote_review_summary", "QUOTE_REVIEW_ACCEPTANCE_V3"),
@@ -19,6 +20,11 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.quote_market_research", "HANDOFF_SOURCE_V1"),
     ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_IDENTITY_V1"),
     ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_IDENTITY_V1"),
+    # 입력 오류 의심 trades are left out of the median: reload in dependency order.
+    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_ENTRY_ERRORS_V1"),
+    ("purchase_price.ui.quote_item_intelligence", "QUOTE_REVIEW_ENTRY_ERRORS_V1"),
+    ("purchase_price.ui.quote_review_summary", "QUOTE_REVIEW_ENTRY_ERRORS_V1"),
+    ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_ENTRY_ERRORS_V1"),
 )
 
 

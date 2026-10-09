@@ -31,6 +31,8 @@ PLAIN_WORDING_2026_10 = True
 PLAIN_WORDING_2026_10B = True
 # 2026-10-09 acceptance fixes: safety_card_checked (grey "확인 전" unless a lookup really ran).
 PLAIN_WORDING_2026_10C = True
+# 2026-10-10: the 거래가 card says how many 입력 오류 의심 trades were left out of the price.
+ENTRY_ERRORS_V1 = True
 
 # Safety codes stay internal; the header shows what they mean.
 _SAFETY_TEXT: dict[str, tuple[str, str, str]] = {
@@ -118,12 +120,16 @@ def price_card(stats: Any, *, unavailable: bool = False) -> SummaryCard:
             "나라장터 가격 자료에 연결하지 못했습니다",
             TONE_WARN,
         )
+    excluded = int(getattr(stats, "entry_error_count", 0) or 0)
+    excluded_note = f"입력 오류 의심 {excluded}건 제외" if excluded else ""
     if direct_count == 0 or min_price is None or max_price is None:
         note = (
             f"비슷한 품목 거래 {reference_count}건은 비교에서 제외"
             if reference_count
             else "나라장터 기준"
         )
+        if excluded_note:
+            note = f"{excluded_note} · {note}"
         return SummaryCard("price", "거래가", "같은 제품 거래 0건", note, TONE_NEUTRAL)
 
     median = getattr(stats, "median_price", None)
@@ -135,6 +141,8 @@ def price_card(stats: Any, *, unavailable: bool = False) -> SummaryCard:
         parts.insert(0, "중앙값")
     else:
         value = f"{min_price:,.0f} ~ {max_price:,.0f}원"
+    if excluded_note:
+        parts.append(excluded_note)
     latest = getattr(stats, "latest_transaction_date", None)
     if latest:
         parts.append(f"최근 {latest}")

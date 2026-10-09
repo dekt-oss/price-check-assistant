@@ -4,7 +4,7 @@ import dataclasses
 import importlib
 import sqlite3
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -32,6 +32,7 @@ from purchase_price.services import index_prefetch as index_prefetch_service
 from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_item_status_r2 as mfds_item_status_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
+from purchase_price.services import price_entry_check as price_entry_check_service
 from purchase_price.services import track_b_db_quote_comparison as track_b_comparison_service
 from purchase_price.services import track_b_live_gap_fill as track_b_live_service
 from purchase_price.services import track_b_r2_quote_index as track_b_r2_index_service
@@ -190,6 +191,15 @@ _TRACK_B_RUNTIME_MARKERS = (
 # was started before the deploy keeps the old copies (the page updates, its imports do not), so the
 # cards would show the new layout with the old developer words.
 _UI_RUNTIME_MARKERS = (
+    # 입력 오류 의심 trades (unit price 0~10원, swapped 단가/수량) are left out of every price:
+    # track_b_transactions first, then the modules that import its functions by name.
+    ("purchase_price.services.category_market", "CATEGORY_MARKET_ENTRY_ERRORS_V1"),
+    ("purchase_price.ui.track_b_transactions", "ENTRY_ERRORS_EXCLUDED_V1"),
+    ("purchase_price.ui.purchase_workspace", "ENTRY_ERRORS_EXCLUDED_V1"),
+    ("purchase_price.ui.workspace_header", "ENTRY_ERRORS_V1"),
+    ("purchase_price.ui.result_summary", "ENTRY_ERRORS_V1"),
+    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_ENTRY_ERRORS_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_ENTRY_ERRORS_V1"),
     ("purchase_price.ui.widgets", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.g2b_market_research", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.market_research", "PLAIN_WORDING_2026_10"),
@@ -610,10 +620,12 @@ def _match_grade_value(candidate: object) -> str:
 
 
 def _strict_candidates_compat(track_b: object) -> tuple[object, ...]:
+    # 입력 오류 의심 lines (unit price 0~10원, swapped 단가/수량) never enter a count or a range.
     return tuple(
         candidate
         for candidate in tuple(getattr(track_b, "candidates", ()) or ())
         if _match_grade_value(candidate) in {"A", "B"}
+        and not price_entry_check_service.is_entry_error(candidate)
     )
 
 
@@ -1911,6 +1923,7 @@ def _render_diagnostic_markers(state: dict[str, Any]) -> None:
 
 
 QUOTE_ITEM_RESULTS_SESSION_KEY = "quote_item_results_v1"
+ENTRY_ERROR_SHOWN = 5
 
 
 def _main_unit_view(track_b: Any) -> tuple[Any, Any]:
@@ -2199,6 +2212,40 @@ def _open_trade_dialog(row: Mapping[str, object]) -> None:
     st.dialog(result_layout_ui.trade_dialog_title(row), width="large")(_render_delivery_record)(row)
 
 
+def _render_entry_error_box(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    quote_key: str,
+) -> None:
+    """입력 오류 의심 trades: left out of every price, listed here with the reason and the 원문."""
+
+    shown = list(rows)[:ENTRY_ERROR_SHOWN]
+    with st.container(key="rl_entry_errors"):
+        st.markdown(
+            f'<div class="rl-outlier-head">입력 오류 의심 거래 {len(rows)}건 · 가격 계산에서 뺐습니다 · 원문을 확인하세요</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "단가가 10원 이하로 적혀 실제 가격으로 볼 수 없는 나라장터 거래입니다(단가와 수량이 뒤바뀐 경우가 많습니다). "
+            "숫자를 고치지 않았고, 최저·최고·가운데 값·연도별 표·납품업체 가격에 넣지 않았습니다."
+        )
+        for index, row in enumerate(shown):
+            line_col, button_col = st.columns([5, 1.1], vertical_alignment="center")
+            line_col.markdown(
+                f"{result_summary_ui.entry_error_line(row)}  \n"
+                f'<span class="rl-entry-reason">{result_layout_ui.esc(row.get("입력 오류 사유") or "")}</span>',
+                unsafe_allow_html=True,
+            )
+            if row.get("원천기록") and button_col.button(
+                "원문 보기",
+                key=f"workspace_entry_error_record::{quote_key}::{index}",
+                type="tertiary",
+            ):
+                _open_trade_dialog(row)
+        if len(rows) > len(shown):
+            st.caption(f"나머지 {len(rows) - len(shown)}건은 Excel에 있습니다.")
+
+
 def _render_price_sections(
     *,
     state: dict[str, Any],
@@ -2215,6 +2262,7 @@ def _render_price_sections(
     period_label: str,
     quote_key: str,
     market_shown: bool = False,
+    entry_error_rows: Sequence[Mapping[str, object]] = (),
 ) -> None:
     """얼마에 거래됐나: tabs 연도별 · 단위·조건별 · 거래 전체 N건 (a row opens its record).
 
@@ -2241,12 +2289,16 @@ def _render_price_sections(
     if notes:
         st.caption(" ".join(notes))
 
+    if entry_error_rows:
+        _render_entry_error_box(entry_error_rows, quote_key=quote_key)
+
     if direct_rows:
         year_rows = result_summary_ui.year_summary_rows(direct_rows, main_unit=unit_split.main_unit)
         all_groups = result_summary_ui.unit_group_rows(direct_rows, limit=len(direct_rows))
-        year_tab, unit_tab, all_tab = st.tabs(
-            ["연도별", "단위·조건별", f"거래 전체 {strict_count}건"]
-        )
+        tab_labels = ["연도별", "단위·조건별", f"거래 전체 {strict_count}건"]
+        if entry_error_rows:
+            tab_labels[2] += f" (입력 오류 의심 {len(entry_error_rows)}건 제외)"
+        year_tab, unit_tab, all_tab = st.tabs(tab_labels)
         with year_tab:
             if year_rows:
                 st.dataframe(year_rows, use_container_width=True, hide_index=True)
@@ -2290,7 +2342,9 @@ def _render_price_sections(
                         ):
                             _open_trade_dialog(row)
             st.caption(
-                f"같은 제품 거래 {strict_count}건입니다. 행을 누르면 그 거래의 조달청 공개 원문"
+                f"같은 제품 거래 {strict_count}건입니다"
+                + (f"(입력 오류 의심 {len(entry_error_rows)}건 제외). " if entry_error_rows else ". ")
+                + "행을 누르면 그 거래의 조달청 공개 원문"
                 "(사업명·계약 방법·납품 기한 등)이 큰 창으로 열리고, '열기'를 누르면 나라장터에서 찾습니다."
             )
             # The period is part of the key: a narrower period must not keep an old row index.
@@ -2843,6 +2897,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
         market_bundle=market_bundle,
         quote_unit_price=workspace_quote,
     )
+    # 입력 오류 의심: A/B lines whose unit price cannot be real (0~10원, swapped 단가/수량). They are
+    # already out of `stats`, the rows and every table; they are listed in their own box instead.
+    entry_error_rows = track_b_transactions_ui.entry_error_rows(track_b)
+    entry_error_count = len(entry_error_rows)
     track_b_unavailable = (
         getattr(track_b, "evidence_status", None) == PriceEvidenceStatus.UNAVAILABLE
     )
@@ -3073,6 +3131,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         live_failed=live_failed,
         widened_note=period_choice.note,
         partial=partial_result,
+        entry_error_count=entry_error_count,
     )
     lead = result_layout_ui.lead_view(
         stats,
@@ -3111,6 +3170,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         [
             result_layout_ui.period_chip(period_choice),
             result_layout_ui.unit_chip(unit_split),
+            result_layout_ui.entry_error_chip(entry_error_count),
             result_layout_ui.outlier_chip(len(outliers), has_median=median_price is not None and stats.direct_count >= 3),
             result_layout_ui.basis_chip(
                 track_b_data_as_of=track_b_data_as_of,
@@ -3244,6 +3304,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
         {"근거구분": "Track B 참고거래", **row}
         for row in reference_rows
     ]
+    # Left out of the prices but kept in the workbook so the buyer can check the 원문.
+    export_research_rows.extend(
+        {"근거구분": "입력 오류 의심 · 가격 계산에서 뺌", **row} for row in entry_error_rows
+    )
     if run.results:
         export_research_rows.extend(
             {
@@ -3314,6 +3378,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
             period_label=period_choice.label,
             quote_key=quote_key,
             market_shown=market_main,
+            entry_error_rows=entry_error_rows,
         )
         _render_supplier_and_models(
             track_b=track_b,
