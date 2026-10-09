@@ -10,6 +10,7 @@ import streamlit as st
 from streamlit.errors import StreamlitPageNotFoundError
 
 from purchase_price.config import get_settings
+from purchase_price.services import hospital_benchmark
 from purchase_price.services.hospital_master import load_hospital_master
 from purchase_price.services.news_radar import NewsRadarState, seoul_time_text, summarize
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
@@ -104,6 +105,25 @@ if not isinstance(radar_state, NewsRadarState):
     radar_state = NewsRadarState()
 radar_summary = summarize(radar_state.entries.values())
 hospital_count = len(load_hospital_master().hospitals)
+
+
+@st.cache_data(show_spinner=False)
+def _latest_fiscal_year() -> int | None:
+    """Newest 회계연도 of the committed 회계정보 공시 data (the 병원 경영 비교 page reads the same file)."""
+
+    try:
+        years = hospital_benchmark.load_benchmark_data().fiscal_years
+    except Exception:
+        return None
+    return max(years) if years else None
+
+
+latest_fiscal_year = _latest_fiscal_year()
+management_sub = (
+    f"{latest_fiscal_year}년 회계공시까지 반영돼 있습니다."
+    if latest_fiscal_year
+    else "회계공시 자료가 아직 올라와 있지 않습니다."
+)
 naver_ready = get_settings().naver_configured
 
 if radar_state.last_scan_at is None:
@@ -126,7 +146,7 @@ st.markdown(
             metric_card_html(
                 "병원 경영 비교 · 비교 가능한 병원",
                 f"{hospital_count}개",
-                "경영 공시 자료는 아직 연계 전입니다.",
+                management_sub,
                 TONE_INFO,
             ),
             metric_card_html(
