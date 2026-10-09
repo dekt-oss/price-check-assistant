@@ -27,6 +27,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_ENTRY_ERRORS_V1"),
     # The per-item status row became wrapping cards (no "…" cut-off).
     ("purchase_price.ui.track_b_transactions", "QUANTITY_COMMAS_V1"),
+    ("purchase_price.ui.product_identity", "PRODUCT_IDENTITY_V2"),
     ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_CARD_WRAP_V1"),
     ("purchase_price.ui.quote_review_steps", "QUOTE_REVIEW_MFDS_INDEX_V1"),
     ("purchase_price.ui.quote_item_intelligence", "QUOTE_REVIEW_ITEM_STATUS_V1"),

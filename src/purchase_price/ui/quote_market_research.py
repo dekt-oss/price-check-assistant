@@ -913,6 +913,7 @@ def _identity_pair_html(state: QuoteReviewState, index: int) -> str:
         workspace=state.mfds_workspace.get(index),
         candidates=strict_comparison_candidates(track_b) if track_b is not None else (),
         fallback_model=item.model_name or "",
+        prefer_makers=(item.manufacturer or "",),
     )
     return identity_pair_html(quote_identity_fields(item), matched)
 

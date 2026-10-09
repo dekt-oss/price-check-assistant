@@ -18,13 +18,16 @@ keeps older modules after a deploy never mixes it up.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from purchase_price.ui.theme import TONE_MUTED, TONE_OK, TONE_WARN, esc, pill_html
 
 PRODUCT_IDENTITY_V1 = True
+# 2026-10-10: a bare model name shared by several permits is narrowed to the quote's / trades'
+# maker, else shown as "허가 N건 — 확인 필요" without merging makers.
+PRODUCT_IDENTITY_V2 = True
 
 NOT_CHECKED = "확인 전"
 NONE = "—"
@@ -267,6 +270,39 @@ def _permit_type(permit: object) -> str:
     return ""
 
 
+_COMPANY_NOISE = ("주식회사", "(주)", "㈜", "(유)", "유한회사", "(합)", "co.,ltd", "co.", "ltd", "inc.", "inc")
+
+
+def _company_core(name: object) -> str:
+    text = _text(name).casefold()
+    for noise in _COMPANY_NOISE:
+        text = text.replace(noise, "")
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def _maker_matches(company: object, makers: Iterable[object]) -> bool:
+    """Same maker by name, ignoring 주식회사/(주) and spacing; either name may contain the other."""
+
+    core = _company_core(company)
+    if len(core) < 2:
+        return False
+    for maker in makers:
+        other = _company_core(maker)
+        if len(other) >= 2 and (core in other or other in core):
+            return True
+    return False
+
+
+def _distinct_identities(records: Sequence[Any]) -> int:
+    return len(
+        {
+            (_normal(_text(getattr(r, "permit_number", ""))), _normal(_text(getattr(r, "registered_company", ""))),
+             _normal(_text(getattr(r, "product_name", ""))))
+            for r in records
+        }
+    )
+
+
 def matched_product_fields(
     *,
     identity: Any = None,
@@ -274,6 +310,7 @@ def matched_product_fields(
     candidates: Sequence[Any] = (),
     fallback_model: str = "",
     status_labels: Mapping[str, str] | None = None,
+    prefer_makers: Sequence[object] = (),
 ) -> list[IdentityField]:
     """The product the app matched, from the 식약처 identity index (``MfdsIdentityLookup``), the
     식약처 search (``MfdsWorkspaceResult``) and the same-product 나라장터 trades. Read with getattr
@@ -288,6 +325,15 @@ def matched_product_fields(
     exact = tuple(getattr(workspace, "exact_records", ()) or ()) if workspace is not None else ()
     if not records and exact and getattr(workspace, "exact_confirmed", False):
         status, match = "success", "model"
+    maker = most_common(getattr(candidate, "manufacturer", "") for candidate in candidates)
+    narrowed = False
+    if len(records) > 1 and _distinct_identities(records) > 1:
+        # The same bare model name sits under several permits (often other makers'): keep the permit
+        # of the maker named on the quote or on the trades that were actually used.
+        keep = tuple(r for r in records if _maker_matches(getattr(r, "registered_company", ""), [*prefer_makers, maker]))
+        if keep and len(keep) < len(records):
+            records, narrowed = keep, True
+        ambiguous = _distinct_identities(records) > 1
     first = records[0] if records else (exact[0] if exact else None)
 
     model = _text(getattr(first, "model_name", "")) or _text(fallback_model)
@@ -297,13 +343,17 @@ def matched_product_fields(
         detail_name, detail_code = detail_class_of(candidates)
     else:
         detail_name, detail_code = "", ""
-    maker = most_common(getattr(candidate, "manufacturer", "") for candidate in candidates)
     label = ""
     for permit in permits:
         label = (status_labels or {}).get("".join(permit.split()), "")
         if label:
             break
     models = _unique(getattr(record, "model_name", "") for record in records)
+    if ambiguous and len(records) > 1:
+        return _ambiguous_fields(records, model=model, candidates=candidates, maker=maker)
+    permit_note = f"이 허가의 모델 {len(models)}개" if len(models) > 1 else ""
+    if narrowed:
+        permit_note = "같은 모델명 허가가 여러 건이라 견적서·거래의 업체와 같은 허가만 보여줍니다"
     return product_fields(
         model=model,
         model_state=model_status(
@@ -317,12 +367,51 @@ def matched_product_fields(
         permit_state=permit_status(
             permit=permits[0] if permits else "", status_label=label, found=bool(permits) and status == "success"
         ),
-        permit_note=f"이 허가의 모델 {len(models)}개" if len(models) > 1 else "",
+        permit_note=permit_note,
         grade=_text(getattr(first, "grade", "")),
         detail_name=detail_name,
         detail_code=detail_code,
         detail_note=f"같은 제품 거래 {len(candidates)}건 기준" if candidates else "같은 제품 거래 0건",
     )
+
+
+def _ambiguous_fields(records: Sequence[Any], *, model: str, candidates: Sequence[Any], maker: str) -> list[IdentityField]:
+    """Several permits share the model name and none matches the quote's maker: say so, merge nothing."""
+
+    permits = _unique(getattr(record, "permit_number", "") for record in records)
+    companies = _unique(getattr(record, "registered_company", "") for record in records)
+    products = _unique(getattr(record, "product_name", "") for record in records)
+    grades = _unique(getattr(record, "grade", "") for record in records)
+    detail_name, detail_code = detail_class_of(candidates) if candidates else ("", "")
+    fields = product_fields(
+        model=model,
+        model_state=("허가 여러 건", TONE_WARN),
+        mfds_product=products[0] if len(products) == 1 else "",
+        companies=companies if len(companies) == 1 else (),
+        procurement_maker=maker,
+        grade=grades[0] if len(grades) == 1 else "",
+        detail_name=detail_name,
+        detail_code=detail_code,
+        detail_note=f"같은 제품 거래 {len(candidates)}건 기준" if candidates else "같은 제품 거래 0건",
+    )
+    shown = " · ".join(permits[:3]) + (f" 외 {len(permits) - 3}건" if len(permits) > 3 else "")
+    out = []
+    for field in fields:
+        if field.key == "permit":
+            field = replace(
+                field, value=f"같은 모델명 허가 {len(permits)}건 — 확인 필요", note=shown,
+                status="확인 필요", tone=TONE_WARN,
+            )
+        elif field.key == "company" and len(companies) > 1:
+            field = replace(
+                field, value=f"업체 {len(companies)}곳 — 확인 필요", note=" · ".join(companies[:3]),
+            )
+        elif field.key == "mfds_product" and not field.value:
+            field = replace(field, empty_text="품목이 여러 개 — 확인 필요")
+        elif field.key == "grade" and not field.value:
+            field = replace(field, empty_text="확인 필요")
+        out.append(field)
+    return out
 
 
 # ── 견적서에 적힌 값 ──

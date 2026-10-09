@@ -171,6 +171,68 @@ def test_matched_fields_use_a_model_level_identity_and_the_trades():
     assert fields["detail_class"].note == "같은 제품 거래 2건 기준"
 
 
+def _two_makers():
+    return (
+        _Record("M40"),
+        _Record("M40", permit_number="제허 11-100 호", registered_company="비스툴 실리콘", product_name="수술용 전극", grade="3"),
+    )
+
+
+def test_a_bare_model_shared_by_two_makers_keeps_the_quote_makers_permit():
+    fields = pi.field_map(
+        pi.matched_product_fields(
+            identity=_Identity("success", "model", _two_makers()),
+            candidates=[_Trade()],
+            fallback_model="M40",
+            prefer_makers=("메디아나",),
+        )
+    )
+
+    assert fields["company"].value == "(주)메디아나"
+    assert fields["permit"].value == "제인 20-5001 호"
+    assert fields["grade"].value == "2등급"
+    assert fields["model"].status == "식약처 확인"
+    assert "업체와 같은 허가만" in fields["permit"].note
+
+
+def test_trade_maker_picks_the_permit_when_the_quote_names_no_maker():
+    fields = pi.field_map(
+        pi.matched_product_fields(
+            identity=_Identity("success", "model", _two_makers()),
+            candidates=[_Trade(), _Trade()],
+            fallback_model="M40",
+        )
+    )
+
+    assert fields["permit"].value == "제인 20-5001 호"
+    assert "비스툴" not in fields["company"].value
+
+
+def test_an_unresolved_shared_model_says_check_needed_and_merges_nothing():
+    fields = pi.field_map(
+        pi.matched_product_fields(
+            identity=_Identity("success", "model", _two_makers()),
+            candidates=[],
+            fallback_model="M40",
+            prefer_makers=("제3의 회사",),
+        )
+    )
+
+    assert fields["model"].status == "허가 여러 건"
+    assert fields["permit"].value == "같은 모델명 허가 2건 — 확인 필요"
+    assert "제인 20-5001 호" in fields["permit"].note and "제허 11-100 호" in fields["permit"].note
+    assert fields["company"].value == "업체 2곳 — 확인 필요"
+    assert fields["mfds_product"].value == "" and fields["grade"].value == ""
+    assert "외 1곳" not in fields["company"].value and "외 1건" not in fields["permit"].value
+
+
+def test_company_names_match_without_the_company_form_or_spacing():
+    assert pi._maker_matches("(주)메디아나", ["메디아나"])
+    assert pi._maker_matches("메디아나 주식회사", ["(주) 메디아나"])
+    assert not pi._maker_matches("비스툴 실리콘", ["메디아나"])
+    assert not pi._maker_matches("", ["메디아나"])
+
+
 def test_matched_fields_ignore_a_product_level_hit():
     fields = pi.field_map(
         pi.matched_product_fields(
