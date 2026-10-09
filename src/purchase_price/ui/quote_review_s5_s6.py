@@ -27,7 +27,7 @@ from purchase_price.services.quote_extraction import parse_quote_decimal, quote_
 from purchase_price.ui.quote_review_export import build_record
 from purchase_price.ui.quote_review_state import QuoteReviewState, can_enter
 
-QUOTE_REVIEW_ACCEPTANCE_V2 = True
+QUOTE_REVIEW_ACCEPTANCE_V3 = True
 
 
 def _condition_text(existing: str | None, additions: dict[str, str]) -> str:
@@ -333,7 +333,7 @@ def render_s5(state: QuoteReviewState, index: int) -> None:
         pd.DataFrame(rows),
         use_container_width=True,
         hide_index=True,
-        column_config={"단가": st.column_config.NumberColumn(format="%d")},
+        column_config={"단가": st.column_config.NumberColumn(format="localized")},
     )
     evidence_index = st.radio(
         "대조할 근거 선택",

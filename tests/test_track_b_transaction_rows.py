@@ -237,3 +237,10 @@ def test_amount_check_is_shown_in_plain_words() -> None:
     assert amount_check_label("not_checked") == "확인 불가"
     assert amount_check_label(None) == "확인 불가"
     assert amount_check_label("something-new") == "확인 불가"
+
+
+def test_price_and_quote_pages_share_one_amount_check_wording() -> None:
+    from purchase_price.ui import amount_check, quote_market_research, track_b_transactions
+
+    assert track_b_transactions.amount_check_label is amount_check.amount_check_label
+    assert quote_market_research.amount_check_label is amount_check.amount_check_label

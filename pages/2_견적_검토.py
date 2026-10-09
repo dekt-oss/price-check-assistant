@@ -9,12 +9,13 @@ import streamlit as st
 # dependency order, before this page imports names from them.
 _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.quote_upload_security", "QUOTE_UPLOAD_IMAGES_V1"),
-    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_ACCEPTANCE_V2"),
-    ("purchase_price.ui.quote_item_intelligence", "QUOTE_REVIEW_ACCEPTANCE_V2"),
-    ("purchase_price.ui.quote_review_summary", "QUOTE_REVIEW_ACCEPTANCE_V2"),
-    ("purchase_price.ui.quote_review_steps", "QUOTE_REVIEW_ACCEPTANCE_V2"),
-    ("purchase_price.ui.quote_review_s4", "QUOTE_REVIEW_ACCEPTANCE_V2"),
-    ("purchase_price.ui.quote_review_s5_s6", "QUOTE_REVIEW_ACCEPTANCE_V2"),
+    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_ACCEPTANCE_V3"),
+    ("purchase_price.ui.quote_item_intelligence", "QUOTE_REVIEW_ACCEPTANCE_V3"),
+    ("purchase_price.ui.quote_review_summary", "QUOTE_REVIEW_ACCEPTANCE_V3"),
+    ("purchase_price.ui.quote_review_steps", "QUOTE_REVIEW_ACCEPTANCE_V3"),
+    ("purchase_price.ui.quote_review_s4", "QUOTE_REVIEW_ACCEPTANCE_V3"),
+    ("purchase_price.ui.quote_review_s5_s6", "QUOTE_REVIEW_ACCEPTANCE_V3"),
+    ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_ACCEPTANCE_V3"),
     ("purchase_price.ui.quote_market_research", "HANDOFF_SOURCE_V1"),
 )
 

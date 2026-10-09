@@ -21,7 +21,7 @@ from purchase_price.ui.widgets import (
     render_source_status,
 )
 
-QUOTE_REVIEW_ACCEPTANCE_V2 = True
+QUOTE_REVIEW_ACCEPTANCE_V3 = True
 
 
 def render_s4(state: QuoteReviewState, index: int) -> None:

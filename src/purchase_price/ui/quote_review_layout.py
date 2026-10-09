@@ -31,7 +31,7 @@ from purchase_price.ui.track_b_transactions import (
 )
 
 QUOTE_REVIEW_LAYOUT_V1 = True
-QUOTE_REVIEW_ACCEPTANCE_V2 = True
+QUOTE_REVIEW_ACCEPTANCE_V3 = True
 
 # A quote this many percent above the median of same-product trades is flagged for a check.
 QUOTE_CHECK_THRESHOLD_PERCENT = Decimal("20")

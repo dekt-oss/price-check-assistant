@@ -14,6 +14,7 @@ from purchase_price.services.quote_extraction import QuoteItem
 from purchase_price.ui import quote_market_research
 from purchase_price.ui.quote_item_intelligence import (
     build_quote_item_intelligence_summary,
+    mfds_permit_note,
     quote_item_intelligence_rows,
 )
 from purchase_price.ui.quote_review_state import QuoteReviewState
@@ -411,3 +412,76 @@ def test_quote_batch_contract_resolves_identity_before_track_b() -> None:
     track_b_pos = source.index("_ensure_track_b_comparison(state)")
     assert identity_pos < track_b_pos
     assert "_quote_item_unified_query(state, index)" in source
+
+
+def _ambiguous_identity() -> MfdsIdentityLookup:
+    records = (
+        _identity_record(permit="제인 20-5001", company="회사A", model="M40"),
+        _identity_record(permit="제허 12-1069", company="회사B", model="M40"),
+        _identity_record(permit="제허 22-131", company="회사C", model="M40"),
+    )
+    return MfdsIdentityLookup(
+        status="success",
+        query="M40",
+        match_type="model",
+        records=records,  # type: ignore[arg-type]
+    )
+
+
+def test_permit_note_never_says_no_match_when_the_full_list_has_the_model() -> None:
+    # The live API only reads the first pages of the product list, so it can miss a model that the
+    # full permit index has. The note must follow the index and list the permits once.
+    workspace = SimpleNamespace(
+        status="success",
+        records=tuple(range(721)),
+        active_records=(),
+        exact_confirmed=False,
+        exact_ambiguous=False,
+        permit_numbers=(),
+    )
+    level, text = mfds_permit_note(workspace, _ambiguous_identity())
+
+    assert level == "warning"
+    assert "여러 허가" in text
+    assert "제인 20-5001" in text and "제허 12-1069" in text and "제허 22-131" in text
+    assert "찾지 못" not in text
+
+
+def test_permit_note_single_index_match_is_confirmed() -> None:
+    identity = MfdsIdentityLookup(
+        status="success",
+        query="DFM100",
+        match_type="model",
+        records=(_identity_record(),),  # type: ignore[arg-type]
+    )
+    workspace = SimpleNamespace(
+        status="success", records=(1, 2), active_records=(), exact_confirmed=False,
+        exact_ambiguous=False, permit_numbers=(),
+    )
+    level, text = mfds_permit_note(workspace, identity)
+
+    assert level == "success"
+    assert "수허 12-3456" in text
+
+
+def test_permit_note_only_hedges_when_neither_source_found_the_model() -> None:
+    workspace = SimpleNamespace(
+        status="success", records=(1, 2), active_records=(), exact_confirmed=False,
+        exact_ambiguous=False, permit_numbers=(),
+    )
+    level, text = mfds_permit_note(workspace, None)
+
+    assert level == "info"
+    assert "직접 확인" in text
+    assert mfds_permit_note(None, None) is None
+
+
+def test_amount_check_labels_are_plain_korean() -> None:
+    from purchase_price.ui.quote_market_research import amount_check_label
+
+    assert amount_check_label("consistent") == "금액 일치"
+    assert amount_check_label("inconsistent") == "금액 확인 필요"
+    assert amount_check_label("not_checked") == "확인 불가"
+    assert amount_check_label("unknown") == "확인 불가"
+    assert amount_check_label(None) == "확인 불가"
+    assert amount_check_label("something_new") == "확인 불가"

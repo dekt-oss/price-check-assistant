@@ -31,6 +31,9 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBReferenceCandidate,
 )
 from purchase_price.services.track_b_quote_with_live import lookup_track_b_quote_with_live
+
+# 금액검증 wording shared with the 가격 조사 tables (one definition, re-exported here).
+from purchase_price.ui.amount_check import AMOUNT_CHECK_LABELS, amount_check_label  # noqa: F401
 from purchase_price.ui.market_research import (
     render_external_research_links,
     render_market_alternative_candidates,
@@ -42,6 +45,7 @@ from purchase_price.ui.market_research import (
 from purchase_price.ui.quote_item_intelligence import (
     PERMIT_VS_TRADES_NOTE,
     build_quote_item_intelligence_summary,
+    mfds_permit_note,
     quote_item_intelligence_rows,
 )
 from purchase_price.ui.quote_review_contract import build_manual_quote_item
@@ -79,7 +83,7 @@ from purchase_price.ui.widgets import (
     render_source_status,
 )
 
-QUOTE_REVIEW_ACCEPTANCE_V2 = True
+QUOTE_REVIEW_ACCEPTANCE_V3 = True
 # The handoff to 가격 조사 says it came from 견적서 검토 (2026-10-09).
 HANDOFF_SOURCE_V1 = True
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
@@ -132,7 +136,7 @@ def _track_b_candidate_rows(
         {
             "가격": _money(candidate.price),
             "총액": _money(getattr(candidate, "total_amount", None)),
-            "금액검증": candidate.amount_check or "미확인",
+            "금액검증": amount_check_label(candidate.amount_check),
             "제조사": getattr(candidate, "manufacturer", None) or "미확인",
             "모델": getattr(candidate, "model_name", None) or "미확인",
             "규격": getattr(candidate, "specification", None) or "미확인",
@@ -628,20 +632,10 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
                 f"실패 단계만 다시 시도할 수 있습니다. 실패한 단계: {failure_text}"
             )
 
-        if mfds is not None and mfds.status in {"success", "success_0"}:
-            if mfds.exact_ambiguous:
-                st.warning("식약처 허가 목록에서 같은 모델명이 여러 허가번호에 걸려 있어 직접 확인해야 합니다.")
-            elif mfds.exact_confirmed:
-                permits = " / ".join(mfds.permit_numbers) or "허가번호 미표기"
-                st.success(
-                    f"식약처 허가 목록에서 같은 모델 확인 · {permits} · "
-                    f"같은 품목의 국내 정상 등록 모델 {len(mfds.active_records)}건"
-                )
-            elif mfds.records:
-                st.info(
-                    f"식약처에 등록된 같은 품목의 모델 {len(mfds.records)}건을 찾았지만 "
-                    "견적서의 모델명과 같은 모델은 찾지 못했습니다."
-                )
+        permit_note = mfds_permit_note(mfds, mfds_identity)
+        if permit_note is not None:
+            note_level, note_text = permit_note
+            {"success": st.success, "warning": st.warning}.get(note_level, st.info)(note_text)
         elif mfds is not None and mfds.status == "failure":
             st.warning("식약처 조회 실패 · 가격검색 결과와 분리해 유지합니다.")
 
