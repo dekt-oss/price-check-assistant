@@ -1093,18 +1093,14 @@ def _render_category_overview(state: dict[str, Any]) -> None:
             on_select="rerun",
             selection_mode="single-row",
             key=f"category_pick::{query}",
-            column_config={
-                "식약처 품목명": st.column_config.TextColumn(width="large"),
-                "제조·수입업체 수": st.column_config.NumberColumn(width="medium"),
-                "등록 모델 수": st.column_config.NumberColumn(width="medium"),
-            },
         )
         selected = list(getattr(getattr(event, "selection", None), "rows", []) or [])
         if selected and 0 <= selected[0] < len(rows):
             _open_model_from_overview(str(rows[selected[0]]["식약처 품목명"]))
         hidden = total - len(rows)
         st.caption(
-            "행을 누르면 그 품목의 모델별 거래로 이동합니다. 제조·수입업체가 많은 품목부터 보여줍니다."
+            "행을 누르면 그 품목의 모델별 거래로 이동합니다. 업체 수는 식약처에 그 품목을 등록한 제조·수입업체 수, "
+            "모델 수는 등록된 모델 수이며, 업체가 많은 품목부터 보여줍니다."
             + (f" 나머지 {hidden}개 품목은 더 구체적인 이름으로 검색하세요." if hidden > 0 else "")
         )
     reference_count = int(state.get("reference_count") or 0)

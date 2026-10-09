@@ -53,13 +53,13 @@ def category_rows(matches: Iterable[Mapping[str, object]], *, limit: int = CATEG
     rows = [
         {
             "식약처 품목명": _text(match.get("product_name")),
-            "제조·수입업체 수": int(match.get("companies") or 0),
-            "등록 모델 수": int(match.get("models") or 0),
+            "업체 수": int(match.get("companies") or 0),
+            "모델 수": int(match.get("models") or 0),
         }
         for match in matches
         if _text(match.get("product_name"))
     ]
-    rows.sort(key=lambda row: (-int(row["제조·수입업체 수"]), -int(row["등록 모델 수"]), str(row["식약처 품목명"])))
+    rows.sort(key=lambda row: (-int(row["업체 수"]), -int(row["모델 수"]), str(row["식약처 품목명"])))
     return rows[:limit]
 
 

@@ -210,7 +210,7 @@ def test_category_rows_put_common_purchase_items_first() -> None:
         ]
     )
     assert [row["식약처 품목명"] for row in rows] == ["저출력 심장 충격기", "이식형 심장충격기용 전극"]
-    assert rows[0]["제조·수입업체 수"] == 15
+    assert rows[0]["업체 수"] == 15
 
 
 def test_company_with_trades_is_preferred_only_when_the_exact_name_has_none() -> None:
