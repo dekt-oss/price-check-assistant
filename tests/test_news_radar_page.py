@@ -31,7 +31,7 @@ def stored_list(tmp_path, monkeypatch):
 
             raise NaverNewsClientError("NAVER 뉴스 검색 오류 HTTP 500", status_code=500)
         return [
-            NaverNewsItem(f"기사 {n}", "", f"https://a.kr/{n}", FINISHED, "a.kr") for n in range(3)
+            NaverNewsItem(f"부산백병원 기사 {n}", "", f"https://a.kr/{n}", FINISHED, "a.kr") for n in range(3)
         ]
 
     nri.collect(index, [keyword, failing], search, clock=lambda: FINISHED)

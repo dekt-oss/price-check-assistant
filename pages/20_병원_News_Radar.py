@@ -26,6 +26,29 @@ from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 
 hydrate_streamlit_runtime_secrets()
 
+
+def _reload_retained_modules() -> None:
+    """Streamlit Cloud keeps imported modules across a redeploy; reload the news services when the
+    retained copy predates title relevance (2026-10-09) so the page never runs on an old object."""
+
+    import importlib
+    import sys
+
+    if hasattr(radar, "rank_entries") and hasattr(radar.Keyword, "required_terms"):
+        return
+    for name in (
+        "purchase_price.clients.naver_news",
+        "purchase_price.services.news_radar",
+        "purchase_price.services.news_radar_index",
+        "purchase_price.services.news_alerts",
+    ):
+        module = sys.modules.get(name)
+        if module is not None:
+            importlib.reload(module)
+
+
+_reload_retained_modules()
+
 NEWS_STATE_KEY = "news_radar_state"
 GROUP_TOGGLE_PREFIX = "news_radar_group::"
 STATUS_WIDGET_PREFIX = "news_radar_status::"
@@ -154,7 +177,11 @@ nri.seed_state(
 st.title("병원 News Radar")
 st.caption("등록한 키워드로 새 기사를 자동 확인합니다. 기사 제목·시간·링크를 그대로 보여 주고 요약하지 않습니다.")
 
-summary = radar.summarize(state.entries.values())
+# Counts cover articles whose title matches a keyword; body-only mentions are not counted.
+_all_keywords = [k for g in groups for k in g.keywords]
+summary = radar.summarize(
+    r.entry for r in radar.rank_entries(state.entries.values(), _all_keywords, include_ignored=True) if r.relevant
+)
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("오늘", f"{summary.today}건")
 m2.metric("이번 주", f"{summary.this_week}건")
@@ -251,25 +278,48 @@ if failed_logs:
     )
 
 st.subheader("오늘의 병원동향")
-filter_col, ignored_col = st.columns([2, 1])
+filter_col, sort_col = st.columns([2, 1])
 with filter_col:
     keyword_filter = st.multiselect(
         "키워드로 좁혀 보기", [keyword.text for keyword in keywords], placeholder="전체 키워드"
     )
+with sort_col:
+    sort_mode = st.radio("정렬", ["중요도순", "최신순"], horizontal=True)
+body_col_opt, ignored_col = st.columns(2)
+with body_col_opt:
+    show_body_only = st.checkbox(
+        "본문에서만 언급된 기사도 보기",
+        value=False,
+        help="제목에 키워드가 없고 본문 어딘가에만 단어가 있는 기사입니다. 대부분 관련 없는 기사라 기본으로 숨깁니다.",
+    )
 with ignored_col:
     show_ignored = st.checkbox("관심없음으로 표시한 기사도 보기", value=False)
-entries = radar.sorted_entries(state.entries.values(), include_ignored=show_ignored)
+
+tiers = radar.load_source_tiers()
+ranked = radar.rank_entries(state.entries.values(), keywords, tiers, include_ignored=show_ignored)
+hidden_body_only = sum(1 for r in ranked if not r.relevant)
+if not show_body_only:
+    ranked = [r for r in ranked if r.relevant]
 if keyword_filter:
-    entries = [entry for entry in entries if set(entry.keywords) & set(keyword_filter)]
+    wanted = set(keyword_filter)
+    ranked = [r for r in ranked if wanted & set(r.matched_keywords or r.entry.keywords)]
+if sort_mode == "중요도순":
+    ranked = radar.by_priority(ranked)
+st.caption(
+    "중요도순: 제목에 키워드가 있는 기사, 우리병원·경쟁병원 기사, 의학·병원 전문지 기사를 앞에 둡니다."
+    + (f" 본문에서만 언급된 {hidden_body_only}건은 숨겼습니다." if not show_body_only and hidden_body_only else "")
+)
+entries = [r.entry for r in ranked]
+rank_by_id = {r.entry.article_id: r for r in ranked}
 
 if not entries:
     st.write("아직 확인된 기사가 없습니다. 위의 새 기사 확인 버튼을 누르면 여기에 쌓입니다.")
 
-# Hundreds of cards make the page sluggish; show the newest batch and let the reader extend it.
+# Hundreds of cards make the page sluggish; show the first batch and let the reader extend it.
 page_size = st.session_state.setdefault("news_radar_page_size", PAGE_SIZE)
 visible_entries = entries[:page_size]
 if len(entries) > len(visible_entries):
-    st.caption(f"최신 {len(visible_entries)}건을 보여 줍니다 (전체 {len(entries)}건).")
+    st.caption(f"{len(visible_entries)}건을 보여 줍니다 (전체 {len(entries)}건).")
 
 for entry in visible_entries:
     with st.container(border=True):
@@ -279,10 +329,19 @@ for entry in visible_entries:
                 st.markdown(f"**NEW** {_time_text(entry.published_at)}")
             else:
                 st.markdown(_time_text(entry.published_at))
-            st.caption(" · ".join(entry.keywords))
+            info = rank_by_id.get(entry.article_id)
+            st.caption(" · ".join(info.matched_keywords if info and info.matched_keywords else entry.keywords))
         with body_col:
             st.markdown(f"**{entry.title}**")
-            st.caption(f"{entry.source_domain or '출처 확인 안 됨'} | {_time_text(entry.published_at)}")
+            badges = []
+            if info and info.tier:
+                badges.append(info.tier.label)
+            if info and not info.relevant:
+                badges.append("본문에서만 언급")
+            st.caption(
+                f"{entry.source_domain or '출처 확인 안 됨'} | {_time_text(entry.published_at)}"
+                + (" | " + " · ".join(badges) if badges else "")
+            )
             link_col, naver_col = st.columns(2)
             with link_col:
                 st.link_button("원문보기", entry.url)

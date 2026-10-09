@@ -547,6 +547,8 @@ def daily_digest_markdown(
     now: datetime,
     hours: int = 24,
     per_keyword_limit: int = DIGEST_PER_KEYWORD_LIMIT,
+    keywords: Iterable[radar.Keyword] = (),
+    tiers: Iterable[radar.SourceTier] = (),
 ) -> str:
     """Markdown digest of the last ``hours`` of articles for keywords marked 하루 1회 요약.
 
@@ -555,13 +557,16 @@ def daily_digest_markdown(
     """
 
     daily = index.keywords_with_alert("daily")
+    by_text = {k.text: k for k in keywords}
+    tier_list = tuple(tiers)
     since = _aware(now) - timedelta(hours=hours)
     by_keyword: dict[str, list[radar.NewsEntry]] = {}
     for entry in radar.sorted_entries(index.items.values(), include_ignored=True):
         if _aware(entry.detected_at) < since:
             continue
         for keyword in entry.keywords:
-            if keyword in daily:
+            # Only titles that actually match the keyword; body-only mentions stay out of the digest.
+            if keyword in daily and (keyword not in by_text or radar.title_matches(entry.title, by_text[keyword])):
                 by_keyword.setdefault(keyword, []).append(entry)
     day = _aware(now).astimezone(KST).date()
     lines = [f"# 병원 News Radar 하루 요약 {day.isoformat()}", ""]
@@ -572,7 +577,11 @@ def daily_digest_markdown(
         return "\n".join(lines) + "\n"
     ordered = [k.get("text") for k in index.keywords if k.get("text") in by_keyword]
     for keyword in ordered:
-        entries = by_keyword[str(keyword)]
+        # Trade press first, newest first within each (the list is already newest first).
+        entries = sorted(
+            by_keyword[str(keyword)],
+            key=lambda e: 0 if radar.source_tier(e.source_domain, tier_list) else 1,
+        )
         lines.append(f"## {keyword} ({len(entries)}건)")
         lines.append("")
         for entry in entries[:per_keyword_limit]:

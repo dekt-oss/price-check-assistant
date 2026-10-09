@@ -30,6 +30,7 @@ import httpx
 
 from purchase_price.clients.naver_news import MAX_DISPLAY, NaverNewsClient
 from purchase_price.config import Settings
+from purchase_price.services import news_alerts
 from purchase_price.services import news_radar as radar
 from purchase_price.services import news_radar_index as nri
 
@@ -65,6 +66,35 @@ def _append_step_summary(text: str) -> None:
     if path:
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(text.rstrip() + "\n")
+
+
+KAKAO_TOKEN_KEY = "private/v1/kakao_refresh_token.json"
+
+
+def _kakao_token_io(store: nri.NewsRadarStore):
+    """Keep the refresh token Kakao re-issues (about monthly) in R2, so the GitHub secret only has
+    to be set once. Local stores keep using the secret."""
+
+    if not isinstance(store, nri.R2NewsRadarStore):
+        return (lambda: None), None
+    client, bucket = store._client, store.bucket
+
+    def load() -> str | None:
+        try:
+            body = client.get_object(Bucket=bucket, Key=KAKAO_TOKEN_KEY)["Body"].read()
+            return str(json.loads(body.decode("utf-8")).get("refresh_token") or "") or None
+        except Exception:  # noqa: BLE001 - missing object or no access: fall back to the secret
+            return None
+
+    def save(token: str) -> None:
+        client.put_object(
+            Bucket=bucket,
+            Key=KAKAO_TOKEN_KEY,
+            Body=json.dumps({"refresh_token": token, "saved_at": datetime.now(UTC).isoformat()}).encode("utf-8"),
+            ContentType="application/json",
+        )
+
+    return load, save
 
 
 def post_webhook(url: str, text: str, *, transport: httpx.BaseTransport | None = None) -> str:
@@ -121,17 +151,20 @@ def run_collect(
         store.write_statuses(pruned, now=datetime.now(UTC))
 
     alert = "not needed"
-    text = nri.immediate_alert_text(result, index.keywords_with_alert("immediate"))
+    tiers = radar.load_source_tiers()
+    items = news_alerts.immediate_items(result.new_by_keyword, groups, tiers)
     if result.bootstrap and result.run.new_count:
         alert = "skipped (first run backlog)"
-    elif text is not None:
-        url = (os.getenv(WEBHOOK_ENV) or "").strip()
-        if args.no_alert:
-            alert = "skipped (--no-alert)"
-        elif not url:
-            alert = "skipped (no webhook configured)"
-        else:
-            alert = post_webhook(url, text)
+    elif items and args.no_alert:
+        alert = "skipped (--no-alert)"
+    elif items:
+        load_token, save_token = _kakao_token_io(store)
+        sent = news_alerts.dispatch(
+            news_alerts.route(items, groups),
+            kakao_refresh_token=load_token(),
+            save_kakao_refresh_token=save_token,
+        )
+        alert = f"{len(items)}건 → " + ", ".join(f"{r.channel} {r.status}" for r in sent)
 
     run = result.run
     summary = {
@@ -159,7 +192,9 @@ def run_collect(
 def run_digest(args: argparse.Namespace, store: nri.NewsRadarStore, *, now: datetime | None = None) -> dict[str, Any]:
     current = now or datetime.now(UTC)
     index = store.read_index() or nri.NewsRadarIndex()
-    text = nri.daily_digest_markdown(index, now=current)
+    digest_keywords = [k for g in radar.load_keyword_groups(args.keywords_file) for k in g.keywords]
+    text = nri.daily_digest_markdown(
+        index, now=current, keywords=digest_keywords, tiers=radar.load_source_tiers())
     day = current.astimezone(nri.KST).date()
     written = store.write_digest(day, text)
     removed = store.prune_digests(day - timedelta(days=nri.RETENTION_DAYS))

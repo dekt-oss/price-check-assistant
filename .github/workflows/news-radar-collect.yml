@@ -43,6 +43,20 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       NEWS_ALERT_WEBHOOK_URL: ${{ secrets.NEWS_ALERT_WEBHOOK_URL }}
+      # 즉시 알림 채널 (없으면 그 채널만 건너뜀). See docs/NEWS_RADAR_ALERTS.md.
+      KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+      KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+      KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+      ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+      SOLAPI_API_KEY: ${{ secrets.SOLAPI_API_KEY }}
+      SOLAPI_API_SECRET: ${{ secrets.SOLAPI_API_SECRET }}
+      SMS_FROM: ${{ secrets.SMS_FROM }}
+      SMS_TO: ${{ secrets.SMS_TO }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
