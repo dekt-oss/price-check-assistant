@@ -128,7 +128,7 @@ def _range_text(row: PurchaseReviewSummaryRow) -> str:
     return f"{row.observed_low:,.0f} ~ {row.observed_high:,.0f}원"
 
 
-QUOTE_REVIEW_ACCEPTANCE_V2 = True
+QUOTE_REVIEW_ACCEPTANCE_V3 = True
 
 DETAIL_VERIFY_NOTE = (
     "상세 검증은 선택 사항입니다. 위 비교표의 판정은 상세 검증과 상관없이 같은 모델 거래의 가운데 값으로 "

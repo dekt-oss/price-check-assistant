@@ -123,7 +123,7 @@ def render_path_card(state: QuoteReviewState) -> None:
     st.caption("위 안내를 마치면 다음 단계로 넘어갈 수 있습니다.")
 
 
-QUOTE_REVIEW_ACCEPTANCE_V2 = True
+QUOTE_REVIEW_ACCEPTANCE_V3 = True
 READ_ERROR_SESSION_KEY = "quote_review_read_error_v1"
 
 _READ_ERROR_BY_KIND = {

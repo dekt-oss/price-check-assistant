@@ -40,7 +40,7 @@ def test_changed_fields_and_snippet_are_grounded_in_extracted_item() -> None:
     assert "프린터" in snippet
     assert "Maker" in snippet
     assert "M-1" in snippet
-    assert "단가 1000" in snippet
+    assert "단가 1,000원" in snippet
 
 
 def test_manual_item_requires_identity_and_marks_manual_provenance() -> None:

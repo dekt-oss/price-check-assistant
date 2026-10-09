@@ -32,6 +32,10 @@ def changed_item_field_labels(original: QuoteItem, current: QuoteItem) -> tuple[
     )
 
 
+def _won(value: Decimal) -> str:
+    return f"{value:,.0f}원"
+
+
 def build_extracted_item_snippet(item: QuoteItem) -> str:
     """Build a compact, non-invented representation of the extracted row for source review."""
     values = [
@@ -41,8 +45,8 @@ def build_extracted_item_snippet(item: QuoteItem) -> str:
         item.specification,
         f"수량 {item.quantity}" if item.quantity is not None else "",
         item.unit,
-        f"단가 {item.unit_price}" if item.unit_price is not None else "",
-        f"금액 {item.total_amount}" if item.total_amount is not None else "",
+        f"단가 {_won(item.unit_price)}" if item.unit_price is not None else "",
+        f"금액 {_won(item.total_amount)}" if item.total_amount is not None else "",
         f"VAT {item.vat_status}" if item.vat_status else "",
     ]
     return " · ".join(str(value).strip() for value in values if str(value).strip())

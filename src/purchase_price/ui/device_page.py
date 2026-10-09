@@ -43,6 +43,7 @@ from purchase_price.ui.track_b_transactions import (
 )
 
 DEVICE_PAGE_LAYOUT_V1 = True
+DEVICE_PAGE_UDI_INPUT_V1 = True
 
 PAGE_TITLE = "의료기기 허가·안전"
 PAGE_SUBTITLE = (
@@ -730,7 +731,7 @@ def trade_unavailable_html() -> str:
     )
 
 SUPPLIER_NOTE = (
-    "식약처 업 허가·신고는 의료기기를 취급할 자격이 있다는 근거일 뿐, 특정 모델의 공식 총판·대리점이라는 뜻은 아닙니다."
+    "식약처 업체 허가·신고는 의료기기를 취급할 자격이 있다는 근거일 뿐, 특정 모델의 공식 총판·대리점이라는 뜻은 아닙니다."
 )
 
 
@@ -784,7 +785,7 @@ def business_rows(records: Iterable[Any]) -> list[dict[str, str]]:
 
 def company_not_found_html(company: str) -> str:
     return not_found_html(
-        f"식약처 업 허가·신고 자료에서 업체 ‘{company}’",
+        f"식약처 업체 허가·신고 자료에서 업체 ‘{company}’",
         (
             "회사 이름의 (주)·유한회사 같은 표기를 빼고 핵심 이름만 넣어 보세요",
             "영문 이름이면 한글 이름으로도 찾아 보세요",
@@ -793,6 +794,41 @@ def company_not_found_html(company: str) -> str:
 
 
 # ---------------------------------------------------------------- UDI-DI tab
+
+def check_udi_di_input(text: str) -> tuple[str, str]:
+    """(다듬은 UDI-DI, 문제 설명). 문제가 없으면 설명은 빈 문자열.
+
+    UDI-DI는 보통 숫자 14자리(GTIN-14)입니다. 숫자만 넣었는데 14자리가 아니거나 0만 이어진 번호는
+    식약처에 보내지 않고 바로 알려 줍니다. HIBC(+)·ICCBBA(=)처럼 문자가 섞인 번호는 그대로 통과시킵니다.
+    """
+
+    cleaned = "".join(str(text or "").split()).replace("-", "")
+    if not cleaned:
+        return "", "UDI-DI를 넣어 주세요."
+    if cleaned.isascii() and cleaned.isdigit():
+        if set(cleaned) == {"0"}:
+            return cleaned, "0만 이어진 번호는 실제 UDI-DI가 아닙니다. 제품 라벨에 적힌 번호를 다시 확인해 주세요."
+        if len(cleaned) != 14:
+            return cleaned, (
+                f"UDI-DI는 숫자 14자리입니다. 입력한 번호는 {len(cleaned)}자리입니다. "
+                "제품 라벨에 적힌 번호를 다시 확인해 주세요."
+            )
+        return cleaned, ""
+    if not cleaned.isascii() or not cleaned.replace("+", "").replace("=", "").isalnum():
+        return cleaned, "UDI-DI에는 숫자와 영문자만 쓸 수 있습니다. 제품 라벨에 적힌 번호를 다시 확인해 주세요."
+    if len(cleaned) < 8:
+        return cleaned, "UDI-DI로 보기에는 너무 짧습니다. 제품 라벨에 적힌 번호를 다시 확인해 주세요."
+    return cleaned, ""
+
+
+def udi_match_note_html(udi_di: str, count: int) -> str:
+    return notice_html(
+        f"<b>입력한 UDI-DI ‘{esc(udi_di)}’와 번호가 똑같은 등록 {count}건입니다.</b> "
+        "일부만 같은 번호는 보여주지 않습니다.",
+        TONE_MUTED,
+        icon="i",
+    )
+
 
 def udi_rows(records: Iterable[Any]) -> list[dict[str, str]]:
     return [

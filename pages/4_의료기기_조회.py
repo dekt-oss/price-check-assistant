@@ -1,5 +1,19 @@
+# ruff: noqa: E402  (imports follow the stale-module refresh below)
+import importlib
+import sys
+
 import pandas as pd
 import streamlit as st
+
+# A Streamlit process that started before a deploy keeps the old copy of device_page (the page file
+# updates, its imports do not). Reload it once so the page can use its new helpers.
+_stale_device_page = sys.modules.get("purchase_price.ui.device_page")
+if _stale_device_page is not None and not hasattr(_stale_device_page, "DEVICE_PAGE_UDI_INPUT_V1"):
+    try:
+        importlib.invalidate_caches()
+        importlib.reload(_stale_device_page)
+    except Exception:
+        pass
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
 from purchase_price.config import get_settings
@@ -600,11 +614,11 @@ with udi_tab:
     with st.form("medical-udi-search"):
         udi_di = st.text_input("UDI-DI", placeholder="알고 있는 UDI-DI를 입력하세요", key=WIDGET_UDI)
         udi_submitted = st.form_submit_button(dev.UDI_BUTTON, type="primary", disabled=not bool(mfds_key))
-    udi_text = udi_di.strip()
-    if udi_submitted and not udi_text:
+    udi_text, udi_problem = dev.check_udi_di_input(udi_di)
+    if udi_submitted and udi_problem:
         st.session_state.pop(UDI_SLOT, None)
         st.markdown(
-            dev.idle_html("UDI-DI를 넣어 주세요.", "제품 라벨에 적힌 번호를 그대로 넣습니다.", dev.TONE_WARN),
+            dev.idle_html(udi_problem, "" if udi_text else "제품 라벨에 적힌 번호를 그대로 넣습니다.", dev.TONE_WARN),
             unsafe_allow_html=True,
         )
     else:
@@ -644,8 +658,16 @@ with udi_tab:
             else:
                 _set_service_state(dev.SERVICE_UDI, dev.STATE_READY)
                 if udi_outcome.product_records:
+                    st.markdown(
+                        dev.udi_match_note_html(str(saved_udi["params"]), len(udi_outcome.product_records)),
+                        unsafe_allow_html=True,
+                    )
                     _table(dev.udi_product_rows(udi_outcome.product_records))
                 elif udi_outcome.code_records:
+                    st.markdown(
+                        dev.udi_match_note_html(str(saved_udi["params"]), len(udi_outcome.code_records)),
+                        unsafe_allow_html=True,
+                    )
                     _table(dev.udi_rows(udi_outcome.code_records))
                 else:
                     st.markdown(dev.udi_not_found_html(str(saved_udi["params"])), unsafe_allow_html=True)

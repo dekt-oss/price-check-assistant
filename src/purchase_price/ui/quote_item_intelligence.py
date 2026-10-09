@@ -59,6 +59,56 @@ def _identity_status(identity: Any) -> str:
     return "확인함"
 
 
+def mfds_permit_note(mfds_workspace: Any, mfds_identity: Any) -> tuple[str, str] | None:
+    """식약처 허가 대조 안내문 (수준, 문장). 수준: success / warning / info.
+
+    전체 허가 목록(R2 색인)에서 모델명을 찾은 결과를 먼저 믿는다. 식약처 API 조회는 품목명으로
+    첫 몇 쪽만 가져오므로 모델명이 그 안에 없다고 해서 '같은 모델이 없다'고 말하면 안 된다.
+    """
+
+    identity_state = ""
+    if mfds_identity is not None and str(getattr(mfds_identity, "status", "")) == "success":
+        match_type = str(getattr(mfds_identity, "match_type", "") or "")
+        if match_type in {"model", "udi", "permit"}:
+            permits = " / ".join(_tuple_attr(mfds_identity, "permit_numbers")) or "허가번호 미표기"
+            if getattr(mfds_identity, "identity_status", None) == IdentityEvidenceStatus.AMBIGUOUS:
+                return (
+                    "warning",
+                    f"같은 모델명이 여러 허가에 있어 직접 확인해야 합니다 · {permits}",
+                )
+            identity_state = f"식약처 허가 목록에서 같은 모델 확인 · {permits}"
+
+    workspace = mfds_workspace
+    status = str(getattr(workspace, "status", "") or "")
+    if workspace is not None and status in {"success", "success_0"}:
+        if getattr(workspace, "exact_ambiguous", False):
+            permits = " / ".join(_tuple_attr(workspace, "permit_numbers"))
+            tail = f" · {permits}" if permits else ""
+            return ("warning", f"같은 모델명이 여러 허가에 있어 직접 확인해야 합니다{tail}")
+        if getattr(workspace, "exact_confirmed", False):
+            permits = " / ".join(_tuple_attr(workspace, "permit_numbers")) or "허가번호 미표기"
+            active = len(getattr(workspace, "active_records", ()) or ())
+            return (
+                "success",
+                f"식약처 허가 목록에서 같은 모델 확인 · {permits} · "
+                f"같은 품목의 국내 정상 등록 모델 {active}건",
+            )
+        if identity_state:
+            return ("success", identity_state)
+        records = getattr(workspace, "records", ()) or ()
+        if records:
+            return (
+                "info",
+                f"식약처에서 같은 품목의 모델 {len(records)}건을 살펴봤지만 "
+                "견적서의 모델명과 같은 모델은 그 안에서 찾지 못했습니다. "
+                "전체 허가 목록에는 있을 수 있어 식약처에서 직접 확인해 주세요.",
+            )
+        return None
+    if identity_state:
+        return ("success", identity_state)
+    return None
+
+
 def _tuple_attr(value: Any, attr: str) -> tuple[str, ...]:
     raw = getattr(value, attr, ()) if value is not None else ()
     return tuple(str(item).strip() for item in tuple(raw or ()) if str(item).strip())
@@ -136,7 +186,7 @@ def build_quote_item_intelligence_summary(
     )
 
 
-QUOTE_REVIEW_ACCEPTANCE_V2 = True
+QUOTE_REVIEW_ACCEPTANCE_V3 = True
 
 ROW_LABELS = {
     "number": "번호",
