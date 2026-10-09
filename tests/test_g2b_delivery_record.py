@@ -114,7 +114,7 @@ def test_dashboard_wires_the_record_panel_and_reloads_new_helpers() -> None:
     assert 'link_col.link_button("나라장터에서 이 거래 보기", ref.g2b_url' in source
     assert 'st.column_config.LinkColumn("나라장터", display_text="열기")' in source
     assert '("purchase_price.services.g2b_delivery_record", "G2B_LINK_V1")' in source
-    assert '("purchase_price.ui.result_summary", "SEARCH_PERIOD_V1")' in source
+    assert '("purchase_price.ui.result_summary", "RESULT_LAYOUT_V2")' in source
     assert record.G2B_LINK_V1 is True
 
 

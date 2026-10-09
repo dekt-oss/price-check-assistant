@@ -9,7 +9,8 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "st.session_state[HOME_SEARCH_STATE_KEY] = search_state" in source
     assert "search_state = st.session_state.get(HOME_SEARCH_STATE_KEY)" in source
     assert "_render_search_result(search_state)" in source
-    assert "st.tabs(" not in source
+    # Only 얼마에 거래됐나 is split into tabs; the rest of the result stays one scrolling page.
+    assert source.count("st.tabs(") == 1
     # One scrolling result with the quote price inline (UI simplification, 2026-10).
     assert "st.segmented_control(" not in source
     assert "workspace_quote_price::" in source

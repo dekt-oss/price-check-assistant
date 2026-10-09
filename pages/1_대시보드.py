@@ -111,6 +111,7 @@ from purchase_price.services.unified_search_intent import (
     UnifiedSearchInterpretation,
     interpret_unified_search,
 )
+from purchase_price.ui import result_layout as result_layout_ui
 from purchase_price.ui import result_summary as result_summary_ui
 from purchase_price.ui import same_item_compare as same_item_ui
 from purchase_price.ui import search_overviews as overview_ui
@@ -136,7 +137,7 @@ from purchase_price.ui.quote_review_state import (
 )
 from purchase_price.ui.quote_review_steps import _store_extraction
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
-from purchase_price.ui.theme import page_header_html
+from purchase_price.ui.theme import notice_html, page_header_html
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
     has_transaction_candidates,
@@ -192,7 +193,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10B"),
     ("purchase_price.services.g2b_delivery_record", "G2B_LINK_V1"),
-    ("purchase_price.ui.result_summary", "SEARCH_PERIOD_V1"),
+    ("purchase_price.ui.result_summary", "RESULT_LAYOUT_V2"),
 )
 
 
@@ -1551,6 +1552,7 @@ def _apply_search_period(track_b: Any, direct_rows, reference_rows, *, slot, quo
         options=[label for label, _years in result_summary_ui.PERIOD_CHOICES],
         key=key,
         on_change=_mark_picked,
+        label_visibility="collapsed",
     )
     if user_chose:
         # Deselecting the active option leaves None; fall back to the default period.
@@ -1678,52 +1680,404 @@ def _render_mfds_collection_status_body(status: MfdsIdentityCollectionStatus) ->
 DELIVERY_RECORD_CACHE_KEY = "delivery_record_cache_v1"
 
 
-def _render_delivery_record(row: Mapping[str, object], *, view_key: str, close_key: str) -> None:
-    """The archived public API record of one same-product trade, in plain labels."""
+def _render_delivery_record(row: Mapping[str, object]) -> None:
+    """The archived public API record of one same-product trade, in plain labels (dialog body)."""
 
+    st.markdown(result_layout_ui.trade_numbers_html(row), unsafe_allow_html=True)
     record_id = str(row.get("원천기록") or "")
     ref = delivery_record_service.parse_record_ref(record_id, row.get("원문근거키"))
-    with st.container(border=True):
-        if ref is None:
-            st.info("이 거래는 원문 위치 정보가 없어 원문을 열 수 없습니다.")
-            return
-        head_col, close_col = st.columns([5, 1], vertical_alignment="center")
-        head_col.markdown(f"**조달청 공개 원문 · 납품요구 {ref.label}**")
-        if close_col.button("닫기", key=close_key, type="tertiary"):
-            st.session_state.pop(view_key, None)
-            st.rerun()
-        cache = st.session_state.setdefault(DELIVERY_RECORD_CACHE_KEY, {})
-        lookup = cache.get(record_id)
-        if lookup is None:
-            with st.spinner("보관해 둔 조달청 원문을 읽고 있습니다..."):
-                lookup = delivery_record_service.load_delivery_record(ref)
-            if lookup.status != "failure":
-                cache[record_id] = lookup
-        if lookup.status == "found":
-            st.dataframe(
-                [{"항목": label, "내용": value} for label, value in lookup.fields],
+    if ref is None:
+        st.info("이 거래는 원문 위치 정보가 없어 원문을 열 수 없습니다.")
+        return
+    link_col, number_col = st.columns([2, 2], vertical_alignment="center")
+    link_col.link_button("나라장터에서 이 거래 보기", ref.g2b_url, type="primary", use_container_width=True)
+    number_col.code(ref.delivery_number, language=None)
+    st.caption(
+        "나라장터 통합검색에서 이 번호로 바로 찾습니다. 결과 줄의 '더보기'를 누르면 납품요청·검수·대금지급 "
+        "단계까지 따라갈 수 있습니다. 민간 병원의 자체조달처럼 나라장터 공개 범위 밖의 거래는 0건으로 나올 수 있습니다."
+    )
+    st.markdown(f"**조달청 공개 원문 · 납품요구 {ref.label}**")
+    cache = st.session_state.setdefault(DELIVERY_RECORD_CACHE_KEY, {})
+    lookup = cache.get(record_id)
+    if lookup is None:
+        with st.spinner("보관해 둔 조달청 원문을 읽고 있습니다..."):
+            lookup = delivery_record_service.load_delivery_record(ref)
+        if lookup.status != "failure":
+            cache[record_id] = lookup
+    if lookup.status == "found":
+        st.dataframe(
+            [{"항목": label, "내용": value} for label, value in lookup.fields],
+            use_container_width=True,
+            hide_index=True,
+            # Tall enough for every field, so 단가·수량·단위 are never below a scroll fold.
+            height=35 * (len(lookup.fields) + 1) + 3,
+        )
+        st.caption(
+            "조달청이 공개한 기록을 수집할 때 그대로 보관한 원본입니다 "
+            f"(원본 확인값 {(ref.payload_hash or '')[:12]})."
+        )
+    elif lookup.status == "not_archived":
+        st.info("최근 며칠 사이 실시간으로 받은 거래라 아직 원문을 보관하지 않았습니다. 위 번호로 확인하세요.")
+    elif lookup.status == "not_found":
+        st.warning("보관한 원문에서 이 줄을 찾지 못했습니다. 위 번호로 확인하세요.")
+    else:
+        st.warning(f"원문을 읽지 못했습니다 ({lookup.error_type or '오류'}). 잠시 뒤 다시 여세요.")
+
+
+def _open_trade_dialog(row: Mapping[str, object]) -> None:
+    """A row of 거래 전체 (or an unusual trade) opens its original record in a large window."""
+
+    st.dialog(result_layout_ui.trade_dialog_title(row), width="large")(_render_delivery_record)(row)
+
+
+def _render_price_sections(
+    *,
+    state: dict[str, Any],
+    track_b: Any,
+    direct_rows: list[Mapping[str, object]],
+    reference_rows: list[Mapping[str, object]],
+    strict_count: int,
+    reference_count: int,
+    indexed_identity: object,
+    exact_identity_crosslinks: list[dict[str, object]],
+    unit_split: Any,
+    median_price: Decimal | None,
+    outliers: list[Mapping[str, object]],
+    period_label: str,
+    quote_key: str,
+) -> None:
+    """얼마에 거래됐나: tabs 연도별 · 단위·조건별 · 거래 전체 N건 (a row opens its record)."""
+
+    st.markdown('<div id="rl-trades"></div>', unsafe_allow_html=True)
+    st.markdown("#### 얼마에 거래됐나")
+    notes: list[str] = []
+    if (
+        isinstance(indexed_identity, MfdsIdentityLookup)
+        and indexed_identity.status == "success"
+        and indexed_identity.match_type == "permit"
+        and len(indexed_identity.model_names) > 1
+    ):
+        notes.append(
+            f"이 허가번호에는 모델 {len(indexed_identity.model_names)}개가 있어, 아래 표를 모델별로 나눴습니다."
+        )
+    if state["model_probe_used"]:
+        notes.append("검색어가 모델명과 같아 그 모델의 거래를 보여줍니다.")
+    if notes:
+        st.caption(" ".join(notes))
+
+    if direct_rows:
+        year_rows = result_summary_ui.year_summary_rows(direct_rows, main_unit=unit_split.main_unit)
+        all_groups = result_summary_ui.unit_group_rows(direct_rows, limit=len(direct_rows))
+        year_tab, unit_tab, all_tab = st.tabs(
+            ["연도별", "단위·조건별", f"거래 전체 {strict_count}건"]
+        )
+        with year_tab:
+            if year_rows:
+                st.dataframe(year_rows, use_container_width=True, hide_index=True)
+            st.caption("가격은 위 결론과 같은 단위만 묶었습니다. 다른 단위 거래는 건수만 따로 셉니다.")
+        with unit_tab:
+            if all_groups:
+                st.dataframe(
+                    all_groups[: result_summary_ui.SUMMARY_ROW_LIMIT],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            st.caption(
+                "단위(대·set 등)와 거래조건이 같은 거래끼리 묶었습니다. 가격은 모두 1단위 가격이며, "
+                "거래 총액 합계 ÷ 총수량과는 다를 수 있습니다."
+                + (
+                    f" {len(all_groups)}가지 중 거래가 많은 {result_summary_ui.SUMMARY_ROW_LIMIT}가지만 보여줍니다."
+                    if len(all_groups) > result_summary_ui.SUMMARY_ROW_LIMIT
+                    else ""
+                )
+            )
+        with all_tab:
+            if outliers and median_price is not None:
+                with st.container(key="rl_outliers"):
+                    st.markdown(
+                        '<div class="rl-outlier-head">'
+                        f"가운데 값과 3배 넘게 다른 거래 {len(outliers)}건 · 원문으로 이유를 확인하세요</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(
+                        "단위(세트·대)나 계약 방식이 다른 거래일 수 있습니다. 가격 계산에서 빼지는 않았습니다."
+                    )
+                    for index, row in enumerate(outliers[: result_summary_ui.OUTLIER_SHOWN]):
+                        line_col, button_col = st.columns([5, 1.1], vertical_alignment="center")
+                        line_col.markdown(
+                            result_summary_ui.outlier_line(row, median_price, unit_split.main_unit)
+                        )
+                        if row.get("원천기록") and button_col.button(
+                            "원문 보기",
+                            key=f"workspace_outlier_record::{quote_key}::{index}",
+                            type="tertiary",
+                        ):
+                            _open_trade_dialog(row)
+            st.caption(
+                f"같은 제품 거래 {strict_count}건입니다. 행을 누르면 그 거래의 조달청 공개 원문"
+                "(사업명·계약 방법·납품 기한 등)이 큰 창으로 열리고, '열기'를 누르면 나라장터에서 찾습니다."
+            )
+            # The period is part of the key: a narrower period must not keep an old row index.
+            record_table_key = f"workspace_direct_table::{quote_key}::{period_label}"
+            record_applied_key = f"workspace_direct_table_applied::{quote_key}::{period_label}"
+            event = st.dataframe(
+                # 거래 총액 → 수량 → 1단위 가격 순서라 세트 거래도 헷갈리지 않습니다.
+                result_summary_ui.trade_table_rows(direct_rows),
                 use_container_width=True,
                 hide_index=True,
-                # Tall enough for every field, so 단가·수량·단위 are never below a scroll fold.
-                height=35 * (len(lookup.fields) + 1) + 3,
+                on_select="rerun",
+                selection_mode="single-row",
+                key=record_table_key,
+                column_config={
+                    "나라장터": st.column_config.LinkColumn("나라장터", display_text="열기"),
+                },
+            )
+            picked_rows = list(getattr(getattr(event, "selection", None), "rows", []) or [])
+            picked = picked_rows[0] if picked_rows else None
+            if picked != st.session_state.get(record_applied_key):
+                st.session_state[record_applied_key] = picked
+                if picked is not None and 0 <= picked < len(direct_rows):
+                    _open_trade_dialog(direct_rows[picked])
+    elif track_b.status == "unavailable":
+        st.warning("가격 자료에 연결하지 못했습니다.")
+    elif track_b.status == "not_ingested":
+        st.info("가격 자료를 준비하는 중입니다. 잠시 뒤 다시 검색하세요.")
+    else:
+        st.info("이 모델과 같은 제품으로 확인된 나라장터 거래가 없습니다.")
+
+    if (
+        isinstance(indexed_identity, MfdsIdentityLookup)
+        and indexed_identity.status == "success"
+        and indexed_identity.match_type == "permit"
+        and exact_identity_crosslinks
+    ):
+        with st.expander(
+            f"이 허가번호의 모델 {len(exact_identity_crosslinks)}개별 거래 보기",
+            expanded=False,
+        ):
+            st.dataframe(
+                result_summary_ui.display_rows(exact_identity_crosslinks),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    if reference_rows:
+        with st.expander(
+            f"비슷한 품목 거래 {reference_count}건 보기 · 같은 제품인지 확인 안 됨, 비교에서 제외",
+            expanded=False,
+        ):
+            st.dataframe(
+                result_summary_ui.display_rows(reference_rows),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "대당 단가": st.column_config.TextColumn("표기 금액 (미검증)"),
+                    "총액": st.column_config.TextColumn("거래총액"),
+                },
             )
             st.caption(
-                "조달청이 공개한 기록을 수집할 때 그대로 보관한 원본입니다 "
-                f"(원본 확인값 {(ref.payload_hash or '')[:12]})."
+                "품목명이나 분류가 비슷한 거래입니다. 모델·규격이 같은지 확인되기 전에는 가격 비교에 쓰지 않습니다."
             )
-        elif lookup.status == "not_archived":
-            st.info("최근 며칠 사이 실시간으로 받은 거래라 아직 원문을 보관하지 않았습니다. 아래 번호로 확인하세요.")
-        elif lookup.status == "not_found":
-            st.warning("보관한 원문에서 이 줄을 찾지 못했습니다. 아래 번호로 확인하세요.")
+
+
+def _render_supplier_and_models(
+    *,
+    track_b: Any,
+    track_b_unavailable: bool,
+    mfds: object,
+    indexed_identity: object,
+    identity_known: bool,
+    same_product_identity: tuple[Any, ...],
+    mfds_procurement_crosslinks: list[dict[str, object]],
+    item_status_labels: dict[str, str],
+    median_price: Decimal | None,
+    query: object,
+    quote_key: str,
+) -> None:
+    """누가 파는가 and 같은 품목의 다른 모델 side by side; the long lists open below them."""
+
+    show_models = bool(mfds_procurement_crosslinks or identity_known)
+    if show_models:
+        supplier_col, models_col = st.columns(2, gap="medium")
+    else:
+        supplier_col, models_col = st.container(), None
+
+    # ── 1단계 ② 누가 파는가 ──
+    with supplier_col:
+        st.markdown("#### 누가 파는가")
+        procurement_suppliers = supplier_rows(track_b)
+        if procurement_suppliers:
+            st.dataframe(
+                result_summary_ui.supplier_summary_rows(procurement_suppliers),
+                use_container_width=True,
+                hide_index=True,
+            )
+            hidden_suppliers = len(procurement_suppliers) - result_summary_ui.SUMMARY_ROW_LIMIT
+            st.caption(
+                "같은 제품을 나라장터에 납품한 업체입니다. 납품 실적이 있다고 공식 총판이라는 뜻은 아닙니다."
+                + (f" 나머지 {hidden_suppliers}곳은 Excel에 있습니다." if hidden_suppliers > 0 else "")
+            )
+        elif track_b_unavailable:
+            st.warning("나라장터 가격 자료를 읽지 못해 납품업체를 확인하지 못했습니다.")
         else:
-            st.warning(f"원문을 읽지 못했습니다 ({lookup.error_type or '오류'}). 잠시 뒤 다시 여세요.")
-        link_col, number_col = st.columns([2, 2], vertical_alignment="center")
-        link_col.link_button("나라장터에서 이 거래 보기", ref.g2b_url, type="primary", use_container_width=True)
-        number_col.code(ref.delivery_number, language=None)
-        st.caption(
-            "나라장터 통합검색에서 이 번호로 바로 찾습니다. 결과 줄의 '더보기'를 누르면 납품요청·검수·대금지급 "
-            "단계까지 따라갈 수 있습니다. 민간 병원의 자체조달처럼 나라장터 공개 범위 밖의 거래는 0건으로 나올 수 있습니다."
-        )
+            st.caption("같은 제품 거래가 없어 납품업체도 없습니다.")
+
+    # ── 1단계 ③ 같은 품목의 다른 모델 ──
+    live_loaded = isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}
+    current_keys = (
+        [(item.permit_number, item.model_name) for item in indexed_identity.records]
+        if identity_known
+        else ()
+    )
+    if models_col is not None:
+        with models_col:
+            st.markdown("#### 같은 품목의 다른 모델")
+            summary_view = same_item_ui.build_same_item_rows(
+                mfds_procurement_crosslinks,
+                same_item_ui.live_status_index(mfds.records if live_loaded else None),
+                current_keys=current_keys,
+                item_status_labels=item_status_labels,
+                reference_price=median_price,
+            )
+            current_note = same_item_ui.current_model_note(summary_view)
+            if current_note:
+                st.info(current_note)
+            if summary_view.rows:
+                st.dataframe(
+                    result_summary_ui.same_item_summary_rows(summary_view.rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.caption(
+                    "식약처에 같은 품목으로 등록된 모델 중 나라장터 거래가 있는 모델입니다. ▶ 표시는 검색한 모델입니다. "
+                    "성능이나 대체 가능 여부는 판단하지 않습니다."
+                )
+                gap_note = same_item_ui.price_gap_note(summary_view)
+                if gap_note:
+                    st.markdown(
+                        notice_html(result_layout_ui.esc(gap_note), tone="warn"),
+                        unsafe_allow_html=True,
+                    )
+            elif not current_note:
+                st.caption("같은 품목의 다른 모델 중 나라장터 거래가 있는 모델이 아직 없습니다.")
+            _render_medical_lookup_link(indexed_identity, mfds, query)
+
+    company_active_keys: set[tuple[str, str]] | None = None
+    if live_loaded:
+        company_active_keys = {
+            (
+                normalize_text(item.permit_number),
+                normalize_text(item.model_name),
+            )
+            for item in mfds.active_records
+            if item.permit_number and item.model_name
+        }
+    company_summaries = build_registered_company_summaries(
+        same_product_identity,
+        procurement_crosslinks=mfds_procurement_crosslinks,
+        active_live_keys=company_active_keys,
+    )
+    if company_summaries:
+        with st.expander(
+            f"식약처에 같은 품목으로 등록한 제조·수입업체 {len(company_summaries)}곳 보기",
+            expanded=False,
+        ):
+            st.caption(
+                "식약처에 등록한 제조·수입업체는 위 납품업체와 다른 관계입니다. 이름이 비슷해도 같은 회사로 보지 않습니다."
+            )
+            st.dataframe(
+                [
+                    {
+                        "제조·수입업체": item.company_name,
+                        "등록 모델": item.registered_model_count,
+                        "허가 건수": item.permit_count,
+                        "최근 허가일": item.latest_permit_date or "",
+                        "대표 모델": " / ".join(item.representative_models),
+                        "거래가 있는 모델": item.direct_price_model_count,
+                        "납품업체(나라장터)": " / ".join(item.procurement_suppliers),
+                        "판매 상태": result_summary_ui.plain_status(item.live_status),
+                    }
+                    for item in company_summaries
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            selected_company = st.selectbox(
+                "업체 하나 자세히 보기",
+                options=[item.company_name for item in company_summaries],
+                key=f"workspace_company_drilldown::{quote_key}",
+            )
+            detail_rows = company_identity_rows(
+                same_product_identity,
+                selected_company,
+                active_live_keys=company_active_keys,
+            )
+            if detail_rows:
+                st.dataframe(
+                    result_summary_ui.display_rows(detail_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            _render_business_license_lookup(selected_company, quote_key)
+
+    if show_models and mfds_procurement_crosslinks:
+        with st.expander(
+            f"같은 품목 모델 전체 {len(mfds_procurement_crosslinks)}개 보기",
+            expanded=False,
+        ):
+            filter_priced, filter_inactive = st.columns(2)
+            only_priced = filter_priced.checkbox(
+                "거래가 있는 모델만",
+                value=True,
+                key=f"workspace_same_item_priced::{quote_key}",
+            )
+            include_inactive = filter_inactive.checkbox(
+                "취소·수출 전용 모델도 보기",
+                value=False,
+                key=f"workspace_same_item_inactive::{quote_key}",
+            )
+            full_view = same_item_ui.build_same_item_rows(
+                mfds_procurement_crosslinks,
+                same_item_ui.live_status_index(mfds.records if live_loaded else None),
+                include_unpriced=not only_priced,
+                include_inactive=include_inactive,
+                current_keys=current_keys,
+                item_status_labels=item_status_labels,
+                reference_price=median_price,
+            )
+            if full_view.rows:
+                current_note = same_item_ui.current_model_note(full_view)
+                if current_note:
+                    st.info(current_note)
+                st.dataframe(
+                    result_summary_ui.display_rows(full_view.rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("조건에 맞는 모델이 없습니다.")
+            notes = [same_item_ui.hidden_note(full_view), *same_item_ui.status_notes(full_view)]
+            st.caption(". ".join(note for note in notes if note) or "모든 모델을 표시했습니다.")
+
+            if isinstance(mfds, MfdsWorkspaceResult) and mfds.active_competitor_records:
+                st.markdown(
+                    f"##### 식약처 모델 목록의 같은 품목 판매 가능 모델 {len(mfds.active_competitor_records)}개"
+                )
+                st.caption("이 목록에는 업체·가격 정보가 없습니다.")
+                st.dataframe(
+                    [
+                        {
+                            "모델": item.model_name or "",
+                            "상품명": item.trade_name or "",
+                            "허가번호": item.permit_number or "",
+                            "허가일": item.permit_date.isoformat() if item.permit_date else "",
+                            "업종": item.industry_type or "",
+                        }
+                        for item in mfds.active_competitor_records
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
 
 def _render_search_result(state: dict[str, Any]) -> None:
@@ -1760,9 +2114,11 @@ def _render_search_result(state: dict[str, Any]) -> None:
     )
 
     st.divider()
-    head_title, head_action = st.columns([5.2, 1.6], vertical_alignment="bottom")
-    head_title.subheader(heading)
-    identity_slot = head_title.container()
+    st.markdown(result_layout_ui.RESULT_CSS, unsafe_allow_html=True)
+    # Header: product title + one subtitle line + chips on the left, Excel on the right.
+    # Both are filled further down, once the identity and the export are known.
+    head_title, head_action = st.columns([5.2, 1.4], vertical_alignment="top")
+    banner_slot = st.container()
     _render_diagnostic_markers(state)
 
     safety_permit_numbers: list[str] = []
@@ -1798,35 +2154,53 @@ def _render_search_result(state: dict[str, Any]) -> None:
     )
     safety_status_value = _safety_evidence_value(safety_state.evidence_status)
     if workspace_header_ui.safety_needs_banner(safety_status_value):
+        # A recall or sales stop comes before any price: red band above the conclusion.
         banner_text = (
-            f"{workspace_header_ui.safety_card(safety_status_value).value} · {safety_state.message}"
+            f"<b>{result_layout_ui.esc(workspace_header_ui.safety_card(safety_status_value).value)}</b> · "
+            f"{result_layout_ui.esc(safety_state.message)}"
         )
-        if safety_status_value == "RED":
-            st.error(banner_text)
-        else:
-            st.warning(banner_text)
+        banner_slot.markdown(
+            notice_html(banner_text, tone="danger" if safety_status_value == "RED" else "warn"),
+            unsafe_allow_html=True,
+        )
 
-    # ── 0단계 · 결론: 내 견적가 한 칸 + 결론 문장 + 가격대 막대 + 카드 4장 ──
+    # ── 0단계 · 설정 막대: 내 견적 단가 + 거래 기간 (카드 한 장) ──
     price_key = f"workspace_quote_price::{quote_key}"
     unit_key = f"workspace_quote_unit::{quote_key}"
     vat_key = f"workspace_quote_vat::{quote_key}"
     conditions_key = f"workspace_quote_conditions::{quote_key}"
     if price_key not in st.session_state:
         st.session_state[price_key] = default_quote
-    quote_col, period_col, _spacer = st.columns([2.2, 3.0, 2.0], vertical_alignment="bottom")
-    quote_text = quote_col.text_input(
-        "내 견적가 (원)",
-        key=price_key,
-        placeholder="선택 · 숫자만 입력, 예: 2100000",
-    )
+    with st.container(key="rl_settings"):
+        (
+            quote_label_col,
+            quote_col,
+            quote_unit_col,
+            period_label_col,
+            period_col,
+        ) = st.columns([0.85, 1.7, 2.8, 0.75, 1.8], vertical_alignment="center")
+        quote_label_col.markdown(
+            '<span class="rl-setting-label">내 견적 단가</span>', unsafe_allow_html=True
+        )
+        quote_text = quote_col.text_input(
+            "내 견적가 (원)",
+            key=price_key,
+            placeholder="숫자만, 예: 2100000",
+            label_visibility="collapsed",
+        )
+        quote_unit_slot = quote_unit_col.empty()
+        period_label_col.markdown(
+            '<span class="rl-setting-label">거래 기간</span>', unsafe_allow_html=True
+        )
     quote_unit = str(st.session_state.get(unit_key) or "")
     vat_status = str(st.session_state.get(vat_key) or "미확인")
     quote_conditions = str(st.session_state.get(conditions_key) or "")
+    quote_error = False
     try:
         workspace_quote = _parse_quote(quote_text)
     except ValueError:
         workspace_quote = review_input.quote_unit_price
-        st.warning("내 견적가는 숫자로만 입력하세요. 직전 값으로 비교합니다.")
+        quote_error = True
 
     # Default 3 years; widen to 5 years / everything when the period holds no same-product trade.
     track_b, direct_rows, reference_rows, period_choice = _apply_search_period(
@@ -1850,13 +2224,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
         unavailable=track_b_unavailable,
         unit=unit_split.main_unit,
     )
-    st.markdown(result_summary_ui.render_conclusion_html(conclusion), unsafe_allow_html=True)
-    if period_choice.note:
-        st.info(period_choice.note)
-    st.caption(result_summary_ui.period_caption(period_choice, oldest_collected="2021년"))
-    unit_note = result_summary_ui.unit_note(unit_split)
-    if unit_note:
-        st.caption(unit_note)
+    unit_phrase = result_layout_ui.unit_phrase(unit_split.main_unit)
+    quote_unit_slot.markdown(
+        '<span class="rl-setting-unit">'
+        + (f"원 / {unit_phrase} 기준 · 넣으면 결론과 막대에 위치가 표시됩니다" if unit_phrase else "원 · 넣으면 결론과 막대에 위치가 표시됩니다")
+        + "</span>",
+        unsafe_allow_html=True,
+    )
+    if quote_error:
+        st.warning("내 견적가는 숫자로만 입력하세요. 직전 값으로 비교합니다.")
 
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
         mfds_metric = "품목번호 확인"
@@ -1880,12 +2256,14 @@ def _render_search_result(state: dict[str, Any]) -> None:
     identity_companies: list[str] = []
     identity_product: str | None = None
     identity_permit_type: str | None = None
+    identity_grade: str | None = None
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
         identity_permits.extend(indexed_identity.permit_numbers)
         identity_companies.extend(indexed_identity.companies)
         if indexed_identity.records:
             identity_product = indexed_identity.records[0].product_name or None
             identity_permit_type = mfds_item_authorization_type(indexed_identity.records[0]).value
+            identity_grade = getattr(indexed_identity.records[0], "grade", None) or None
     if isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_records:
         identity_permits.extend(mfds.permit_numbers)
         identity_product = identity_product or mfds.exact_records[0].product_name or None
@@ -1898,26 +2276,60 @@ def _render_search_result(state: dict[str, Any]) -> None:
     mfds_complete = bool(
         collection_status.status != "unavailable" and collection_status.first_backfill_complete
     )
-    identity_text = workspace_header_ui.identity_line(
-        product_name=identity_product,
-        permit_numbers=identity_permits,
-        permit_type=identity_permit_type,
-        companies=identity_companies,
-        procurement_product=workspace_header_ui.procurement_product_name(direct_rows),
-        procurement_maker=workspace_header_ui.most_common_text(direct_rows, "제조사"),
-    )
+    procurement_product = workspace_header_ui.procurement_product_name(direct_rows)
     procurement_spec = workspace_header_ui.most_common_text(direct_rows, "규격") or ""
-    with identity_slot:
-        if identity_text:
-            st.caption(identity_text)
-        if "부품" in procurement_spec:
-            st.warning(
-                f"나라장터 규격상 **부품**입니다 · 규격: {procurement_spec}. "
-                "아래 거래가는 본체가 아니라 이 부품의 가격입니다."
-            )
+    title_text = result_layout_ui.header_title(heading, identity_product or procurement_product)
+    subtitle_text = result_layout_ui.header_subtitle(
+        title=title_text,
+        identity_product=identity_product,
+        procurement_product=procurement_product,
+        procurement_maker=workspace_header_ui.most_common_text(direct_rows, "제조사"),
+        companies=identity_companies,
+        permit_type=identity_permit_type,
+        permit_numbers=identity_permits,
+    )
+    search_text = " ".join(str(state.get("search_text") or "").split())
+    header_chips: list[str] = []
+    if search_text and normalize_text(search_text) != normalize_text(heading):
+        header_chips.append(f"검색어 {search_text}")
+    if identity_grade:
+        header_chips.append(f"식약처 {identity_grade}등급")
+    if (
+        isinstance(indexed_identity, MfdsIdentityLookup)
+        and indexed_identity.status == "success"
+        and len(indexed_identity.model_names) > 1
+    ):
+        header_chips.append(f"이 허가의 모델 {len(indexed_identity.model_names)}개")
+    if "부품" in procurement_spec:
+        header_chips.append("나라장터 규격상 부품")
+    head_title.markdown(
+        result_layout_ui.header_html(
+            title=title_text,
+            subtitle=subtitle_text,
+            chips=header_chips,
+            marker_heading=f"{search_text or heading} 거래가격",
+        ),
+        unsafe_allow_html=True,
+    )
+    if "부품" in procurement_spec:
+        banner_slot.markdown(
+            notice_html(
+                f"나라장터 규격상 <b>부품</b>입니다 · 규격: {result_layout_ui.esc(procurement_spec)}. "
+                "아래 거래가는 본체가 아니라 이 부품의 가격입니다.",
+                tone="warn",
+            ),
+            unsafe_allow_html=True,
+        )
 
     price_header_card = workspace_header_ui.price_card(stats, unavailable=track_b_unavailable)
-    if getattr(track_b, "status", "") == "partial" and stats.direct_count:
+    price_header_card = dataclasses.replace(
+        price_header_card,
+        label=result_layout_ui.price_card_label(stats, unit_split.main_unit),
+        # The label already says 가운데 값.
+        note=price_header_card.note.removeprefix("중앙값 · "),
+    )
+    partial_result = bool(getattr(track_b, "status", "") == "partial" and stats.direct_count)
+    if partial_result:
         # More matching trades exist than one lookup returns; say what the summary covers.
         price_header_card = dataclasses.replace(
             price_header_card,
@@ -1970,35 +2382,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
             else build_purchase_workspace_stats(track_b=track_b, market_bundle=None, quote_unit_price=None)
         ),
         mfds_header_card,
-        workspace_header_ui.safety_card(safety_status_value),
+        dataclasses.replace(workspace_header_ui.safety_card(safety_status_value), label="안전·회수"),
     ]
-    st.markdown(
-        workspace_header_ui.HEADER_CSS + workspace_header_ui.render_cards_html(header_cards),
-        unsafe_allow_html=True,
-    )
-
-    if isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "deferred":
-        _left, _middle, mfds_button_col, _right = st.columns(4)
-        if mfds_button_col.button(
-            (
-                "판매 가능·취소 여부 확인 (약 30초)"
-                if isinstance(indexed_identity, MfdsIdentityLookup)
-                and indexed_identity.status == "success"
-                else "식약처에서 확인 (약 30초)"
-            ),
-            key=f"workspace_header_mfds_model_info::{quote_key}",
-            type="tertiary",
-            help="식약처 모델 목록에서 판매 가능·취소 상태와 같은 품목의 다른 모델을 불러옵니다. 가격 결과는 그대로입니다.",
-        ):
-            with st.status(
-                "식약처 모델 목록을 확인하고 있습니다. 가격 결과는 그대로 유지됩니다...",
-                expanded=False,
-            ) as header_mfds_progress:
-                refreshed = dict(state)
-                refreshed["mfds"] = _run_deferred_mfds_model_info(state)
-                st.session_state[HOME_SEARCH_STATE_KEY] = refreshed
-                header_mfds_progress.update(label="식약처 확인 완료", state="complete")
-            st.rerun()
 
     live_note: str | None = None
     live_checked_until: str | None = None
@@ -2031,17 +2416,102 @@ def _render_search_result(state: dict[str, Any]) -> None:
             live_note = f"실시간 확인 안 함({live.reason})"
         if live_note and getattr(live, "truncated_window", False):
             live_note += " (최근 62일만 조회)"
-        basis_text = result_summary_ui.short_basis_line(
-            track_b_data_as_of=track_b_data_as_of,
-            live_checked_until=live_checked_until,
-            live_failed=live_failed,
-            mfds_coverage_percent=mfds_coverage,
-            mfds_complete=mfds_complete,
+
+    # ── 결론 줄: 왼쪽 결론 카드 + 가격 막대, 오른쪽 "최종 판단 전에 확인하세요" ──
+    median_price = stats.median_price
+    outliers = result_summary_ui.price_outlier_rows(direct_rows, median_price)
+    main_unit_id = result_summary_ui.unit_key(unit_split.main_unit)
+    comparison_rows = [
+        row
+        for row in direct_rows
+        if not unit_split.mixed or result_summary_ui.unit_key(row.get("단위")) in {"", main_unit_id}
+    ]
+    points = result_layout_ui.check_points(
+        comparison_rows,
+        direct_count=int(stats.direct_count or 0),
+        unavailable=track_b_unavailable,
+        other_unit_count=len(unit_split.other),
+        other_units=unit_split.other_units,
+        main_unit=unit_split.main_unit,
+        outlier_count=len(outliers) if median_price is not None else 0,
+        live_failed=live_failed,
+        widened_note=period_choice.note,
+        partial=partial_result,
+    )
+    lead = result_layout_ui.lead_view(
+        stats,
+        conclusion,
+        quote=workspace_quote,
+        unit=unit_split.main_unit,
+        warn_count=sum(1 for point in points if point.tone in {"warn", "danger"}),
+        unavailable=track_b_unavailable,
+    )
+    if conclusion.band is not None:
+        price_html = result_layout_ui.price_rail_html(
+            low=conclusion.band.low,
+            high=conclusion.band.high,
+            median=conclusion.band.median,
+            quote=conclusion.band.quote,
         )
-        if basis_text:
-            st.caption(basis_text)
-    elif track_b_index_updated_at:
-        st.caption(f"자료 기준 · 나라장터 자료 갱신 {track_b_index_updated_at}")
+    elif track_b_unavailable:
+        price_html = ""
+    else:
+        price_html = result_layout_ui.price_points_html(
+            stats, quote=workspace_quote, unit=unit_split.main_unit
+        )
+    st.markdown(
+        result_layout_ui.lead_row_html(
+            lead,
+            price_html=price_html,
+            panel_html=result_layout_ui.check_panel_html(points),
+        ),
+        unsafe_allow_html=True,
+    )
+
+    # ── 카드 4장 (같은 높이, 오른쪽 위 상태 점) ──
+    st.markdown(result_layout_ui.cards_html(header_cards), unsafe_allow_html=True)
+    if isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "deferred":
+        _left, _middle, mfds_button_col, _right = st.columns(4, gap="small")
+        if mfds_button_col.container(key="rl_mfds_action").button(
+            (
+                "판매 가능·취소 여부 확인 (약 30초)"
+                if isinstance(indexed_identity, MfdsIdentityLookup)
+                and indexed_identity.status == "success"
+                else "식약처에서 확인 (약 30초)"
+            ),
+            key=f"workspace_header_mfds_model_info::{quote_key}",
+            type="tertiary",
+            help="식약처 모델 목록에서 판매 가능·취소 상태와 같은 품목의 다른 모델을 불러옵니다. 가격 결과는 그대로입니다.",
+        ):
+            with st.status(
+                "식약처 모델 목록을 확인하고 있습니다. 가격 결과는 그대로 유지됩니다...",
+                expanded=False,
+            ) as header_mfds_progress:
+                refreshed = dict(state)
+                refreshed["mfds"] = _run_deferred_mfds_model_info(state)
+                st.session_state[HOME_SEARCH_STATE_KEY] = refreshed
+                header_mfds_progress.update(label="식약처 확인 완료", state="complete")
+            st.rerun()
+
+    # ── 칩 한 줄: 기간 · 단위 · 이상 거래 · 자료 기준 ──
+    st.markdown(
+        result_layout_ui.chip_row_html(
+            [
+                result_layout_ui.period_chip(period_choice),
+                result_layout_ui.unit_chip(unit_split),
+                result_layout_ui.outlier_chip(len(outliers), has_median=median_price is not None and stats.direct_count >= 3),
+                result_layout_ui.basis_chip(
+                    track_b_data_as_of=track_b_data_as_of,
+                    index_updated_at=track_b_index_updated_at,
+                    live_checked_until=live_checked_until,
+                    live_failed=live_failed,
+                    mfds_coverage_percent=mfds_coverage,
+                    mfds_complete=mfds_complete,
+                ),
+            ]
+        ),
+        unsafe_allow_html=True,
+    )
 
     # ── Excel (header button) ──
     export_identity_rows: list[dict[str, object]] = []
@@ -2110,323 +2580,48 @@ def _render_search_result(state: dict[str, Any]) -> None:
     ).strip("_") or "market_survey"
     head_action.download_button(
         "Excel로 저장",
+        icon=":material/download:",
         data=export_payload,
         file_name=f"시장조사표_{safe_export_name}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"workspace_market_survey_export::{quote_key}",
+        type="primary",
         use_container_width=True,
         help="같은 제품 거래, 참고 자료, 납품업체, 식약처 정보와 원문 위치를 모두 담은 시장조사표입니다.",
     )
 
-    # ── 1단계 ① 얼마에 거래됐나 ──
-    st.markdown("#### 얼마에 거래됐나")
-    if (
-        isinstance(indexed_identity, MfdsIdentityLookup)
-        and indexed_identity.status == "success"
-        and indexed_identity.match_type == "permit"
-        and len(indexed_identity.model_names) > 1
-    ):
-        st.caption(
-            f"이 허가번호에는 모델 {len(indexed_identity.model_names)}개가 있어, 아래 표를 모델별로 나눴습니다."
-        )
-    if state["model_probe_used"]:
-        st.caption("검색어가 모델명과 같아 그 모델의 거래를 보여줍니다.")
-    if direct_rows:
-        all_groups = result_summary_ui.unit_group_rows(direct_rows, limit=len(direct_rows))
-        if all_groups:
-            st.dataframe(
-                all_groups[: result_summary_ui.SUMMARY_ROW_LIMIT],
-                use_container_width=True,
-                hide_index=True,
-            )
-            st.caption(
-                "단위(대·set 등)와 거래조건이 같은 거래끼리 묶었습니다. 가격은 모두 1단위 가격이며, "
-                "거래 총액 합계 ÷ 총수량과는 다를 수 있습니다."
-                + (
-                    f" {len(all_groups)}가지 중 거래가 많은 {result_summary_ui.SUMMARY_ROW_LIMIT}가지만 보여줍니다."
-                    if len(all_groups) > result_summary_ui.SUMMARY_ROW_LIMIT
-                    else ""
-                )
-            )
-        year_rows = result_summary_ui.year_summary_rows(direct_rows, main_unit=unit_split.main_unit)
-        if len(year_rows) > 1:
-            st.markdown("##### 연도별")
-            st.dataframe(year_rows, use_container_width=True, hide_index=True)
-            st.caption("가격은 위 결론과 같은 단위만 묶었습니다. 다른 단위 거래는 건수만 따로 셉니다.")
-        record_view_key = f"workspace_record_view::{quote_key}"
-        record_table_key = f"workspace_direct_table::{quote_key}"
-        record_applied_key = f"workspace_direct_table_applied::{quote_key}"
-        # A row picked in the full table (previous run) opens its record above the table.
-        table_state = st.session_state.get(record_table_key)
-        picked_rows = list(
-            ((table_state or {}).get("selection") or {}).get("rows") or []
-        ) if isinstance(table_state, Mapping) else []
-        picked = picked_rows[0] if picked_rows else None
-        if picked != st.session_state.get(record_applied_key):
-            st.session_state[record_applied_key] = picked
-            if picked is not None and 0 <= picked < len(direct_rows):
-                st.session_state[record_view_key] = str(direct_rows[picked].get("원천기록") or "")
-
-        median_price = stats.median_price
-        outliers = result_summary_ui.price_outlier_rows(direct_rows, median_price)
-        if outliers and median_price is not None:
-            st.warning(
-                f"중앙값과 3배 넘게 차이 나는 거래가 {len(outliers)}건 있습니다. "
-                "단위(세트·대)나 계약 방식이 다른 거래일 수 있으니 조달청 원문을 확인하세요."
-            )
-            for index, row in enumerate(outliers[: result_summary_ui.OUTLIER_SHOWN]):
-                line_col, button_col = st.columns([5, 1.2], vertical_alignment="center")
-                line_col.caption(result_summary_ui.outlier_line(row, median_price, unit_split.main_unit))
-                if row.get("원천기록") and button_col.button(
-                    "원문 보기",
-                    key=f"workspace_outlier_record::{quote_key}::{index}",
-                    type="tertiary",
-                ):
-                    st.session_state[record_view_key] = str(row["원천기록"])
-
-        rows_by_record = {
-            str(row.get("원천기록") or ""): row for row in direct_rows if row.get("원천기록")
-        }
-        selected_record = str(st.session_state.get(record_view_key) or "")
-        if selected_record in rows_by_record:
-            _render_delivery_record(
-                rows_by_record[selected_record],
-                view_key=record_view_key,
-                close_key=f"workspace_record_close::{quote_key}",
-            )
-
-        with st.expander(f"같은 제품 거래 {strict_count}건 전체 보기", expanded=False):
-            st.dataframe(
-                # 거래 총액 → 수량 → 1단위 가격 순서라 세트 거래도 헷갈리지 않습니다.
-                result_summary_ui.trade_table_rows(direct_rows),
-                use_container_width=True,
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                key=record_table_key,
-                column_config={
-                    "나라장터": st.column_config.LinkColumn("나라장터", display_text="열기"),
-                },
-            )
-            st.caption(
-                "행을 누르면 그 거래의 조달청 공개 원문(사업명·계약 방법·납품 기한 등)이 위에 열리고, "
-                "'열기'를 누르면 나라장터에서 그 거래를 찾습니다. 모든 항목은 Excel에도 들어 있습니다."
-            )
-    elif track_b.status == "unavailable":
-        st.warning("가격 자료에 연결하지 못했습니다.")
-    elif track_b.status == "not_ingested":
-        st.info("가격 자료를 준비하는 중입니다. 잠시 뒤 다시 검색하세요.")
-    else:
-        st.info("이 모델과 같은 제품으로 확인된 나라장터 거래가 없습니다.")
-
-    if (
-        isinstance(indexed_identity, MfdsIdentityLookup)
-        and indexed_identity.status == "success"
-        and indexed_identity.match_type == "permit"
-        and exact_identity_crosslinks
-    ):
-        with st.expander(
-            f"이 허가번호의 모델 {len(exact_identity_crosslinks)}개별 거래 보기",
-            expanded=False,
-        ):
-            st.dataframe(
-                result_summary_ui.display_rows(exact_identity_crosslinks),
-                use_container_width=True,
-                hide_index=True,
-            )
-
-    if reference_rows:
-        with st.expander(
-            f"비슷한 품목 거래 {reference_count}건 보기 · 같은 제품인지 확인 안 됨, 비교에서 제외",
-            expanded=False,
-        ):
-            st.dataframe(
-                result_summary_ui.display_rows(reference_rows),
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "대당 단가": st.column_config.TextColumn("표기 금액 (미검증)"),
-                    "총액": st.column_config.TextColumn("거래총액"),
-                },
-            )
-            st.caption(
-                "품목명이나 분류가 비슷한 거래입니다. 모델·규격이 같은지 확인되기 전에는 가격 비교에 쓰지 않습니다."
-            )
-
-    # ── 1단계 ② 누가 파는가 ──
-    st.markdown("#### 누가 파는가")
-    procurement_suppliers = supplier_rows(track_b)
-    if procurement_suppliers:
-        st.dataframe(
-            result_summary_ui.supplier_summary_rows(procurement_suppliers),
-            use_container_width=True,
-            hide_index=True,
-        )
-        hidden_suppliers = len(procurement_suppliers) - result_summary_ui.SUMMARY_ROW_LIMIT
-        st.caption(
-            "같은 제품을 나라장터에 납품한 업체입니다. 납품 실적이 있다고 공식 총판이라는 뜻은 아닙니다."
-            + (f" 나머지 {hidden_suppliers}곳은 Excel에 있습니다." if hidden_suppliers > 0 else "")
-        )
-    elif track_b_unavailable:
-        st.warning("나라장터 가격 자료를 읽지 못해 납품업체를 확인하지 못했습니다.")
-    else:
-        st.caption("같은 제품 거래가 없어 납품업체도 없습니다.")
-
-    company_active_keys: set[tuple[str, str]] | None = None
-    if isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}:
-        company_active_keys = {
-            (
-                normalize_text(item.permit_number),
-                normalize_text(item.model_name),
-            )
-            for item in mfds.active_records
-            if item.permit_number and item.model_name
-        }
-    company_summaries = build_registered_company_summaries(
-        same_product_identity,
-        procurement_crosslinks=mfds_procurement_crosslinks,
-        active_live_keys=company_active_keys,
-    )
-    if company_summaries:
-        with st.expander(
-            f"식약처에 같은 품목으로 등록한 제조·수입업체 {len(company_summaries)}곳 보기",
-            expanded=False,
-        ):
-            st.caption(
-                "식약처에 등록한 제조·수입업체는 위 납품업체와 다른 관계입니다. 이름이 비슷해도 같은 회사로 보지 않습니다."
-            )
-            st.dataframe(
-                [
-                    {
-                        "제조·수입업체": item.company_name,
-                        "등록 모델": item.registered_model_count,
-                        "허가 건수": item.permit_count,
-                        "최근 허가일": item.latest_permit_date or "",
-                        "대표 모델": " / ".join(item.representative_models),
-                        "거래가 있는 모델": item.direct_price_model_count,
-                        "납품업체(나라장터)": " / ".join(item.procurement_suppliers),
-                        "판매 상태": result_summary_ui.plain_status(item.live_status),
-                    }
-                    for item in company_summaries
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-            selected_company = st.selectbox(
-                "업체 하나 자세히 보기",
-                options=[item.company_name for item in company_summaries],
-                key=f"workspace_company_drilldown::{quote_key}",
-            )
-            detail_rows = company_identity_rows(
-                same_product_identity,
-                selected_company,
-                active_live_keys=company_active_keys,
-            )
-            if detail_rows:
-                st.dataframe(
-                    result_summary_ui.display_rows(detail_rows),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            _render_business_license_lookup(selected_company, quote_key)
-
-    # ── 1단계 ③ 같은 품목의 다른 모델 ──
     identity_known = (
         isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success"
     )
-    if mfds_procurement_crosslinks or identity_known:
-        st.markdown("#### 같은 품목의 다른 모델")
-        live_loaded = isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"success", "success_0"}
-        current_keys = (
-            [(item.permit_number, item.model_name) for item in indexed_identity.records]
-            if identity_known
-            else ()
+    with st.container(key="rl_result"):
+        _render_price_sections(
+            state=state,
+            track_b=track_b,
+            direct_rows=direct_rows,
+            reference_rows=reference_rows,
+            strict_count=strict_count,
+            reference_count=reference_count,
+            indexed_identity=indexed_identity,
+            exact_identity_crosslinks=exact_identity_crosslinks,
+            unit_split=unit_split,
+            median_price=median_price,
+            outliers=outliers,
+            period_label=period_choice.label,
+            quote_key=quote_key,
         )
-        summary_view = same_item_ui.build_same_item_rows(
-            mfds_procurement_crosslinks,
-            same_item_ui.live_status_index(mfds.records if live_loaded else None),
-            current_keys=current_keys,
+        _render_supplier_and_models(
+            track_b=track_b,
+            track_b_unavailable=track_b_unavailable,
+            mfds=mfds,
+            indexed_identity=indexed_identity,
+            identity_known=identity_known,
+            same_product_identity=same_product_identity,
+            mfds_procurement_crosslinks=mfds_procurement_crosslinks,
             item_status_labels=item_status_labels,
-            reference_price=stats.median_price,
+            median_price=stats.median_price,
+            query=query,
+            quote_key=quote_key,
         )
-        current_note = same_item_ui.current_model_note(summary_view)
-        if current_note:
-            st.info(current_note)
-        if summary_view.rows:
-            st.dataframe(
-                result_summary_ui.same_item_summary_rows(summary_view.rows),
-                use_container_width=True,
-                hide_index=True,
-            )
-            st.caption(
-                "식약처에 같은 품목으로 등록된 모델 중 나라장터 거래가 있는 모델입니다. ▶ 표시는 검색한 모델입니다. "
-                "성능이나 대체 가능 여부는 판단하지 않습니다."
-            )
-            gap_note = same_item_ui.price_gap_note(summary_view)
-            if gap_note:
-                st.warning(gap_note)
-        elif not current_note:
-            st.caption("같은 품목의 다른 모델 중 나라장터 거래가 있는 모델이 아직 없습니다.")
-
-        if mfds_procurement_crosslinks:
-            with st.expander(
-                f"같은 품목 모델 전체 {len(mfds_procurement_crosslinks)}개 보기",
-                expanded=False,
-            ):
-                filter_priced, filter_inactive = st.columns(2)
-                only_priced = filter_priced.checkbox(
-                    "거래가 있는 모델만",
-                    value=True,
-                    key=f"workspace_same_item_priced::{quote_key}",
-                )
-                include_inactive = filter_inactive.checkbox(
-                    "취소·수출 전용 모델도 보기",
-                    value=False,
-                    key=f"workspace_same_item_inactive::{quote_key}",
-                )
-                full_view = same_item_ui.build_same_item_rows(
-                    mfds_procurement_crosslinks,
-                    same_item_ui.live_status_index(mfds.records if live_loaded else None),
-                    include_unpriced=not only_priced,
-                    include_inactive=include_inactive,
-                    current_keys=current_keys,
-                    item_status_labels=item_status_labels,
-                    reference_price=stats.median_price,
-                )
-                if full_view.rows:
-                    current_note = same_item_ui.current_model_note(full_view)
-                    if current_note:
-                        st.info(current_note)
-                    st.dataframe(
-                        result_summary_ui.display_rows(full_view.rows),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                else:
-                    st.info("조건에 맞는 모델이 없습니다.")
-                notes = [same_item_ui.hidden_note(full_view), *same_item_ui.status_notes(full_view)]
-                st.caption(". ".join(note for note in notes if note) or "모든 모델을 표시했습니다.")
-
-                if isinstance(mfds, MfdsWorkspaceResult) and mfds.active_competitor_records:
-                    st.markdown(
-                        f"##### 식약처 모델 목록의 같은 품목 판매 가능 모델 {len(mfds.active_competitor_records)}개"
-                    )
-                    st.caption("이 목록에는 업체·가격 정보가 없습니다.")
-                    st.dataframe(
-                        [
-                            {
-                                "모델": item.model_name or "",
-                                "상품명": item.trade_name or "",
-                                "허가번호": item.permit_number or "",
-                                "허가일": item.permit_date.isoformat() if item.permit_date else "",
-                                "업종": item.industry_type or "",
-                            }
-                            for item in mfds.active_competitor_records
-                        ],
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-        _render_medical_lookup_link(indexed_identity, mfds, query)
 
     # ── 2단계 · 상세 자료 (한 묶음) ──
     with st.expander("상세 자료 · 견적 조건 · 안전정보 · 식약처 원자료 · 자료 기준", expanded=False):

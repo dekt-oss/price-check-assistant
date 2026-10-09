@@ -256,7 +256,7 @@ BAND_CSS = """
 <style>
 .pr-conclusion {border:1px solid rgba(128,128,128,0.28); border-radius:0.6rem; padding:0.85rem 1rem 0.6rem 1rem; margin:0.3rem 0 0.6rem 0;}
 .pr-conclusion.pr-warn {border-left:4px solid #d97706;}
-.pr-conclusion.pr-ok {border-left:4px solid #1f6f8b;}
+.pr-conclusion.pr-ok {border-left:4px solid #1D4ED8;}
 .pr-conclusion.pr-neutral {border-left:4px solid #94a3b8;}
 .pr-headline {font-size:1.12rem; font-weight:700; line-height:1.5; word-break:keep-all;}
 .pr-detail {font-size:0.86rem; opacity:0.75; margin-top:0.15rem;}
@@ -264,13 +264,13 @@ BAND_CSS = """
 .pr-caveat {font-size:0.8rem; opacity:0.7; margin-top:0.15rem;}
 .pr-band {position:relative; height:74px; margin:0.5rem 0.4rem 0.1rem 0.4rem;}
 .pr-track {position:absolute; top:40px; left:0; right:0; height:4px; background:rgba(128,128,128,0.25); border-radius:2px;}
-.pr-range {position:absolute; top:35px; height:14px; background:rgba(31,111,139,0.18); border:1px solid #1f6f8b; border-radius:7px;}
-.pr-median {position:absolute; top:33px; width:18px; height:18px; margin-left:-9px; border-radius:50%; background:#1f6f8b; border:2px solid #fff;}
+.pr-range {position:absolute; top:35px; height:14px; background:rgba(29,78,216,0.14); border:1px solid #1D4ED8; border-radius:7px;}
+.pr-median {position:absolute; top:33px; width:18px; height:18px; margin-left:-9px; border-radius:50%; background:#1D4ED8; border:2px solid #fff;}
 .pr-mark {position:absolute; top:17px; width:0; height:0; margin-left:-8px; border-left:8px solid transparent; border-right:8px solid transparent; border-top:13px solid #b45309;}
 .pr-label {position:absolute; font-size:0.74rem; white-space:nowrap; transform:translateX(-50%);}
 .pr-label.pr-top {top:0; color:#b45309; font-weight:600;}
 .pr-label.pr-bottom {top:56px; opacity:0.75;}
-.pr-label.pr-mid {top:56px; color:#1f6f8b; font-weight:600;}
+.pr-label.pr-mid {top:56px; color:#1D4ED8; font-weight:600;}
 </style>
 """
 
@@ -780,6 +780,8 @@ def unit_group_rows(
 # ── 거래 기간: 기본 최근 3년, 거래가 없으면 5년·전체로 넓히기 ──
 
 SEARCH_PERIOD_V1 = True
+# Runtime marker: blue palette (design step 2, 2026-10-09); the result screen uses result_layout.
+RESULT_LAYOUT_V2 = True
 PERIOD_CHOICES: tuple[tuple[str, int | None], ...] = (
     ("최근 3년", 3),
     ("최근 5년", 5),

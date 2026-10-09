@@ -141,10 +141,13 @@ def test_cards_html_escapes_values() -> None:
 def test_dashboard_uses_fixed_header_before_area_tabs() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
-    conclusion = source.index("result_summary_ui.render_conclusion_html(conclusion)")
-    cards = source.index("workspace_header_ui.render_cards_html(header_cards)")
-    first_section = source.index('st.markdown("#### 얼마에 거래됐나")')
-    assert conclusion < cards < first_section
+    # Design step 2 (2026-10-09): conclusion card + check panel, then the four cards, then tabs.
+    conclusion = source.index("result_layout_ui.lead_row_html(")
+    cards = source.index("result_layout_ui.cards_html(header_cards)")
+    chips = source.index("result_layout_ui.chip_row_html(")
+    sections = source.index("_render_price_sections(\n            state=state")
+    assert conclusion < cards < chips < sections
+    assert 'st.markdown("#### 얼마에 거래됐나")' in source
     assert 'id="purchase-workspace-runtime-v11"' in source
     # Full trade list: total amount, quantity, then the price of one unit (UI 2026-10-08).
     assert "result_summary_ui.trade_table_rows(direct_rows)" in source

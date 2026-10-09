@@ -97,7 +97,8 @@ def test_slow_lookups_are_not_primary_buttons_on_the_first_screen() -> None:
 
 def test_full_tables_are_one_expander_away() -> None:
     source = DASHBOARD.read_text(encoding="utf-8")
-    assert 'f"같은 제품 거래 {strict_count}건 전체 보기"' in source
+    # The full list is the third tab of 얼마에 거래됐나 (design step 3, 2026-10-09).
+    assert '["연도별", "단위·조건별", f"거래 전체 {strict_count}건"]' in source
     assert "result_summary_ui.unit_group_rows(direct_rows" in source
     assert "result_summary_ui.trade_table_rows(direct_rows)" in source
     assert "supplier_summary_rows(" in source
