@@ -15,15 +15,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from statistics import median
+from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from purchase_price.evidence_domain import IdentityEvidenceStatus
 from purchase_price.services.matching import exact_model_match
-from purchase_price.ui import result_summary
+from purchase_price.ui import product_identity, result_summary
 from purchase_price.ui.theme import (
     TONE_DANGER,
     TONE_INFO,
@@ -44,6 +46,8 @@ from purchase_price.ui.track_b_transactions import (
 
 DEVICE_PAGE_LAYOUT_V1 = True
 DEVICE_PAGE_UDI_INPUT_V1 = True
+# 2026-10-10: the result header is the shared labelled product block (ui/product_identity.py).
+DEVICE_PAGE_IDENTITY_V1 = True
 
 PAGE_TITLE = "의료기기 허가·안전"
 PAGE_SUBTITLE = (
@@ -412,6 +416,10 @@ class MarketResult:
     trades: TradeSummary | None = None
     supplier_rows: list[dict[str, str]] = field(default_factory=list)
     recall: Any = None
+    # The 식약처 identity index answer for the typed model (permit, company, grade, UDI-DI) and the
+    # item-status labels of its permits; both empty when the model was not typed or not found.
+    identity: Any = None
+    status_labels: dict[str, str] = field(default_factory=dict)
 
     @property
     def records_failed(self) -> bool:
@@ -471,7 +479,24 @@ def supplier_evidence_text(evidence: str) -> str:
     return evidence.split(";")[0].strip()
 
 
-def identity_notice_html(model_name: str, exact: Any) -> str:
+def index_exact_permits(result: MarketResult) -> tuple[str, ...]:
+    """Permit numbers of the typed model in the full 허가 목록 index (the header's source); () if none.
+
+    The 식약처 API lookup only returns the first rows of the product name, so a model missing there
+    can still be a confirmed registration in the full list. Ambiguous hits are left to the person.
+    """
+
+    identity = getattr(result, "identity", None)
+    if getattr(identity, "status", "") != "success":
+        return ()
+    if getattr(identity, "match_type", "") not in {"model", "udi", "permit"}:
+        return ()
+    if getattr(identity, "identity_status", None) == IdentityEvidenceStatus.AMBIGUOUS:
+        return ()
+    return tuple(getattr(identity, "permit_numbers", ()) or ())
+
+
+def identity_notice_html(model_name: str, exact: Any, index_permits: Sequence[str] = ()) -> str:
     """One sentence on whether the typed model was found as the same registration."""
 
     if exact is None or not model_name.strip():
@@ -489,6 +514,13 @@ def identity_notice_html(model_name: str, exact: Any) -> str:
         )
         return notice_html(
             f"<b>모델명 ‘{esc(model_name)}’과 정확히 같은 등록을 확인했습니다.</b> 허가번호 {esc(permits)}",
+            TONE_OK,
+            icon="✓",
+        )
+    if index_permits:
+        return notice_html(
+            f"<b>식약처 전체 허가 목록에서 모델명 ‘{esc(model_name)}’과 정확히 같은 등록을 확인했습니다.</b> "
+            f"허가번호 {esc(', '.join(index_permits))} · 위 표는 품목명 조회 결과의 일부라 이 등록이 안 보일 수 있습니다.",
             TONE_OK,
             icon="✓",
         )
@@ -529,6 +561,13 @@ def permit_summary_cards(result: MarketResult) -> str:
     elif getattr(exact, "confirmed", False):
         count = len(exact.exact_matches)
         same = metric_card_html("입력한 모델과 같은 등록", f"{count}건", "모델명이 정확히 같음", TONE_OK)
+    elif index_exact_permits(result):
+        same = metric_card_html(
+            "입력한 모델과 같은 등록",
+            f"{len(index_exact_permits(result))}건",
+            "식약처 전체 허가 목록에서 확인",
+            TONE_OK,
+        )
     else:
         same = metric_card_html("입력한 모델과 같은 등록", "찾지 못함", "품목 결과 안에 같은 모델명 없음", TONE_WARN)
     recall = recall_view(result.recall, searched=params.model_name or params.product_name)
@@ -541,6 +580,73 @@ def searched_chips_html(params: MarketParams, checked_at: str) -> str:
     if checked_at:
         chips.append(f"확인 시각 <b>{esc(checked_at)}</b>")
     return chips_html(chips)
+
+
+def meta_chips_html(params: MarketParams, checked_at: str) -> str:
+    """The chips the product block does not show: 규격 and when the lookup ran."""
+
+    chips = []
+    if params.specification.strip():
+        chips.append(f"규격 <b>{esc(params.specification.strip())}</b>")
+    if checked_at:
+        chips.append(f"확인 시각 <b>{esc(checked_at)}</b>")
+    return chips_html(chips)
+
+
+def identity_header_fields(result: MarketResult) -> list[product_identity.IdentityField]:
+    """The same labelled product grid as 가격 조사: 모델명, 품목명, 업체, 허가번호, 등급, UDI-DI when known."""
+
+    params = result.params
+    exact = result.exact
+    exact_records = tuple(getattr(exact, "exact_matches", ()) or ()) if getattr(exact, "confirmed", False) else ()
+    workspace = SimpleNamespace(exact_records=exact_records, exact_confirmed=bool(exact_records))
+    identity = getattr(result, "identity", None)
+    try:
+        candidates = strict_comparison_candidates(result.track_b) if result.track_b is not None else ()
+    except Exception:
+        candidates = ()
+    fields = product_identity.matched_product_fields(
+        identity=identity,
+        workspace=workspace,
+        candidates=candidates,
+        fallback_model=params.model_name,
+        status_labels=getattr(result, "status_labels", None) or {},
+    )
+    if getattr(exact, "ambiguous", False):
+        fields = [
+            replace(f, status="허가 여러 건", tone=TONE_WARN) if f.key == "model" else f for f in fields
+        ]
+    typed_product = " ".join(params.product_name.split())
+    typed_maker = " ".join(params.manufacturer.split())
+    adjusted = []
+    for item in fields:
+        if item.key == "model" and not item.value:
+            item = replace(item, empty_text="입력 안 함")
+        elif item.key == "mfds_product" and not item.value and typed_product:
+            item = replace(item, value=typed_product, note="검색한 품목명")
+        elif item.key == "company" and not item.value and typed_maker:
+            item = replace(item, value=typed_maker, note="입력한 업체 (식약처 확인 전)")
+        adjusted.append(item)
+    udis = list(
+        dict.fromkeys(
+            str(getattr(record, "udi_di", "") or "").strip()
+            for record in (getattr(identity, "records", ()) or ())
+            if str(getattr(record, "udi_di", "") or "").strip()
+        )
+    ) if getattr(identity, "status", "") == "success" and getattr(identity, "match_type", "") in {"model", "udi", "permit"} else []
+    if udis:
+        adjusted.append(
+            product_identity.IdentityField(
+                "udi", "UDI-DI", udis[0], note=f"외 {len(udis) - 1}건" if len(udis) > 1 else ""
+            )
+        )
+    return adjusted
+
+
+def identity_header_html(result: MarketResult) -> str:
+    return product_identity.identity_html(
+        identity_header_fields(result), element_id="device-product-identity-v1"
+    )
 
 
 def permit_not_found_html(params: MarketParams) -> str:

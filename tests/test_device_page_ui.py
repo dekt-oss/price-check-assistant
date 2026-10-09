@@ -401,3 +401,72 @@ def test_udi_match_note_shows_the_matched_number() -> None:
 def test_company_wording_has_no_stray_eop() -> None:
     assert "업 허가" not in dev.SUPPLIER_NOTE.replace("업체 허가", "")
     assert "식약처 업체 허가·신고" in dev.SUPPLIER_NOTE
+
+
+def _identity_lookup(*, udi: str | None = "08801234567895"):
+    from purchase_price.services.mfds_identity_index import MfdsIdentityLookup, MfdsIdentityRecord
+
+    record = MfdsIdentityRecord(
+        udi_di=udi,
+        product_name="저출력심장충격기",
+        classification_no=None,
+        grade="3",
+        permit_number="제허 19-527 호",
+        permit_date=None,
+        model_name="DFM100",
+        trade_name=None,
+        registered_company="(주)메디아나",
+    )
+    return MfdsIdentityLookup("success", "DFM100", "model", (record,))
+
+
+def test_result_header_uses_the_shared_labelled_product_block() -> None:
+    result = dev.MarketResult(
+        params=dev.MarketParams(product_name="저출력심장충격기", model_name="DFM100"),
+        identity=_identity_lookup(),
+        status_labels={"제허19-527호": "국내 정상(품목)"},
+    )
+
+    html = dev.identity_header_html(result)
+
+    for label in ("모델명", "품목명(식약처)", "제조·수입업체", "식약처 허가번호", "등급", "UDI-DI"):
+        assert label in html, label
+    for value in ("DFM100", "저출력심장충격기", "(주)메디아나", "제허 19-527 호", "3등급", "08801234567895"):
+        assert value in html, value
+    assert "판매 가능" in html
+
+
+def test_result_header_leaves_out_udi_when_unknown_and_keeps_typed_values() -> None:
+    result = dev.MarketResult(
+        params=dev.MarketParams(product_name="심장충격기", manufacturer="필립스코리아"),
+    )
+
+    fields = {field.key: field for field in dev.identity_header_fields(result)}
+
+    assert "udi" not in fields
+    assert fields["model"].empty_text == "입력 안 함"
+    assert fields["mfds_product"].value == "심장충격기"
+    assert fields["company"].value == "필립스코리아" and "확인 전" in fields["company"].note
+
+
+def test_meta_chips_keep_only_what_the_block_does_not_show() -> None:
+    params = dev.MarketParams(product_name="심장충격기", model_name="A", specification="2 채널")
+    chips = dev.meta_chips_html(params, "10-09 14:57")
+
+    assert chips.count('class="pc-chip"') == 2
+    assert "심장충격기" not in chips
+
+
+def test_card_and_notice_agree_with_the_header_when_the_full_index_confirms_the_model() -> None:
+    result = dev.MarketResult(
+        params=dev.MarketParams(product_name="저출력심장충격기", model_name="DFM100"),
+        identity=_identity_lookup(),
+        exact=resolve_exact_model_identity((), "DFM100"),
+    )
+
+    cards = dev.permit_summary_cards(result)
+    notice = dev.identity_notice_html("DFM100", result.exact, dev.index_exact_permits(result))
+
+    assert "전체 허가 목록에서 확인" in cards and "찾지 못함" not in cards
+    assert "pc-ok" in notice and "제허 19-527 호" in notice
+    assert "찾지 못했습니다" in dev.identity_notice_html("DFM100", result.exact)
