@@ -134,7 +134,10 @@ def test_dashboard_reloads_retained_pre_simplification_ui_modules() -> None:
         ("purchase_price.ui.g2b_market_research", "PLAIN_WORDING_2026_10"),
         ("purchase_price.ui.market_research", "PLAIN_WORDING_2026_10"),
         ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
-        ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10B"),
+        ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10C"),
+        ("purchase_price.ui.result_summary", "RESULT_SUMMARY_V3"),
+        ("purchase_price.ui.search_overviews", "OVERVIEW_V2"),
+        ("purchase_price.ui.result_layout", "RESULT_LAYOUT_V2"),
     ):
         assert f'("{name}", "{marker}")' in source
         assert getattr(importlib.import_module(name), marker) is True
@@ -147,7 +150,7 @@ def test_zero_trade_rows_do_not_put_words_in_the_price_column() -> None:
         [{"모델": "A", "품목 책임주체": "X", "나라장터 직접거래": 0, "나라장터 가격범위": "같은 제품 거래 0건"}]
     )
     assert rows[0]["가격범위"] == ""
-    assert rows[0]["같은 제품 거래"] == "0건"
+    assert rows[0]["같은 제품 거래(수집분)"] == "0건"
 
 
 def test_company_overview_offers_similarly_named_companies_instead_of_guessing() -> None:

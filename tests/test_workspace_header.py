@@ -142,11 +142,13 @@ def test_dashboard_uses_fixed_header_before_area_tabs() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
     # Design step 2 (2026-10-09): conclusion card + check panel, then the four cards, then tabs.
+    # The chip row is built first and drawn at the bottom of the conclusion card (acceptance fix).
     conclusion = source.index("result_layout_ui.lead_row_html(")
     cards = source.index("result_layout_ui.cards_html(header_cards)")
     chips = source.index("result_layout_ui.chip_row_html(")
     sections = source.index("_render_price_sections(\n            state=state")
-    assert conclusion < cards < chips < sections
+    assert chips < conclusion < cards < sections
+    assert "foot_html=chip_row" in source
     assert 'st.markdown("#### 얼마에 거래됐나")' in source
     assert 'id="purchase-workspace-runtime-v11"' in source
     # Full trade list: total amount, quantity, then the price of one unit (UI 2026-10-08).
@@ -162,3 +164,19 @@ def test_mfds_not_applicable_does_not_claim_the_item_is_not_medical() -> None:
     assert card.value == "확인 못 함"
     assert card.note == "식약처 등록을 찾지 못해 조회하지 않았습니다"
     assert "의료기기" not in card.value + card.note
+
+
+def test_safety_card_is_green_only_when_a_lookup_ran_for_an_identified_product() -> None:
+    checked = header.safety_card_checked("CHECKED_NONE", checked_query="DFM100", query_type="model")
+    assert checked.value == "확인된 회수 없음" and checked.tone == header.TONE_OK
+    assert "모델명 ‘DFM100’" in checked.note
+
+    unknown = header.safety_card_checked("CHECKED_NONE", checked_query="zzqq", query_type="model", identified=False)
+    assert unknown.value == "확인 전" and unknown.tone == header.TONE_NEUTRAL
+
+    assert header.safety_card_checked("CHECKED_NONE").value == "확인 전"
+
+    not_run = header.safety_card_checked("CHECK_REQUIRED", checked_query="DFM100")
+    assert not_run.value == "확인 전" and not_run.tone == header.TONE_NEUTRAL
+
+    assert header.safety_card_checked("RED", checked_query="DFM100").tone == header.TONE_DANGER

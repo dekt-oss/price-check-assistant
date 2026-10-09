@@ -28,6 +28,9 @@ from purchase_price.ui.theme import (
 )
 
 RESULT_LAYOUT_V1 = True
+# Runtime marker (2026-10-09 acceptance fixes): top-aligned conclusion with the chip row inside,
+# narrow-width settings card, empty state, record table. The dashboard reloads a retained copy.
+RESULT_LAYOUT_V2 = True
 
 RESULT_CSS = """
 <style>
@@ -38,11 +41,42 @@ RESULT_CSS = """
 .rl-head .pc-title {margin:0 0 6px 0; line-height:1.25;}
 .rl-head .pc-subtitle {font-size:12.5px; margin:0;}
 .rl-head .pc-chips {margin:10px 0 0 0;}
+/* Width-aware blocks: the main column is ~1040px at 1440 but ~620px at 1024 (sidebar open). */
+.rl-cq {container-type:inline-size;}
 .rl-lead {display:grid; grid-template-columns:minmax(0,1fr) 265px; gap:13px; margin:0 0 13px 0;}
 .rl-lead > .pc-card {padding:22px 24px;}
-/* Content sits as one block (rail right under the basis line), centred when the panel is taller. */
-.rl-lead > .pc-card:first-child {display:flex; flex-direction:column; justify-content:center;}
+/* Top-aligned with the panel title: rail right under the basis line, the basis chips at the
+   card bottom, so a taller panel leaves no blank band above or below the conclusion. */
+.rl-lead > .pc-card:first-child {display:flex; flex-direction:column; justify-content:flex-start;}
 .rl-lead .rl-price {margin-top:0;}
+.rl-foot {margin-top:auto; padding-top:16px;}
+.rl-foot .rl-chiprow {margin:0; padding-top:12px; border-top:1px solid #EDF1F6;}
+#purchase-workspace-header-v1 .pc-value {white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+@container (max-width: 760px) {
+  .rl-lead {grid-template-columns:1fr;}
+  .rl-cq .pc-metrics {grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@container (max-width: 420px) {
+  .rl-cq .pc-metrics {grid-template-columns:1fr;}
+}
+.rl-done {display:flex; align-items:center; gap:7px; font-size:12px; color:#2F5A43; margin:-4px 0 12px 2px;}
+.rl-done::before {content:'✓'; font-weight:800; color:#047857;}
+.rl-done.rl-warn {color:#825510;} .rl-done.rl-warn::before {content:'!'; color:#B45309;}
+.rl-empty {padding:26px 28px !important; margin:4px 0 14px 0;}
+.rl-empty ul {margin:14px 0 0 0; padding:0 0 0 18px;}
+.rl-empty li {font-size:13px; color:#3E536C; line-height:1.7;}
+.rl-empty .rl-basis {margin-top:2px;}
+.rl-record {width:100%; border-collapse:collapse; font-size:12.5px; margin:4px 0 8px 0;}
+.rl-record th, .rl-record td {padding:7px 10px; border-bottom:1px solid #E9EEF4; text-align:left; vertical-align:top;}
+.rl-record th {width:28%; color:#5B6C82; font-weight:600; background:#F7FAFD; white-space:nowrap;}
+.rl-record td {color:#172B4D; word-break:break-all;}
+.rl-quote-hint {font-size:12px; color:#7A899B;}
+.rl-quote-hint b {font-size:13px; color:var(--pc-navy); font-weight:800;}
+.rl-quote-strip {font-size:13px; color:#3E536C; line-height:1.6;}
+.rl-quote-strip b {color:var(--pc-navy);}
+.st-key-rl_quote_strip {background:#F3F8FD; border:1px solid #D2E0F0; border-radius:11px; padding:8px 16px;}
+.st-key-rl_quote_strip [data-testid="stPageLink"] a {justify-content:flex-end;}
+.st-key-rl_quote_strip [data-testid="stPageLink"] p {font-weight:700; color:#1D4ED8;}
 .rl-eyebrow {display:flex; align-items:center; gap:6px; color:var(--pc-teal); font-weight:800;
   font-size:12px; margin-bottom:11px;}
 .rl-eyebrow::before {content:''; width:8px; height:8px; border-radius:50%; background:currentColor;}
@@ -106,8 +140,28 @@ RESULT_CSS = """
 .st-key-rl_settings input::placeholder {font-weight:400; font-size:13px;}
 .st-key-rl_settings [data-testid="stColumn"]:nth-child(4) [data-testid="stMarkdownContainer"] {text-align:right;}
 .st-key-rl_settings [data-testid="stColumn"]:last-child [data-testid="stVerticalBlock"] {align-items:flex-end;}
+/* Below ~860px of card width: price input and its hint on the first line, the period control on
+   its own second line (the ::after item forces the break), so nothing overlaps or clips. */
+.st-key-rl_settings {container-type:inline-size;}
+@container (max-width: 860px) {
+  .st-key-rl_settings [data-testid="stHorizontalBlock"] {flex-wrap:wrap; row-gap:6px;}
+  .st-key-rl_settings [data-testid="stHorizontalBlock"]::after {content:''; order:1; flex:0 0 100%; height:0;}
+  .st-key-rl_settings [data-testid="stColumn"] {min-width:0 !important;}
+  .st-key-rl_settings [data-testid="stColumn"]:nth-child(1) {flex:0 0 78px !important; width:78px !important;}
+  .st-key-rl_settings [data-testid="stColumn"]:nth-child(2) {flex:0 0 190px !important; width:190px !important;}
+  .st-key-rl_settings [data-testid="stColumn"]:nth-child(3) {flex:1 1 0 !important; width:auto !important;}
+  .st-key-rl_settings [data-testid="stColumn"]:nth-child(4) {order:2; flex:0 0 78px !important; width:78px !important;}
+  .st-key-rl_settings [data-testid="stColumn"]:nth-child(4) [data-testid="stMarkdownContainer"] {text-align:left;}
+  .st-key-rl_settings [data-testid="stColumn"]:nth-child(5) {order:2; flex:1 1 0 !important; width:auto !important;}
+  .st-key-rl_settings [data-testid="stColumn"]:last-child [data-testid="stVerticalBlock"] {align-items:flex-start;}
+  .st-key-rl_settings .rl-setting-unit {white-space:normal;}
+}
+@container (max-width: 480px) {
+  .st-key-rl_settings [data-testid="stColumn"]:nth-child(2) {flex:1 1 0 !important; width:auto !important;}
+  .st-key-rl_settings [data-testid="stColumn"]:nth-child(3) {order:1; flex:0 0 100% !important; width:100% !important;}
+}
 .st-key-rl_mfds_action {margin-top:-10px;}
-.st-key-rl_mfds_action button p {font-size:12px; color:#1D4ED8; font-weight:700;}
+.st-key-rl_mfds_action button p {font-size:12px; color:#1D4ED8; font-weight:700; white-space:nowrap;}
 .st-key-rl_result h4 {margin-top:18px;}
 .st-key-rl_outliers {background:#FFF9EA; border:1px solid #F8E2B5; border-radius:10px; padding:12px 16px;}
 .st-key-rl_outliers [data-testid="stMarkdownContainer"] p {font-size:12.5px; color:#5A4210;}
@@ -528,17 +582,21 @@ def price_points_html(stats: Any, *, quote: Decimal | None, unit: str | None) ->
     return f'<div class="rl-points rl-keep" id="purchase-price-band-v1">{cells}</div>'
 
 
-def lead_row_html(lead: LeadView, *, price_html: str, panel_html: str) -> str:
+def lead_row_html(lead: LeadView, *, price_html: str, panel_html: str, foot_html: str = "") -> str:
+    """Conclusion card (eyebrow, headline, basis, rail, then the basis chips at the bottom) and
+    the check panel, inside a width-aware wrapper so they stack when the column is narrow."""
+
     eyebrow_class = {TONE_WARN: " rl-warn", TONE_MUTED: " rl-muted"}.get(lead.eyebrow_tone, "")
     basis = f'<div class="rl-basis">{esc(lead.basis)}</div>' if lead.basis else ""
     return (
-        '<div class="rl-lead rl-keep">'
+        '<div class="rl-cq rl-keep"><div class="rl-lead rl-keep">'
         '<div class="pc-card" id="purchase-conclusion-v1">'
         f'<div class="rl-eyebrow{eyebrow_class}">{esc(lead.eyebrow)}</div>'
         f'<div class="rl-headline">{lead.headline_html}</div>{basis}'
         + (f'<div class="rl-price">{price_html}</div>' if price_html else "")
+        + (f'<div class="rl-foot">{foot_html}</div>' if foot_html else "")
         + "</div>"
-        f"{panel_html}</div>"
+        f"{panel_html}</div></div>"
     )
 
 
@@ -554,7 +612,107 @@ def cards_html(cards: Sequence[Any]) -> str:
         metric_card_html(card.label, card.value, card.note, tone=_CARD_TONES.get(card.tone, TONE_MUTED))
         for card in cards
     )
-    return f'<div class="pc-metrics rl-keep" id="purchase-workspace-header-v1">{items}</div>'
+    # Two columns when the main column is narrow, so a value never breaks inside "1,980,000원".
+    return f'<div class="rl-cq rl-keep"><div class="pc-metrics rl-keep" id="purchase-workspace-header-v1">{items}</div></div>'
+
+
+def mfds_check_done_html(
+    *,
+    status: str,
+    active_model_count: int,
+    model_count: int,
+    companies_before: int,
+    companies_after: int,
+) -> str:
+    """One line where the 'check sale status' button was, saying what the check changed."""
+
+    if status == "failure":
+        return (
+            '<div class="rl-done rl-warn rl-keep">식약처 모델 목록을 불러오지 못했습니다. '
+            "가격 결과는 그대로이며, 잠시 뒤 다시 확인하세요.</div>"
+        )
+    if status not in {"success", "success_0"}:
+        return ""
+    parts = ["식약처 판매 가능·취소 확인 완료"]
+    if model_count:
+        parts.append(f"같은 품목 모델 {model_count:,}개 중 판매 가능 {active_model_count:,}개")
+    else:
+        parts.append("식약처 모델 목록에서 같은 품목 모델을 찾지 못했습니다")
+    if companies_before and companies_after != companies_before:
+        parts.append(
+            f"아래 제조·수입업체 목록은 판매 가능한 모델이 있는 {companies_after}곳만 남겼습니다"
+            f"(전체 {companies_before}곳)"
+        )
+    return f'<div class="rl-done rl-keep">{esc(" · ".join(parts))}</div>'
+
+
+def nothing_found(
+    *,
+    direct_count: int,
+    reference_count: int,
+    identity_found: bool,
+    price_unavailable: bool,
+    mfds_records: int = 0,
+    recall_records: int = 0,
+) -> bool:
+    """True when the search matched nothing anywhere, so no product result should be drawn.
+
+    A failed price lookup is not "nothing found" (it says so instead), and any MFDS or recall
+    hit means there is something to show.
+    """
+
+    return (
+        not price_unavailable
+        and not identity_found
+        and direct_count == 0
+        and reference_count == 0
+        and mfds_records == 0
+        and recall_records == 0
+    )
+
+
+def not_found_html(query: str, *, basis: str = "") -> str:
+    """Empty state: what was searched, where we looked, and what to try next."""
+
+    shown = " ".join(str(query or "").split()) or "검색어"
+    basis_html = f'<div class="rl-basis">{esc(basis)}</div>' if basis else ""
+    return (
+        '<div class="pc-card rl-empty rl-keep" id="purchase-not-found-v1">'
+        '<div class="rl-eyebrow rl-muted">검색 결과 없음</div>'
+        f'<div class="rl-headline">‘{esc(shown)}’에 맞는 제품을 찾지 못했습니다.</div>'
+        '<div class="rl-basis">나라장터 거래 자료와 식약처 허가 자료 모두에서 이 검색어와 같은 모델·품목·업체를 '
+        "찾지 못했습니다. 그래서 가격·허가·회수 정보를 보여주지 않습니다.</div>"
+        f"{basis_html}"
+        "<ul>"
+        "<li><b>철자</b>를 확인하세요. 띄어쓰기와 하이픈(-)은 빼도 됩니다.</li>"
+        "<li><b>모델명만</b> 넣어 보세요. 예: DFM100, HeartOn A16-DS</li>"
+        "<li><b>업체명</b>이나 <b>품목명</b>으로 찾아보세요. 예: 메디아나, 환자감시장치</li>"
+        "</ul></div>"
+    )
+
+
+def quote_hint_html(quote: Decimal | None, unit: str | None, *, invalid: bool = False) -> str:
+    """Next to the price input: the parsed value with thousands separators, or how to fill it."""
+
+    phrase = unit_phrase(unit)
+    if invalid:
+        return '<span class="rl-quote-hint">숫자로만 입력하세요 (쉼표는 괜찮습니다)</span>'
+    if quote is not None and quote > 0:
+        per = f" · {phrase} 기준" if phrase else ""
+        return f'<span class="rl-quote-hint"><b>= {esc(_won(quote))}</b>{esc(per)}</span>'
+    base = f"원 / {phrase} 기준" if phrase else "원"
+    return f'<span class="rl-setting-unit">{esc(base)} · 넣으면 결론과 막대에 위치가 표시됩니다</span>'
+
+
+def record_fields_html(fields: Iterable[tuple[str, object]]) -> str:
+    """The archived record as a plain two-column table sized to its rows (no empty filler rows)."""
+
+    rows = "".join(
+        f"<tr><th>{esc(label)}</th><td>{esc(value)}</td></tr>"
+        for label, value in fields
+        if str(label or "").strip()
+    )
+    return f'<table class="rl-record rl-keep"><tbody>{rows}</tbody></table>'
 
 
 def price_card_label(stats: Any, unit: str | None) -> str:

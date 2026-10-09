@@ -29,6 +29,8 @@ TONE_NEUTRAL = "neutral"
 PLAIN_WORDING_2026_10 = True
 # Bumped when this module's wording changes again, so retained copies reload once more.
 PLAIN_WORDING_2026_10B = True
+# 2026-10-09 acceptance fixes: safety_card_checked (grey "확인 전" unless a lookup really ran).
+PLAIN_WORDING_2026_10C = True
 
 # Safety codes stay internal; the header shows what they mean.
 _SAFETY_TEXT: dict[str, tuple[str, str, str]] = {
@@ -60,6 +62,41 @@ def safety_card(status_value: str) -> SummaryCard:
         ("안전정보 미확인", "회수·판매중지 여부를 확인하지 못했습니다", TONE_WARN),
     )
     return SummaryCard("safety", "안전정보", value, note, tone)
+
+
+def safety_card_checked(
+    status_value: str,
+    *,
+    checked_query: str = "",
+    query_type: str = "",
+    identified: bool = True,
+) -> SummaryCard:
+    """The 안전·회수 card that says what was actually looked up.
+
+    "확인된 회수 없음" (green) only when the recall lookup ran for an identified product, and
+    the note names the search word used. When the product itself was not identified, an empty
+    recall answer proves nothing, so the card stays grey "확인 전".
+    """
+
+    status = str(status_value or "").upper()
+    card = safety_card(status)
+    if status == "CHECKED_NONE":
+        query = " ".join(str(checked_query or "").split())
+        if not identified or not query:
+            return SummaryCard(
+                "safety",
+                card.label,
+                "확인 전",
+                "제품을 특정하지 못해 회수 여부를 판단하지 않았습니다",
+                TONE_NEUTRAL,
+            )
+        what = "품목명" if query_type == "product" else "모델명"
+        return SummaryCard(
+            "safety", card.label, card.value, f"식약처 회수·판매중지 자료에서 {what} ‘{query}’ 검색", card.tone
+        )
+    if status not in _SAFETY_TEXT:
+        return SummaryCard("safety", card.label, "확인 전", "회수·판매중지 자료를 아직 조회하지 않았습니다", TONE_NEUTRAL)
+    return card
 
 
 def safety_needs_banner(status_value: str) -> bool:
