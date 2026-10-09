@@ -62,7 +62,9 @@ jobs:
     env:
       PYTHONPATH: src
       G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
-      G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY }}
+      # The account approved for 100,000 calls/day (2026-10-09) holds G2B_RESEARCH_SERVICE_KEY; an
+      # explicit G2B_SHOPPING_SERVICE_KEY secret still wins when one is added.
+      G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY || secrets.G2B_RESEARCH_SERVICE_KEY }}
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
