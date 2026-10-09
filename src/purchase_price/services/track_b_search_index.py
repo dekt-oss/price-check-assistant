@@ -30,6 +30,8 @@ from sqlalchemy.orm import Session
 from purchase_price.models import TrackBDeliveryLine
 
 SEARCH_FTS_TABLE = "track_b_search_fts"
+# Runtime marker: pages/1_대시보드.py reloads a retained pre-#329 copy that lacks it.
+SEARCH_INDEX_V1 = True
 SEARCH_ROWS_TABLE = "track_b_search_rows"
 SEARCH_VOCAB_TABLE = "track_b_search_vocab"
 SEARCH_COLUMNS = ("product_title", "model_key", "class_key", "supplier")

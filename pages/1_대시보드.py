@@ -36,6 +36,8 @@ from purchase_price.services import price_entry_check as price_entry_check_servi
 from purchase_price.services import track_b_db_quote_comparison as track_b_comparison_service
 from purchase_price.services import track_b_live_gap_fill as track_b_live_service
 from purchase_price.services import track_b_r2_quote_index as track_b_r2_index_service
+from purchase_price.services import track_b_reference_quality as track_b_reference_quality_service
+from purchase_price.services import track_b_search_index as track_b_search_index_service
 from purchase_price.services import track_b_serving_snapshot as track_b_snapshot_service
 from purchase_price.services import track_b_supplier_summary as supplier_summary_service
 from purchase_price.services.g2b_search_policy import (
@@ -178,6 +180,11 @@ def _mfds_identity_r2_runtime():
 _TRACK_B_RELOAD_LOCK = Lock()
 # (module, attribute that only the current code has), reloaded in dependency order.
 _TRACK_B_RUNTIME_MARKERS = (
+    # #329 trigram side index: the helper module first, then the modules that import it.
+    (track_b_search_index_service, "SEARCH_INDEX_V1"),
+    (track_b_comparison_service, "SEARCH_INDEX_V1"),
+    (track_b_reference_quality_service, "SEARCH_INDEX_V1"),
+    (supplier_summary_service, "SEARCH_INDEX_V1"),
     (track_b_comparison_service, "_BUSINESS_NAME_COLUMN"),
     (track_b_r2_index_service, "_LAST_GOOD_SNAPSHOT"),
     (track_b_snapshot_service, "WORKSPACE_LOOKUP_LIMIT"),

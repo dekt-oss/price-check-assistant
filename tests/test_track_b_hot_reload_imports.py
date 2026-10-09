@@ -94,6 +94,43 @@ def test_dashboard_reloads_retained_pre_fix_track_b_modules() -> None:
     assert track_b_live_gap_fill.DROPS_CANCELLED_LINES is True
 
 
+def test_dashboard_reloads_pre_search_index_modules_in_dependency_order() -> None:
+    """#329 changed three lookup modules; a stale process must reload them (helper first)."""
+
+    from pathlib import Path
+
+    from purchase_price.services import (
+        track_b_db_quote_comparison,
+        track_b_reference_quality,
+        track_b_search_index,
+        track_b_supplier_summary,
+    )
+    from purchase_price.ui import memory_diagnostic
+
+    for module in (
+        track_b_search_index,
+        track_b_db_quote_comparison,
+        track_b_reference_quality,
+        track_b_supplier_summary,
+        memory_diagnostic,
+    ):
+        assert module.SEARCH_INDEX_V1 is True
+
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+    entries = [
+        '(track_b_search_index_service, "SEARCH_INDEX_V1")',
+        '(track_b_comparison_service, "SEARCH_INDEX_V1")',
+        '(track_b_reference_quality_service, "SEARCH_INDEX_V1")',
+        '(supplier_summary_service, "SEARCH_INDEX_V1")',
+    ]
+    positions = [source.index(entry) for entry in entries]
+    assert positions == sorted(positions)
+    assert positions[0] > source.index("_TRACK_B_RUNTIME_MARKERS = (")
+
+    home = Path("Home.py").read_text(encoding="utf-8")
+    assert 'if not hasattr(memory_diagnostic, "SEARCH_INDEX_V1"):' in home
+
+
 def test_native_snapshot_lookup_reads_beyond_50_rows(tmp_path) -> None:
     """The workspace opens the native snapshot; its lookup must use the 500-row limit."""
 
