@@ -12,6 +12,17 @@ from purchase_price.ui import quote_market_research
 from purchase_price.ui.quote_review_state import QuoteReviewState
 
 
+def _with_live(lookup):
+    """Wrap an index-only fake lookup in the (result, live) shape of the shared live lookup."""
+
+    from purchase_price.services.track_b_live_gap_fill import TrackBLiveGapFill
+
+    def wrapped(query, *, quote_unit_price):
+        return lookup(query, quote_unit_price=quote_unit_price), TrackBLiveGapFill("up_to_date")
+
+    return wrapped
+
+
 def test_auto_quote_flow_loads_db_comparison_and_invalidates_it(monkeypatch) -> None:
     state = QuoteReviewState(items=[QuoteItem(
         source_sheet="sheet", source_row=1, product_name="제습기",
@@ -25,7 +36,7 @@ def test_auto_quote_flow_loads_db_comparison_and_invalidates_it(monkeypatch) -> 
         calls.append((query.model_name, quote_unit_price))
         return expected
 
-    monkeypatch.setattr(quote_market_research, "lookup_track_b_quote", lookup)
+    monkeypatch.setattr(quote_market_research, "lookup_track_b_quote_with_live", _with_live(lookup))
     quote_market_research._ensure_track_b_comparison(state)
     assert calls == [("MA-045DT", Decimal("100"))]
     assert state.track_b_db[0] is expected
