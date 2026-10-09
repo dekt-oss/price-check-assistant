@@ -40,8 +40,9 @@ RESULT_CSS = """
 .rl-head .pc-chips {margin:10px 0 0 0;}
 .rl-lead {display:grid; grid-template-columns:minmax(0,1fr) 265px; gap:13px; margin:0 0 13px 0;}
 .rl-lead > .pc-card {padding:22px 24px;}
-.rl-lead > .pc-card:first-child {display:flex; flex-direction:column;}
-.rl-lead .rl-price {margin-top:auto; padding-top:8px;}
+/* Content sits as one block (rail right under the basis line), centred when the panel is taller. */
+.rl-lead > .pc-card:first-child {display:flex; flex-direction:column; justify-content:center;}
+.rl-lead .rl-price {margin-top:0;}
 .rl-eyebrow {display:flex; align-items:center; gap:6px; color:var(--pc-teal); font-weight:800;
   font-size:12px; margin-bottom:11px;}
 .rl-eyebrow::before {content:''; width:8px; height:8px; border-radius:50%; background:currentColor;}
@@ -110,7 +111,8 @@ RESULT_CSS = """
 .st-key-rl_result h4 {margin-top:18px;}
 .st-key-rl_outliers {background:#FFF9EA; border:1px solid #F8E2B5; border-radius:10px; padding:12px 16px;}
 .st-key-rl_outliers [data-testid="stMarkdownContainer"] p {font-size:12.5px; color:#5A4210;}
-.st-key-rl_outliers button p {color:#1D4ED8; font-weight:700; font-size:12.5px;}
+.st-key-rl_outliers button [data-testid="stMarkdownContainer"] p {color:#1D4ED8; font-weight:700; font-size:12.5px;}
+.st-key-rl_outliers button:hover [data-testid="stMarkdownContainer"] p {text-decoration:underline;}
 .st-key-rl_result h4 {font-size:17px; font-weight:700; color:var(--pc-navy); letter-spacing:-0.4px; padding:0;}
 .st-key-rl_result [data-baseweb="tab-list"] {gap:20px;}
 .st-key-rl_result [data-baseweb="tab"] p {font-size:13px;}
