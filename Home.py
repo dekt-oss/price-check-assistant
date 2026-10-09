@@ -6,6 +6,11 @@ import streamlit as st
 
 from purchase_price.config import Settings
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
+from purchase_price.ui.theme import (
+    apply_app_theme,
+    sidebar_brand_html,
+    sidebar_group_html,
+)
 
 hydrate_streamlit_runtime_secrets()
 
@@ -84,8 +89,8 @@ benchmark_page = st.Page(
     icon="📈",
     url_path="hospital-benchmark",
 )
-medical_page = st.Page("pages/4_의료기기_조회.py", title="의료기기 상세", icon="🏥")
-quote_detail_page = st.Page("pages/2_견적_검토.py", title="견적 상세 검증", icon="📋")
+medical_page = st.Page("pages/4_의료기기_조회.py", title="의료기기 허가·안전", icon="🏥")
+quote_detail_page = st.Page("pages/2_견적_검토.py", title="견적서 검토", icon="📋")
 legacy_search_page = st.Page("pages/3_빠른_검색.py", title="상세 검색(이전 화면)", icon="🧭")
 validation_pages = [
     st.Page(
@@ -120,16 +125,28 @@ page = st.navigation(
     position="hidden",
 )
 
+apply_app_theme()
+
+# Two groups (docs/design/DESIGN_DECISIONS.md): purchasing work first, hospital management info second.
 with st.sidebar:
+    st.markdown(sidebar_brand_html(), unsafe_allow_html=True)
     st.page_link(home_page, label="홈", icon="🏠")
-    st.page_link(price_page, label="구매가격 조사", icon="🔎")
-    st.page_link(news_page, label="병원 News Radar", icon="📰")
-    st.page_link(benchmark_page, label="병원 경영 Benchmark", icon="📈")
-    st.page_link(medical_page, label="의료기기 상세", icon="🏥")
+    st.markdown(sidebar_group_html("구매 업무"), unsafe_allow_html=True)
+    st.page_link(price_page, label="가격 조사", icon="🔎")
+    st.page_link(quote_detail_page, label="견적서 검토", icon="📋")
+    st.page_link(medical_page, label="의료기기 허가·안전", icon="🏥")
+    st.markdown(sidebar_group_html("병원 경영 정보"), unsafe_allow_html=True)
+    st.page_link(news_page, label="병원 뉴스", icon="📰")
+    st.page_link(benchmark_page, label="병원 경영 비교", icon="📈")
+    st.markdown(
+        '<div class="pc-sidefoot">나라장터 거래자료 · 식약처 허가정보 기준<br>'
+        "가격 판단은 거래 원문을 확인한 뒤 진행해 주세요.</div>",
+        unsafe_allow_html=True,
+    )
     if admin_pages:
         st.divider()
         st.caption("관리 · 검증")
-        for admin_link in (*admin_pages, *validation_pages, quote_detail_page, legacy_search_page):
+        for admin_link in (*admin_pages, *validation_pages, legacy_search_page):
             st.page_link(admin_link)
 
 page.run()

@@ -111,11 +111,13 @@ def test_quote_upload_opens_items_in_place() -> None:
     assert 'st.switch_page("pages/2_견적_검토.py")' not in source
 
 
-def test_sidebar_shows_two_business_pages_and_hides_validation_tools() -> None:
+def test_sidebar_groups_business_pages_and_hides_validation_tools() -> None:
     source = HOME.read_text(encoding="utf-8")
     assert 'position="hidden"' in source
     assert 'title="가격 조사"' in source
-    assert 'title="의료기기 상세"' in source
+    assert 'title="의료기기 허가·안전"' in source
+    assert 'sidebar_group_html("구매 업무")' in source
+    assert 'sidebar_group_html("병원 경영 정보")' in source
     # Validation pages stay reachable by URL (production OCR smoke) but are listed only for admins.
     assert 'url_path="quote-extraction-uat"' in source
     assert "if _admin_mode():" in source

@@ -4,5 +4,29 @@ headless = true
 [browser]
 gatherUsageStats = false
 
+# 병원 구매정보 도우미 — docs/design/DESIGN_DECISIONS.md (blue, GPT component sizing).
 [theme]
 base = "light"
+primaryColor = "#1D4ED8"
+backgroundColor = "#F4F7FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#172B4D"
+linkColor = "#1D4ED8"
+borderColor = "#DCE4EE"
+dataframeHeaderBackgroundColor = "#F5F8FC"
+showWidgetBorder = true
+baseRadius = "8px"
+buttonRadius = "8px"
+baseFontSize = 14
+metricValueFontSize = "22px"
+metricValueFontWeight = 800
+headingFontWeights = [800, 700, 700, 700, 600, 600]
+headingFontSizes = ["29px", "20px", "17px", "15px", "14px", "13px"]
+redColor = "#B42318"
+orangeColor = "#B45309"
+greenColor = "#047857"
+blueColor = "#1D4ED8"
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#EAF1FF"

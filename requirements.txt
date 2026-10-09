@@ -1,6 +1,7 @@
 -e .
 
 # Streamlit Community Cloud runtime parser manifest.
+# Revision 2026-10-09g: restart so the new blue theme in .streamlit/config.toml loads.
 # Revision 2026-10-09f: add the ?_memdiag=1 memory readout to confirm the page-cache fix (#311).
 # Revision 2026-10-09e: restart after index downloads stop filling the page cache.
 # Revision 2026-10-09d: restart after the app went over its resource limit; index warm-up now sequential.
