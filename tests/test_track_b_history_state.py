@@ -188,7 +188,7 @@ def test_runner_freezes_tiers_then_collects_the_first_pass(monkeypatch, tmp_path
     saved = TrackBHistoryState.from_payload(states.values[HISTORY_STATE_NAME])
     assert saved.cursor == CollectionCursor(1, 1)
     report = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
-    assert report["tier"] == "hospital_active" and report["mode"] == "history_backfill"
+    assert report["batches"][0]["tier"] == "hospital_active" and report["mode"] == "history_backfill"
 
 
 def test_codes_reach_the_collector_sorted_even_from_an_unsorted_frozen_state(tmp_path) -> None:
@@ -213,3 +213,70 @@ def test_codes_reach_the_collector_sorted_even_from_an_unsorted_frozen_state(tmp
     )
     assert tuple(resolved[0]) == codes
     assert date.fromisoformat(state.current_pass[1])
+
+
+def _wire_runner(monkeypatch, tmp_path: Path, states: _MemoryStates, fake_collect) -> None:
+    settings = SimpleNamespace(
+        r2_configured=True,
+        resolved_g2b_shopping_service_key="key",
+        g2b_request_timeout_seconds=5,
+        g2b_max_retries=0,
+        g2b_shopping_base_url=None,
+    )
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(runner.R2OperationalStateStore, "from_settings", lambda _s: states)
+    monkeypatch.setattr(runner, "_restore_snapshot", lambda **_kwargs: tmp_path / "codes.json")
+    monkeypatch.setattr(
+        runner, "load_target_code_snapshot", lambda *_a, **_k: SimpleNamespace(codes=SNAPSHOT)
+    )
+    monkeypatch.setattr(runner, "_active_codes_from_serving_index", lambda *_a: ACTIVE)
+    monkeypatch.setattr(runner, "PublicDataPortalClient", lambda *_a, **_k: object())
+    monkeypatch.setattr(runner.R2RawEvidenceStore, "from_settings", lambda _s: object())
+    monkeypatch.setattr(runner, "collect_track_b_batch", fake_collect)
+
+
+def test_until_done_runs_every_pass_and_retries_a_connection_error(monkeypatch, tmp_path) -> None:
+    states = _MemoryStates()
+    failures = iter([True])  # the very first batch hits a ConnectTimeout
+    pauses: list[float] = []
+
+    def fake_collect(**kwargs):
+        state = TrackBHistoryState.from_payload(states.values[HISTORY_STATE_NAME])
+        if next(failures, False):
+            return _summary(state, next_index=0, stop="SOURCE_OR_STORAGE_ERROR", requests=1)
+        return _summary(state, next_index=len(state.current_codes), stop="TARGET_COMPLETE")
+
+    _wire_runner(monkeypatch, tmp_path, states, fake_collect)
+    exit_code = runner.run(
+        request_budget=10, output=tmp_path / "s.json", max_minutes=300, pause=pauses.append
+    )
+
+    saved = TrackBHistoryState.from_payload(states.values[HISTORY_STATE_NAME])
+    report = json.loads((tmp_path / "s.json").read_text(encoding="utf-8"))
+    assert exit_code == 0 and saved.complete and report["history_complete"] is True
+    assert len(report["batches"]) == len(saved.passes) + 1
+    assert pauses == [runner.SOURCE_ERROR_PAUSE_SECONDS]
+
+
+def test_until_done_stops_before_the_job_deadline(monkeypatch, tmp_path) -> None:
+    states = _MemoryStates()
+    now = [0.0]
+
+    def fake_collect(**kwargs):
+        now[0] += 40 * 60  # each batch takes 40 minutes
+        state = TrackBHistoryState.from_payload(states.values[HISTORY_STATE_NAME])
+        return _summary(state, next_index=1)
+
+    _wire_runner(monkeypatch, tmp_path, states, fake_collect)
+    runner.run(
+        request_budget=1000,
+        output=tmp_path / "s.json",
+        max_minutes=100,
+        clock=lambda: now[0],
+        pause=lambda _s: None,
+    )
+
+    report = json.loads((tmp_path / "s.json").read_text(encoding="utf-8"))
+    # 0 -> 40 -> 80 min; a third batch (estimated 1000 x 1.3 s) would pass the 100-minute deadline.
+    assert len(report["batches"]) == 2
+    assert report["history_complete"] is False
