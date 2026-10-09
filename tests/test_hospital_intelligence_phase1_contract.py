@@ -37,6 +37,26 @@ def test_root_url_still_opens_the_price_search() -> None:
         assert f'label="{label}"' in source
 
 
+def test_home_uses_the_app_name_and_the_new_menu_names() -> None:
+    source = (REPO_ROOT / "pages" / "0_홈.py").read_text(encoding="utf-8")
+    assert "page_header_html(APP_NAME" in source
+    for old in ("AI Hospital Intelligence", "구매가격 조사", "News Radar", "Benchmark 열기", "병원 경영 Benchmark"):
+        assert old not in source
+    for name in ("가격 조사", "견적서 검토", "의료기기 허가·안전", "병원 뉴스", "병원 경영 비교"):
+        assert f'"{name}"' in source
+    # two groups, in the same order as the sidebar
+    assert source.index("구매 업무") < source.index("병원 경영 정보")
+    for target in (
+        "pages/1_대시보드.py",
+        "pages/2_견적_검토.py",
+        "pages/4_의료기기_조회.py",
+        "pages/20_병원_News_Radar.py",
+        "pages/21_병원_경영_Benchmark.py",
+    ):
+        assert f'"{target}"' in source
+        assert (REPO_ROOT / target).exists()
+
+
 def test_new_screens_use_plain_words() -> None:
     offenders = [
         (page.name, line, text)

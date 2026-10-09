@@ -14,11 +14,16 @@ Screen-specific CSS uses the ``pc-dev-`` prefix; the shared look comes from ui/t
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta, timezone
+from decimal import Decimal
+from statistics import median
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from purchase_price.services.matching import exact_model_match
+from purchase_price.ui import result_summary
 from purchase_price.ui.theme import (
     TONE_DANGER,
     TONE_INFO,
@@ -30,6 +35,11 @@ from purchase_price.ui.theme import (
     metric_card_html,
     metric_row_html,
     notice_html,
+)
+from purchase_price.ui.track_b_transactions import (
+    category_reference_candidates,
+    reference_candidates,
+    strict_comparison_candidates,
 )
 
 DEVICE_PAGE_LAYOUT_V1 = True
@@ -60,9 +70,41 @@ _AUTH_MARKERS = (
     "PERMISSION_DENIED",
     "CODE=30",
 )
+NOT_APPROVED_TEXT = "식약처 조회 서비스가 아직 연결되지 않았습니다."
 _TIMEOUT_MARKERS = ("TIMEOUT", "TIMED OUT", "TRANSPORT")
 _URL_PATTERN = re.compile(r"https?://\S+")
 _KEY_PATTERN = re.compile(r"(?i)(service[_-]?key|api[_-]?key|key)=\S+")
+
+try:
+    SEOUL = ZoneInfo("Asia/Seoul")
+except ZoneInfoNotFoundError:  # no tz database (bare Windows); Korea has no DST
+    SEOUL = timezone(timedelta(hours=9), name="KST")
+
+
+def kst_now() -> datetime:
+    """Streamlit Cloud runs in UTC; every time shown on this page is Korean time."""
+
+    return datetime.now(SEOUL)
+
+
+def kst_time_text(value: datetime | None = None, fmt: str = "%m-%d %H:%M") -> str:
+    moment = value or kst_now()
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(SEOUL).strftime(fmt)
+
+
+def won_text(value: object) -> str:
+    """'1,980,000원' for a number; '미확인' when there is no usable number."""
+
+    try:
+        number = Decimal(str(value).replace(",", "").replace("원", "").strip())
+    except Exception:
+        return "미확인"
+    if not number.is_finite():
+        return "미확인"
+    return f"{number:,.0f}원"
+
 
 DEVICE_CSS = """
 <style>
@@ -78,6 +120,7 @@ DEVICE_CSS = """
 .pc-dev-section .pc-subtitle {margin:0 0 10px 0;}
 .pc-dev-hint {font-size:12px; color:var(--pc-muted); line-height:1.6; margin:6px 0 0 0;}
 .pc-notice.pc-ok {background:#EFFAF5; border-color:#BDE5D3; color:#0F5F46;}
+.pc-dev-trades .pc-metric .pc-value {font-size:18px; white-space:nowrap;}
 .pc-dev-one {max-width:280px; margin:0 0 14px 0;}
 .pc-dev-detail {display:block; margin-top:4px; font-size:11.5px; opacity:.85;}
 </style>
@@ -98,13 +141,20 @@ def _eul_reul(word: str) -> str:
     return "를"
 
 
+def is_not_approved_error(error: object) -> bool:
+    """True when a lookup failed because the service is not approved for the deployed key."""
+
+    upper = str(error or "").upper()
+    return any(marker in upper for marker in _AUTH_MARKERS) or str(error or "") == NOT_APPROVED_TEXT
+
+
 def safe_error_text(error: object) -> str:
     """One short plain line for the screen: no URLs, no keys, no stack traces, no error codes."""
 
     text = " ".join(str(error or "").split())
     upper = text.upper()
     if any(marker in upper for marker in _AUTH_MARKERS):
-        return "식약처 서비스 사용 승인이 확인되지 않았습니다. 서비스키 등록을 확인해야 합니다."
+        return NOT_APPROVED_TEXT
     if any(marker in upper for marker in _TIMEOUT_MARKERS) or "시간 초과" in text:
         return "서버가 제때 응답하지 않았습니다."
     server_error = re.search(r"HTTP\s*(5\d\d)", upper)
@@ -125,16 +175,45 @@ def section_html(title: str, hint: str = "") -> str:
 
 # ---------------------------------------------------------------- state notices
 
-def connection_chips_html(*, mfds_ready: bool, g2b_ready: bool) -> str:
-    def _state(name: str, ready: bool) -> str:
-        return f"{esc(name)} <b>{'사용 가능' if ready else '사용 불가'}</b>"
+SERVICE_PERMIT = "permit"
+SERVICE_RECALL = "recall"
+SERVICE_COMPANY = "company"
+SERVICE_UDI = "udi"
+SERVICE_G2B = "g2b"
+SERVICE_LABELS = {
+    SERVICE_PERMIT: "식약처 허가정보",
+    SERVICE_RECALL: "회수·판매중지",
+    SERVICE_COMPANY: "업체 허가·신고",
+    SERVICE_UDI: "UDI-DI",
+    SERVICE_G2B: "나라장터 자료",
+}
+STATE_READY = "ready"
+STATE_PENDING = "pending"
+STATE_OFF = "off"
+_STATE_WORDS = {STATE_READY: "사용 가능", STATE_PENDING: "연결 전", STATE_OFF: "사용 불가"}
 
-    return chips_html([_state("식약처 자료", mfds_ready), _state("나라장터 자료", g2b_ready)])
+
+def connection_chips_html(
+    *,
+    mfds_ready: bool,
+    g2b_ready: bool,
+    service_states: Mapping[str, str] | None = None,
+) -> str:
+    """One chip per data service. ``service_states`` holds what the last call of each one showed:
+    ``pending`` (the service is not approved yet, so the chip says 연결 전), ``ready``."""
+
+    states = dict(service_states or {})
+    chips: list[str] = []
+    for service, label in SERVICE_LABELS.items():
+        configured = g2b_ready if service == SERVICE_G2B else mfds_ready
+        state = STATE_OFF if not configured else states.get(service, STATE_READY)
+        chips.append(f"{esc(label)} <b>{_STATE_WORDS.get(state, _STATE_WORDS[STATE_READY])}</b>")
+    return chips_html(chips)
 
 
 def missing_key_notice_html(what: str) -> str:
     return notice_html(
-        f"<b>{esc(what)}을 조회할 수 없습니다.</b> 식약처 조회용 서비스키가 설정되지 않았습니다. "
+        f"<b>{esc(what)}{_eul_reul(what)} 조회할 수 없습니다.</b> 식약처 자료 연결 설정이 없습니다. "
         "관리자에게 설정을 요청해 주세요.",
         TONE_WARN,
     )
@@ -153,6 +232,12 @@ def handoff_notice_html(source: str, filled: str) -> str:
 def lookup_failed_html(what: str, detail: str = "") -> str:
     """Failed live lookup: say so, offer a retry, and never read as "0건" / "없음"."""
 
+    if is_not_approved_error(detail):
+        return notice_html(
+            f"<b>{esc(what)}{_eul_reul(what)} 확인하지 못했습니다.</b><br>"
+            "이 조회 서비스가 아직 연결되지 않았습니다. ‘없음’이라는 뜻이 아니니 식약처 사이트에서 직접 확인하세요.",
+            TONE_WARN,
+        )
     detail_text = safe_error_text(detail)
     detail_html = f'<span class="pc-dev-detail">원인: {esc(detail_text)}</span>' if detail_text else ""
     return notice_html(
@@ -320,10 +405,10 @@ class MarketResult:
     records_error: str = ""
     exact: Any = None
     business_error: str = ""
-    procurement: Any = None
-    procurement_error: str = ""
-    procurement_note: str = ""
-    discovery: Any = None
+    track_b: Any = None
+    track_b_live: str = ""
+    track_b_error: str = ""
+    trades: TradeSummary | None = None
     supplier_rows: list[dict[str, str]] = field(default_factory=list)
     recall: Any = None
 
@@ -468,104 +553,181 @@ def permit_not_found_html(params: MarketParams) -> str:
     )
 
 
-# ---------------------------------------------------------------- procurement cases
+# ---------------------------------------------------------------- 나라장터 same-product trades
 
-def procurement_rows(items: Iterable[Any]) -> list[dict[str, object]]:
-    """Plain table of public price/delivery cases: confirmed-same-product rows first."""
+TRADE_TABLE_LIMIT = 10
+LIVE_FAILURE_NOTE = "나라장터 실시간 확인에 실패해 최근 며칠 거래가 빠졌을 수 있습니다."
 
-    from purchase_price.services.price_conditions import build_price_condition_profile
 
-    rows: list[tuple[int, dict[str, object]]] = []
-    for item in items:
-        profile = build_price_condition_profile(item)
-        grade = str(getattr(getattr(item, "match_grade", ""), "value", getattr(item, "match_grade", "")))
-        same_product = grade.upper() in {"A", "B"}
-        transaction_date = getattr(item, "transaction_date", None)
-        rows.append(
-            (
-                0 if same_product else 1,
-                {
-                    "거래일": transaction_date.isoformat() if transaction_date else "",
-                    "1개당 가격(원)": int(item.price),
-                    "수량·단위": profile.quantity_unit,
-                    "부가세": profile.vat,
-                    "같은 제품 여부": "같은 제품으로 확인" if same_product else "참고용 (가격 판단 제외)",
-                    "출처": str(getattr(item, "source_name", "") or ""),
-                    "거래 조건": str(getattr(item, "conditions", "") or ""),
-                    "원문 링크": str(getattr(item, "source_url", "") or ""),
-                },
-            )
+@dataclass(frozen=True)
+class TradeSummary:
+    """The same numbers 가격 조사 shows: default period (widened when empty), same-product (A/B)
+    trades only, and only the most common unit in the median."""
+
+    count: int
+    median_price: Decimal | None
+    low_price: Decimal | None
+    high_price: Decimal | None
+    main_unit: str | None
+    period_label: str
+    period_note: str | None
+    reference_count: int
+    other_unit_count: int
+    trades: tuple[Any, ...] = ()
+
+
+def _positive_decimal(value: object) -> Decimal | None:
+    try:
+        number = Decimal(str(value))
+    except Exception:
+        return None
+    return number if number.is_finite() and number > 0 else None
+
+
+def build_trade_summary(track_b: Any, today: date | None = None) -> TradeSummary:
+    today = today or kst_now().date()
+    direct = strict_comparison_candidates(track_b)
+    references = (*category_reference_candidates(track_b), *reference_candidates(track_b))
+    choice = result_summary.choose_period(
+        [getattr(candidate, "transaction_date", None) for candidate in direct],
+        requested=result_summary.DEFAULT_PERIOD_LABEL,
+        user_chose=False,
+        today=today,
+    )
+    direct = result_summary.filter_candidates(direct, choice.cutoff)
+    references = result_summary.filter_candidates(references, choice.cutoff)
+    split = result_summary.split_by_main_unit(direct)
+    priced = [
+        (candidate, price)
+        for candidate in split.kept
+        if (price := _positive_decimal(getattr(candidate, "price", None))) is not None
+    ]
+    prices = sorted(price for _, price in priced)
+    ordered = sorted(
+        (candidate for candidate, _ in priced),
+        key=lambda candidate: str(getattr(candidate, "transaction_date", "") or ""),
+        reverse=True,
+    )
+    return TradeSummary(
+        count=len(prices),
+        median_price=Decimal(str(median(prices))) if prices else None,
+        low_price=prices[0] if prices else None,
+        high_price=prices[-1] if prices else None,
+        main_unit=split.main_unit,
+        period_label=choice.label,
+        period_note=choice.note,
+        reference_count=len(references),
+        other_unit_count=len(split.other),
+        trades=tuple(ordered),
+    )
+
+
+def track_b_unavailable(track_b: Any) -> bool:
+    return str(getattr(track_b, "status", "") or "") in {"unavailable", "not_ingested"}
+
+
+def trade_summary_cards(summary: TradeSummary) -> str:
+    """Four equal cards: 같은 제품 거래, 가운데 값, 가격 범위, 참고 거래."""
+
+    per = result_summary.per_unit_label(summary.main_unit).strip()
+    count_card = metric_card_html(
+        "같은 제품 거래",
+        f"{summary.count}건",
+        f"나라장터 · {summary.period_label}",
+        TONE_OK if summary.count else TONE_MUTED,
+    )
+    if summary.count:
+        middle = metric_card_html(
+            "거래 가운데 값",
+            won_text(summary.median_price),
+            f"{per} 가격" if per else "1단위 가격",
+            TONE_INFO,
         )
-    rows.sort(key=lambda pair: pair[0])
-    return [row for _, row in rows]
+        spread = metric_card_html(
+            "거래 가격 범위",
+            f"{summary.low_price:,.0f} ~ {summary.high_price:,.0f}원",
+            "가장 싼 거래 ~ 가장 비싼 거래",
+            TONE_INFO,
+        )
+    else:
+        middle = metric_card_html("거래 가운데 값", "—", "같은 제품 거래가 없어 계산하지 않음", TONE_MUTED)
+        spread = metric_card_html("거래 가격 범위", "—", "같은 제품 거래가 없어 계산하지 않음", TONE_MUTED)
+    reference = metric_card_html(
+        "참고 거래",
+        f"{summary.reference_count}건",
+        "같은 제품인지 확인 전 · 가격 판단 제외",
+        TONE_MUTED,
+    )
+    return f'<div class="pc-dev-trades">{metric_row_html([count_card, middle, spread, reference])}</div>'
 
 
-def procurement_state(run: Any) -> tuple[str, str]:
-    """(state, detail) for the search run: ``found``, ``empty``, ``failed`` or ``skipped``."""
+def trade_rows(summary: TradeSummary, limit: int = TRADE_TABLE_LIMIT) -> list[dict[str, str]]:
+    """Newest same-product trades with money written as '1,980,000원'."""
 
-    statuses = tuple(getattr(run, "source_statuses", ()) or ())
-    results = tuple(getattr(run, "results", ()) or ())
-    failed = [s for s in statuses if not s.succeeded and not s.skipped]
-    if results:
-        return "found", ""
-    if failed:
-        detail = " ".join(str(s.error or "") for s in failed)
-        return "failed", detail
-    if statuses and all(s.skipped for s in statuses):
-        return "skipped", " ".join(str(s.note or "") for s in statuses if s.note)
-    return "empty", ""
+    per = result_summary.per_unit_label(summary.main_unit).strip() or "1단위"
+    price_column = f"{per} 가격"
+    rows: list[dict[str, str]] = []
+    for candidate in summary.trades[:limit]:
+        quantity = _positive_decimal(getattr(candidate, "quantity", None))
+        unit = str(getattr(candidate, "unit", "") or "").strip()
+        quantity_text = ""
+        if quantity is not None:
+            quantity_text = f"{quantity:,.0f}" + (f" {unit}" if unit and unit != "미확인" else "")
+        rows.append(
+            {
+                "거래일": str(getattr(candidate, "transaction_date", "") or ""),
+                price_column: won_text(getattr(candidate, "price", None)),
+                "수량": quantity_text,
+                "공급업체": str(getattr(candidate, "supplier", "") or ""),
+                "수요기관": str(getattr(candidate, "demand_institution", "") or ""),
+            }
+        )
+    return rows
 
 
-def procurement_partial_notice(run: Any) -> str:
-    """Some sources failed while others returned rows: warn that the list may be incomplete."""
+def trade_supplier_rows(summary: TradeSummary, limit: int = 10) -> list[dict[str, str]]:
+    """Suppliers named on the same-product trades, most trades first."""
 
-    statuses = tuple(getattr(run, "source_statuses", ()) or ())
-    failed = [s for s in statuses if not s.succeeded and not s.skipped]
-    if not failed or not tuple(getattr(run, "results", ()) or ()):
-        return ""
-    names = ", ".join(sorted({str(s.source_name) for s in failed}))
+    groups: dict[str, list[Any]] = {}
+    for candidate in summary.trades:
+        name = str(getattr(candidate, "supplier", "") or "").strip()
+        if name:
+            groups.setdefault(name, []).append(candidate)
+    ordered = sorted(groups.items(), key=lambda pair: (-len(pair[1]), pair[0].casefold()))
+    rows: list[dict[str, str]] = []
+    for name, trades in ordered[:limit]:
+        latest = max(str(getattr(trade, "transaction_date", "") or "") for trade in trades)
+        rows.append(
+            {
+                "업체": name,
+                "자료 출처": "나라장터 납품 기록",
+                "설명": f"같은 제품 거래 {len(trades)}건" + (f" · 가장 최근 {latest}" if latest else ""),
+            }
+        )
+    return rows
+
+
+def trade_empty_html(params: MarketParams, summary: TradeSummary) -> str:
+    name = f"{params.product_name} {params.model_name}".strip()
+    extra = (
+        f"<br>같은 제품인지 확인 전인 참고 거래 {summary.reference_count}건은 ‘가격 조사’에서 볼 수 있습니다."
+        if summary.reference_count
+        else ""
+    )
     return notice_html(
-        f"<b>{esc(names)}의 자료는 확인하지 못했습니다.</b> 아래 목록에서 빠진 거래가 있을 수 있습니다.",
+        f"<b>나라장터에서 ‘{esc(name)}’과 같은 제품으로 확인된 거래를 찾지 못했습니다.</b>{extra}"
+        "<br>다음을 해 보세요: 모델명 철자를 확인하세요 · ‘가격 조사’ 화면에서 같은 모델을 검색해 거래 기간을 넓혀 보세요",
+        TONE_MUTED,
+        icon="i",
+    )
+
+
+def trade_unavailable_html() -> str:
+    return notice_html(
+        "<b>나라장터 거래 자료를 아직 쓸 수 없습니다.</b> 잠시 뒤 다시 시도하거나 ‘가격 조사’에서 확인하세요. "
+        "‘거래가 없다’는 뜻이 아닙니다.",
         TONE_WARN,
     )
-
-
-def procurement_empty_html(params: MarketParams) -> str:
-    return not_found_html(
-        "나라장터 공개 거래에서 ‘" + f"{params.product_name} {params.model_name}".strip() + "’",
-        (
-            "모델명 철자를 확인하세요",
-            "‘가격 조사’ 화면에서 같은 모델을 검색해 거래 기간을 넓혀 보세요",
-        ),
-    )
-
-
-def discovery_rows(discovery: Any) -> list[dict[str, object]]:
-    return [
-        {
-            "거래일": candidate.transaction_date.isoformat() if candidate.transaction_date else "",
-            "나라장터 표기": candidate.title,
-            "세부품명": candidate.classification_name,
-            "표기 금액(원)": int(candidate.price),
-            "살펴볼 순서": candidate.relevance,
-            "찾은 이유": candidate.match_reason,
-        }
-        for candidate in getattr(discovery, "candidates", ())
-    ]
-
-
-def discovery_state(discovery: Any) -> str:
-    """``failed``, ``partial``, ``empty`` or ``found``."""
-
-    status = str(getattr(discovery, "status", "") or "")
-    if status == "failure":
-        return "failed"
-    if status == "partial":
-        return "partial"
-    if not getattr(discovery, "candidates", ()):
-        return "empty"
-    return "found"
-
 
 SUPPLIER_NOTE = (
     "식약처 업 허가·신고는 의료기기를 취급할 자격이 있다는 근거일 뿐, 특정 모델의 공식 총판·대리점이라는 뜻은 아닙니다."
@@ -643,6 +805,30 @@ def udi_rows(records: Iterable[Any]) -> list[dict[str, str]]:
         for item in records
     ]
 
+
+def udi_product_rows(records: Iterable[Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "UDI-DI": str(getattr(item, "udi_di", "") or ""),
+            "품목명": str(getattr(item, "product_name", "") or ""),
+            "모델명": str(getattr(item, "model_name", "") or ""),
+            "허가번호": str(getattr(item, "permit_number", "") or ""),
+            "허가일": str(getattr(item, "permit_date", "") or ""),
+            "제조·수입업체": str(getattr(item, "company_name", "") or ""),
+        }
+        for item in records
+    ]
+
+
+UDI_NOT_CONNECTED_TEXT = (
+    "<b>UDI-DI 조회 서비스가 아직 연결되지 않았습니다.</b> "
+    "식약처 의료기기 통합정보시스템(UDI)에서 직접 확인하세요."
+)
+UDI_PORTAL_BUTTON = "식약처 의료기기 통합정보시스템(UDI)에서 확인"
+
+
+def udi_not_connected_html() -> str:
+    return notice_html(UDI_NOT_CONNECTED_TEXT, TONE_WARN)
 
 def udi_not_found_html(udi_di: str) -> str:
     return not_found_html(

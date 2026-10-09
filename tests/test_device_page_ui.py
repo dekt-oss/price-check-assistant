@@ -6,13 +6,11 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
-from purchase_price.domain import ComparisonScope, EvidenceType, MatchGrade, SourceType
-from purchase_price.schemas import CollectedPrice
+from purchase_price.domain import MatchGrade
 from purchase_price.services.mfds_device_intelligence import (
     MedicalDeviceModelRecord,
     resolve_exact_model_identity,
 )
-from purchase_price.services.search import SearchRun, SourceRunStatus
 from purchase_price.ui import device_page as dev
 from purchase_price.ui.result_summary import has_banned_term
 
@@ -129,7 +127,7 @@ def test_failed_lookup_notice_hides_urls_and_keys() -> None:
     assert "https://" not in html_text
     assert "확인하지 못했습니다 (다시 시도)" in html_text
     assert dev.safe_error_text("HTTP 403 error=SERVICE_KEY_IS_NOT_REGISTERED_ERROR code=30").startswith(
-        "식약처 서비스 사용 승인"
+        "식약처 조회 서비스가 아직 연결되지"
     )
     assert "제때 응답" in dev.safe_error_text("Read timed out")
     assert len(dev.safe_error_text("가" * 500)) <= 140
@@ -205,65 +203,142 @@ def test_identity_notice_covers_confirmed_missing_and_ambiguous() -> None:
     assert dev.identity_notice_html("", None) == ""
 
 
-def _price(grade: MatchGrade, price: str, unit: str | None = "대") -> CollectedPrice:
-    return CollectedPrice(
-        manufacturer="M",
-        product_name="P",
-        model_name="A16-DS",
-        specification=None,
-        price=Decimal(price),
-        evidence_type=EvidenceType.PUBLIC_SALE_PRICE,
-        source_type=SourceType.PROCUREMENT,
-        source_name="나라장터",
-        source_url="https://example.com/x",
-        collected_at=date(2026, 10, 1),
-        transaction_date=date(2026, 9, 1),
-        quantity=Decimal("2") if unit else None,
-        unit=unit,
+def _trade(grade: MatchGrade, price: str, day: str, unit: str | None = "대", supplier: str = "A사"):
+    return SimpleNamespace(
         match_grade=grade,
-        comparison_scope=ComparisonScope.OBSERVED_ONLY,
+        price=Decimal(price),
+        transaction_date=day,
+        unit=unit,
+        quantity=Decimal("2"),
+        supplier=supplier,
+        demand_institution="B병원",
     )
 
 
-def test_procurement_rows_use_plain_columns_and_put_confirmed_first() -> None:
-    rows = dev.procurement_rows([_price(MatchGrade.C, "100"), _price(MatchGrade.A, "200")])
-    assert rows[0]["같은 제품 여부"] == "같은 제품으로 확인"
-    assert rows[1]["같은 제품 여부"].startswith("참고용")
-    assert rows[0]["1개당 가격(원)"] == 200
-    for column in rows[0]:
+def _track_b(*candidates, references=()):
+    return SimpleNamespace(status="success", candidates=tuple(candidates), reference_candidates=tuple(references))
+
+
+TODAY = date(2026, 10, 9)
+
+
+def test_trade_summary_counts_only_same_product_trades_in_the_main_unit() -> None:
+    track_b = _track_b(
+        _trade(MatchGrade.A, "1980000", "2026-09-29"),
+        _trade(MatchGrade.B, "2000000", "2026-09-17"),
+        _trade(MatchGrade.A, "1900000", "2026-08-01"),
+        _trade(MatchGrade.A, "5000000", "2026-08-01", unit="set"),
+        _trade(MatchGrade.C, "100", "2026-08-01"),
+    )
+    summary = dev.build_trade_summary(track_b, TODAY)
+    assert summary.count == 3
+    assert summary.median_price == Decimal("1980000")
+    assert (summary.low_price, summary.high_price) == (Decimal("1900000"), Decimal("2000000"))
+    assert summary.main_unit == "대"
+    assert summary.other_unit_count == 1
+    assert summary.reference_count == 1
+    assert summary.trades[0].transaction_date == "2026-09-29"
+
+
+def test_trade_cards_and_rows_write_money_with_commas_and_won() -> None:
+    summary = dev.build_trade_summary(
+        _track_b(_trade(MatchGrade.A, "1980000", "2026-09-29"), _trade(MatchGrade.A, "2000000", "2026-09-17")),
+        TODAY,
+    )
+    cards = dev.trade_summary_cards(summary)
+    assert cards.count("pc-card pc-metric") == 4
+    assert "2건" in cards and "1,990,000원" in cards and "1,980,000 ~ 2,000,000원" in cards
+    row = dev.trade_rows(summary)[0]
+    assert row["1대당 가격"] == "1,980,000원"
+    assert row["수량"] == "2 대"
+    for column in row:
         assert has_banned_term(column) is None
-        assert column not in {"Evidence Type", "근거ID", "등급", "비교범위", "자료성격"}
+    assert dev.won_text("1980000") == "1,980,000원"
+    assert dev.won_text(None) == "미확인"
 
 
-def test_procurement_state_separates_failed_empty_and_found() -> None:
-    ok = SourceRunStatus(source_name="나라장터", succeeded=True, result_count=0)
-    bad = SourceRunStatus(source_name="나라장터", succeeded=False, result_count=0, error="x")
-    skipped = SourceRunStatus(source_name="나라장터", succeeded=False, result_count=0, skipped=True, note="키 없음")
-    assert dev.procurement_state(SearchRun(source_statuses=[ok]))[0] == "empty"
-    assert dev.procurement_state(SearchRun(source_statuses=[bad]))[0] == "failed"
-    assert dev.procurement_state(SearchRun(source_statuses=[skipped]))[0] == "skipped"
-    found = SearchRun(results=[_price(MatchGrade.A, "1")], source_statuses=[bad])
-    assert dev.procurement_state(found)[0] == "found"
-    assert "확인하지 못했습니다" in dev.procurement_partial_notice(found)
-    assert dev.procurement_partial_notice(SearchRun(source_statuses=[ok])) == ""
+def test_trade_summary_without_same_product_trades_shows_dashes_not_zero_prices() -> None:
+    summary = dev.build_trade_summary(_track_b(_trade(MatchGrade.C, "100", "2026-09-01")), TODAY)
+    assert summary.count == 0 and summary.reference_count == 1
+    cards = dev.trade_summary_cards(summary)
+    assert "0건" in cards and "—" in cards
+    empty = dev.trade_empty_html(dev.MarketParams(product_name="심장충격기", model_name="X1"), summary)
+    assert "찾지 못했습니다" in empty and "참고 거래 1건" in empty
 
 
-def test_discovery_state_and_rows() -> None:
-    candidate = SimpleNamespace(
-        transaction_date=date(2026, 9, 1),
-        title="t",
-        classification_name="c",
-        price=Decimal("1000"),
-        relevance="분류 후보",
-        match_reason="r",
+def test_trade_suppliers_are_ranked_by_same_product_trades() -> None:
+    summary = dev.build_trade_summary(
+        _track_b(
+            _trade(MatchGrade.A, "1", "2026-09-01", supplier="가사"),
+            _trade(MatchGrade.A, "1", "2026-09-05", supplier="나사"),
+            _trade(MatchGrade.A, "1", "2026-09-09", supplier="나사"),
+        ),
+        TODAY,
     )
-    assert dev.discovery_state(SimpleNamespace(status="failure", candidates=())) == "failed"
-    assert dev.discovery_state(SimpleNamespace(status="partial", candidates=(candidate,))) == "partial"
-    assert dev.discovery_state(SimpleNamespace(status="success_0", candidates=())) == "empty"
-    assert dev.discovery_state(SimpleNamespace(status="success", candidates=(candidate,))) == "found"
-    row = dev.discovery_rows(SimpleNamespace(candidates=(candidate,)))[0]
-    assert row["표기 금액(원)"] == 1000
-    assert "근거ID" not in row and "점수" not in row
+    rows = dev.trade_supplier_rows(summary)
+    assert [row["업체"] for row in rows] == ["나사", "가사"]
+    assert rows[0]["설명"] == "같은 제품 거래 2건 · 가장 최근 2026-09-09"
+
+
+def test_page_uses_the_same_trade_lookup_as_price_research() -> None:
+    page = PAGE.read_text(encoding="utf-8")
+    assert "lookup_track_b_quote_with_live" in page
+    assert "build_purchase_workspace_handoff" in page
+    assert "search_all" not in page and "discover_unmapped_g2b_candidates" not in page
+
+
+def test_times_are_shown_in_korean_time() -> None:
+    from datetime import UTC, datetime
+
+    assert dev.kst_time_text(datetime(2026, 10, 9, 7, 50, tzinfo=UTC)) == "10-09 16:50"
+    assert dev.kst_time_text(datetime(2026, 10, 9, 7, 50)) == "10-09 16:50"  # naive means UTC
+    assert "datetime.now()" not in PAGE.read_text(encoding="utf-8")
+
+
+def test_connection_chips_say_which_service_is_not_connected_yet() -> None:
+    ready = dev.connection_chips_html(mfds_ready=True, g2b_ready=True)
+    assert "연결 전" not in ready and ready.count("사용 가능") == 5
+    chips = dev.connection_chips_html(
+        mfds_ready=True, g2b_ready=True, service_states={dev.SERVICE_UDI: dev.STATE_PENDING}
+    )
+    assert "UDI-DI <b>연결 전</b>" in chips
+    assert "식약처 허가정보 <b>사용 가능</b>" in chips
+    off = dev.connection_chips_html(mfds_ready=False, g2b_ready=True)
+    assert "식약처 허가정보 <b>사용 불가</b>" in off and "나라장터 자료 <b>사용 가능</b>" in off
+
+
+def test_not_approved_errors_have_no_service_key_wording() -> None:
+    raw = "Public Data Portal request failed: HTTP 403 error=SERVICE_KEY_IS_NOT_REGISTERED_ERROR code=30"
+    assert dev.is_not_approved_error(raw)
+    assert dev.is_not_approved_error(dev.safe_error_text(raw))
+    assert not dev.is_not_approved_error("Read timed out")
+    for text in (
+        dev.safe_error_text(raw),
+        dev.lookup_failed_html("식약처 허가정보", raw),
+        dev.udi_not_connected_html(),
+        dev.missing_key_notice_html("UDI-DI"),
+    ):
+        assert "서비스키" not in text
+        assert has_banned_term(text) is None
+    assert "다시 시도" not in dev.lookup_failed_html("식약처 허가정보", raw)
+    html_text = dev.udi_not_connected_html()
+    assert "UDI-DI 조회 서비스가 아직 연결되지 않았습니다" in html_text
+    assert "식약처 의료기기 통합정보시스템(UDI)에서 직접 확인하세요" in html_text
+
+
+def test_udi_product_rows_use_plain_headers() -> None:
+    record = SimpleNamespace(
+        udi_di="18800003462138",
+        product_name="환자 감시장치",
+        model_name="M40",
+        permit_number="제인 20-5001 호",
+        permit_date="2020-11-10",
+        company_name="(주)메디아나",
+    )
+    row = dev.udi_product_rows([record])[0]
+    assert row["모델명"] == "M40" and row["제조·수입업체"] == "(주)메디아나"
+    for column in row:
+        assert has_banned_term(column) is None
 
 
 def test_business_and_udi_rows_use_plain_headers() -> None:
