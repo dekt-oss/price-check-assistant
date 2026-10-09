@@ -7,7 +7,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from inspect import signature
 from threading import Lock
 from time import monotonic, sleep
@@ -33,6 +33,7 @@ from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_item_status_r2 as mfds_item_status_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services import price_entry_check as price_entry_check_service
+from purchase_price.services import search_routing
 from purchase_price.services import track_b_db_quote_comparison as track_b_comparison_service
 from purchase_price.services import track_b_live_gap_fill as track_b_live_service
 from purchase_price.services import track_b_r2_quote_index as track_b_r2_index_service
@@ -117,6 +118,7 @@ from purchase_price.services.unified_search_intent import (
 )
 from purchase_price.ui import category_market as category_market_ui
 from purchase_price.ui import product_identity as product_identity_ui
+from purchase_price.ui import quote_input as quote_input_ui
 from purchase_price.ui import result_layout as result_layout_ui
 from purchase_price.ui import result_summary as result_summary_ui
 from purchase_price.ui import same_item_compare as same_item_ui
@@ -218,6 +220,11 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_V3"),
     ("purchase_price.services.category_market", "CATEGORY_MARKET_PERIOD_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_PERIOD_V1"),
+    # 2026-10-10 search fixes: quote parsing/percentages (new quote_input module), stable unit
+    # across periods, outliers only within one unit and 3+ trades, permit hint.
+    ("purchase_price.ui.result_summary", "SEARCH_FIXES_V1"),
+    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_SEARCH_FIXES_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_RECENT_GROUPED_V1"),
 )
 
 
@@ -391,13 +398,12 @@ QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 
 def _parse_quote(value: str) -> Decimal | None:
-    if not value.strip():
-        return None
-    try:
-        # "2,500,000", "2500000원" and "2 500 000" all mean the same price.
-        return Decimal("".join(value.replace(",", "").replace("원", "").split()))
-    except InvalidOperation as exc:
-        raise ValueError("견적 단가는 숫자로 입력하세요.") from exc
+    # "2,500,000", "2500000원", "250만" and "2억 5천만" all work; 0, negatives and absurd values
+    # (over 1,000억) are refused with a plain message.
+    parsed = quote_input_ui.parse_quote_input(value)
+    if parsed.error:
+        raise ValueError(parsed.error)
+    return parsed.value
 
 
 def _safety_evidence_token(name: str, *, fallback: str = "CHECK_FAILED") -> object:
@@ -596,6 +602,10 @@ def _identity_hydration(
     lookup_key = raw_search or model_name.strip() or product_name.strip()
     if not lookup_key:
         return product_name, manufacturer, model_name, specification, None
+    permit = search_routing.parse_permit_number(lookup_key)
+    if permit is not None:
+        # "제허19-527", "제허 19527 호" -> the stored spelling "제허 19-527 호".
+        lookup_key = permit.display
 
     identity = _lookup_mfds_identity_runtime(lookup_key)
     if isinstance(identity, MfdsIdentityLookup) and identity.status == "success_0" and raw_search:
@@ -811,6 +821,252 @@ def _identity_product_names_containing(text: str) -> list[dict[str, object]]:
     return [{"product_name": row[0], "models": row[1], "companies": row[2]} for row in rows if row[0]]
 
 
+NO_MATCH_ROUTE = "no_match"
+_DISTINCT_KEYS_CACHE: dict[tuple[str, str], tuple[str, ...]] = {}
+
+
+def _mfds_index_path() -> Any:
+    module = _mfds_identity_r2_runtime()
+    local_index_path = getattr(module, "_local_index_path", None)
+    if not callable(local_index_path):
+        return None
+    try:
+        return local_index_path(get_settings())
+    except Exception:
+        return None
+
+
+def _distinct_keys(cache_key: tuple[str, str], load) -> tuple[str, ...]:
+    """Distinct name keys of one index file (a few thousand); kept per file for the process."""
+
+    cached = _DISTINCT_KEYS_CACHE.get(cache_key)
+    if cached is None:
+        cached = tuple(str(key) for key in load() if key)
+        _DISTINCT_KEYS_CACHE[cache_key] = cached
+    return cached
+
+
+def _mfds_rows(sql_for_keys: str, keys: list[str]) -> list[tuple[Any, ...]]:
+    path = _mfds_index_path()
+    if path is None or not keys:
+        return []
+    connection = sqlite3.connect(path)
+    try:
+        marks = ",".join("?" for _ in keys)
+        return connection.execute(sql_for_keys.format(marks=marks), keys).fetchall()
+    finally:
+        connection.close()
+
+
+def _mfds_distinct(column: str) -> tuple[str, ...]:
+    path = _mfds_index_path()
+    if path is None:
+        return ()
+
+    def load() -> list[str]:
+        connection = sqlite3.connect(path)
+        try:
+            return [row[0] for row in connection.execute(f"SELECT DISTINCT {column} FROM mfds_identity")]
+        finally:
+            connection.close()
+
+    return _distinct_keys((str(path), column), load)
+
+
+def _mfds_company_matches(needles: Sequence[str]) -> list[search_routing.CompanyMatch]:
+    """식약처 registered companies whose name contains a needle; empty on any failure."""
+
+    try:
+        keys = _mfds_distinct("company_key")
+        short = {needle for needle in needles if len(needle) < search_routing.MIN_PARTIAL_NEEDLE}
+        long_needles = [needle for needle in needles if needle not in short]
+        wanted = [
+            key
+            for key in keys
+            if any(needle in key for needle in long_needles)
+            or any(key in {needle, f"주{needle}", f"{needle}주", f"주식회사{needle}", f"{needle}주식회사"} for needle in short)
+        ][:60]
+        rows = _mfds_rows(
+            "SELECT MIN(registered_company), COUNT(DISTINCT model_key) FROM mfds_identity "
+            "WHERE company_key IN ({marks}) GROUP BY company_key",
+            wanted,
+        )
+    except Exception:
+        return []
+    return search_routing.rank_company_matches(((str(name or ""), int(count or 0)) for name, count in rows), needles)
+
+
+def _supplier_matches(session: Any, needles: Sequence[str]) -> list[search_routing.CompanyMatch]:
+    """나라장터 suppliers whose name contains a needle (latest trades first); empty on any failure."""
+
+    if session is None:
+        return []
+    from collections import Counter
+
+    from sqlalchemy import select
+
+    from purchase_price.models import TrackBDeliveryLine
+    from purchase_price.services import track_b_search_index
+
+    counts: Counter[str] = Counter()
+    for needle in needles:
+        if len(needle) < search_routing.MIN_PARTIAL_NEEDLE:
+            continue
+        try:
+            rows = track_b_search_index.matching_rows(
+                session,
+                select(TrackBDeliveryLine.supplier).where(TrackBDeliveryLine.supplier.like(f"%{needle}%")),
+                track_b_search_index.Contains("supplier", needle),
+                limit=2000,
+                order="recent",
+            )
+        except Exception:
+            continue
+        counts.update(str(row or "").strip() for row in rows if str(row or "").strip())
+    return search_routing.rank_company_matches(counts.items(), needles, source="나라장터")
+
+
+def _partial_company_overview(raw_search: str, snapshot_runtime: Any, prefer_traded_company: bool) -> dict[str, Any] | None:
+    """Company overview for a partial or foreign-maker name ("필립스" -> (주)필립스코리아)."""
+
+    needles = search_routing.company_search_needles(raw_search)
+    if not needles:
+        return None
+    registered = _mfds_company_matches(needles)
+    for match in registered:
+        found = _lookup_mfds_identity_runtime(match.name)
+        if isinstance(found, MfdsIdentityLookup) and found.status == "success" and found.match_type == "company":
+            state = _build_overview_state(
+                raw_search,
+                found,
+                snapshot_runtime,
+                prefer_traded_company=prefer_traded_company,
+                partial_matches=[m for m in registered if m is not match],
+            )
+            state["matched_from"] = raw_search
+            return state
+    try:
+        with snapshot_runtime.open_track_b_serving_snapshot() as snapshot:
+            suppliers = _supplier_matches(getattr(snapshot, "session", None), needles)
+    except Exception:
+        suppliers = []
+    if not suppliers:
+        return None
+    # Only a 나라장터 supplier carries the name: its delivery record, no 식약처 registration.
+    state = _build_overview_state(
+        raw_search,
+        MfdsIdentityLookup("success", raw_search, "company", ()),
+        snapshot_runtime,
+        prefer_traded_company=False,
+        heading_override=suppliers[0].name,
+        partial_matches=suppliers[1:],
+    )
+    state["matched_from"] = raw_search
+    return state
+
+
+def _g2b_class_rows(snapshot: Any, pieces: Sequence[str]) -> list[dict[str, object]]:
+    """나라장터 의료 세부품명 (detail code 42…) whose name contains a piece, with trade counts."""
+
+    session = getattr(snapshot, "session", None)
+    if session is None:
+        return []
+    from sqlalchemy import text
+
+    def load() -> list[str]:
+        return [row[0] for row in session.execute(text("SELECT DISTINCT class_key FROM track_b_delivery_lines"))]
+
+    keys = _distinct_keys((f"track-b::{getattr(snapshot, 'data_as_of', '')}", "class_key"), load)
+    wanted = search_routing.matching_keys(keys, pieces)
+    if not wanted:
+        return []
+    params = {f"k{index}": key for index, key in enumerate(wanted)}
+    rows = session.execute(
+        text(
+            "SELECT class_key, MIN(product_class), MIN(detail_code), COUNT(*) FROM track_b_delivery_lines "
+            f"WHERE class_key IN ({','.join(':' + name for name in params)}) GROUP BY class_key"
+        ),
+        params,
+    ).all()
+    return [
+        {"name": name, "key": key, "code": str(code or ""), "trades": int(count or 0)}
+        for key, name, code, count in rows
+        if str(code or "").startswith(search_routing.MEDICAL_DETAIL_PREFIX)
+        and not category_market_service.is_veterinary_class(name)
+    ]
+
+
+def _name_suggestions(raw_search: str, snapshot_runtime: Any) -> dict[str, list[dict[str, object]]]:
+    """식약처 품목명 and 나라장터 세부품명 sharing a meaningful part of the word; empty on failure."""
+
+    pieces = search_routing.word_pieces(raw_search)
+    if not pieces:
+        return {"items": [], "classes": []}
+    items: list[search_routing.NameSuggestion] = []
+    classes: list[search_routing.NameSuggestion] = []
+    try:
+        wanted = search_routing.matching_keys(_mfds_distinct("product_key"), pieces)
+        rows = _mfds_rows(
+            "SELECT product_key, MIN(product_name), COUNT(DISTINCT model_key), COUNT(DISTINCT company_key) "
+            "FROM mfds_identity WHERE product_key IN ({marks}) GROUP BY product_key",
+            wanted,
+        )
+        # Only parts that are a word of some 품목명 ("펌프"), never "액펌프" inside "혈액펌프".
+        pieces = search_routing.meaningful_pieces(pieces, (str(row[1] or "") for row in rows))
+        items = search_routing.rank_name_suggestions(
+            (
+                {"key": key, "name": name, "models": models, "companies": companies}
+                for key, name, models, companies in rows
+            ),
+            pieces,
+        )
+    except Exception:
+        items = []
+    try:
+        with snapshot_runtime.open_track_b_serving_snapshot() as snapshot:
+            classes = search_routing.rank_name_suggestions(_g2b_class_rows(snapshot, pieces), pieces, limit=6)
+    except Exception:
+        classes = []
+    return {
+        "items": [dataclasses.asdict(item) for item in items],
+        "classes": [dataclasses.asdict(item) for item in classes],
+    }
+
+
+def _class_market_overview(raw_search: str, snapshot_runtime: Any) -> dict[str, Any] | None:
+    """A 나라장터 의료 세부품명 that is no 식약처 품목명 ("정맥용주사기주입펌프"): its market alone."""
+
+    key = normalize_text(raw_search)
+    try:
+        with snapshot_runtime.open_track_b_serving_snapshot() as snapshot:
+            rows = [row for row in _g2b_class_rows(snapshot, [key]) if row["key"] == key]
+            if not rows:
+                return None
+            name = str(rows[0]["name"])
+            market = _build_category_market(
+                snapshot, product_names=(name,), records=(), crosslinks=[], model_stats={}
+            )
+            data_as_of = str(getattr(snapshot, "data_as_of", "") or "")
+    except Exception:
+        return None
+    if market is None:
+        return None
+    return {
+        "route": "product_overview",
+        "search_text": raw_search,
+        "heading": name,
+        "similar_companies": [],
+        "switched_from": None,
+        "overview_records": [],
+        "overview_crosslinks": [],
+        "overview_supplier": None,
+        "overview_record_limit_hit": False,
+        "track_b_data_as_of": data_as_of,
+        "category_market": market,
+        "class_only": True,
+    }
+
+
 def _build_category_market(
     snapshot: Any,
     *,
@@ -901,6 +1157,8 @@ def _build_overview_state(
     snapshot_runtime: Any,
     *,
     prefer_traded_company: bool = True,
+    partial_matches: Sequence[search_routing.CompanyMatch] = (),
+    heading_override: str = "",
 ) -> dict[str, Any]:
     route = "company_overview" if identity.match_type == "company" else "product_overview"
     records = list(identity.records)
@@ -910,8 +1168,8 @@ def _build_overview_state(
             _lookup_same_mfds_product_runtime(heading) or ()
         )
     else:
-        heading = next((r.registered_company for r in records if r.registered_company), raw_search)
-        wide = _identity_index_wide(query_company=heading)
+        heading = heading_override or next((r.registered_company for r in records if r.registered_company), raw_search)
+        wide = _identity_index_wide(query_company=heading) if records else ()
     if wide:
         records = list(wide)
     similar_companies: list[dict[str, object]] = []
@@ -933,6 +1191,14 @@ def _build_overview_state(
             models = {r.model_name for r in found.records if r.model_name}
             similar_companies.append(
                 {"name": name, "models": len(models), "more": len(found.records) >= 200}
+            )
+        for match in partial_matches:
+            # "필립스": the other registered or supplying companies whose name contains it.
+            if normalize_text(match.name) in seen:
+                continue
+            seen.add(normalize_text(match.name))
+            similar_companies.append(
+                {"name": match.name, "models": match.models, "more": False, "source": match.source}
             )
     switched_from: str | None = None
     category_market = None
@@ -1051,7 +1317,19 @@ def _render_overview(state: dict[str, Any]) -> None:
     st.subheader(heading)
     if route == "company_overview":
         switched_from = str(state.get("switched_from") or "")
-        if switched_from:
+        matched_from = str(state.get("matched_from") or "")
+        if matched_from and normalize_text(matched_from) != normalize_text(heading):
+            st.caption(
+                f"‘{matched_from}’와 이름이 똑같은 업체는 없어, 이름에 ‘{matched_from}’"
+                + (
+                    "(또는 같은 회사의 다른 표기)"
+                    if search_routing.company_search_needles(matched_from)[1:]
+                    else ""
+                )
+                + f"가 들어간 {heading}를 보여줍니다. 업체 이름은 바꾸지 않고 등록된 그대로 보여줍니다. "
+                "표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
+            )
+        elif switched_from:
             st.caption(
                 f"‘{switched_from}’ 이름 그대로 등록된 업체는 나라장터 거래가 없어, 거래가 있는 {heading}를 먼저 "
                 "보여줍니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
@@ -1063,10 +1341,15 @@ def _render_overview(state: dict[str, Any]) -> None:
             more = " 이상" if similar.get("more") else ""
             priced = similar.get("priced_models")
             priced_text = f" · 나라장터 거래가 있는 모델 {priced}개" if isinstance(priced, int) else ""
-            note_col.info(
-                f"이름이 비슷한 다른 업체도 있습니다: **{similar['name']}** · 등록 모델 {similar['models']}개{more}"
-                f"{priced_text}"
-            )
+            if similar.get("source") == "나라장터":
+                note_col.info(
+                    f"이름이 비슷한 나라장터 납품업체도 있습니다: **{similar['name']}** · 최근 납품 {similar['models']}건"
+                )
+            else:
+                note_col.info(
+                    f"이름이 비슷한 다른 업체도 있습니다: **{similar['name']}** · 등록 모델 {similar['models']}개{more}"
+                    f"{priced_text}"
+                )
             if button_col.button(
                 f"{similar['name']} 보기",
                 key=f"overview_similar::{similar['name']}",
@@ -1096,12 +1379,18 @@ def _render_overview(state: dict[str, Any]) -> None:
             ),
         ]
     else:
-        st.caption(
-            "품목 이름으로 찾은 결과입니다. 이 품목의 다른 모델, 참고 시세, 도입 기관, 구할 수 있는 곳을 모았습니다. "
-            "모델을 누르면 그 모델의 가격 조사로 이동합니다."
-            if market is not None
-            else "품목 이름으로 찾은 결과입니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
-        )
+        if state.get("class_only"):
+            st.caption(
+                "나라장터 세부품명으로 찾은 결과입니다. 식약처에는 이 이름의 품목이 없어, 나라장터에서 이 "
+                "세부품명으로 거래된 장비의 참고 시세와 도입 기관만 모았습니다."
+            )
+        else:
+            st.caption(
+                "품목 이름으로 찾은 결과입니다. 이 품목의 다른 모델, 참고 시세, 도입 기관, 구할 수 있는 곳을 모았습니다. "
+                "모델을 누르면 그 모델의 가격 조사로 이동합니다."
+                if market is not None
+                else "품목 이름으로 찾은 결과입니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
+            )
         class_rows = overview_ui.classification_rows(records)
         companies = {r.registered_company for r in records if r.registered_company}
         cards = [
@@ -1275,6 +1564,40 @@ def _render_not_found(state: dict[str, Any], *, basis: str = "") -> None:
         result_layout_ui.not_found_html(str(state.get("search_text") or state.get("heading") or ""), basis=basis),
         unsafe_allow_html=True,
     )
+    suggestions = state.get("suggestions") or {}
+    items = [row for row in suggestions.get("items") or () if isinstance(row, Mapping) and row.get("name")]
+    classes = [row for row in suggestions.get("classes") or () if isinstance(row, Mapping) and row.get("name")]
+    if items or classes:
+        query = str(state.get("search_text") or "")
+        st.markdown(
+            notice_html(
+                result_layout_ui.esc(
+                    f"‘{query}’는 식약처 품목명이 아닙니다. 낱말의 일부가 같은 품목명을 골라 보세요. "
+                    "누르면 그 품목의 모델과 시세로 이동합니다."
+                ),
+                tone="info",
+                icon="i",
+            ),
+            unsafe_allow_html=True,
+        )
+        labels: dict[str, str] = {}
+        for row in items:
+            labels[f"{row['name']} · 업체 {int(row.get('companies') or 0)}곳"] = str(row["name"])
+        if items:
+            picked_item = st.pills(
+                "식약처 품목명", list(labels), selection_mode="single", key=f"no_match_items::{query}"
+            )
+            if picked_item:
+                _open_query(labels[str(picked_item)])
+        class_labels: dict[str, str] = {}
+        for row in classes:
+            class_labels[f"{row['name']} · 거래 {int(row.get('trades') or 0):,}건"] = str(row["name"])
+        if classes:
+            picked_class = st.pills(
+                "나라장터 세부품명", list(class_labels), selection_mode="single", key=f"no_match_classes::{query}"
+            )
+            if picked_class:
+                _open_query(class_labels[str(picked_class)])
     picked = st.pills(
         "예시로 검색",
         HOME_EXAMPLE_QUERIES,
@@ -1284,6 +1607,23 @@ def _render_not_found(state: dict[str, Any], *, basis: str = "") -> None:
     if picked:
         st.session_state.pop("not_found_example_pick", None)
         _open_query(str(picked))
+
+
+def _render_no_match(state: dict[str, Any]) -> None:
+    """A word that is no model, 품목명 or company ("수액펌프"): empty state plus close 품목명."""
+
+    st.divider()
+    st.markdown(result_layout_ui.RESULT_CSS, unsafe_allow_html=True)
+    _render_diagnostic_markers(state)
+    status = _load_mfds_collection_status()
+    _render_not_found(
+        state,
+        basis=result_summary_ui.short_basis_line(
+            track_b_data_as_of=str(state.get("track_b_data_as_of") or "") or None,
+            mfds_coverage_percent=status.progress_percent if status.status != "unavailable" else None,
+            mfds_complete=bool(status.status != "unavailable" and status.first_backfill_complete),
+        ),
+    )
 
 
 def _render_medical_lookup_link(indexed_identity: object, mfds: object, query: object) -> None:
@@ -1316,7 +1656,9 @@ def _load_mfds_collection_status() -> MfdsIdentityCollectionStatus:
     return get_mfds_identity_collection_status()
 
 
-def _ambiguous_identity_candidates(identity: MfdsIdentityLookup) -> list[dict[str, str]]:
+def _ambiguous_identity_candidates(
+    identity: MfdsIdentityLookup, trade_counts: Mapping[str, int | None] | None = None
+) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     seen: set[tuple[str, str, str, str]] = set()
     for item in identity.records:
@@ -1340,6 +1682,9 @@ def _ambiguous_identity_candidates(identity: MfdsIdentityLookup) -> list[dict[st
                 "UDI-DI": str(item.udi_di or "").strip() or "미확인",
             }
         )
+        if trade_counts is not None:
+            count = trade_counts.get(normalize_text(key[2]))
+            rows[-1]["같은 제품 거래(전체 기간)"] = "조회 못 함" if count is None else f"{count:,}건"
     return rows
 
 
@@ -1386,10 +1731,16 @@ def _selected_identity_from_token(
 
 def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
     identity = state.get("mfds_identity")
+    permit_pick = state.get("review_reason") == "permit"
     st.divider()
-    st.caption("같은 이름의 제품이 여러 개입니다")
+    st.caption("이 허가번호에 등록된 모델이 여러 개입니다" if permit_pick else "같은 이름의 제품이 여러 개입니다")
     st.subheader(state.get("heading") or state.get("search_text") or "검색 결과")
-    if state.get("review_reason") == "weak_model_key":
+    if permit_pick:
+        st.info(
+            "식약처 허가번호 하나에 모델이 여러 개 등록돼 있습니다. 모델마다 나라장터 거래가 따로 있으니, "
+            "아래에서 조사할 모델을 고르세요."
+        )
+    elif state.get("review_reason") == "weak_model_key":
         st.warning(
             "모델명이 짧거나 숫자 위주라 다른 제품의 모델명과 겹칠 수 있습니다. "
             "제조사나 품목명으로 확인되지 않아 식약처 제품을 자동으로 연결하지 않았습니다. "
@@ -1405,8 +1756,17 @@ def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
         return
 
     candidates = _candidate_identity_records(identity)
+    trade_counts = state.get("candidate_trade_counts") if permit_pick else None
+    if isinstance(trade_counts, Mapping):
+        # The model with the most 나라장터 trades first: it is usually the one being bought.
+        candidates.sort(key=lambda record: -(trade_counts.get(normalize_text(record.model_name)) or 0))
     st.dataframe(
-        result_summary_ui.display_rows(_ambiguous_identity_candidates(identity)),
+        result_summary_ui.display_rows(
+            _ambiguous_identity_candidates(
+                MfdsIdentityLookup(identity.status, identity.query, identity.match_type, tuple(candidates)),
+                trade_counts if isinstance(trade_counts, Mapping) else None,
+            )
+        ),
         use_container_width=True,
         hide_index=True,
     )
@@ -1444,6 +1804,32 @@ def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
             st.query_params["identity"] = _identity_selection_token(selected)
             status.update(label="조사 완료", state="complete")
         st.rerun()
+
+
+def _build_permit_picker_state(
+    raw_search: str, identity: MfdsIdentityLookup, snapshot_runtime: Any
+) -> dict[str, Any]:
+    """The product picker limited to one 허가번호, with each model's 나라장터 trade count."""
+
+    trade_counts: dict[str, int | None] = {}
+    try:
+        with snapshot_runtime.open_track_b_serving_snapshot() as snapshot:
+            for row in _build_mfds_procurement_crosslinks(
+                _candidate_identity_records(identity), track_b_snapshot=snapshot, current_model=""
+            ):
+                key = normalize_text(str(row.get("모델") or ""))
+                count = row.get("나라장터 직접거래")
+                trade_counts[key] = int(count) if isinstance(count, int) else None
+    except Exception:
+        trade_counts = {}
+    return {
+        "route": "candidate_selection",
+        "search_text": raw_search,
+        "heading": raw_search,
+        "mfds_identity": identity,
+        "review_reason": "permit",
+        "candidate_trade_counts": trade_counts,
+    }
 
 
 def _identity_found(identity: object) -> bool:
@@ -1532,6 +1918,28 @@ def _execute_search(
             product_name=product_name,
         )
     )
+    if (
+        selected_identity is None
+        and isinstance(indexed_identity, MfdsIdentityLookup)
+        and indexed_identity.status == "success"
+        and indexed_identity.match_type == "permit"
+    ):
+        # A 허가번호 is not a model: one registered model opens that product, several open the
+        # picker limited to this permit (제허 19-527 호: HeartOn A16-DF and A16-DS).
+        registrations = _candidate_identity_records(indexed_identity)
+        if len(registrations) > 1:
+            return _build_permit_picker_state(raw_search, indexed_identity, snapshot_runtime)
+        if registrations:
+            selected_identity = registrations[0]
+            selected_token = _identity_selection_token(selected_identity)
+            product_name = selected_identity.product_name or product_name
+            model_name = selected_identity.model_name or model_name
+            indexed_identity = MfdsIdentityLookup(
+                "success",
+                raw_search,
+                "model",
+                tuple(r for r in indexed_identity.records if _identity_selection_token(r) == selected_token),
+            )
     if (
         selected_identity is None
         and isinstance(indexed_identity, MfdsIdentityLookup)
@@ -1703,14 +2111,15 @@ def _execute_search(
         search_timings["category_market"] = round(monotonic() - category_started, 3)
     search_timings["track_b"] = round(monotonic() - track_b_started, 3)
 
-    if (
+    unresolved_word = bool(
         selected_identity is None
         and raw_search
         and not product_name.strip()
         and not (isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success")
         and not strict_comparison_candidates(track_b)
-        and overview_ui.looks_like_category_word(raw_search)
-    ):
+    )
+    category_word = unresolved_word and overview_ui.looks_like_category_word(raw_search)
+    if category_word:
         # "심장충격기" is an item category, not a model: offer the MFDS 품목명 that contain it
         # (each opens the product overview with its models and trades) instead of a 0-trade result.
         category_matches = _identity_product_names_containing(raw_search)
@@ -1723,6 +2132,25 @@ def _execute_search(
                 "category_rows": overview_ui.category_rows(category_matches),
                 "category_total": len(category_matches),
                 "reference_count": reference_total,
+                "track_b_data_as_of": track_b_data_as_of,
+            }
+    if unresolved_word and search_routing.parse_permit_number(raw_search) is None:
+        # "필립스" / "Philips": no company of exactly that name, but registered or supplying
+        # companies whose name contains it ((주)필립스코리아). Search expansion only.
+        company_state = _partial_company_overview(raw_search, snapshot_runtime, prefer_traded_company)
+        if company_state is not None:
+            return company_state
+        if category_word:
+            # A Korean word that is no 식약처 품목명 ("수액펌프"): nothing to price. Show the empty
+            # state with 품목명 and 나라장터 세부품명 that share its meaningful part ("펌프").
+            class_state = _class_market_overview(raw_search, snapshot_runtime)
+            if class_state is not None:
+                return class_state
+            return {
+                "route": NO_MATCH_ROUTE,
+                "search_text": raw_search,
+                "heading": raw_search,
+                "suggestions": _name_suggestions(raw_search, snapshot_runtime),
                 "track_b_data_as_of": track_b_data_as_of,
             }
 
@@ -1933,14 +2361,21 @@ QUOTE_ITEM_RESULTS_SESSION_KEY = "quote_item_results_v1"
 ENTRY_ERROR_SHOWN = 5
 
 
-def _main_unit_view(track_b: Any) -> tuple[Any, Any]:
+def _main_unit_view(track_b: Any, *, preferred_unit: str | None = None) -> tuple[Any, Any]:
     """Track B limited to the most common unit (대 vs set...) for medians and ranges.
 
     Prices in different units are never mixed into one median; the other-unit trades stay in
-    the tables. Returns (track_b for stats, unit split).
+    the tables. ``preferred_unit`` is the unit chosen over all periods, so switching 최근 3년 /
+    5년 / 전체 keeps comparing the same unit while the period has a trade in it.
+    Returns (track_b for stats, unit split).
     """
 
-    split = result_summary_ui.split_by_main_unit(strict_comparison_candidates(track_b))
+    candidates = strict_comparison_candidates(track_b)
+    split = (
+        result_summary_ui.split_by_main_unit(candidates, preferred=preferred_unit)
+        if preferred_unit
+        else result_summary_ui.split_by_main_unit(candidates)
+    )
     if not split.mixed:
         return track_b, split
     other = {id(candidate) for candidate in split.other}
@@ -2302,7 +2737,8 @@ def _render_price_sections(
     if direct_rows:
         year_rows = result_summary_ui.year_summary_rows(direct_rows, main_unit=unit_split.main_unit)
         all_groups = result_summary_ui.unit_group_rows(direct_rows, limit=len(direct_rows))
-        tab_labels = ["연도별", "단위·조건별", f"거래 전체 {strict_count}건"]
+        unit_suffix = result_layout_ui.other_unit_suffix(len(unit_split.other), unit_split.other_units)
+        tab_labels = ["연도별", "단위·조건별", f"거래 전체 {strict_count}건{unit_suffix}"]
         if entry_error_rows:
             tab_labels[2] += f" (입력 오류 의심 {len(entry_error_rows)}건 제외)"
         year_tab, unit_tab, all_tab = st.tabs(tab_labels)
@@ -2350,7 +2786,13 @@ def _render_price_sections(
                             _open_trade_dialog(row)
             st.caption(
                 f"같은 제품 거래 {strict_count}건입니다"
-                + (f"(입력 오류 의심 {len(entry_error_rows)}건 제외). " if entry_error_rows else ". ")
+                + (f"(입력 오류 의심 {len(entry_error_rows)}건 제외)" if entry_error_rows else "")
+                + (
+                    f". 그중 {len(unit_split.other)}건은 단위가 달라({'·'.join(unit_split.other_units)}) "
+                    f"{unit_split.main_unit} 단위 가격 계산에 넣지 않았습니다. "
+                    if unit_split.mixed
+                    else ". "
+                )
                 + "행을 누르면 그 거래의 조달청 공개 원문"
                 "(사업명·계약 방법·납품 기한 등)이 큰 창으로 열리고, '열기'를 누르면 나라장터에서 찾습니다."
             )
@@ -2679,6 +3121,10 @@ def _result_identity_fields(
     procurement_maker: str,
     procurement_spec: str,
     category_market: category_market_service.CategoryMarket | None,
+    period_label: str = "",
+    period_count: int | None = None,
+    other_unit_count: int = 0,
+    other_units: Sequence[str] = (),
 ) -> list[product_identity_ui.IdentityField]:
     """The labelled product grid at the top of the result (replaces the glued title line)."""
 
@@ -2695,7 +3141,19 @@ def _result_identity_fields(
         isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_ambiguous
     )
     detail_name, detail_code = product_identity_ui.detail_class_of(all_direct)
-    detail_note = f"같은 제품 거래 {len(all_direct):,}건 기준 (전체 기간)" if all_direct else ""
+    # One sentence that adds up with the conclusion and the 거래 전체 tab (9100c NXT: 3 in all
+    # periods, 2 in 최근 3년, one of them in another unit).
+    detail_note = (
+        result_layout_ui.trade_count_note(
+            all_period_count=len(all_direct),
+            period_count=len(all_direct) if period_count is None else period_count,
+            period_label=period_label,
+            other_unit_count=other_unit_count,
+            other_units=other_units,
+        )
+        if all_direct
+        else ""
+    )
     if not (detail_name or detail_code) and category_market is not None and category_market.codes:
         first_code = category_market.codes[0]
         detail_name, detail_code = first_code.name, first_code.code
@@ -2884,13 +3342,19 @@ def _render_search_result(state: dict[str, Any]) -> None:
     quote_unit = str(st.session_state.get(unit_key) or "")
     vat_status = str(st.session_state.get(vat_key) or "미확인")
     quote_conditions = str(st.session_state.get(conditions_key) or "")
-    quote_error = False
-    try:
-        workspace_quote = _parse_quote(quote_text)
-    except ValueError:
-        workspace_quote = review_input.quote_unit_price
-        quote_error = True
+    # The last usable value typed in this box; an unusable entry keeps comparing it, or nothing.
+    last_quote_key = f"workspace_quote_last::{quote_key}"
+    parsed_quote = quote_input_ui.parse_quote_input(quote_text)
+    quote_error = bool(parsed_quote.error)
+    if quote_error:
+        previous_quote = st.session_state.get(last_quote_key)
+        workspace_quote = previous_quote if isinstance(previous_quote, Decimal) else None
+    else:
+        workspace_quote = parsed_quote.value
+        st.session_state[last_quote_key] = workspace_quote
 
+    # The unit the whole history uses most; every period compares that unit while it has a trade.
+    all_period_unit = result_summary_ui.main_unit_of(strict_comparison_candidates(track_b))
     # Default 3 years; widen to 5 years / everything when the period holds no same-product trade.
     track_b, direct_rows, reference_rows, period_choice = _apply_search_period(
         track_b, direct_rows, reference_rows, slot=period_col, quote_key=quote_key
@@ -2898,7 +3362,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     strict_count = len(direct_rows)
     reference_count = len(reference_rows)
 
-    stats_track_b, unit_split = _main_unit_view(track_b)
+    stats_track_b, unit_split = _main_unit_view(track_b, preferred_unit=all_period_unit)
     stats = build_purchase_workspace_stats(
         track_b=stats_track_b,
         market_bundle=market_bundle,
@@ -2920,12 +3384,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
     # "= 2,500,000원 · 1대 기준" once a price is typed, so a digit too many is easy to spot.
     quote_unit_slot.markdown(
         result_layout_ui.quote_hint_html(
-            workspace_quote if not quote_error else None, unit_split.main_unit, invalid=quote_error
+            workspace_quote if not quote_error else None,
+            unit_split.main_unit,
+            invalid=quote_error,
+            error=parsed_quote.error or "",
         ),
         unsafe_allow_html=True,
     )
     if quote_error:
-        st.warning("내 견적가는 숫자로만 입력하세요. 직전 값으로 비교합니다.")
+        st.warning(quote_input_ui.quote_error_message(parsed_quote.error or "", workspace_quote))
 
     if isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success":
         mfds_metric = "품목번호 확인"
@@ -3044,6 +3511,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 procurement_maker=workspace_header_ui.most_common_text(direct_rows, "제조사") or "",
                 procurement_spec=procurement_spec,
                 category_market=category_market,
+                period_label=period_choice.label,
+                period_count=strict_count,
+                other_unit_count=len(unit_split.other),
+                other_units=unit_split.other_units,
             ),
             marker_heading=f"{search_text or heading} 거래가격",
         ),
@@ -3120,13 +3591,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
     # ── 결론 줄: 왼쪽 결론 카드 + 가격 막대, 오른쪽 "최종 판단 전에 확인하세요" ──
     median_price = stats.median_price
-    outliers = result_summary_ui.price_outlier_rows(direct_rows, median_price)
     main_unit_id = result_summary_ui.unit_key(unit_split.main_unit)
     comparison_rows = [
         row
         for row in direct_rows
         if not unit_split.mixed or result_summary_ui.unit_key(row.get("단위")) in {"", main_unit_id}
     ]
+    # Only trades in the comparison unit, and only with 3+ of them: with 1~2 trades the "median"
+    # is one of the trades, and a trade in another unit is not comparable at all.
+    outliers = result_summary_ui.comparable_outlier_rows(comparison_rows, median_price)
     points = result_layout_ui.check_points(
         comparison_rows,
         direct_count=int(stats.direct_count or 0),
@@ -3140,6 +3613,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
         partial=partial_result,
         entry_error_count=entry_error_count,
     )
+    unit_change_note = result_layout_ui.unit_change_note(unit_split, all_period_unit, period_choice.label)
+    if unit_change_note:
+        points.append(result_layout_ui.CheckPoint(result_layout_ui.TONE_INFO, unit_change_note))
     lead = result_layout_ui.lead_view(
         stats,
         conclusion,
@@ -4054,5 +4530,7 @@ if isinstance(search_state, dict):
         _render_overview(search_state)
     elif search_state.get("route") == overview_ui.CATEGORY_ROUTE:
         _render_category_overview(search_state)
+    elif search_state.get("route") == NO_MATCH_ROUTE:
+        _render_no_match(search_state)
     else:
         _render_search_result(search_state)

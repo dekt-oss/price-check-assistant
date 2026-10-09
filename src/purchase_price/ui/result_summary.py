@@ -18,6 +18,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
+from purchase_price.ui.quote_input import difference_phrase
+
 TONE_OK = "ok"
 TONE_WARN = "warn"
 TONE_NEUTRAL = "neutral"
@@ -40,6 +42,9 @@ RESULT_SUMMARY_V3 = True
 # Runtime marker (2026-10-10): entry_error_line / entry_error_notice and the excluded count in the
 # conclusion; 입력 오류 의심 trades never enter a price.
 ENTRY_ERRORS_V1 = True
+# Runtime marker (2026-10-10 search fixes): quote differences as '1,234.5%' or 'N배 넘게', and
+# split_by_main_unit(preferred=...) keeps the all-period unit across periods.
+SEARCH_FIXES_V1 = True
 # Overview and same-item tables count the collected index only (no live days, all periods).
 COLLECTED_TRADES_LABEL = "같은 제품 거래(수집분)"
 
@@ -138,14 +143,6 @@ def _percent(value: Decimal, base: Decimal) -> Decimal:
     return ((value - base) / base * 100).quantize(Decimal("0.1"))
 
 
-def _direction(delta: Decimal) -> str:
-    if delta > 0:
-        return f"{delta:.1f}% 높습니다"
-    if delta < 0:
-        return f"{abs(delta):.1f}% 낮습니다"
-    return "같습니다"
-
-
 def build_conclusion(
     stats: Any,
     *,
@@ -212,7 +209,7 @@ def build_conclusion(
         quote_line = None
         if quote is not None:
             quote_line = (
-                f"내 견적가 {_won(quote)}은 이 1건보다 {_direction(_percent(quote, low))}. "
+                f"내 견적가 {_won(quote)}은 이 1건보다 {difference_phrase(quote, low)}. "
                 "1건뿐이라 가격대를 판단하기에는 부족합니다."
             )
         return Conclusion(
@@ -227,7 +224,7 @@ def build_conclusion(
     if low == high:
         quote_line = None
         if quote is not None:
-            quote_line = f"내 견적가 {_won(quote)}은 이 거래가보다 {_direction(_percent(quote, low))}."
+            quote_line = f"내 견적가 {_won(quote)}은 이 거래가보다 {difference_phrase(quote, low)}."
         return Conclusion(
             headline=f"같은 제품이 나라장터에서 {direct}번 거래됐고, 모두 {per}{_won(low)}이었습니다.",
             detail=latest_text.removeprefix(" · ") or None,
@@ -258,7 +255,7 @@ def build_conclusion(
             quote_line = f"내 견적가 {_won(quote)}은 {where}. 2건뿐이라 가격대를 판단하기에는 부족합니다."
         else:
             quote_line = (
-                f"내 견적가 {_won(quote)}은 중앙값보다 {_direction(_percent(quote, mid))}. {where}."
+                f"내 견적가 {_won(quote)}은 중앙값보다 {difference_phrase(quote, mid)}. {where}."
             )
 
     return Conclusion(
@@ -595,9 +592,9 @@ def quote_item_rows(
             elif quote is None or median_value is None:
                 position, status = "—", "확인됨"
             elif direct < 3:
-                position, status = f"{_percent(Decimal(str(quote)), median_value):+.1f}%", f"거래 {direct}건뿐"
+                position, status = f"{_percent(Decimal(str(quote)), median_value):+,.1f}%", f"거래 {direct}건뿐"
             else:
-                position, status = f"{_percent(Decimal(str(quote)), median_value):+.1f}%", "확인됨"
+                position, status = f"{_percent(Decimal(str(quote)), median_value):+,.1f}%", "확인됨"
         rows.append(
             {
                 "#": index + 1,
@@ -638,6 +635,27 @@ def price_outlier_rows(
         if ratio >= factor:
             found.append((ratio, row))
     return [row for _ratio, row in sorted(found, key=lambda item: -item[0])]
+
+
+OUTLIER_MIN_ROWS = 3
+
+
+def comparable_outlier_rows(
+    rows: Sequence[Mapping[str, object]],
+    median_price: Decimal | None,
+    *,
+    min_rows: int = OUTLIER_MIN_ROWS,
+) -> list[Mapping[str, object]]:
+    """Outliers among the trades that entered the price (one unit only).
+
+    With one or two trades the 'median' is one of them, so "3배 넘게 다른 거래" would only compare
+    the two trades with each other (9100c NXT: 27.5M vs a 108.3M 1식 trade); say nothing then.
+    """
+
+    priced = [row for row in rows if (_decimal(row.get("가격")) or 0) > 0]
+    if len(priced) < min_rows:
+        return []
+    return price_outlier_rows(priced, median_price)
 
 
 def entry_error_line(row: Mapping[str, object]) -> str:
@@ -703,27 +721,54 @@ class UnitSplit:
     other: tuple[Any, ...]
     main_unit: str | None
     other_units: tuple[str, ...]
+    # True when the period holds no trade in the unit chosen over all periods, so this period
+    # uses its own most common unit ("기간에 따라 기준 단위가 바뀝니다").
+    unit_changed: bool = False
 
     @property
     def mixed(self) -> bool:
         return bool(self.other)
 
 
-def split_by_main_unit(candidates: Sequence[Any]) -> UnitSplit:
+def main_unit_of(candidates: Sequence[Any]) -> str | None:
+    """The unit most same-product trades use; on a tie the most recent trade's unit decides,
+    then the unit name, so the choice never depends on list order."""
+
+    counts: dict[str, int] = {}
+    latest: dict[str, str] = {}
+    for candidate in candidates:
+        key = unit_key(getattr(candidate, "unit", None))
+        if not key:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+        when = str(getattr(candidate, "transaction_date", "") or "")
+        latest[key] = max(latest.get(key, ""), when)
+    if not counts:
+        return None
+    main = max(counts, key=lambda key: (counts[key], latest.get(key, ""), key))
+    return _unit_display(getattr(candidate, "unit", None) for candidate in candidates).get(main, main)
+
+
+def split_by_main_unit(candidates: Sequence[Any], *, preferred: str | None = None) -> UnitSplit:
+    """Split by the main unit. ``preferred`` (a unit key chosen over all periods) wins whenever
+    this period has a trade in it, so 최근 3년 / 5년 / 전체 compare the same unit."""
+
     keys = [unit_key(getattr(candidate, "unit", None)) for candidate in candidates]
     counts: dict[str, int] = {}
     for key in keys:
         if key:
             counts[key] = counts.get(key, 0) + 1
     display = _unit_display(getattr(candidate, "unit", None) for candidate in candidates)
+    preferred_key = unit_key(preferred) if preferred else ""
+    changed = bool(preferred_key and counts and preferred_key not in counts)
     if len(counts) <= 1:
         main = next(iter(counts), None)
-        return UnitSplit(tuple(candidates), (), display.get(main) if main else None, ())
-    main = max(counts, key=lambda key: (counts[key], key))
+        return UnitSplit(tuple(candidates), (), display.get(main) if main else None, (), changed)
+    main = preferred_key if preferred_key in counts else unit_key(main_unit_of(candidates))
     kept = tuple(c for c, key in zip(candidates, keys, strict=True) if key in {"", main})
     other = tuple(c for c, key in zip(candidates, keys, strict=True) if key not in {"", main})
     other_units = tuple(dict.fromkeys(display[key] for key in keys if key not in {"", main}))
-    return UnitSplit(kept, other, display[main], other_units)
+    return UnitSplit(kept, other, display[main], other_units, changed)
 
 
 def per_unit_label(unit: str | None) -> str:

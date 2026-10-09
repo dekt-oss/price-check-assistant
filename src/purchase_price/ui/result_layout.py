@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from purchase_price.ui.quote_input import difference_phrase
 from purchase_price.ui.theme import (
     TONE_DANGER,
     TONE_INFO,
@@ -36,6 +37,9 @@ RESULT_LAYOUT_V3 = True
 # Runtime marker (2026-10-10): 입력 오류 의심 trades are counted in the check panel, the headline basis
 # and the chip row; they get their own box (rl_entry_errors).
 RESULT_LAYOUT_ENTRY_ERRORS_V1 = True
+# Runtime marker (2026-10-10 search fixes): quote differences via quote_input, permit hint in the
+# empty state, outliers only with 3+ comparable trades.
+RESULT_LAYOUT_SEARCH_FIXES_V1 = True
 
 RESULT_CSS = """
 <style>
@@ -346,6 +350,50 @@ def check_points(
     return points
 
 
+def unit_change_note(split: Any, all_period_unit: str | None, period_label: str) -> str:
+    """When this period has no trade in the unit the whole history uses most, say the basis moved."""
+
+    if not getattr(split, "unit_changed", False) or not all_period_unit:
+        return ""
+    main = getattr(split, "main_unit", None) or "다른"
+    return (
+        f"기간에 따라 기준 단위가 바뀝니다. 전체 기간은 {all_period_unit} 단위 거래가 가장 많지만 "
+        f"{period_label or '이 기간'}에는 {all_period_unit} 단위 거래가 없어 {main} 단위로 셉니다."
+    )
+
+
+def trade_count_note(
+    *,
+    all_period_count: int,
+    period_count: int,
+    period_label: str,
+    other_unit_count: int = 0,
+    other_units: Sequence[str] = (),
+) -> str:
+    """'같은 제품 거래 3건 (전체 기간) · 최근 3년 2건, 그중 단위 다른 1건(식)': one sentence that
+    reconciles the header count, the period count and the other-unit trades."""
+
+    if not all_period_count:
+        return "같은 제품 거래 0건"
+    text = f"같은 제품 거래 {all_period_count:,}건 (전체 기간)"
+    whole = not period_label or period_label == "전체" or period_count == all_period_count
+    if not whole:
+        text += f" · {period_label} {period_count:,}건"
+    if other_unit_count:
+        units = "·".join(other_units)
+        text += ("," if not whole else " ·") + f" 그중 단위 다른 {other_unit_count:,}건" + (f"({units})" if units else "")
+    return text
+
+
+def other_unit_suffix(other_unit_count: int, other_units: Sequence[str] = ()) -> str:
+    """For '거래 전체 N건': ' · 단위 다른 1건(식) 포함' so the tab and the conclusion add up."""
+
+    if not other_unit_count:
+        return ""
+    units = "·".join(other_units)
+    return f" · 단위 다른 {other_unit_count:,}건" + (f"({units})" if units else "") + " 포함"
+
+
 GENERAL_CHECK = "VAT·설치·옵션 조건이 같은지는 원문에서 확인하세요."
 
 
@@ -378,16 +426,15 @@ class LeadView:
     basis: str
 
 
-def _delta(quote: Decimal, base: Decimal) -> Decimal:
-    return ((quote - base) / base * 100).quantize(Decimal("0.1"))
+def _delta_html(quote: Decimal, base: Decimal) -> str:
+    """'9.1% 낮습니다' with thousands separators, or 'N배 넘게 높습니다' far above the price."""
 
-
-def _delta_html(delta: Decimal) -> str:
-    if delta > 0:
-        return f'<em class="rl-up">{delta:.1f}% 높습니다</em>'
-    if delta < 0:
-        return f'<em class="rl-down">{abs(delta):.1f}% 낮습니다</em>'
-    return "<em>같습니다</em>"
+    phrase = esc(difference_phrase(quote, base))
+    if quote > base:
+        return f'<em class="rl-up">{phrase}</em>'
+    if quote < base:
+        return f'<em class="rl-down">{phrase}</em>'
+    return f"<em>{phrase}</em>"
 
 
 def lead_view(
@@ -435,7 +482,7 @@ def lead_view(
     quote_text = esc(_won(quote))
     if direct >= 3 and low != high and mid is not None:
         headline = (
-            f"내 견적가 {quote_text}은 {esc(_per(unit))}거래 가운데 값보다 {_delta_html(_delta(quote, mid))}."
+            f"내 견적가 {quote_text}은 {esc(_per(unit))}거래 가운데 값보다 {_delta_html(quote, mid)}."
         )
         basis = f"{scope} {direct}건 기준{excluded_text} · 가운데 값 {_won(mid)}{latest_text}"
     elif direct == 2 and low != high:
@@ -449,7 +496,7 @@ def lead_view(
         basis = f"{scope} 2건 기준{excluded_text}{latest_text}"
     else:
         target = "이 1건" if direct == 1 else "이 거래가"
-        headline = f"내 견적가 {quote_text}은 {target}보다 {_delta_html(_delta(quote, low))}."
+        headline = f"내 견적가 {quote_text}은 {target}보다 {_delta_html(quote, low)}."
         basis = f"{scope} {direct}건 기준{excluded_text}{latest_text}"
     return LeadView(eyebrow, tone, headline, basis)
 
@@ -654,19 +701,23 @@ def not_found_html(query: str, *, basis: str = "") -> str:
         "찾지 못했습니다. 그래서 가격·허가·회수 정보를 보여주지 않습니다.</div>"
         f"{basis_html}"
         "<ul>"
-        "<li><b>철자</b>를 확인하세요. 띄어쓰기와 하이픈(-)은 빼도 됩니다.</li>"
+        "<li><b>철자</b>를 확인하세요. 모델명은 띄어쓰기와 하이픈(-)을 빼도 됩니다.</li>"
+        "<li><b>허가번호</b>는 ‘제허 19-527 호’처럼 넣으세요. 띄어쓰기와 ‘호’는 없어도 됩니다.</li>"
         "<li><b>모델명만</b> 넣어 보세요. 예: DFM100, HeartOn A16-DS</li>"
         "<li><b>업체명</b>이나 <b>품목명</b>으로 찾아보세요. 예: 메디아나, 환자감시장치</li>"
         "</ul></div>"
     )
 
 
-def quote_hint_html(quote: Decimal | None, unit: str | None, *, invalid: bool = False) -> str:
+def quote_hint_html(
+    quote: Decimal | None, unit: str | None, *, invalid: bool = False, error: str = ""
+) -> str:
     """Next to the price input: the parsed value with thousands separators, or how to fill it."""
 
     phrase = unit_phrase(unit)
     if invalid:
-        return '<span class="rl-quote-hint">숫자로만 입력하세요 (쉼표는 괜찮습니다)</span>'
+        text = error or "숫자로 넣으세요. 예: 1,800,000 · 180만"
+        return f'<span class="rl-quote-hint rl-quote-error">{esc(text)}</span>'
     if quote is not None and quote > 0:
         per = f" · {phrase} 기준" if phrase else ""
         return f'<span class="rl-quote-hint"><b>= {esc(_won(quote))}</b>{esc(per)}</span>'
