@@ -91,7 +91,8 @@ def test_dashboard_wires_item_status_part_warning_and_note_order() -> None:
 
     assert "mfds_item_status_service.lookup_item_status_from_r2(" in source
     assert "item_status_labels=item_status_labels" in source
-    assert "reference_price=stats.median_price" in source
+    assert "median_price=stats.median_price" in source
+    assert "reference_price=median_price" in source
     assert 'if "부품" in procurement_spec:' in source
     assert source.index("same_item_ui.current_model_note(summary_view)") < source.index(
         "result_summary_ui.same_item_summary_rows(summary_view.rows)"
