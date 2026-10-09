@@ -40,6 +40,8 @@ RESULT_LAYOUT_ENTRY_ERRORS_V1 = True
 # Runtime marker (2026-10-10 search fixes): quote differences via quote_input, permit hint in the
 # empty state, outliers only with 3+ comparable trades.
 RESULT_LAYOUT_SEARCH_FIXES_V1 = True
+# Runtime marker (2026-10-10): 누가 파는가 / 같은 품목의 다른 모델 stack below ~1200px.
+RESULT_LAYOUT_STACK_V1 = True
 
 RESULT_CSS = """
 <style>
@@ -167,7 +169,8 @@ RESULT_CSS = """
   .st-key-rl_settings [data-testid="stColumn"]:nth-child(3) {order:1; flex:0 0 100% !important; width:100% !important;}
 }
 .st-key-rl_mfds_action {margin-top:-10px;}
-.st-key-rl_mfds_action button p {font-size:12px; color:#1D4ED8; font-weight:700; white-space:nowrap;}
+.st-key-rl_mfds_action button p {font-size:12px; color:#1D4ED8; font-weight:700; white-space:normal;}
+.st-key-rl_mfds_action button {height:auto; min-height:2rem;}
 .st-key-rl_result h4 {margin-top:18px;}
 .st-key-rl_outliers, .st-key-rl_entry_errors {background:#FFF9EA; border:1px solid #F8E2B5; border-radius:10px; padding:12px 16px;}
 .st-key-rl_entry_errors {margin:0 0 12px 0;}
@@ -180,6 +183,13 @@ RESULT_CSS = """
 .st-key-rl_result [data-baseweb="tab"] p {font-size:13px;}
 .st-key-rl_result [data-baseweb="tab"][aria-selected="true"] p {font-weight:800;}
 .st-key-rl_result [data-baseweb="tab-highlight"] {height:3px;}
+/* 누가 파는가 | 같은 품목의 다른 모델: two half-width tables are cramped once the side menu leaves
+   ~800px of page, so below ~1200px they stack (same wrapping trick as the quote review page). */
+@media (max-width: 1200px) {
+  .st-key-rl_who_models div[data-testid="stHorizontalBlock"] {flex-wrap:wrap !important; row-gap:0.5rem;}
+  .st-key-rl_who_models div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+    flex:1 1 100% !important; width:100% !important; min-width:100% !important;}
+}
 @media (max-width: 900px) {
   .rl-lead {grid-template-columns:1fr;}
   .rl-bignums {grid-template-columns:1fr;}

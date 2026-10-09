@@ -10,6 +10,9 @@ def test_quantity_text_drops_trailing_zeros_without_exponents() -> None:
     assert _quantity_text(Decimal("100")) == "100"
     assert _quantity_text(Decimal("2.50")) == "2.5"
     assert _quantity_text(None) == "미확인"
+    assert _quantity_text(Decimal("1071")) == "1,071"
+    assert _quantity_text(Decimal("1000")) == "1,000"
+    assert _quantity_text(Decimal("12345.50")) == "12,345.5"
     assert _quantity_unit(Decimal("3.000"), "개") == "3 개"
 
 

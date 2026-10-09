@@ -15,15 +15,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from statistics import median
+from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from purchase_price.evidence_domain import IdentityEvidenceStatus
 from purchase_price.services.matching import exact_model_match
-from purchase_price.ui import result_summary
+from purchase_price.ui import product_identity, result_summary
 from purchase_price.ui.theme import (
     TONE_DANGER,
     TONE_INFO,
@@ -38,12 +40,17 @@ from purchase_price.ui.theme import (
 )
 from purchase_price.ui.track_b_transactions import (
     category_reference_candidates,
+    entry_error_candidates,
     reference_candidates,
     strict_comparison_candidates,
 )
 
 DEVICE_PAGE_LAYOUT_V1 = True
 DEVICE_PAGE_UDI_INPUT_V1 = True
+# 2026-10-10: the result header is the shared labelled product block (ui/product_identity.py).
+DEVICE_PAGE_IDENTITY_V1 = True
+# 2026-10-10: the trade summary counts 입력 오류 의심 lines out and says so (same rule as 가격 조사).
+DEVICE_PAGE_ENTRY_ERRORS_V1 = True
 
 PAGE_TITLE = "의료기기 허가·안전"
 PAGE_SUBTITLE = (
@@ -121,7 +128,7 @@ DEVICE_CSS = """
 .pc-dev-section .pc-subtitle {margin:0 0 10px 0;}
 .pc-dev-hint {font-size:12px; color:var(--pc-muted); line-height:1.6; margin:6px 0 0 0;}
 .pc-notice.pc-ok {background:#EFFAF5; border-color:#BDE5D3; color:#0F5F46;}
-.pc-dev-trades .pc-metric .pc-value {font-size:18px; white-space:nowrap;}
+.pc-dev-trades .pc-metric .pc-value {font-size:18px; overflow-wrap:anywhere;}
 .pc-dev-one {max-width:280px; margin:0 0 14px 0;}
 .pc-dev-detail {display:block; margin-top:4px; font-size:11.5px; opacity:.85;}
 </style>
@@ -412,6 +419,10 @@ class MarketResult:
     trades: TradeSummary | None = None
     supplier_rows: list[dict[str, str]] = field(default_factory=list)
     recall: Any = None
+    # The 식약처 identity index answer for the typed model (permit, company, grade, UDI-DI) and the
+    # item-status labels of its permits; both empty when the model was not typed or not found.
+    identity: Any = None
+    status_labels: dict[str, str] = field(default_factory=dict)
 
     @property
     def records_failed(self) -> bool:
@@ -471,7 +482,24 @@ def supplier_evidence_text(evidence: str) -> str:
     return evidence.split(";")[0].strip()
 
 
-def identity_notice_html(model_name: str, exact: Any) -> str:
+def index_exact_permits(result: MarketResult) -> tuple[str, ...]:
+    """Permit numbers of the typed model in the full 허가 목록 index (the header's source); () if none.
+
+    The 식약처 API lookup only returns the first rows of the product name, so a model missing there
+    can still be a confirmed registration in the full list. Ambiguous hits are left to the person.
+    """
+
+    identity = getattr(result, "identity", None)
+    if getattr(identity, "status", "") != "success":
+        return ()
+    if getattr(identity, "match_type", "") not in {"model", "udi", "permit"}:
+        return ()
+    if getattr(identity, "identity_status", None) == IdentityEvidenceStatus.AMBIGUOUS:
+        return ()
+    return tuple(getattr(identity, "permit_numbers", ()) or ())
+
+
+def identity_notice_html(model_name: str, exact: Any, index_permits: Sequence[str] = ()) -> str:
     """One sentence on whether the typed model was found as the same registration."""
 
     if exact is None or not model_name.strip():
@@ -489,6 +517,13 @@ def identity_notice_html(model_name: str, exact: Any) -> str:
         )
         return notice_html(
             f"<b>모델명 ‘{esc(model_name)}’과 정확히 같은 등록을 확인했습니다.</b> 허가번호 {esc(permits)}",
+            TONE_OK,
+            icon="✓",
+        )
+    if index_permits:
+        return notice_html(
+            f"<b>식약처 전체 허가 목록에서 모델명 ‘{esc(model_name)}’과 정확히 같은 등록을 확인했습니다.</b> "
+            f"허가번호 {esc(', '.join(index_permits))} · 위 표는 품목명 조회 결과의 일부라 이 등록이 안 보일 수 있습니다.",
             TONE_OK,
             icon="✓",
         )
@@ -529,6 +564,13 @@ def permit_summary_cards(result: MarketResult) -> str:
     elif getattr(exact, "confirmed", False):
         count = len(exact.exact_matches)
         same = metric_card_html("입력한 모델과 같은 등록", f"{count}건", "모델명이 정확히 같음", TONE_OK)
+    elif index_exact_permits(result):
+        same = metric_card_html(
+            "입력한 모델과 같은 등록",
+            f"{len(index_exact_permits(result))}건",
+            "식약처 전체 허가 목록에서 확인",
+            TONE_OK,
+        )
     else:
         same = metric_card_html("입력한 모델과 같은 등록", "찾지 못함", "품목 결과 안에 같은 모델명 없음", TONE_WARN)
     recall = recall_view(result.recall, searched=params.model_name or params.product_name)
@@ -541,6 +583,73 @@ def searched_chips_html(params: MarketParams, checked_at: str) -> str:
     if checked_at:
         chips.append(f"확인 시각 <b>{esc(checked_at)}</b>")
     return chips_html(chips)
+
+
+def meta_chips_html(params: MarketParams, checked_at: str) -> str:
+    """The chips the product block does not show: 규격 and when the lookup ran."""
+
+    chips = []
+    if params.specification.strip():
+        chips.append(f"규격 <b>{esc(params.specification.strip())}</b>")
+    if checked_at:
+        chips.append(f"확인 시각 <b>{esc(checked_at)}</b>")
+    return chips_html(chips)
+
+
+def identity_header_fields(result: MarketResult) -> list[product_identity.IdentityField]:
+    """The same labelled product grid as 가격 조사: 모델명, 품목명, 업체, 허가번호, 등급, UDI-DI when known."""
+
+    params = result.params
+    exact = result.exact
+    exact_records = tuple(getattr(exact, "exact_matches", ()) or ()) if getattr(exact, "confirmed", False) else ()
+    workspace = SimpleNamespace(exact_records=exact_records, exact_confirmed=bool(exact_records))
+    identity = getattr(result, "identity", None)
+    try:
+        candidates = strict_comparison_candidates(result.track_b) if result.track_b is not None else ()
+    except Exception:
+        candidates = ()
+    fields = product_identity.matched_product_fields(
+        identity=identity,
+        workspace=workspace,
+        candidates=candidates,
+        fallback_model=params.model_name,
+        status_labels=getattr(result, "status_labels", None) or {},
+    )
+    if getattr(exact, "ambiguous", False):
+        fields = [
+            replace(f, status="허가 여러 건", tone=TONE_WARN) if f.key == "model" else f for f in fields
+        ]
+    typed_product = " ".join(params.product_name.split())
+    typed_maker = " ".join(params.manufacturer.split())
+    adjusted = []
+    for item in fields:
+        if item.key == "model" and not item.value:
+            item = replace(item, empty_text="입력 안 함")
+        elif item.key == "mfds_product" and not item.value and typed_product:
+            item = replace(item, value=typed_product, note="검색한 품목명")
+        elif item.key == "company" and not item.value and typed_maker:
+            item = replace(item, value=typed_maker, note="입력한 업체 (식약처 확인 전)")
+        adjusted.append(item)
+    udis = list(
+        dict.fromkeys(
+            str(getattr(record, "udi_di", "") or "").strip()
+            for record in (getattr(identity, "records", ()) or ())
+            if str(getattr(record, "udi_di", "") or "").strip()
+        )
+    ) if getattr(identity, "status", "") == "success" and getattr(identity, "match_type", "") in {"model", "udi", "permit"} else []
+    if udis:
+        adjusted.append(
+            product_identity.IdentityField(
+                "udi", "UDI-DI", udis[0], note=f"외 {len(udis) - 1}건" if len(udis) > 1 else ""
+            )
+        )
+    return adjusted
+
+
+def identity_header_html(result: MarketResult) -> str:
+    return product_identity.identity_html(
+        identity_header_fields(result), element_id="device-product-identity-v1"
+    )
 
 
 def permit_not_found_html(params: MarketParams) -> str:
@@ -575,6 +684,7 @@ class TradeSummary:
     reference_count: int
     other_unit_count: int
     trades: tuple[Any, ...] = ()
+    entry_error_count: int = 0
 
 
 def _positive_decimal(value: object) -> Decimal | None:
@@ -598,6 +708,9 @@ def build_trade_summary(track_b: Any, today: date | None = None) -> TradeSummary
     direct = result_summary.filter_candidates(direct, choice.cutoff)
     references = result_summary.filter_candidates(references, choice.cutoff)
     split = result_summary.split_by_main_unit(direct)
+    entry_errors = result_summary.filter_candidates(
+        [candidate for candidate, _error in entry_error_candidates(track_b)], choice.cutoff
+    )
     priced = [
         (candidate, price)
         for candidate in split.kept
@@ -620,11 +733,24 @@ def build_trade_summary(track_b: Any, today: date | None = None) -> TradeSummary
         reference_count=len(references),
         other_unit_count=len(split.other),
         trades=tuple(ordered),
+        entry_error_count=len(entry_errors),
     )
 
 
 def track_b_unavailable(track_b: Any) -> bool:
     return str(getattr(track_b, "status", "") or "") in {"unavailable", "not_ingested"}
+
+
+def entry_error_note_html(summary: TradeSummary) -> str:
+    """Says how many lines were left out of the price as 입력 오류 의심 (same wording as 가격 조사)."""
+
+    if not summary.entry_error_count:
+        return ""
+    return (
+        '<div class="pc-dev-hint">입력 오류 의심 '
+        f"{summary.entry_error_count:,}건은 단가가 10원 이하로 적혀 있어 가격 계산에서 뺐습니다. "
+        "가격 조사 화면에서 원문을 확인하세요.</div>"
+    )
 
 
 def trade_summary_cards(summary: TradeSummary) -> str:
@@ -633,7 +759,7 @@ def trade_summary_cards(summary: TradeSummary) -> str:
     per = result_summary.per_unit_label(summary.main_unit).strip()
     count_card = metric_card_html(
         "같은 제품 거래",
-        f"{summary.count}건",
+        f"{summary.count:,}건",
         f"나라장터 · {summary.period_label}",
         TONE_OK if summary.count else TONE_MUTED,
     )

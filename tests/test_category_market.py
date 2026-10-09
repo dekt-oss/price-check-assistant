@@ -412,3 +412,15 @@ def test_recent_purchases_group_identical_delivery_requests_without_dropping_the
     assert html.count("재단법인 화성시문화관광재단") == 1
     assert "납품요구 3건" in html
     assert len(market.equipment) == 5
+
+
+def test_block_fits_a_390px_phone_without_cutting_text():
+    css = ui.CSS
+    assert ui.CATEGORY_MARKET_NARROW_V1 is True
+    narrow = css[css.index("@container (max-width: 520px)"): css.index("@container (max-width: 420px)")]
+    # the year table scrolls inside its own card; recent purchases and the status strip wrap
+    assert ".cm-grid > .pc-card {padding" in narrow and "grid-template-columns:minmax(0,1fr)" in css
+    assert "overflow-x:auto" in css
+    assert ".cm-recent-row .cm-who {order:3; flex:1 1 100%; white-space:normal" in narrow
+    assert ".cm-strip-note {white-space:normal" in narrow
+    assert "overflow-wrap:anywhere" in css

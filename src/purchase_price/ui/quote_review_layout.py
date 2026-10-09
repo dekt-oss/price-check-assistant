@@ -38,6 +38,8 @@ QUOTE_REVIEW_IDENTITY_V1 = True
 # Runtime marker: 입력 오류 의심 trades (unit price 0~10원, swapped 단가/수량) stay out of the median
 # and are counted in the check points (2026-10-10).
 QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
+# Summary-card sub lines wrap instead of ending in "…" (2026-10-10).
+QUOTE_REVIEW_CARD_WRAP_V1 = True
 
 # A quote this many percent above the median of same-product trades is flagged for a check.
 QUOTE_CHECK_THRESHOLD_PERCENT = Decimal("20")
@@ -648,8 +650,8 @@ LAYOUT_CSS = """
 <style>
 .qr-metrics {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:4px 0 12px 0;}
 .qr-metric {display:flex; flex-direction:column;}
-.qr-metric .pc-sub {overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-.qr-filetag {display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+.qr-metric .pc-sub {overflow-wrap:anywhere; word-break:keep-all;}
+.qr-filetag {display:inline-block; max-width:100%; overflow-wrap:anywhere; word-break:break-all;
   vertical-align:bottom; font-size:11px; color:#567399; border:1px solid #D2E0F0; background:#F3F8FD;
   padding:3px 8px; border-radius:6px;}
 .qr-rule {font-size:12px; color:#5B6C82; line-height:1.6; margin:0 0 14px 0; padding:10px 14px;

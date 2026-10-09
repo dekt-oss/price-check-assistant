@@ -204,6 +204,7 @@ _UI_RUNTIME_MARKERS = (
     # track_b_transactions first, then the modules that import its functions by name.
     ("purchase_price.services.category_market", "CATEGORY_MARKET_ENTRY_ERRORS_V1"),
     ("purchase_price.ui.track_b_transactions", "ENTRY_ERRORS_EXCLUDED_V1"),
+    ("purchase_price.ui.track_b_transactions", "QUANTITY_COMMAS_V1"),
     ("purchase_price.ui.purchase_workspace", "ENTRY_ERRORS_EXCLUDED_V1"),
     ("purchase_price.ui.workspace_header", "ENTRY_ERRORS_V1"),
     ("purchase_price.ui.result_summary", "ENTRY_ERRORS_V1"),
@@ -218,6 +219,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.result_summary", "RESULT_SUMMARY_V3"),
     ("purchase_price.ui.search_overviews", "OVERVIEW_V2"),
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_V3"),
+    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_STACK_V1"),
     ("purchase_price.services.category_market", "CATEGORY_MARKET_PERIOD_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_PERIOD_V1"),
     # 2026-10-10 search fixes: quote parsing/percentages (new quote_input module), stable unit
@@ -225,6 +227,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.result_summary", "SEARCH_FIXES_V1"),
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_SEARCH_FIXES_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_RECENT_GROUPED_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_NARROW_V1"),
 )
 
 
@@ -2917,7 +2920,9 @@ def _render_supplier_and_models(
 
     show_models = bool(mfds_procurement_crosslinks or identity_known)
     if show_models:
-        supplier_col, models_col = st.columns(2, gap="medium")
+        # Keyed so the layout CSS can stack the two tables below ~1200px (see result_layout.RESULT_CSS).
+        with st.container(key="rl_who_models"):
+            supplier_col, models_col = st.columns(2, gap="medium")
     else:
         supplier_col, models_col = st.container(), None
 
