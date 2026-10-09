@@ -37,10 +37,12 @@ CSS = """
 .pi-block {margin:0 0 4px 0;}
 .pi-title {display:flex; align-items:center; gap:8px; font-size:12px; font-weight:800; color:var(--pc-muted);
   margin:0 0 7px 2px; letter-spacing:-0.1px;}
-/* Lines are cell shadows, not a coloured gap, so a short last row leaves white space, not a grey block. */
-.pi-grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; background:#FFFFFF;
-  border:1px solid #E3EAF2; border-radius:11px; overflow:hidden;}
-.pi-cell {background:#FFFFFF; padding:10px 14px 11px 14px; min-width:0; box-shadow:1px 0 0 #E3EAF2, 0 1px 0 #E3EAF2;}
+/* Each cell draws its left and top line; the grid is pulled 1px up-left inside a clipped frame so
+   the outer edge shows only the frame, and a short last row leaves white space, not a grey block. */
+.pi-frame {border:1px solid #E3EAF2; border-radius:11px; overflow:hidden; background:#FFFFFF;}
+.pi-grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; margin:-1px 0 0 -1px;}
+.pi-cell {background:#FFFFFF; padding:10px 14px 11px 14px; min-width:0; border-left:1px solid #E3EAF2;
+  border-top:1px solid #E3EAF2;}
 .pi-cell.pi-span2 {grid-column:span 2;}
 .pi-cell.pi-main {background:#F7FAFE;}
 .pi-label {display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:3px 6px;
@@ -388,7 +390,7 @@ def _cell_html(field: IdentityField) -> str:
 def grid_html(fields: Sequence[IdentityField], *, title: str = "") -> str:
     head = f'<div class="pi-title">{esc(title)}</div>' if title else ""
     cells = "".join(_cell_html(field) for field in fields)
-    return f'<div class="pi-block">{head}<div class="pi-grid">{cells}</div></div>'
+    return f'<div class="pi-block">{head}<div class="pi-frame"><div class="pi-grid">{cells}</div></div></div>'
 
 
 def identity_html(

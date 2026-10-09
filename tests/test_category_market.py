@@ -315,7 +315,7 @@ def test_market_follows_the_chosen_trade_period() -> None:
     )
 
     everything = cm.within_period(market, None, label="전체")
-    assert len(everything.equipment) == 4 and ui.period_text(everything) == "전체 기간"
+    assert len(everything.equipment) == 4 and ui.period_text(everything) == "전체"
 
     empty = cm.within_period(market, date(2026, 6, 1), label="최근 3년")
     assert not empty.equipment and empty.outside_period == 4

@@ -126,12 +126,12 @@ def product_label(market: CategoryMarket) -> str:
 
 
 def period_text(market: CategoryMarket) -> str:
-    """'최근 3년(2023-10-10 이후)' / '전체 기간' / '' when the market was not limited."""
+    """'최근 3년(2023-10-10 이후)' / '전체' / '' when the market was not limited."""
 
     if not market.period_label:
         return ""
     if not market.period_start:
-        return "전체 기간"
+        return "전체"
     return f"{market.period_label}({market.period_start} 이후)"
 
 
