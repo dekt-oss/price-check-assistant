@@ -36,6 +36,8 @@ RESULT_LAYOUT_V3 = True
 # Runtime marker (2026-10-10): 입력 오류 의심 trades are counted in the check panel, the headline basis
 # and the chip row; they get their own box (rl_entry_errors).
 RESULT_LAYOUT_ENTRY_ERRORS_V1 = True
+# Runtime marker (2026-10-10): 누가 파는가 / 같은 품목의 다른 모델 stack below ~1200px.
+RESULT_LAYOUT_STACK_V1 = True
 
 RESULT_CSS = """
 <style>
@@ -176,6 +178,13 @@ RESULT_CSS = """
 .st-key-rl_result [data-baseweb="tab"] p {font-size:13px;}
 .st-key-rl_result [data-baseweb="tab"][aria-selected="true"] p {font-weight:800;}
 .st-key-rl_result [data-baseweb="tab-highlight"] {height:3px;}
+/* 누가 파는가 | 같은 품목의 다른 모델: two half-width tables are cramped once the side menu leaves
+   ~800px of page, so below ~1200px they stack (same wrapping trick as the quote review page). */
+@media (max-width: 1200px) {
+  .st-key-rl_who_models div[data-testid="stHorizontalBlock"] {flex-wrap:wrap !important; row-gap:0.5rem;}
+  .st-key-rl_who_models div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+    flex:1 1 100% !important; width:100% !important; min-width:100% !important;}
+}
 @media (max-width: 900px) {
   .rl-lead {grid-template-columns:1fr;}
   .rl-bignums {grid-template-columns:1fr;}
