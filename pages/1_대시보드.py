@@ -195,6 +195,7 @@ _UI_RUNTIME_MARKERS = (
     # track_b_transactions first, then the modules that import its functions by name.
     ("purchase_price.services.category_market", "CATEGORY_MARKET_ENTRY_ERRORS_V1"),
     ("purchase_price.ui.track_b_transactions", "ENTRY_ERRORS_EXCLUDED_V1"),
+    ("purchase_price.ui.track_b_transactions", "QUANTITY_COMMAS_V1"),
     ("purchase_price.ui.purchase_workspace", "ENTRY_ERRORS_EXCLUDED_V1"),
     ("purchase_price.ui.workspace_header", "ENTRY_ERRORS_V1"),
     ("purchase_price.ui.result_summary", "ENTRY_ERRORS_V1"),
