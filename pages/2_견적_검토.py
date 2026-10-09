@@ -17,6 +17,8 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.quote_review_s5_s6", "QUOTE_REVIEW_ACCEPTANCE_V3"),
     ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_ACCEPTANCE_V3"),
     ("purchase_price.ui.quote_market_research", "HANDOFF_SOURCE_V1"),
+    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_IDENTITY_V1"),
+    ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_IDENTITY_V1"),
 )
 
 

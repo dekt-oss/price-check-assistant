@@ -32,6 +32,8 @@ from purchase_price.ui.track_b_transactions import (
 
 QUOTE_REVIEW_LAYOUT_V1 = True
 QUOTE_REVIEW_ACCEPTANCE_V3 = True
+# Runtime marker: the selected-item card shows 견적서에 적힌 값 / 확인된 제품 grids (2026-10-10).
+QUOTE_REVIEW_IDENTITY_V1 = True
 
 # A quote this many percent above the median of same-product trades is flagged for a check.
 QUOTE_CHECK_THRESHOLD_PERCENT = Decimal("20")
@@ -568,7 +570,10 @@ def _per_unit(unit: str | None) -> str:
     return result_summary.per_unit_label(unit).strip() or "1단위당"
 
 
-def detail_card_html(comparison: QuoteItemComparison, *, total: int) -> str:
+def detail_card_html(comparison: QuoteItemComparison, *, total: int, identity_html: str = "") -> str:
+    """The selected item. ``identity_html`` (견적서에 적힌 값 next to 확인된 제품, from
+    product_identity.pair_html) replaces the model title and the glued grey line under it."""
+
     c = comparison
     tone = c.verdict.tone
     quote_sub = _per_unit(c.quote_unit or None) if c.quote_unit_price is not None else "견적서에 단가 없음"
@@ -593,11 +598,15 @@ def detail_card_html(comparison: QuoteItemComparison, *, total: int) -> str:
         range_line = (
             f'<div class="qr-range">거래 가격 {_won(c.low_price)} ~ {_won(c.high_price)}</div>'
         )
-    subtitle = f'<div class="qr-hint">{html.escape(c.subtitle)}</div>' if c.subtitle else ""
+    if identity_html:
+        head = f'<div class="qr-identity">{identity_html}</div>'
+    else:
+        subtitle = f'<div class="qr-hint">{html.escape(c.subtitle)}</div>' if c.subtitle else ""
+        head = f'<div class="qr-detail-title">{html.escape(c.title)}</div>{subtitle}'
     return (
         '<div class="qr-detail">'
         f'<span class="pc-pill pc-info">선택한 품목 {c.number} / {total}</span>'
-        f'<div class="qr-detail-title">{html.escape(c.title)}</div>{subtitle}'
+        f"{head}"
         '<div class="qr-prices">'
         f'<div class="qr-cell"><div class="qr-lbl">견적 단가</div><div class="qr-num">{_won(c.quote_unit_price)}</div>'
         f'<div class="qr-lbl">{html.escape(quote_sub)}</div></div>'
@@ -630,6 +639,7 @@ LAYOUT_CSS = """
 .qr-section-sub {font-size:12px; color:var(--pc-muted); margin:2px 0 0 0;}
 .qr-foot {font-size:11px; color:#8694A6; margin:4px 0 0 0; line-height:1.6;}
 .qr-detail .pc-pill {margin-bottom:10px;}
+.qr-identity {margin:2px 0 4px 0;}
 .qr-detail-title {font-size:20px; font-weight:800; color:var(--pc-navy); letter-spacing:-0.5px; line-height:1.35;
   word-break:keep-all;}
 .qr-hint {font-size:12px; color:#7B8A9C; margin:4px 0 0 0;}

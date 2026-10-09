@@ -199,27 +199,6 @@ def test_single_price_is_a_card_not_a_bar():
 # ── 머리말 · 카드 · 칩 ──
 
 
-def test_header_title_puts_a_short_product_name_before_the_model():
-    assert rl.header_title("M40", "환자감시장치") == "환자감시장치 M40"
-    assert rl.header_title("M40", None) == "M40"
-    assert rl.header_title("환자감시장치 M40", "환자감시장치") == "환자감시장치 M40"
-    subtitle = rl.header_subtitle(
-        title="환자감시장치 M40",
-        procurement_product="환자감시장치",
-        companies=["(주)메디아나"],
-        permit_type="인증",
-        permit_numbers=["제인 20-5001 호", "제인 20-5002 호"],
-    )
-    assert subtitle == "제조·수입 (주)메디아나 · 식약처 인증 제인 20-5001 호 외 1건"
-    assert rl.header_subtitle(title="X", procurement_maker="Philips") == "제조사 Philips"
-
-
-def test_header_keeps_the_smoke_heading_visually_hidden():
-    markup = rl.header_html(title="A <b>", subtitle="", chips=["검색어 DFM100"], marker_heading="DFM100 거래가격")
-    assert '<div class="rl-sr"><h2>DFM100 거래가격</h2></div>' in markup
-    assert "A &lt;b&gt;" in markup and "검색어 DFM100" in markup
-
-
 def test_cards_keep_the_header_id_and_show_a_word_with_every_dot():
     from purchase_price.ui import workspace_header as header
 

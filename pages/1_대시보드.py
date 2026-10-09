@@ -113,6 +113,7 @@ from purchase_price.services.unified_search_intent import (
     interpret_unified_search,
 )
 from purchase_price.ui import category_market as category_market_ui
+from purchase_price.ui import product_identity as product_identity_ui
 from purchase_price.ui import result_layout as result_layout_ui
 from purchase_price.ui import result_summary as result_summary_ui
 from purchase_price.ui import same_item_compare as same_item_ui
@@ -198,6 +199,8 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.result_summary", "RESULT_SUMMARY_V3"),
     ("purchase_price.ui.search_overviews", "OVERVIEW_V2"),
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_V3"),
+    ("purchase_price.services.category_market", "CATEGORY_MARKET_PERIOD_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_PERIOD_V1"),
 )
 
 
@@ -2599,6 +2602,77 @@ def _render_supplier_and_models(
                 )
 
 
+def _result_identity_fields(
+    *,
+    heading: str,
+    search_text: str,
+    indexed_identity: object,
+    mfds: object,
+    all_direct: tuple[Any, ...],
+    identity_product: str,
+    identity_companies: list[str],
+    identity_permits: list[str],
+    identity_permit_type: str,
+    identity_grade: str,
+    identity_status_label: str,
+    procurement_maker: str,
+    procurement_spec: str,
+    category_market: category_market_service.CategoryMarket | None,
+) -> list[product_identity_ui.IdentityField]:
+    """The labelled product grid at the top of the result (replaces the glued title line)."""
+
+    identity_ok = isinstance(indexed_identity, MfdsIdentityLookup) and indexed_identity.status == "success"
+    exact_ok = isinstance(mfds, MfdsWorkspaceResult) and bool(mfds.exact_confirmed)
+    if identity_ok:
+        state_status, state_match = "success", str(indexed_identity.match_type or "")
+    elif exact_ok:
+        state_status, state_match = "success", "model"
+    else:
+        state_status = str(getattr(indexed_identity, "status", "") or "")
+        state_match = ""
+    ambiguous = bool(identity_ok and mfds_identity_status(indexed_identity) == IdentityEvidenceStatus.AMBIGUOUS) or bool(
+        isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_ambiguous
+    )
+    detail_name, detail_code = product_identity_ui.detail_class_of(all_direct)
+    detail_note = f"같은 제품 거래 {len(all_direct):,}건 기준 (전체 기간)" if all_direct else ""
+    if not (detail_name or detail_code) and category_market is not None and category_market.codes:
+        first_code = category_market.codes[0]
+        detail_name, detail_code = first_code.name, first_code.code
+        more = len(category_market.codes) - 1
+        detail_note = "같은 제품 거래 0건 · 같은 품목 시장 기준" + (f" (외 {more}개 코드)" if more > 0 else "")
+    elif not all_direct:
+        detail_note = "같은 제품 거래 0건"
+    if "부품" in procurement_spec:
+        detail_note = (detail_note + " · " if detail_note else "") + "나라장터 규격상 부품"
+    model_names = indexed_identity.model_names if identity_ok else ()
+    unique_permits = list(dict.fromkeys(p for p in identity_permits if p))
+    return product_identity_ui.product_fields(
+        model=heading,
+        model_state=product_identity_ui.model_status(
+            identity_status=state_status,
+            identity_match=state_match,
+            ambiguous=ambiguous,
+            direct_count=len(all_direct),
+        ),
+        mfds_product=identity_product,
+        companies=identity_companies,
+        procurement_maker=procurement_maker,
+        permit_numbers=unique_permits,
+        permit_type=identity_permit_type,
+        permit_state=product_identity_ui.permit_status(
+            permit=unique_permits[0] if unique_permits else "",
+            status_label=result_summary_ui.plain_status(identity_status_label) if identity_status_label else "",
+            found=bool(unique_permits) and (identity_ok or exact_ok),
+        ),
+        permit_note=f"이 허가의 모델 {len(model_names)}개" if len(model_names) > 1 else "",
+        grade=identity_grade,
+        detail_name=detail_name,
+        detail_code=detail_code,
+        detail_note=detail_note,
+        search_text=search_text,
+    )
+
+
 def _render_search_result(state: dict[str, Any]) -> None:
     heading = state["heading"]
     review_input = state["review_input"]
@@ -2830,41 +2904,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
     mfds_complete = bool(
         collection_status.status != "unavailable" and collection_status.first_backfill_complete
     )
-    procurement_product = workspace_header_ui.procurement_product_name(direct_rows)
     procurement_spec = workspace_header_ui.most_common_text(direct_rows, "규격") or ""
-    title_text = result_layout_ui.header_title(heading, identity_product or procurement_product)
-    subtitle_text = result_layout_ui.header_subtitle(
-        title=title_text,
-        identity_product=identity_product,
-        procurement_product=procurement_product,
-        procurement_maker=workspace_header_ui.most_common_text(direct_rows, "제조사"),
-        companies=identity_companies,
-        permit_type=identity_permit_type,
-        permit_numbers=identity_permits,
-    )
     search_text = " ".join(str(state.get("search_text") or "").split())
-    header_chips: list[str] = []
-    if search_text and normalize_text(search_text) != normalize_text(heading):
-        header_chips.append(f"검색어 {search_text}")
-    if identity_grade:
-        header_chips.append(f"식약처 {identity_grade}등급")
-    if (
-        isinstance(indexed_identity, MfdsIdentityLookup)
-        and indexed_identity.status == "success"
-        and len(indexed_identity.model_names) > 1
-    ):
-        header_chips.append(f"이 허가의 모델 {len(indexed_identity.model_names)}개")
-    if "부품" in procurement_spec:
-        header_chips.append("나라장터 규격상 부품")
-    head_title.markdown(
-        result_layout_ui.header_html(
-            title=title_text,
-            subtitle=subtitle_text,
-            chips=header_chips,
-            marker_heading=f"{search_text or heading} 거래가격",
-        ),
-        unsafe_allow_html=True,
-    )
     if "부품" in procurement_spec:
         banner_slot.markdown(
             notice_html(
@@ -2906,6 +2947,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
             item_status_labels[status_key] = label
     if category_market is not None:
         category_market = category_market_service.with_status_labels(category_market, item_status_labels)
+        # The market follows the same 거래 기간 as the same-product numbers above it.
+        category_market = category_market_service.within_period(
+            category_market, period_choice.cutoff, label=period_choice.label
+        )
     # No same-model trade: 같은 품목 시장 becomes the main body right after the conclusion.
     market_main = bool(category_market is not None and not any_direct and not track_b_unavailable)
     identity_status_label = next(
@@ -2915,6 +2960,29 @@ def _render_search_result(state: dict[str, Any]) -> None:
             if "".join(permit.split()) in item_status_labels
         ),
         None,
+    )
+    # ── 머리말: 이 제품이 무엇인지 (모델명 · 품목명 · 업체 · 허가번호 · 등급 · 세부품명 · 검색어) ──
+    head_title.markdown(
+        product_identity_ui.identity_html(
+            _result_identity_fields(
+                heading=heading,
+                search_text=search_text,
+                indexed_identity=indexed_identity,
+                mfds=mfds,
+                all_direct=strict_comparison_candidates(state["track_b"]),
+                identity_product=identity_product or "",
+                identity_companies=identity_companies,
+                identity_permits=identity_permits,
+                identity_permit_type=identity_permit_type or "",
+                identity_grade=identity_grade or "",
+                identity_status_label=identity_status_label or "",
+                procurement_maker=workspace_header_ui.most_common_text(direct_rows, "제조사") or "",
+                procurement_spec=procurement_spec,
+                category_market=category_market,
+            ),
+            marker_heading=f"{search_text or heading} 거래가격",
+        ),
+        unsafe_allow_html=True,
     )
     mfds_header_card = workspace_header_ui.mfds_card(
         mfds_metric,

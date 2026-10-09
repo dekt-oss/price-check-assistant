@@ -208,6 +208,28 @@ def test_detail_card_shows_both_prices_count_unit_and_check_points() -> None:
     assert "확인할 점" in card
 
 
+def test_detail_card_puts_the_identity_grids_in_place_of_the_glued_title() -> None:
+    from purchase_price.ui import product_identity as pi
+
+    comparison = build_item_comparison(0, _item(), _track_b(_candidate("4400000")), today=TODAY)
+    pair = pi.pair_html(pi.quote_fields(_item()), pi.product_fields(model="M40"), include_css=False)
+    card = detail_card_html(comparison, total=3, identity_html=pair)
+
+    assert "선택한 품목 1 / 3" in card
+    assert "견적서에 적힌 값" in card and "확인된 제품" in card
+    assert "qr-detail-title" not in card
+    assert "qr-detail-title" in detail_card_html(comparison, total=3)
+
+
+def test_quote_page_reloads_the_identity_modules() -> None:
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parents[1] / "pages" / "2_견적_검토.py").read_text(encoding="utf-8")
+    assert '("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_IDENTITY_V1")' in page
+    assert '("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_IDENTITY_V1")' in page
+    assert layout.QUOTE_REVIEW_IDENTITY_V1 is True
+
+
 def test_condition_rows_say_what_to_ask_when_the_quote_is_silent() -> None:
     rows = condition_rows(_item(unit="SET", installation_condition="설치 포함"), main_unit="대")
     by_label = {row.label: row for row in rows}
