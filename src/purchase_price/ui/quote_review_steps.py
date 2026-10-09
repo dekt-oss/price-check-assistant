@@ -6,17 +6,10 @@ from dataclasses import replace
 
 import streamlit as st
 
-from purchase_price.clients.data_go_kr import PublicDataClientError
-from purchase_price.config import get_settings
+from purchase_price.evidence_domain import IdentityEvidenceStatus
 from purchase_price.services.g2b_product_mapping import resolve_verified_g2b_mapping
-from purchase_price.services.mfds_api_keys import (
-    mfds_model_info_json_client,
-    mfds_service_key_candidates,
-)
-from purchase_price.services.mfds_device_intelligence import (
-    MfdsModelInfoClient,
-    resolve_exact_model_identity,
-)
+from purchase_price.services.mfds_identity_r2 import lookup_mfds_identity_from_r2
+from purchase_price.services.mfds_item_status_r2 import lookup_item_status_from_r2
 from purchase_price.services.product_matching import (
     ManufacturerAliasError,
     canonical_manufacturer,
@@ -124,6 +117,8 @@ def render_path_card(state: QuoteReviewState) -> None:
 
 
 QUOTE_REVIEW_ACCEPTANCE_V3 = True
+# Step 3's 식약처 check reads the full R2 허가 목록 index like the rest of the page (2026-10-10).
+QUOTE_REVIEW_MFDS_INDEX_V1 = True
 READ_ERROR_SESSION_KEY = "quote_review_read_error_v1"
 
 _READ_ERROR_BY_KIND = {
@@ -439,32 +434,45 @@ def render_s2(state: QuoteReviewState, index: int) -> None:
         st.rerun()
 
 
-def _mfds_exact_confirmed(item: QuoteItem) -> tuple[bool, str]:
-    settings = get_settings()
-    service_key = (mfds_service_key_candidates(settings) or ("",))[0]
-    if not service_key:
-        return False, "식약처 조회 설정이 없어 허가 목록 확인을 할 수 없습니다."
+_MFDS_EXACT_MATCH_TYPES = {"model", "udi", "permit"}
+
+
+def _mfds_exact_confirmed(
+    item: QuoteItem,
+    *,
+    identity_lookup=lookup_mfds_identity_from_r2,
+    status_lookup=lookup_item_status_from_r2,
+) -> tuple[bool, str]:
+    """Step 3 approval: is the quoted model registered in Korea as a normal domestic item?
+
+    Uses the same source as the rest of the page (the full 허가 목록 index in R2, see
+    quote_item_intelligence.mfds_permit_note), not the first page of the MFDS API, so the step
+    never says "not found" for a model the page header already shows as confirmed. The approval
+    rules are unchanged: one unambiguous exact model, and a domestic, non-cancelled item number.
+    """
+
     if not item.product_name.strip() or not item.model_name.strip():
         return False, "식약처 허가 목록 확인에는 품명과 모델명이 필요합니다."
-    kwargs = {
-        "timeout_seconds": settings.mfds_request_timeout_seconds,
-        "max_retries": settings.mfds_max_retries,
-    }
-    if settings.mfds_model_info_base_url:
-        kwargs["base_url"] = settings.mfds_model_info_base_url
-    client = MfdsModelInfoClient(service_key, client=mfds_model_info_json_client(settings), **kwargs)
-    try:
-        records = client.search_models(item.product_name)
-    except (PublicDataClientError, ValueError):
-        return False, "식약처 조회에 실패했습니다. 잠시 뒤 다시 시도하세요."
-    resolution = resolve_exact_model_identity(records, item.model_name)
-    active = [record for record in resolution.exact_matches if record.active_for_domestic_candidate]
-    if resolution.ambiguous:
-        return False, "같은 모델명이 여러 허가번호에 걸려 있어 자동으로 확인하지 않았습니다."
-    if not active:
+    lookup = identity_lookup(item.model_name.strip())
+    if lookup.status in {"unavailable", "not_ingested"}:
+        return False, "식약처 허가 목록을 지금은 조회할 수 없습니다. 잠시 뒤 다시 시도하세요."
+    if lookup.status != "success" or lookup.match_type not in _MFDS_EXACT_MATCH_TYPES:
         return False, "허가 목록에서 국내용으로 정상 등록된 같은 모델을 찾지 못했습니다."
-    record = active[0]
-    return True, f"식약처 허가 목록에서 같은 모델 확인 · 허가번호 {record.permit_number or '-'}"
+    if lookup.identity_status == IdentityEvidenceStatus.AMBIGUOUS:
+        return False, "같은 모델명이 여러 허가번호에 걸려 있어 자동으로 확인하지 않았습니다."
+
+    permits = lookup.permit_numbers
+    statuses = status_lookup(permits) if permits else None
+    active = [
+        permit
+        for permit in permits
+        if statuses is not None and (found := statuses.get(permit)) is not None and found.domestic_active
+    ]
+    if not active:
+        if statuses is not None and any(statuses.get(permit) is not None for permit in permits):
+            return False, "허가 목록에서 같은 모델을 찾았지만 국내용으로 정상 등록된 상태가 아닙니다."
+        return False, "허가 목록에서 같은 모델은 찾았지만 국내 정상 등록 여부를 확인하지 못했습니다. 식약처에서 직접 확인하세요."
+    return True, f"식약처 허가 목록에서 같은 모델 확인 · 허가번호 {active[0]}"
 
 
 def render_s3(state: QuoteReviewState, index: int) -> None:
