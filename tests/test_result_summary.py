@@ -136,7 +136,37 @@ def test_overview_rows_sort_by_trades_and_cap_at_limit():
     rows = rs.overview_model_rows(crosslinks)
     assert len(rows) == rs.OVERVIEW_ROW_LIMIT
     assert rows[0]["모델"] == "M14"
-    assert rows[0]["같은 제품 거래"] == "14건"
+    # The overview counts the collected index only, and the header says so.
+    assert rows[0]["같은 제품 거래(수집분)"] == "14건"
+
+
+def test_overview_model_keys_follow_the_row_order():
+    crosslinks = [
+        {"모델": "M40", "품목 책임주체": "(주)메디아나", "식약처 품목번호": "제인 20-5001 호", "나라장터 직접거래": 3},
+        {"모델": "Y1", "품목 책임주체": "(주)메디아나", "식약처 품목번호": "제허 1 호", "나라장터 직접거래": 9},
+        {"모델": "M40", "품목 책임주체": "(주)메디아나", "식약처 품목번호": "제인 20-5001 호", "나라장터 직접거래": 1},
+    ]
+    rows = rs.overview_model_rows(crosslinks)
+    keys = rs.overview_model_keys(crosslinks)
+    assert [row["모델"] for row in rows] == [key[1] for key in keys] == ["Y1", "M40"]
+    assert keys[1] == ("제인 20-5001 호", "M40", "(주)메디아나")
+
+
+def test_collected_counts_note_names_the_collection_date():
+    note = rs.collected_counts_note("2026-10-05")
+    assert "나라장터 2026-10-05 수집분" in note and "실시간" in note
+    assert "수집해 둔 나라장터 자료" in rs.collected_counts_note(None)
+    assert rs.has_banned_term(note) is None
+
+
+def test_quote_item_rows_mark_the_item_shown_below():
+    items = [
+        SimpleNamespace(product_name="심장충격기", model_name="DFM100", unit_price=Decimal("12000000")),
+        SimpleNamespace(product_name="환자감시장치", model_name="M40", unit_price=None),
+    ]
+    rows = rs.quote_item_rows(items, {}, current_index=1)
+    assert rows[1]["품목·모델"] == "▶ 환자감시장치 · M40"
+    assert rows[0]["품목·모델"] == "심장충격기 · DFM100"
 
 
 def test_quote_item_rows_mark_unopened_items():

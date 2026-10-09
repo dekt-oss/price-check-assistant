@@ -34,6 +34,11 @@ G2B_LINK_COLUMN_V1 = True
 BUSINESS_NAME_V1 = True
 BUSINESS_NAME_MAX_CHARS = 40
 OVERVIEW_ROW_LIMIT = 10
+# Runtime marker (2026-10-09 acceptance fixes): overview_model_keys, collected-count labels,
+# quote_item_rows(current_index=...).
+RESULT_SUMMARY_V3 = True
+# Overview and same-item tables count the collected index only (no live days, all periods).
+COLLECTED_TRADES_LABEL = "같은 제품 거래(수집분)"
 
 # Words that only make sense to the developers. The screen uses the plain words instead.
 BANNED_SCREEN_TERMS: tuple[str, ...] = (
@@ -460,7 +465,7 @@ def same_item_summary_rows(
         {
             "모델": row.get("모델") or "",
             "제조·수입업체": row.get("_company") or "",
-            "같은 제품 거래": row.get("나라장터 거래") or "",
+            COLLECTED_TRADES_LABEL: row.get("나라장터 거래") or "",
             "가격범위": row.get("가격범위") or "",
             "최근 거래": row.get("최근거래") or "",
         }
@@ -468,45 +473,89 @@ def same_item_summary_rows(
     ]
 
 
-def overview_model_rows(
+def _crosslink_count(row: Mapping[str, object]) -> int:
+    try:
+        return int(row.get("나라장터 직접거래") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _overview_ordered(
     crosslinks: Sequence[Mapping[str, object]],
-    *,
-    limit: int | None = OVERVIEW_ROW_LIMIT,
-) -> list[dict[str, object]]:
-    """Company/product-name overview: models with trades first, most-traded first."""
-
-    def count(row: Mapping[str, object]) -> int:
-        try:
-            return int(row.get("나라장터 직접거래") or 0)
-        except (TypeError, ValueError):
-            return 0
-
+    limit: int | None,
+) -> list[Mapping[str, object]]:
     seen: set[str] = set()
     ordered: list[Mapping[str, object]] = []
-    for row in sorted(crosslinks, key=lambda row: (-count(row), str(row.get("모델") or ""))):
+    for row in sorted(crosslinks, key=lambda row: (-_crosslink_count(row), str(row.get("모델") or ""))):
         model = str(row.get("모델") or "").strip()
         if not model or model in seen:
             continue
         seen.add(model)
         ordered.append(row)
-    selected = ordered if limit is None else ordered[:limit]
+    return ordered if limit is None else ordered[:limit]
+
+
+def overview_model_rows(
+    crosslinks: Sequence[Mapping[str, object]],
+    *,
+    limit: int | None = OVERVIEW_ROW_LIMIT,
+) -> list[dict[str, object]]:
+    """Company/product-name overview: models with trades first, most-traded first.
+
+    The counts come from the collected index (all periods, without the last few live days), so
+    the column says 수집분; an opened model can show a few more trades.
+    """
+
     return [
         {
             "모델": row.get("모델") or "",
             "제조·수입업체": row.get("품목 책임주체") or "",
-            "같은 제품 거래": f"{count(row)}건" if row.get("나라장터 직접거래") is not None else "조회 불가",
-            "가격범위": (row.get("나라장터 가격범위") or "") if count(row) else "",
+            COLLECTED_TRADES_LABEL: (
+                f"{_crosslink_count(row)}건" if row.get("나라장터 직접거래") is not None else "조회 불가"
+            ),
+            "가격범위": (row.get("나라장터 가격범위") or "") if _crosslink_count(row) else "",
             "최근 거래": row.get("최근거래") or "",
         }
-        for row in selected
+        for row in _overview_ordered(crosslinks, limit)
     ]
+
+
+def overview_model_keys(
+    crosslinks: Sequence[Mapping[str, object]],
+    *,
+    limit: int | None = OVERVIEW_ROW_LIMIT,
+) -> list[tuple[str, str, str]]:
+    """(허가번호, 모델, 제조·수입업체) for each overview_model_rows row, in the same order, so a
+    clicked row opens exactly that registration instead of every product with the model name."""
+
+    return [
+        (
+            str(row.get("식약처 품목번호") or "").strip(),
+            str(row.get("모델") or "").strip(),
+            str(row.get("품목 책임주체") or "").strip(),
+        )
+        for row in _overview_ordered(crosslinks, limit)
+    ]
+
+
+def collected_counts_note(track_b_data_as_of: str | None) -> str:
+    """Why an overview/same-item count can be a few lower than the opened result."""
+
+    when = f"나라장터 {track_b_data_as_of} 수집분" if track_b_data_as_of else "수집해 둔 나라장터 자료"
+    return (
+        f"건수는 {when}의 전체 기간 기준입니다. 모델을 열면 그 뒤 며칠의 실시간 거래와 고른 거래 기간이 "
+        "반영돼 건수가 조금 다를 수 있습니다."
+    )
 
 
 def quote_item_rows(
     items: Sequence[Any],
     results: Mapping[int, Mapping[str, object]],
+    *,
+    current_index: int | None = None,
 ) -> list[dict[str, object]]:
-    """Master table for an uploaded quote. Items not opened yet show what happens on click."""
+    """Master table for an uploaded quote. Items not opened yet show what happens on click;
+    the item shown below the table is marked with ▶."""
 
     rows: list[dict[str, object]] = []
     for index, item in enumerate(items):
@@ -515,6 +564,8 @@ def quote_item_rows(
             for part in (getattr(item, "product_name", None), getattr(item, "model_name", None))
             if part
         ) or f"품목 {index + 1}"
+        if index == current_index:
+            title = f"▶ {title}"
         quote = getattr(item, "unit_price", None)
         result = results.get(index)
         if result is None:

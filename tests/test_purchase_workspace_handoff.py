@@ -51,7 +51,9 @@ def test_quote_and_home_pages_share_purchase_workspace_handoff_contract() -> Non
 
     assert "PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY" in home_source
     assert "parse_purchase_workspace_handoff" in home_source
-    assert 'search_state["origin"] = "quote"' in home_source
+    # Opened from 견적서 검토: a strip naming the item and a link back, not a second item table.
+    assert 'search_state["origin"] = "quote_review"' in home_source
+    assert "_render_quote_review_strip(search_state)" in home_source
     assert 'search_text=(handoff.model_name or handoff.product_name)' in home_source
     assert "_render_quote_items(search_state)" in home_source
 

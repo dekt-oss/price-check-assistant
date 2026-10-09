@@ -24,6 +24,58 @@ from purchase_price.ui.same_item_compare import price_bounds
 
 NAME_MATCH_LABEL = "명칭 일치 · 사업자번호 미확인"
 OVERVIEW_ROUTES = ("company_overview", "product_overview")
+# Runtime marker (2026-10-09): category picker and company-with-trades preference.
+OVERVIEW_V2 = True
+# A search word that is part of several MFDS 품목명 ("심장충격기") but no model or company.
+CATEGORY_ROUTE = "category_overview"
+CATEGORY_ROW_LIMIT = 12
+
+
+def looks_like_category_word(text: str) -> bool:
+    """Korean words without digits ("심장충격기", "환자 감시") read as an item category.
+
+    Model names almost always carry digits or Latin letters, so those never go to the picker.
+    """
+
+    core = "".join(str(text or "").split())
+    if len(core) < 2 or len(core) > 30:
+        return False
+    if any(char.isdigit() or char.isascii() and char.isalpha() for char in core):
+        return False
+    hangul = sum(1 for char in core if "가" <= char <= "힣")
+    return hangul >= 2
+
+
+def category_rows(matches: Iterable[Mapping[str, object]], *, limit: int = CATEGORY_ROW_LIMIT) -> list[dict[str, object]]:
+    """MFDS 품목명 that contain the search word: most companies first (a common purchase item
+    has many makers; a niche implant has few), then most models."""
+
+    rows = [
+        {
+            "식약처 품목명": _text(match.get("product_name")),
+            "업체 수": int(match.get("companies") or 0),
+            "모델 수": int(match.get("models") or 0),
+        }
+        for match in matches
+        if _text(match.get("product_name"))
+    ]
+    rows.sort(key=lambda row: (-int(row["업체 수"]), -int(row["모델 수"]), str(row["식약처 품목명"])))
+    return rows[:limit]
+
+
+def pick_traded_company(
+    current_priced_models: int,
+    candidates: Sequence[Mapping[str, object]],
+) -> Mapping[str, object] | None:
+    """When the exact-name company has no 나라장터 trade but a legal-form spelling does
+    ("메디아나" vs "(주)메디아나"), the one with trades is what the buyer meant."""
+
+    if current_priced_models > 0:
+        return None
+    traded = [c for c in candidates if int(c.get("priced_models") or 0) > 0]
+    if not traded:
+        return None
+    return max(traded, key=lambda c: (int(c.get("priced_models") or 0), int(c.get("models") or 0)))
 
 
 _LEGAL_FORM_PREFIXES = ("(주)", "주식회사 ", "(유)", "유한회사 ")

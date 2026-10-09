@@ -293,3 +293,83 @@ def test_screen_wording_has_no_developer_terms():
     ]
     for piece in pieces:
         assert rs.has_banned_term(_text(piece)) is None
+
+
+# ── 2026-10-09 production acceptance fixes ──
+
+
+def test_nothing_found_only_when_no_source_matched():
+    base = dict(direct_count=0, reference_count=0, identity_found=False, price_unavailable=False)
+    assert rl.nothing_found(**base) is True
+    assert rl.nothing_found(**{**base, "reference_count": 25}) is False
+    assert rl.nothing_found(**{**base, "identity_found": True}) is False
+    assert rl.nothing_found(**{**base, "price_unavailable": True}) is False
+    assert rl.nothing_found(**base, recall_records=1) is False
+
+
+def test_not_found_says_what_was_searched_and_what_to_try():
+    text = _text(rl.not_found_html("zzqq없는모델123", basis="자료 기준 · 나라장터 2026-10-05 수집분"))
+    assert "zzqq없는모델123" in text and "찾지 못했습니다" in text
+    assert "나라장터" in text and "식약처" in text
+    assert "철자" in text and "모델명만" in text and "업체명" in text
+    assert "확인된 회수 없음" not in text and "Excel" not in text
+    assert rs.has_banned_term(text) is None
+    assert "<script" not in rl.not_found_html("<script>")
+
+
+def test_lead_card_puts_the_chip_row_at_the_bottom_and_top_aligns():
+    stats = _stats(16, "4389000", "4400000", "6585500")
+    chips = rl.chip_row_html([rl.Chip("기간", "최근 3년")])
+    markup = rl.lead_row_html(
+        rl.lead_view(stats, _conclusion(stats, None), quote=None, unit="대"),
+        price_html=rl.price_rail_html(low=Decimal("1"), high=Decimal("3"), median=Decimal("2")),
+        panel_html="<div>panel</div>",
+        foot_html=chips,
+    )
+    assert markup.index("rl-rail") < markup.index('class="rl-foot"') < markup.index("panel")
+    assert "justify-content:flex-start" in rl.RESULT_CSS
+    assert "justify-content:center" not in rl.RESULT_CSS
+
+
+def test_quote_hint_shows_the_parsed_price_with_separators():
+    assert "= 2,500,000원" in _text(rl.quote_hint_html(Decimal("2500000"), "대"))
+    assert "1대 기준" in _text(rl.quote_hint_html(Decimal("2500000"), "대"))
+    assert "원 / 1대 기준" in _text(rl.quote_hint_html(None, "대"))
+    assert "숫자로만" in _text(rl.quote_hint_html(None, "대", invalid=True))
+
+
+def test_record_fields_table_has_exactly_one_row_per_field():
+    markup = rl.record_fields_html([("사업명", "구입"), ("단가", "1,980,000원"), ("", "skip")])
+    assert markup.count("<tr>") == 2
+    assert "<td>1,980,000원</td>" in markup
+
+
+def test_mfds_check_done_line_says_what_changed():
+    text = _text(
+        rl.mfds_check_done_html(
+            status="success", active_model_count=40, model_count=134, companies_before=14, companies_after=9
+        )
+    )
+    assert "확인 완료" in text and "134개 중 판매 가능 40개" in text and "9곳" in text and "14곳" in text
+    unchanged = _text(
+        rl.mfds_check_done_html(
+            status="success", active_model_count=1, model_count=1, companies_before=3, companies_after=3
+        )
+    )
+    assert "곳만 남겼습니다" not in unchanged
+    failed = rl.mfds_check_done_html(
+        status="failure", active_model_count=0, model_count=0, companies_before=0, companies_after=0
+    )
+    assert "불러오지 못했습니다" in failed
+    waiting = rl.mfds_check_done_html(
+        status="deferred", active_model_count=0, model_count=0, companies_before=0, companies_after=0
+    )
+    assert waiting == ""
+
+
+def test_settings_card_and_cards_fit_a_narrow_column():
+    css = rl.RESULT_CSS
+    assert ".st-key-rl_settings {container-type:inline-size;}" in css
+    assert "@container (max-width: 860px)" in css
+    assert "white-space:nowrap; overflow:hidden; text-overflow:ellipsis" in css
+    assert 'class="rl-cq rl-keep"' in rl.cards_html([])

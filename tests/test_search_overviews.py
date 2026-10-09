@@ -172,8 +172,14 @@ def test_dashboard_routes_company_and_product_matches_to_overviews() -> None:
 
     route = source.index('indexed_identity.match_type in {"company", "product"}')
     assert route < source.index('"route": "candidate_selection"')
-    assert "return _build_overview_state(raw_search, indexed_identity, snapshot_runtime)" in source
+    assert (
+        "return _build_overview_state(\n            raw_search, indexed_identity, snapshot_runtime, "
+        "prefer_traded_company=prefer_traded_company" in source
+    )
     assert 'elif search_state.get("route") in overview_ui.OVERVIEW_ROUTES:' in source
+    # A category word opens the 품목 picker (2026-10-09 acceptance).
+    assert 'elif search_state.get("route") == overview_ui.CATEGORY_ROUTE:' in source
+    assert "overview_ui.looks_like_category_word(raw_search)" in source
     assert "lookup_model_summaries(queries, limit_per_model=500)" in source
     assert 'id="purchase-workspace-runtime-v16"' in source
 
@@ -184,3 +190,42 @@ def test_company_name_variants_only_add_legal_forms() -> None:
     assert ov.company_name_variants("(주)메디아나") == []
     assert ov.company_name_variants("주식회사 메디아나") == []
     assert ov.company_name_variants("A") == []
+
+
+def test_category_words_are_korean_words_without_digits() -> None:
+    assert ov.looks_like_category_word("심장충격기")
+    assert ov.looks_like_category_word("환자 감시장치")
+    assert not ov.looks_like_category_word("zzqq없는모델123")
+    assert not ov.looks_like_category_word("HeartOn A16-DS")
+    assert not ov.looks_like_category_word("M40")
+    assert not ov.looks_like_category_word("가")
+
+
+def test_category_rows_put_common_purchase_items_first() -> None:
+    rows = ov.category_rows(
+        [
+            {"product_name": "이식형 심장충격기용 전극", "models": 180, "companies": 5},
+            {"product_name": "저출력 심장 충격기", "models": 134, "companies": 15},
+            {"product_name": "", "models": 1, "companies": 1},
+        ]
+    )
+    assert [row["식약처 품목명"] for row in rows] == ["저출력 심장 충격기", "이식형 심장충격기용 전극"]
+    assert rows[0]["업체 수"] == 15
+
+
+def test_company_with_trades_is_preferred_only_when_the_exact_name_has_none() -> None:
+    candidates = [
+        {"name": "(주)메디아나", "models": 108, "priced_models": 15},
+        {"name": "메디아나(주)", "priced_models": 0},
+    ]
+    assert ov.pick_traded_company(0, candidates)["name"] == "(주)메디아나"
+    assert ov.pick_traded_company(3, candidates) is None
+    assert ov.pick_traded_company(0, [{"name": "x", "priced_models": 0}]) is None
+
+
+def test_dashboard_pins_the_clicked_registration_from_an_overview() -> None:
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+    assert "result_summary_ui.overview_model_keys(crosslinks)" in source
+    assert 'st.query_params["identity"] = identity_token' in source
+    assert 'prefer_traded_company=str(st.query_params.get("exact") or "") != "1"' in source
+    assert "_open_model_from_overview(str(similar[\"name\"]), exact_company=True)" in source
