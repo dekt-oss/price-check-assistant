@@ -35,7 +35,11 @@ from purchase_price.storage.r2_reader import R2RawEvidenceReader
 from purchase_price.storage.r2_state import R2OperationalStateStore
 
 TRACK_B_PAGE_OPERATION = f"{TRACK_B_OPERATION}-page"
-ROLLING_WINDOW_DAYS = 7
+# Each daily cycle re-reads the last 31 days. 납품요구 rows can be registered weeks after their
+# request date: R26TB02339713 (M40, 서울의료원, dated 2026-09-21) was missing after the 09-19~10-05
+# cycle and only a 7-day replay followed. With the 100,000/day quota a 31-day cycle (~5,500 calls)
+# fits one daily run.
+ROLLING_WINDOW_DAYS = 31
 # One request per target code covers any window up to the API's ~1-year limit, and most codes
 # return only a handful of rows per month. A 7-day catch-up step meant one capped cycle (six runs,
 # about two weeks at three runs per week) covered only seven days, so the lag grew every week.

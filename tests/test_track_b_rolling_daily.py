@@ -33,7 +33,7 @@ def _rolling_summary(
     *,
     start: CollectionCursor,
     next_cursor: CollectionCursor,
-    begin_date: str = "2026-09-10",
+    begin_date: str = "2026-08-17",
     end_date: str = "2026-09-16",
 ) -> CollectionSummary:
     return CollectionSummary(
@@ -64,46 +64,37 @@ def _rolling_summary(
     )
 
 
-def test_next_rolling_window_uses_recent_overlap_when_it_covers_first_uncovered_day() -> None:
+def test_next_rolling_window_replays_the_last_31_days() -> None:
     state = _historical_complete_state()
 
     assert daily._next_rolling_window(state, today=date(2026, 9, 16)) == (
-        date(2026, 9, 10),
+        date(2026, 8, 17),
         date(2026, 9, 16),
         "recent_overlap",
     )
 
 
-def test_next_rolling_window_catches_up_from_historical_endpoint_without_gap() -> None:
+def test_late_registered_rows_are_reread_after_a_completed_cycle() -> None:
+    """Production 2026-10-09: covered through 10-05, a row dated 09-21 appeared after that cycle."""
+
     state = _historical_complete_state()
+    state.rolling_covered_through = "2026-10-05"
 
-    assert daily._next_rolling_window(state, today=date(2026, 9, 20)) == (
-        date(2026, 9, 12),
-        date(2026, 9, 20),
-        "catch_up",
-    )
-
-
-def test_next_rolling_window_continues_catch_up_from_last_completed_cycle() -> None:
-    state = _historical_complete_state()
-    state.rolling_covered_through = "2026-09-18"
-
-    assert daily._next_rolling_window(state, today=date(2026, 9, 27)) == (
-        date(2026, 9, 19),
-        date(2026, 9, 27),
-        "catch_up",
-    )
+    begin, end, strategy = daily._next_rolling_window(state, today=date(2026, 10, 9))
+    assert (begin, end, strategy) == (date(2026, 9, 9), date(2026, 10, 9), "recent_overlap")
+    assert begin <= date(2026, 9, 21) <= end
 
 
 def test_catch_up_window_is_capped_at_31_days_and_never_skips_a_day() -> None:
     state = _historical_complete_state()
     state.rolling_covered_through = "2026-09-18"
 
-    # Production state on 2026-10-04: covered through 09-18, next run on 10-05 KST.
+    # Production state on 2026-10-04: covered through 09-18, next run on 10-05 KST. The 31-day
+    # replay already reaches back past the first uncovered day.
     assert daily._next_rolling_window(state, today=date(2026, 10, 5)) == (
-        date(2026, 9, 19),
+        date(2026, 9, 5),
         date(2026, 10, 5),
-        "catch_up",
+        "recent_overlap",
     )
     # Far behind: one cycle advances at most 31 days from the first uncovered day.
     assert daily._next_rolling_window(state, today=date(2026, 12, 1)) == (
@@ -157,20 +148,20 @@ def test_rolling_runner_opens_kst_window_and_persists_it_before_requests(
     )
 
     assert rc == 0
-    assert captured["begin"] == date(2026, 9, 10)
+    assert captured["begin"] == date(2026, 8, 17)
     assert captured["end"] == date(2026, 9, 16)
     assert captured["start_cursor"] == ROLLING_BOOTSTRAP_CURSOR
     assert len(store.writes) == 2
     first_payload = store.writes[0][1]
     assert isinstance(first_payload, dict)
-    assert first_payload["rolling_window_begin"] == "2026-09-10"
+    assert first_payload["rolling_window_begin"] == "2026-08-17"
     assert first_payload["rolling_window_end"] == "2026-09-16"
     assert first_payload["rolling_covered_through"] == "2026-09-11"
     assert state.rolling_cursor == CollectionCursor(800, 1)
     assert state.rolling_covered_through == "2026-09-11"
     report = json.loads(summary_path.read_text(encoding="utf-8"))
     assert report["mode"] == "rolling_incremental"
-    assert report["rolling_window_days"] == 7
+    assert report["rolling_window_days"] == 31
     assert report["rolling_window_strategy"] == "recent_overlap"
 
 
@@ -181,7 +172,7 @@ def test_delayed_rolling_runner_opens_catch_up_window_from_first_uncovered_date(
     store = FakeStateStore()
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(daily, "_kst_today", lambda: date(2026, 9, 20))
+    monkeypatch.setattr(daily, "_kst_today", lambda: date(2026, 10, 20))
     monkeypatch.setattr(daily, "_collection_clients", lambda *args, **kwargs: (object(), object()))
     monkeypatch.setattr(
         daily.R2RawEvidenceStore,
@@ -195,7 +186,7 @@ def test_delayed_rolling_runner_opens_catch_up_window_from_first_uncovered_date(
             start=ROLLING_BOOTSTRAP_CURSOR,
             next_cursor=CollectionCursor(800, 1),
             begin_date="2026-09-12",
-            end_date="2026-09-20",
+            end_date="2026-10-12",
         )
 
     monkeypatch.setattr(daily, "collect_track_b_batch", fake_collect)
@@ -214,7 +205,7 @@ def test_delayed_rolling_runner_opens_catch_up_window_from_first_uncovered_date(
 
     assert rc == 0
     assert captured["begin"] == date(2026, 9, 12)
-    assert captured["end"] == date(2026, 9, 20)
+    assert captured["end"] == date(2026, 10, 12)
     report = json.loads(summary_path.read_text(encoding="utf-8"))
     assert report["rolling_window_strategy"] == "catch_up"
     assert report["rolling_covered_through"] == "2026-09-11"
@@ -241,6 +232,7 @@ def test_rolling_runner_reuses_locked_window_on_resume(monkeypatch, tmp_path) ->
         return _rolling_summary(
             start=CollectionCursor(800, 2),
             next_cursor=CollectionCursor(1600, 1),
+            begin_date="2026-09-10",  # a window locked before the 31-day replay keeps its dates
         )
 
     monkeypatch.setattr(daily, "collect_track_b_batch", fake_collect)
