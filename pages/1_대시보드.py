@@ -856,6 +856,7 @@ def _render_category_market(
     searched_model: str = "",
     has_direct: bool = False,
     section_heading: bool = False,
+    show_headline: bool = True,
     model_count_note: str = "",
 ) -> None:
     category_market_ui.render_category_market(
@@ -864,6 +865,7 @@ def _render_category_market(
         searched_model=searched_model,
         has_direct=has_direct,
         section_heading=section_heading,
+        show_headline=show_headline,
         on_open_model=lambda model: _open_category_model(model, records),
         on_open_trade=_open_trade_dialog,
         render_company_lookup=_render_business_license_lookup,
@@ -3013,12 +3015,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
         unavailable=track_b_unavailable,
     )
     if market_main and category_market is not None:
+        # No same-model trade: the conclusion points straight at the category market below it.
         lead = dataclasses.replace(
             lead,
-            basis=(
-                f"아래에 같은 품목({category_market_ui.product_label(category_market)})의 다른 모델, 참고 시세, "
-                "도입 기관, 구할 수 있는 곳을 모았습니다."
+            headline_html=result_layout_ui.esc(
+                category_market_ui.no_trade_headline(
+                    category_market, str(getattr(query, "model_name", "") or "") or heading
+                )
             ),
+            basis=category_market_ui.no_trade_basis(category_market),
         )
     if conclusion.band is not None:
         price_html = result_layout_ui.price_rail_html(
@@ -3059,8 +3064,29 @@ def _render_search_result(state: dict[str, Any]) -> None:
         unsafe_allow_html=True,
     )
 
-    # ── 카드 4장 (같은 높이, 오른쪽 위 상태 점) ──
-    st.markdown(result_layout_ui.cards_html(header_cards), unsafe_allow_html=True)
+    mfds_live_count_note = ""
+    if isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "success" and mfds.records:
+        mfds_live_count_note = (
+            f"'판매 가능·취소 확인'의 식약처 모델 목록({len(mfds.records):,}개)은 이 표(식약처 제품정보)와 "
+            "다른 식약처 자료라 개수가 다를 수 있습니다."
+        )
+    if market_main and category_market is not None:
+        # ── 같은 품목 시장 (본문): 시세 카드 · 연도별 시세 · 다른 모델 · 도입 기관 · 구할 수 있는 곳 ──
+        # Right under the conclusion; the grey 거래가·납품업체 cards say nothing with 0 trades, so
+        # only 식약처 허가 and 안전·회수 follow, as one line.
+        _render_category_market(
+            category_market,
+            key=quote_key,
+            records=same_product_identity,
+            searched_model=str(getattr(query, "model_name", "") or "") or heading,
+            has_direct=False,
+            show_headline=False,
+            model_count_note=mfds_live_count_note,
+        )
+        st.markdown(category_market_ui.status_strip_html(header_cards[2:]), unsafe_allow_html=True)
+    else:
+        # ── 카드 4장 (같은 높이, 오른쪽 위 상태 점) ──
+        st.markdown(result_layout_ui.cards_html(header_cards), unsafe_allow_html=True)
     if isinstance(mfds, MfdsWorkspaceResult) and mfds.status in {"deferred", "failure"}:
         if mfds.status == "failure":
             st.markdown(
@@ -3125,23 +3151,6 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 ),
             ),
             unsafe_allow_html=True,
-        )
-
-    mfds_live_count_note = ""
-    if isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "success" and mfds.records:
-        mfds_live_count_note = (
-            f"위 '판매 가능·취소 확인'의 식약처 모델 목록({len(mfds.records):,}개)은 이 표(식약처 제품정보)와 "
-            "다른 식약처 자료라 개수가 다를 수 있습니다."
-        )
-    if market_main and category_market is not None:
-        # ── 같은 품목 시장 (본문): 다른 모델 · 참고 시세 · 도입 기관 · 구할 수 있는 곳 ──
-        _render_category_market(
-            category_market,
-            key=quote_key,
-            records=same_product_identity,
-            searched_model=str(getattr(query, "model_name", "") or "") or heading,
-            has_direct=False,
-            model_count_note=mfds_live_count_note,
         )
 
     # ── Excel (header button) ──

@@ -280,6 +280,40 @@ def test_summary_shows_price_level_rules_and_exclusions() -> None:
     assert 'id="purchase-' not in html
 
 
+def test_no_trade_conclusion_points_at_the_category_market() -> None:
+    market = _market()
+    assert ui.no_trade_headline(market, "Flow-c") == (
+        "Flow-c의 나라장터 거래는 없습니다 · 같은 품목(가스 마취기) 장비 구매 3건으로 시세를 보여 드립니다"
+    )
+    assert "같은 제품의 가격이 아니니" in ui.no_trade_basis(market)
+    # Without a headline the block starts with the price cards (the conclusion already says it).
+    assert "category-market-head-v1" not in ui.summary_html(market, show_headline=False)
+
+
+def test_status_strip_keeps_a_word_next_to_every_dot() -> None:
+    @dataclass(frozen=True)
+    class Card:
+        label: str
+        value: str
+        note: str
+        tone: str
+
+    html = ui.status_strip_html(
+        [Card("식약처 허가", "허가 확인", "수허 21-193 호", "ok"), Card("안전·회수", "확인된 회수 없음", "모델명 검색", "ok")]
+    )
+    assert html.count("cm-strip-item") == 2
+    assert "pc-pill pc-ok" in html and "허가 확인" in html and "확인된 회수 없음" in html
+
+
+def test_dashboard_puts_the_market_right_under_the_conclusion_when_there_is_no_trade() -> None:
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+    lead = source.index("result_layout_ui.lead_row_html(")
+    market = source.index("show_headline=False", lead)
+    cards = source.index("st.markdown(result_layout_ui.cards_html(header_cards)", lead)
+    assert lead < market < cards
+    assert "category_market_ui.status_strip_html(header_cards[2:])" in source
+
+
 def test_empty_category_says_so_instead_of_inventing_a_price() -> None:
     market = cm.build_category_market([], product_name="가스 마취기", crosslinks=[_link("Flow-c", "수허 1", "G사", 0)])
     assert "아직 없습니다" in ui.headline_text(market, searched_model="Flow-c")

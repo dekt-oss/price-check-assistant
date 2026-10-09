@@ -646,7 +646,7 @@ def mfds_check_done_html(
         parts.append(f"식약처 모델 목록의 같은 품목 모델 {model_count:,}개 중 판매 가능 {active_model_count:,}개")
         if registered_model_count and registered_model_count != model_count:
             parts.append(
-                f"아래 표의 등록 모델 {registered_model_count:,}개는 식약처 제품정보 기준이라 개수가 다릅니다"
+                f"‘같은 품목’ 표의 등록 모델 {registered_model_count:,}개는 식약처 제품정보 기준이라 개수가 다릅니다"
             )
     else:
         parts.append("식약처 모델 목록에서 같은 품목 모델을 찾지 못했습니다")

@@ -80,6 +80,11 @@ CSS = """
 .cm-excluded li span {color:#8A6A2E; font-size:11.5px;}
 .cm-rule {font-size:11.5px; color:#7A6A4A; line-height:1.6; margin:10px 0 0 0; padding-top:10px;
   border-top:1px solid #F1E4C8; word-break:keep-all;}
+.cm-strip {display:flex; flex-wrap:wrap; gap:10px 28px; padding:12px 18px !important; margin:0 0 14px 0;}
+.cm-strip-item {display:flex; align-items:center; gap:8px; min-width:0; flex:1 1 320px;}
+.cm-strip-label {font-size:12px; font-weight:700; color:#5B6C82; white-space:nowrap;}
+.cm-strip-note {font-size:11.5px; color:#7A899B; line-height:1.5; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap;}
 .st-key-cm_block [data-baseweb="tab-list"] {gap:20px;}
 .st-key-cm_block [data-baseweb="tab"] p {font-size:13px;}
 .st-key-cm_block [data-baseweb="tab"][aria-selected="true"] p {font-weight:800;}
@@ -249,12 +254,51 @@ def exclusion_box_html(market: CategoryMarket) -> str:
     )
 
 
-def summary_html(market: CategoryMarket, *, searched_model: str = "", has_direct: bool = False) -> str:
+def no_trade_headline(market: CategoryMarket, searched_model: str) -> str:
+    """The conclusion headline when the model has no trade but its 품목 has some."""
+
+    product = product_label(market)
+    count = len(market.equipment)
+    if not count:
+        return f"{searched_model}의 나라장터 거래는 없습니다 · 같은 품목({product})의 다른 모델을 아래에 모았습니다"
+    return f"{searched_model}의 나라장터 거래는 없습니다 · 같은 품목({product}) 장비 구매 {count:,}건으로 시세를 보여 드립니다"
+
+
+def no_trade_basis(market: CategoryMarket) -> str:
+    text = "참고 시세는 같은 품목의 다른 모델 거래입니다. 같은 제품의 가격이 아니니 성능·구성을 함께 확인하세요."
+    basis = basis_text(market)
+    return f"{text} {basis}" if basis else text
+
+
+_STRIP_TONES = {"ok": TONE_OK, "warn": "warn", "danger": "danger", "neutral": TONE_MUTED}
+
+
+def status_strip_html(cards: Sequence[object]) -> str:
+    """식약처 허가 · 안전·회수 as one compact line (label, dot + word, note) instead of big cards."""
+
+    items = []
+    for card in cards:
+        tone = _STRIP_TONES.get(str(getattr(card, "tone", "")), TONE_MUTED)
+        items.append(
+            '<div class="cm-strip-item">'
+            f'<span class="cm-strip-label">{esc(getattr(card, "label", ""))}</span>'
+            f'<span class="pc-pill pc-{tone}">{esc(getattr(card, "value", ""))}</span>'
+            f'<span class="cm-strip-note">{esc(getattr(card, "note", ""))}</span></div>'
+        )
+    return f'<div class="pc-card cm-strip" id="category-market-status-v1">{"".join(items)}</div>'
+
+
+def summary_html(
+    market: CategoryMarket,
+    *,
+    searched_model: str = "",
+    has_direct: bool = False,
+    show_headline: bool = True,
+) -> str:
+    head = headline_html(market, searched_model=searched_model, has_direct=has_direct) if show_headline else ""
     return (
         CSS
-        + '<div class="cm-cq" id="category-market-v1">'
-        + headline_html(market, searched_model=searched_model, has_direct=has_direct)
-        + "</div>"
+        + f'<div class="cm-cq" id="category-market-v1">{head}</div>'
         + metric_cards_html(market)
         + f'<div class="cm-cq"><div class="cm-grid">{year_table_html(market)}{exclusion_box_html(market)}</div></div>'
     )
@@ -422,6 +466,7 @@ def render_category_market(
     searched_model: str = "",
     has_direct: bool = False,
     section_heading: bool = False,
+    show_headline: bool = True,
     on_open_model: Callable[[CategoryModel], None],
     on_open_trade: Callable[[Mapping[str, object]], None],
     render_company_lookup: Callable[[str, str], None] | None = None,
@@ -431,7 +476,7 @@ def render_category_market(
         if section_heading:
             st.markdown(f"#### {SECTION_TITLE}")
         st.markdown(
-            summary_html(market, searched_model=searched_model, has_direct=has_direct),
+            summary_html(market, searched_model=searched_model, has_direct=has_direct, show_headline=show_headline),
             unsafe_allow_html=True,
         )
         models_tab, buyers_tab, suppliers_tab = st.tabs(list(tab_labels(market)))

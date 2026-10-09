@@ -379,7 +379,7 @@ def test_mfds_check_done_line_explains_a_different_registered_count():
         )
     )
     assert "식약처 모델 목록의 같은 품목 모델 168개 중 판매 가능 79개" in text
-    assert "등록 모델 134개는 식약처 제품정보 기준이라 개수가 다릅니다" in text
+    assert "‘같은 품목’ 표의 등록 모델 134개는 식약처 제품정보 기준이라 개수가 다릅니다" in text
     same = _text(
         rl.mfds_check_done_html(
             status="success",
