@@ -378,10 +378,10 @@ def main() -> None:
 
                 _open_page(page, "의료기기_조회")
                 app = _app_frame(page)
-                app.get_by_role("tab", name="등록·시장조사", exact=True).wait_for(
+                app.get_by_role("tab", name="허가·시장조사", exact=True).wait_for(
                     state="visible"
                 )
-                app.get_by_role("tab", name="Safety·공급사", exact=True).wait_for(
+                app.get_by_role("tab", name="안전·공급사", exact=True).wait_for(
                     state="visible"
                 )
                 app.get_by_role("tab", name="UDI-DI", exact=True).wait_for(state="visible")
