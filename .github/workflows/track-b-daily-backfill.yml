@@ -80,6 +80,8 @@ jobs:
     timeout-minutes: 240
     env:
       PYTHONPATH: src
+      # Collector calls per KST day stop here; the rest of the quota is for the app's live lookups.
+      TRACK_B_DAILY_CALL_CAP: ${{ vars.TRACK_B_DAILY_CALL_CAP || '80000' }}
       G2B_CATALOG_SERVICE_KEY: ${{ secrets.G2B_CATALOG_SERVICE_KEY }}
       G2B_SHOPPING_SERVICE_KEY: ${{ secrets.G2B_SHOPPING_SERVICE_KEY }}
       G2B_RESEARCH_SERVICE_KEY: ${{ secrets.G2B_RESEARCH_SERVICE_KEY }}

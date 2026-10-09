@@ -15,10 +15,19 @@ from purchase_price.services.track_b_pipeline_state import (
 
 
 class FakeStateStore:
+    """Pipeline-state writes go to ``writes``; the daily call counter is kept apart."""
+
     def __init__(self) -> None:
         self.writes: list[tuple[str, object]] = []
+        self.usage: dict | None = None
+
+    def read_json(self, name: str):
+        return self.usage if name == "track-b/api-usage" else None
 
     def write_json(self, name: str, payload: object) -> None:
+        if name == "track-b/api-usage":
+            self.usage = payload  # type: ignore[assignment]
+            return
         self.writes.append((name, payload))
 
 
