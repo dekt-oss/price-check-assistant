@@ -20,7 +20,7 @@ that KST day without a rate-limit stop, at about 1.1 s per call.
 | Run | Schedule | Default budget | Override (repo variable) |
 | --- | --- | --- | --- |
 | Base: rolling recent window | 03:10 KST daily | 6,000 (one full 5,208-code cycle) | `TRACK_B_DAILY_REQUEST_BUDGET` |
-| History: 2021-01-01 to 2025-09-11 | every 3 h at :40 UTC | 5,000 | `TRACK_B_HISTORY_REQUEST_BUDGET` |
+| History: 2021-01-01 to 2025-09-11 | every 3 h at :40 UTC; each run loops 2,000-call batches for up to 320 min | 2,000 per batch | `TRACK_B_HISTORY_REQUEST_BUDGET` |
 | Supplemental verified codes | 04:40 KST Monday | 50 | workflow input |
 
 The collector caps a single run at 10,000 requests. All writers share one concurrency group, so
