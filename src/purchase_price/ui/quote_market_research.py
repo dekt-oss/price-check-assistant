@@ -48,6 +48,7 @@ from purchase_price.ui.product_identity import quote_fields as quote_identity_fi
 from purchase_price.ui.quote_item_intelligence import (
     PERMIT_VS_TRADES_NOTE,
     build_quote_item_intelligence_summary,
+    item_status_cards_html,
     mfds_permit_note,
     quote_item_intelligence_rows,
 )
@@ -96,6 +97,8 @@ HANDOFF_SOURCE_V1 = True
 QUOTE_REVIEW_IDENTITY_V1 = True
 # Runtime marker: re-imports track_b_transactions / quote_review_layout (입력 오류 의심 trades left out).
 QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
+# The per-item status row is wrapping cards with a short value instead of cut-off st.metric text.
+QUOTE_REVIEW_ITEM_STATUS_V1 = True
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(
@@ -592,20 +595,7 @@ def _render_item_result(state: QuoteReviewState, index: int) -> None:
         )
         st.caption(identity_text or "추가 식별정보 없음")
 
-        status_cols = st.columns(5)
-        status_cols[0].metric("같은 제품 거래", f"{intelligence.direct_count}건")
-        status_cols[1].metric("식약처 허가 확인", intelligence.identity_status)
-        status_cols[2].metric(
-            "제조·수입업체",
-            f"{len(intelligence.responsible_companies)}개"
-            if intelligence.responsible_companies
-            else "미확인",
-        )
-        status_cols[3].metric(
-            "납품업체",
-            f"{len(intelligence.supplier_names)}개",
-        )
-        status_cols[4].metric("회수·판매중지", intelligence.safety_status)
+        st.markdown(item_status_cards_html(intelligence), unsafe_allow_html=True)
         if intelligence.responsible_companies:
             st.caption(
                 "제조·수입업체(식약처) · " + " / ".join(intelligence.responsible_companies[:5])

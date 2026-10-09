@@ -25,6 +25,10 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.quote_item_intelligence", "QUOTE_REVIEW_ENTRY_ERRORS_V1"),
     ("purchase_price.ui.quote_review_summary", "QUOTE_REVIEW_ENTRY_ERRORS_V1"),
     ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_ENTRY_ERRORS_V1"),
+    # The per-item status row became wrapping cards (no "…" cut-off).
+    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_CARD_WRAP_V1"),
+    ("purchase_price.ui.quote_item_intelligence", "QUOTE_REVIEW_ITEM_STATUS_V1"),
+    ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_ITEM_STATUS_V1"),
 )
 
 
