@@ -1,0 +1,48 @@
+{
+  "_note": "출처 가중치. 의학·병원 전문지는 중요도순 정렬에서 앞에 온다. 도메인은 하위 도메인까지 포함한다(예: m.dailymedi.com).",
+  "tiers": [
+    {
+      "key": "medical_trade",
+      "label": "의학·병원 전문지",
+      "weight": 3,
+      "domains": [
+        "dailymedi.com",
+        "medigatenews.com",
+        "bosa.co.kr",
+        "docdocdoc.co.kr",
+        "medicaltimes.com",
+        "doctorsnews.co.kr",
+        "khanews.com",
+        "monews.co.kr",
+        "medipana.com",
+        "mdtoday.co.kr",
+        "medifonews.com",
+        "newsmp.com",
+        "whosaeng.com",
+        "rapportian.com",
+        "medicalworldnews.co.kr",
+        "medicalnewspaper.co.kr",
+        "medicaltribune.co.kr",
+        "medical-tribune.co.kr",
+        "koreahealthlog.com",
+        "hidoc.co.kr",
+        "dailypharm.com",
+        "yakup.com",
+        "hitnews.co.kr",
+        "pharmnews.com",
+        "kpanews.co.kr",
+        "medisobizanews.com",
+        "medicalkorea.co.kr",
+        "healthinnews.co.kr",
+        "biotimes.co.kr",
+        "thebigdata.co.kr"
+      ]
+    },
+    {
+      "key": "local_busan",
+      "label": "부산 지역지",
+      "weight": 1,
+      "domains": ["kookje.co.kr", "busan.com", "bsnews.kr", "busanilbo.com"]
+    }
+  ]
+}

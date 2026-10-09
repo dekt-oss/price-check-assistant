@@ -9,6 +9,7 @@ Nothing here feeds an AI step.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -63,6 +64,15 @@ class Keyword:
     group_key: str
     group_name: str
     alert: str = "none"
+    # Words that must appear in the article *title* for it to count as relevant. Each inner tuple
+    # is a set of alternatives (any one is enough); every inner tuple must be satisfied. Empty means
+    # "every word of the keyword text". NAVER returns articles that mention the words anywhere in
+    # the body, so without this most results are unrelated (measured 2026-10-09: 40 of 1,624).
+    title_terms: tuple[tuple[str, ...], ...] = ()
+
+    @property
+    def required_terms(self) -> tuple[tuple[str, ...], ...]:
+        return self.title_terms or tuple((word,) for word in self.text.split() if word)
 
     @property
     def alert_label(self) -> str:
@@ -75,6 +85,7 @@ class KeywordGroup:
     name: str
     enabled: bool
     keywords: tuple[Keyword, ...]
+    notify: tuple[str, ...] = ()  # channels for 즉시 alerts: kakao, email, sms, webhook
 
 
 def load_keyword_groups(path: Path = DEFAULT_KEYWORD_FILE) -> tuple[KeywordGroup, ...]:
@@ -89,6 +100,10 @@ def load_keyword_groups(path: Path = DEFAULT_KEYWORD_FILE) -> tuple[KeywordGroup
                 group_key=key,
                 group_name=name,
                 alert=str(item.get("alert") or "none"),
+                title_terms=tuple(
+                    tuple(str(t) for t in (group if isinstance(group, list) else [group]))
+                    for group in item.get("title_terms") or []
+                ),
             )
             for item in raw.get("keywords") or []
             if str(item.get("text") or "").strip()
@@ -96,10 +111,106 @@ def load_keyword_groups(path: Path = DEFAULT_KEYWORD_FILE) -> tuple[KeywordGroup
         if key and keywords:
             groups.append(
                 KeywordGroup(
-                    key=key, name=name, enabled=bool(raw.get("enabled", True)), keywords=keywords
+                    key=key,
+                    name=name,
+                    enabled=bool(raw.get("enabled", True)),
+                    keywords=keywords,
+                    notify=tuple(str(c) for c in raw.get("notify") or ("webhook",)),
                 )
             )
     return tuple(groups)
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", "", text or "").casefold()
+
+
+def title_matches(title: str, keyword: Keyword) -> bool:
+    """True when the title contains the keyword's required words (spaces and case ignored)."""
+
+    squashed = _squash(title)
+    return all(any(_squash(term) in squashed for term in group) for group in keyword.required_terms)
+
+
+DEFAULT_SOURCE_FILE = Path(__file__).resolve().parents[3] / "data" / "news_sources.json"
+
+
+@dataclass(frozen=True)
+class SourceTier:
+    key: str
+    label: str
+    weight: int
+    domains: tuple[str, ...]
+
+
+def load_source_tiers(path: Path = DEFAULT_SOURCE_FILE) -> tuple[SourceTier, ...]:
+    if not path.exists():
+        return ()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return tuple(
+        SourceTier(
+            key=str(raw["key"]),
+            label=str(raw.get("label") or raw["key"]),
+            weight=int(raw.get("weight") or 0),
+            domains=tuple(str(d).casefold() for d in raw.get("domains") or []),
+        )
+        for raw in payload.get("tiers") or []
+    )
+
+
+def source_tier(domain: str, tiers: Iterable[SourceTier]) -> SourceTier | None:
+    host = (domain or "").casefold()
+    for tier in tiers:
+        if any(host == d or host.endswith("." + d) for d in tier.domains):
+            return tier
+    return None
+
+
+GROUP_WEIGHTS = {"our_hospital": 4, "peer_hospitals": 2}
+RELEVANT_WEIGHT = 3
+
+
+@dataclass(frozen=True)
+class RankedEntry:
+    entry: NewsEntry
+    relevant: bool
+    matched_keywords: tuple[str, ...]
+    tier: SourceTier | None
+    score: int
+
+
+def rank_entries(
+    entries: Iterable[NewsEntry],
+    keywords: Iterable[Keyword],
+    tiers: Iterable[SourceTier] = (),
+    *,
+    include_ignored: bool = False,
+) -> list[RankedEntry]:
+    """Score each article: title relevance, 우리병원/경쟁병원 group, medical trade press.
+
+    Returned newest first; callers sort by ``score`` for the 중요도순 view.
+    """
+
+    by_text = {k.text: k for k in keywords}
+    tier_list = tuple(tiers)
+    ranked: list[RankedEntry] = []
+    for entry in sorted_entries(entries, include_ignored=include_ignored):
+        matched = tuple(
+            text for text in entry.keywords if (k := by_text.get(text)) is not None and title_matches(entry.title, k)
+        )
+        tier = source_tier(entry.source_domain, tier_list)
+        group_weight = max(
+            (GROUP_WEIGHTS.get(by_text[t].group_key, 0) for t in matched if t in by_text), default=0
+        )
+        score = (RELEVANT_WEIGHT if matched else 0) + group_weight + (tier.weight if tier else 0)
+        ranked.append(RankedEntry(entry, bool(matched), matched, tier, score))
+    return ranked
+
+
+def by_priority(ranked: Iterable[RankedEntry]) -> list[RankedEntry]:
+    """중요도순: higher score first, newer first within the same score (input is newest first)."""
+
+    return sorted(ranked, key=lambda r: -r.score)
 
 
 def active_keywords(

@@ -10,6 +10,7 @@ import httpx
 from purchase_price.clients.naver_news import NaverNewsItem
 from purchase_price.config import Settings
 from purchase_price.scripts import collect_news_radar as cli
+from purchase_price.services import news_alerts
 from purchase_price.services import news_radar as radar
 from purchase_price.services import news_radar_index as nri
 
@@ -57,7 +58,11 @@ def test_collect_writes_local_index_alerts_only_after_bootstrap(tmp_path, monkey
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
     monkeypatch.setenv(cli.WEBHOOK_ENV, "https://hooks.example/abc")
     sent: list[dict] = []
-    monkeypatch.setattr(cli, "post_webhook", lambda url, text: sent.append({"text": text}) or "sent")
+    monkeypatch.setattr(
+        news_alerts,
+        "send_webhook",
+        lambda text, env, transport=None: sent.append({"text": text}) or news_alerts.SendResult("webhook", "sent"),
+    )
     args = cli._parse_args(["--output", str(tmp_path / "news.json.gz"), "--keywords-file", str(_keywords_file(tmp_path))])
     store = cli._store(args, Settings(_env_file=None))
 
@@ -72,7 +77,7 @@ def test_collect_writes_local_index_alerts_only_after_bootstrap(tmp_path, monkey
 
     search, _ = _search_factory({"부산백병원": ["https://a.kr/1", "https://a.kr/2"], "병원 AI 도입": ["https://a.kr/3"]})
     second = cli.run_collect(args, Settings(_env_file=None), store, search=search)
-    assert second["new_count"] == 2 and second["alert"] == "sent"
+    assert second["new_count"] == 2 and second["alert"] == "1건 → webhook sent"
     (message,) = sent
     assert "https://a.kr/2" in message["text"] and "https://a.kr/3" not in message["text"]
     assert set(store.read_statuses()) == {article}  # statuses of vanished articles are pruned
@@ -86,7 +91,7 @@ def test_collect_without_webhook_skips_silently(tmp_path, monkeypatch) -> None:
     cli.run_collect(args, Settings(_env_file=None), store, search=_search_factory({})[0])
     search, _ = _search_factory({"부산백병원": ["https://a.kr/9"]})
     assert cli.run_collect(args, Settings(_env_file=None), store, search=search)["alert"] == (
-        "skipped (no webhook configured)"
+        "1건 → webhook skipped (not configured)"
     )
 
 
@@ -114,7 +119,7 @@ def test_digest_mode_writes_markdown_and_prunes_old_files(tmp_path, monkeypatch)
     nri.collect(
         index,
         [keyword],
-        lambda t, d: [NaverNewsItem("AI 기사", "", "https://a.kr/ai", now - timedelta(hours=1), "a.kr")],
+        lambda t, d: [NaverNewsItem("병원 AI 도입 기사", "", "https://a.kr/ai", now - timedelta(hours=1), "a.kr")],
         groups=groups,
         clock=lambda: now - timedelta(hours=1),
     )
@@ -124,4 +129,4 @@ def test_digest_mode_writes_markdown_and_prunes_old_files(tmp_path, monkeypatch)
     result = cli.run_digest(args, store, now=now)
     assert result["day"] == "2026-10-08" and result["removed_old_digests"] == 1
     text = (store.digest_dir / "2026-10-08.md").read_text(encoding="utf-8")
-    assert "[AI 기사](https://a.kr/ai) · a.kr · 10-08 07:30" in text
+    assert "[병원 AI 도입 기사](https://a.kr/ai) · a.kr · 10-08 07:30" in text
