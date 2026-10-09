@@ -196,6 +196,10 @@ def quantity_text(item: Any) -> str:
     return f"{_number(quantity)} {unit}".strip()
 
 
+# Same wording as the 가격 조사 result's check panel.
+LIVE_FAILURE_POINT = "나라장터 실시간 확인에 실패해 최근 며칠 거래가 빠졌을 수 있습니다."
+
+
 def _data_problem(track_b: Any, *, failed: bool) -> str | None:
     if track_b is None:
         if failed:
@@ -225,6 +229,7 @@ def _check_points(
     period_note: str | None,
     data_problem: str | None,
     safety_status: str,
+    live_status: str = "",
 ) -> tuple[str, ...]:
     points: list[str] = []
     if safety_status == SafetyCheckStatus.MATCH.value:
@@ -257,6 +262,8 @@ def _check_points(
         )
     if period_note:
         points.append(period_note)
+    if live_status == "failure":
+        points.append(LIVE_FAILURE_POINT)
     if not _text(getattr(item, "vat_status", "")):
         points.append("견적서에 부가세 포함 여부가 없습니다. 거래가는 부가세 포함 금액입니다.")
     return tuple(dict.fromkeys(points))
@@ -270,6 +277,7 @@ def build_item_comparison(
     today: date,
     failed: bool = False,
     safety_status: str = "",
+    live_status: str = "",
 ) -> QuoteItemComparison:
     """Same numbers as the 가격 조사 result: default period (최근 3년, widened when empty),
     same-product (A/B) trades only, and only the most common unit in the median."""
@@ -335,6 +343,7 @@ def build_item_comparison(
             period_note=choice.note,
             data_problem=data_problem,
             safety_status=safety_status,
+            live_status=live_status,
         ),
     )
 

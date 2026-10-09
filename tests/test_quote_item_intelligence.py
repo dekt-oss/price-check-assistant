@@ -19,6 +19,17 @@ from purchase_price.ui.quote_item_intelligence import (
 from purchase_price.ui.quote_review_state import QuoteReviewState
 
 
+def _with_live(lookup):
+    """Wrap an index-only fake lookup in the (result, live) shape of the shared live lookup."""
+
+    from purchase_price.services.track_b_live_gap_fill import TrackBLiveGapFill
+
+    def wrapped(query, *, quote_unit_price):
+        return lookup(query, quote_unit_price=quote_unit_price), TrackBLiveGapFill("up_to_date")
+
+    return wrapped
+
+
 def _item(model: str = "DFM100") -> QuoteItem:
     return QuoteItem(
         source_sheet="Sheet1",
@@ -360,7 +371,7 @@ def test_quote_track_b_uses_same_canonical_model_as_unified_search(monkeypatch) 
             suggestions=(),
         )
 
-    monkeypatch.setattr(quote_market_research, "lookup_track_b_quote", fake_lookup)
+    monkeypatch.setattr(quote_market_research, "lookup_track_b_quote_with_live", _with_live(fake_lookup))
 
     quote_market_research._ensure_track_b_comparison(state)
 

@@ -60,6 +60,8 @@ class QuoteReviewState:
     discoveries: dict[int, G2BUnmappedDiscoveryResult | None] = field(default_factory=dict)
     market_bundles: dict[int, MarketResearchBundle | None] = field(default_factory=dict)
     track_b_db: dict[int, TrackBQuoteComparison] = field(default_factory=dict)
+    # Live G2B check status per item (success / success_0 / up_to_date / failure / ...).
+    track_b_live_status: dict[int, str] = field(default_factory=dict)
     mfds_workspace: dict[int, MfdsWorkspaceResult] = field(default_factory=dict)
     mfds_identity: dict[int, MfdsIdentityLookup] = field(default_factory=dict)
     safety_lookup: dict[int, MfdsRecallLookupResult] = field(default_factory=dict)

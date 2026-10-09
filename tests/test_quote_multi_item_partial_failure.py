@@ -8,6 +8,17 @@ from purchase_price.ui import quote_market_research as module
 from purchase_price.ui.quote_review_state import QuoteReviewState
 
 
+def _with_live(lookup):
+    """Wrap an index-only fake lookup in the (result, live) shape of the shared live lookup."""
+
+    from purchase_price.services.track_b_live_gap_fill import TrackBLiveGapFill
+
+    def wrapped(query, *, quote_unit_price):
+        return lookup(query, quote_unit_price=quote_unit_price), TrackBLiveGapFill("up_to_date")
+
+    return wrapped
+
+
 def _item(name: str, model: str) -> QuoteItem:
     return QuoteItem(
         source_sheet="Sheet1",
@@ -35,7 +46,7 @@ def test_track_b_failure_on_one_item_does_not_block_later_items(monkeypatch) -> 
             suggestions=(),
         )
 
-    monkeypatch.setattr(module, "lookup_track_b_quote", fake_lookup)
+    monkeypatch.setattr(module, "lookup_track_b_quote_with_live", _with_live(fake_lookup))
 
     module._ensure_track_b_comparison(state)
 
@@ -86,15 +97,12 @@ def test_successful_retry_clears_only_the_recovered_stage(monkeypatch) -> None:
         }
     }
 
-    monkeypatch.setattr(
-        module,
-        "lookup_track_b_quote",
-        lambda query, *, quote_unit_price: SimpleNamespace(
+    monkeypatch.setattr(module, "lookup_track_b_quote_with_live", _with_live(lambda query, *, quote_unit_price: SimpleNamespace(
             status="success_0",
             candidates=(),
             reference_candidates=(),
             suggestions=(),
-        ),
+        )),
     )
 
     module._ensure_track_b_comparison(state)

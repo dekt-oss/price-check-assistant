@@ -29,8 +29,8 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBIdentitySuggestion,
     TrackBQuoteCandidate,
     TrackBReferenceCandidate,
-    lookup_track_b_quote,
 )
+from purchase_price.services.track_b_quote_with_live import lookup_track_b_quote_with_live
 from purchase_price.ui import result_summary
 from purchase_price.ui.market_research import (
     render_external_research_links,
@@ -412,10 +412,15 @@ def _ensure_track_b_comparison(state: QuoteReviewState) -> None:
         if index in state.track_b_db:
             continue
         try:
-            state.track_b_db[index] = lookup_track_b_quote(
+            # Same trades as the 가격 조사 page: the index plus the live days after it.
+            track_b, live = lookup_track_b_quote_with_live(
                 _quote_item_unified_query(state, index),
                 quote_unit_price=item.unit_price,
             )
+            state.track_b_db[index] = track_b
+            live_status = getattr(state, "track_b_live_status", None)
+            if isinstance(live_status, dict):
+                live_status[index] = live.status
         except Exception as exc:
             _record_item_failure(state, index, "나라장터 가격", exc)
             continue
@@ -767,6 +772,7 @@ def _item_comparisons(state: QuoteReviewState) -> list[QuoteItemComparison]:
                 today=today,
                 failed="나라장터 가격" in failures,
                 safety_status=intelligence.safety_status,
+                live_status=(getattr(state, "track_b_live_status", None) or {}).get(index, ""),
             )
         )
     return comparisons
