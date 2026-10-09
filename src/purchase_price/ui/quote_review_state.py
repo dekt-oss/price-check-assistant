@@ -149,7 +149,7 @@ def can_enter(step: int, state: QuoteReviewState) -> tuple[bool, tuple[str, ...]
         return True, ()
 
     if not state.search_runs:
-        reasons.append("제품 식별이 끝난 품목의 공개 가격근거 검색을 실행하세요.")
+        reasons.append("공개된 가격 자료 검색을 실행하세요.")
         return False, tuple(reasons)
     if step == 5:
         return True, ()
@@ -161,6 +161,6 @@ def can_enter(step: int, state: QuoteReviewState) -> tuple[bool, tuple[str, ...]
         reasons.append(f"품목 {_item_numbers(missing_context)}의 견적 비교조건을 확인하세요.")
         return False, tuple(reasons)
     if not _has_eligible_candidate(state):
-        reasons.append("현재 조건에서 승인 가능한 직접 비교 후보가 없습니다.")
+        reasons.append("현재 조건에서 승인할 수 있는 비교 가격 자료가 없습니다.")
         return False, tuple(reasons)
     return True, ()

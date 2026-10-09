@@ -150,7 +150,7 @@ def test_failed_lookup_is_not_shown_as_zero_result() -> None:
     row = table_rows([comparison], [_item()])[0]
     assert row["거래 가운데 값"] is None and row["차이 %"] is None
     assert row["판정"] == [VERDICT_INSUFFICIENT]
-    assert row["품목 / 모델"] == "M40 · 환자감시장치"
+    assert row["모델"] == "M40" and row["품명"] == "환자감시장치"
 
 
 def test_unit_mismatch_and_missing_vat_become_check_points() -> None:

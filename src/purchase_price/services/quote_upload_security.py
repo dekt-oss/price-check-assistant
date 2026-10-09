@@ -26,12 +26,14 @@ class QuoteUploadSecurityPolicy:
 
 
 CURRENT_QUOTE_UPLOAD_SECURITY_POLICY = QuoteUploadSecurityPolicy(
-    allowed_suffixes=frozenset({".pdf", ".xlsx", ".xls"}),
+    allowed_suffixes=frozenset({".pdf", ".xlsx", ".xls", ".png", ".jpg", ".jpeg"}),
     raw_retention="temporary_file_only_deleted_after_parsing",
     raw_content_logging=False,
     external_ai_transfer=False,
     external_ai_retention="not_applicable",
 )
+
+QUOTE_UPLOAD_IMAGES_V1 = True
 
 _ALLOWED_SUFFIXES = set(CURRENT_QUOTE_UPLOAD_SECURITY_POLICY.allowed_suffixes)
 

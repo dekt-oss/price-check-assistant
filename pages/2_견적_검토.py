@@ -1,4 +1,39 @@
+# ruff: noqa: E402  (imports follow the stale-module refresh below)
+import importlib
+import sys
+
 import streamlit as st
+
+# A Streamlit process that started before a deploy keeps the old copies of imported modules (the
+# page file updates, its imports do not). Reload the ones whose wording or table changed, in
+# dependency order, before this page imports names from them.
+_UI_RUNTIME_MARKERS = (
+    ("purchase_price.services.quote_upload_security", "QUOTE_UPLOAD_IMAGES_V1"),
+    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_ACCEPTANCE_V2"),
+    ("purchase_price.ui.quote_item_intelligence", "QUOTE_REVIEW_ACCEPTANCE_V2"),
+    ("purchase_price.ui.quote_review_summary", "QUOTE_REVIEW_ACCEPTANCE_V2"),
+    ("purchase_price.ui.quote_review_steps", "QUOTE_REVIEW_ACCEPTANCE_V2"),
+    ("purchase_price.ui.quote_review_s4", "QUOTE_REVIEW_ACCEPTANCE_V2"),
+    ("purchase_price.ui.quote_review_s5_s6", "QUOTE_REVIEW_ACCEPTANCE_V2"),
+    ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_ACCEPTANCE_V2"),
+)
+
+
+def _refresh_ui_modules() -> None:
+    """Reload retained pre-deploy copies once; never raises."""
+
+    for name, marker in _UI_RUNTIME_MARKERS:
+        module = sys.modules.get(name)
+        if module is None or hasattr(module, marker):
+            continue
+        try:
+            importlib.invalidate_caches()
+            importlib.reload(module)
+        except Exception:
+            pass
+
+
+_refresh_ui_modules()
 
 from purchase_price.ui.quote_market_research import (
     SELECTED_ITEM_SESSION_KEY,
@@ -20,7 +55,7 @@ from purchase_price.ui.quote_review_steps import (
 from purchase_price.ui.theme import page_header_html
 
 PAGE_TITLE = "견적서 검토"
-DETAIL_EXPANDER_LABEL = "상세 검증 · 원문 확인 · 제품 식별 · 조건 대조 · 승인"
+DETAIL_EXPANDER_LABEL = "상세 검증 (선택) · 원문 확인 · 조건 대조 · 승인"
 DETAIL_SYNCED_ITEM_KEY = "quote_review_detail_synced_item_v1"
 
 st.set_page_config(page_title=PAGE_TITLE, page_icon="📋", layout="wide")
@@ -52,8 +87,9 @@ if state.extraction is not None and state.items:
 
     with st.expander(DETAIL_EXPANDER_LABEL, expanded=False):
         st.caption(
-            "결재 문서에 붙일 때만 필요합니다. 품목을 원문과 맞춰 보고, 제품을 확인하고, VAT·설치·보증 같은 "
-            "거래 조건을 대조한 뒤 담당자가 비교 거래를 하나씩 승인합니다."
+            "꼭 거칠 필요는 없습니다. 위 비교표의 판정은 이 단계 없이도 볼 수 있습니다. 결재 문서에 근거를 "
+            "남겨야 할 때처럼 더 꼼꼼히 확인하고 싶을 때, 견적서 원문과 품목을 맞춰 보고 부가세·설치·보증 같은 "
+            "거래 조건이 같은지 따져 담당자가 비교할 거래를 하나씩 승인합니다."
         )
         render_stepper(state)
 
@@ -79,8 +115,8 @@ if state.extraction is not None and state.items:
                 render_s5(state, selected_index)
             else:
                 st.info(
-                    "조건이 미확인이거나 충돌인 근거는 승인·판정에서 제외되며 참고용으로만 남습니다. "
-                    "담당자가 동일 비교조건을 명시적으로 확인한 pair만 견적 위치 계산에 사용합니다."
+                    "거래 조건을 확인하지 못했거나 서로 맞지 않는 가격 자료는 승인에서 빠지고 참고용으로만 남습니다. "
+                    "담당자가 같은 조건임을 직접 확인해 승인한 가격 자료만 이 단계의 견적 위치 계산에 씁니다."
                 )
                 render_s6(state, selected_index)
         with right:
