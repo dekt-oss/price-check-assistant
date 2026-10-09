@@ -1,19 +1,13 @@
-from datetime import datetime
-
 import pandas as pd
 import streamlit as st
 
 from purchase_price.clients.data_go_kr import PublicDataClientError
-from purchase_price.collectors.g2b_shopping import G2B_SHOPPING_BASE_URL, SOURCE_NAME
-from purchase_price.collectors.registry import build_collectors
 from purchase_price.config import get_settings
 from purchase_price.schemas import ProductQuery
-from purchase_price.services.g2b_unmapped_discovery import discover_unmapped_g2b_candidates
 from purchase_price.services.market_research_support import (
     alternative_research_gate,
     build_alternative_web_search_links,
     build_web_supplier_search_links,
-    extract_g2b_supplier_candidates,
     extract_mfds_business_supplier_candidates,
 )
 from purchase_price.services.medical_lookup_handoff import (
@@ -36,20 +30,30 @@ from purchase_price.services.mfds_device_intelligence import (
     resolve_exact_model_identity,
 )
 from purchase_price.services.mfds_recall import lookup_mfds_recall
-from purchase_price.services.mfds_udi import MFDS_UDI_CODE_BASE_URL, MfdsUdiCodeClient
+from purchase_price.services.mfds_udi import (
+    MFDS_UDI_CODE_BASE_URL,
+    MFDS_UDI_PRODUCT_INFO_BASE_URL,
+    MfdsUdiCodeClient,
+    MfdsUdiProductInfoClient,
+    lookup_udi_with_fallback,
+)
+from purchase_price.services.purchase_workspace_handoff import (
+    PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY,
+    build_purchase_workspace_handoff,
+)
 from purchase_price.services.safety_support import (
     MFDS_ADMIN_SANCTION_PAGE_URL,
     MFDS_RECALL_PAGE_URL,
     MFDS_SAFETY_LETTER_PAGE_URL,
     MFDS_UDI_PORTAL_URL,
 )
-from purchase_price.services.search import search_all
+from purchase_price.services.track_b_quote_with_live import lookup_track_b_quote_with_live
 from purchase_price.ui import device_page as dev
 from purchase_price.ui.production_runtime_compat import (
     mfds_recall_exception_result,
     normalize_mfds_recall_lookup,
 )
-from purchase_price.ui.theme import metric_card_html, page_header_html
+from purchase_price.ui.theme import TONE_WARN, metric_card_html, notice_html, page_header_html
 
 st.set_page_config(page_title=dev.PAGE_TITLE, page_icon="🏥", layout="wide")
 st.markdown(dev.DEVICE_CSS, unsafe_allow_html=True)
@@ -58,10 +62,23 @@ st.markdown(page_header_html(dev.PAGE_TITLE, subtitle=dev.PAGE_SUBTITLE), unsafe
 settings = get_settings()
 mfds_key = (mfds_service_key_candidates(settings) or ("",))[0]
 g2b_key = (settings.resolved_g2b_service_key or "").strip()
-st.markdown(
-    dev.connection_chips_html(mfds_ready=bool(mfds_key), g2b_ready=bool(g2b_key)),
-    unsafe_allow_html=True,
-)
+chips_slot = st.empty()  # filled at the end of the script, after this run's lookups set their states
+SERVICE_STATES_KEY = "device_service_states_v1"
+
+
+def _set_service_state(service: str, state: str) -> None:
+    states = st.session_state.setdefault(SERVICE_STATES_KEY, {})
+    states[service] = state
+
+
+def _note_lookup(service: str, error: object = "", *, answered: bool = False) -> None:
+    """Remember what the last call of a service showed: not approved -> 연결 전, answered -> 사용 가능."""
+
+    if error and dev.is_not_approved_error(error):
+        _set_service_state(service, dev.STATE_PENDING)
+    elif answered:
+        _set_service_state(service, dev.STATE_READY)
+
 
 handoff = apply_handoff(st.session_state)
 if handoff is not None:
@@ -148,30 +165,32 @@ def _business_client() -> MfdsBusinessLicenseClient:
 def _collect_market(params: dev.MarketParams, step) -> dev.MarketResult:
     """Run the 허가·시장조사 lookups. Each source fails on its own and says so."""
 
-    result = dev.MarketResult(params=params, checked_at=datetime.now().strftime("%m-%d %H:%M"))
+    result = dev.MarketResult(params=params, checked_at=dev.kst_time_text())
     step("식약처 등록 자료에서 품목을 찾는 중입니다.")
     try:
         result.records = tuple(_model_info_client().search_models(params.product_name))
+        _note_lookup(dev.SERVICE_PERMIT, answered=True)
     except (PublicDataClientError, ValueError) as exc:
         result.records_error = dev.safe_error_text(exc) or "응답을 받지 못했습니다"
+        _note_lookup(dev.SERVICE_PERMIT, exc)
 
     step("회수·판매중지 정보를 확인하는 중입니다.")
     result.recall = _lookup_recall(params.model_name, params.product_name)
+    _note_recall_state(result.recall)
 
-    if result.records_failed:
-        return result
-
-    exact = resolve_exact_model_identity(result.records, params.model_name) if params.model_name else None
-    result.exact = exact
-    exact_ready = bool(exact and exact.confirmed and not exact.ambiguous)
+    if not result.records_failed:
+        exact = resolve_exact_model_identity(result.records, params.model_name) if params.model_name else None
+        result.exact = exact
 
     if params.manufacturer:
         step("식약처 업체 허가·신고를 확인하는 중입니다.")
         businesses = ()
         try:
             businesses = _business_client().search_company(params.manufacturer)
+            _note_lookup(dev.SERVICE_COMPANY, answered=True)
         except (PublicDataClientError, ValueError) as exc:
             result.business_error = dev.safe_error_text(exc) or "응답을 받지 못했습니다"
+            _note_lookup(dev.SERVICE_COMPANY, exc)
         for candidate in extract_mfds_business_supplier_candidates(businesses):
             result.supplier_rows.append(
                 {
@@ -181,8 +200,9 @@ def _collect_market(params: dev.MarketParams, step) -> dev.MarketResult:
                 }
             )
 
-    if exact_ready and g2b_key:
-        step("나라장터 납품·가격 사례를 확인하는 중입니다. 1~2분 걸릴 수 있습니다.")
+    if params.product_name or params.model_name:
+        # The same lookup as the 가격 조사 page, so the numbers on both screens agree.
+        step("나라장터에서 같은 제품의 거래를 찾는 중입니다.")
         query = ProductQuery(
             product_name=params.product_name,
             manufacturer=params.manufacturer,
@@ -190,46 +210,26 @@ def _collect_market(params: dev.MarketParams, step) -> dev.MarketResult:
             specification=params.specification,
         )
         try:
-            run = search_all(query, build_collectors())
+            track_b, live = lookup_track_b_quote_with_live(query, quote_unit_price=None)
+            result.track_b = track_b
+            result.track_b_live = str(getattr(live, "status", "") or "")
+            if dev.track_b_unavailable(track_b):
+                _set_service_state(dev.SERVICE_G2B, dev.STATE_PENDING)
+            else:
+                result.trades = dev.build_trade_summary(track_b)
+                _set_service_state(dev.SERVICE_G2B, dev.STATE_READY)
+                result.supplier_rows.extend(dev.trade_supplier_rows(result.trades))
         except Exception as exc:  # noqa: BLE001 - one source must not blank the whole page
-            result.procurement_error = dev.safe_error_text(exc) or "응답을 받지 못했습니다"
-            return result
-        result.procurement = run
-        for candidate in extract_g2b_supplier_candidates(run.results):
-            result.supplier_rows.append(
-                {
-                    "업체": candidate.name,
-                    "자료 출처": candidate.source.value,
-                    "설명": dev.supplier_evidence_text(candidate.evidence),
-                }
-            )
-        g2b_status = next(
-            (s for s in run.source_statuses if s.source_name == SOURCE_NAME),
-            None,
-        )
-        research_needed = bool(
-            g2b_status is not None
-            and (g2b_status.skipped or (g2b_status.succeeded and g2b_status.result_count == 0))
-        )
-        if research_needed:
-            step("나라장터에서 비슷한 후보를 찾는 중입니다.")
-            try:
-                result.discovery = discover_unmapped_g2b_candidates(
-                    query,
-                    service_key=g2b_key,
-                    lookback_days=365,
-                    base_url=settings.g2b_shopping_base_url or G2B_SHOPPING_BASE_URL,
-                    timeout_seconds=settings.g2b_request_timeout_seconds,
-                    max_retries=settings.g2b_max_retries,
-                    pages_per_term_window=2,
-                )
-            except Exception as exc:  # noqa: BLE001
-                result.procurement_error = dev.safe_error_text(exc) or "응답을 받지 못했습니다"
-    elif params.model_name and not exact_ready:
-        result.procurement_note = (
-            "입력한 모델과 정확히 같은 등록을 확인하지 못해 나라장터 납품 사례는 찾지 않았습니다."
-        )
+            result.track_b_error = dev.safe_error_text(exc) or "응답을 받지 못했습니다"
     return result
+
+
+def _note_recall_state(lookup: object) -> None:
+    status = str(getattr(lookup, "status", "") or "")
+    if status == "not_authorized":
+        _set_service_state(dev.SERVICE_RECALL, dev.STATE_PENDING)
+    elif status in {"success", "success_0"}:
+        _set_service_state(dev.SERVICE_RECALL, dev.STATE_READY)
 
 
 def _render_market(result: dev.MarketResult) -> None:
@@ -268,9 +268,9 @@ def _render_market(result: dev.MarketResult) -> None:
         st.markdown(
             dev.lookup_failed_html("식약처 허가정보", result.records_error), unsafe_allow_html=True
         )
-        _retry_button(MARKET_SLOT, "records")
-        return
-    if not result.records:
+        if not dev.is_not_approved_error(result.records_error):
+            _retry_button(MARKET_SLOT, "records")
+    elif not result.records:
         st.markdown(dev.permit_not_found_html(params), unsafe_allow_html=True)
     else:
         _table(dev.permit_rows(result.records, params.model_name))
@@ -285,16 +285,16 @@ def _render_market(result: dev.MarketResult) -> None:
                 unsafe_allow_html=True,
             )
 
-    # 3. Public delivery / price cases from 나라장터.
-    if result.procurement is not None or result.procurement_error or result.procurement_note:
+    # 3. Same-product trades from 나라장터 (the same lookup as 가격 조사).
+    if result.trades is not None or result.track_b_error or result.track_b is not None:
         st.markdown(
             dev.section_html(
-                "나라장터 납품·가격 사례",
-                "공개된 납품·구매 기록입니다. ‘같은 제품으로 확인’된 것만 가격 비교에 쓸 수 있습니다.",
+                "나라장터 거래가격",
+                "가격 조사와 같은 자료입니다. ‘같은 제품으로 확인’된 거래만 가격 판단에 씁니다.",
             ),
             unsafe_allow_html=True,
         )
-        _render_procurement(result)
+        _render_trades(result)
 
     # 4. Companies (only when there is something to say about them).
     if result.supplier_rows or result.business_error or params.manufacturer:
@@ -307,7 +307,8 @@ def _render_market(result: dev.MarketResult) -> None:
             dev.lookup_failed_html("식약처 업체 허가·신고", result.business_error),
             unsafe_allow_html=True,
         )
-        _retry_button(MARKET_SLOT, "business")
+        if not dev.is_not_approved_error(result.business_error):
+            _retry_button(MARKET_SLOT, "business")
     if result.supplier_rows:
         _table(result.supplier_rows)
         st.markdown(f'<div class="pc-dev-hint">{dev.SUPPLIER_NOTE}</div>', unsafe_allow_html=True)
@@ -338,73 +339,53 @@ def _render_market(result: dev.MarketResult) -> None:
             column.link_button(label.replace("웹 · ", "웹에서 "), url, use_container_width=True)
 
 
-def _render_procurement(result: dev.MarketResult) -> None:
+def _open_price_research(params: dev.MarketParams) -> None:
+    handoff = build_purchase_workspace_handoff(
+        product_name=params.product_name,
+        manufacturer=params.manufacturer,
+        model_name=params.model_name,
+        specification=params.specification,
+    )
+    if handoff is not None:
+        st.session_state[PURCHASE_WORKSPACE_HANDOFF_SESSION_KEY] = handoff.to_session_payload()
+        st.switch_page("pages/1_대시보드.py")
+
+
+def _render_trades(result: dev.MarketResult) -> None:
     params = result.params
-    if result.procurement_error:
+    if result.track_b_error:
         st.markdown(
-            dev.lookup_failed_html("나라장터 납품·가격 사례", result.procurement_error),
-            unsafe_allow_html=True,
+            dev.lookup_failed_html("나라장터 거래가격", result.track_b_error), unsafe_allow_html=True
         )
-        _retry_button(MARKET_SLOT, "procurement")
-    if result.procurement_note:
-        st.markdown(
-            dev.idle_html("나라장터 납품 사례는 찾지 않았습니다.", result.procurement_note),
-            unsafe_allow_html=True,
-        )
-    run = result.procurement
-    if run is None:
+        _retry_button(MARKET_SLOT, "trades")
         return
-    state, detail = dev.procurement_state(run)
-    if state == "found":
-        st.markdown(dev.procurement_partial_notice(run), unsafe_allow_html=True)
-        st.dataframe(
-            pd.DataFrame(dev.procurement_rows(run.results)),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "1개당 가격(원)": st.column_config.NumberColumn(format="%d"),
-                "원문 링크": st.column_config.LinkColumn(display_text="원문 열기"),
-            },
-        )
-    elif state == "failed":
-        st.markdown(dev.lookup_failed_html("나라장터 납품·가격 사례", detail), unsafe_allow_html=True)
-        _retry_button(MARKET_SLOT, "procurement-run")
-    elif state == "empty":
-        st.markdown(dev.procurement_empty_html(params), unsafe_allow_html=True)
-    discovery = result.discovery
-    if discovery is None:
+    if dev.track_b_unavailable(result.track_b) or result.trades is None:
+        st.markdown(dev.trade_unavailable_html(), unsafe_allow_html=True)
+        _retry_button(MARKET_SLOT, "trades-unavailable")
         return
-    d_state = dev.discovery_state(discovery)
-    if d_state == "failed":
+    summary = result.trades
+    if result.track_b_live == "failure":
+        st.markdown(notice_html(dev.LIVE_FAILURE_NOTE, TONE_WARN), unsafe_allow_html=True)
+    st.markdown(dev.trade_summary_cards(summary), unsafe_allow_html=True)
+    if summary.period_note:
+        st.markdown(f'<div class="pc-dev-hint">{summary.period_note}</div>', unsafe_allow_html=True)
+    if summary.other_unit_count:
         st.markdown(
-            dev.lookup_failed_html("나라장터 비슷한 후보"),
+            f'<div class="pc-dev-hint">단위가 다른 거래 {summary.other_unit_count}건은 가운데 값과 범위에 섞지 않았습니다.</div>',
             unsafe_allow_html=True,
         )
-        _retry_button(MARKET_SLOT, "discovery")
-        return
-    if d_state == "partial":
+    if summary.count:
+        shown = min(summary.count, dev.TRADE_TABLE_LIMIT)
+        _table(dev.trade_rows(summary))
         st.markdown(
-            dev.lookup_failed_html("나라장터 비슷한 후보 일부"), unsafe_allow_html=True
-        )
-        _retry_button(MARKET_SLOT, "discovery-partial")
-    if d_state == "empty":
-        st.markdown(
-            dev.not_found_html("나라장터 비슷한 후보", ("모델명 철자를 확인하거나 품목명만으로 다시 찾아 보세요",)),
+            f'<div class="pc-dev-hint" style="margin-bottom:12px">같은 제품 거래 중 최근 {shown}건입니다. 금액은 부가세 포함 1단위 가격이며, '
+            "전체 거래와 견적 비교는 가격 조사에서 볼 수 있습니다.</div>",
             unsafe_allow_html=True,
         )
-        return
-    with st.expander("비슷한 후보 보기 (같은 제품인지 확인 전)", expanded=True):
-        st.dataframe(
-            pd.DataFrame(dev.discovery_rows(discovery)),
-            use_container_width=True,
-            hide_index=True,
-            column_config={"표기 금액(원)": st.column_config.NumberColumn(format="%d")},
-        )
-        st.markdown(
-            '<div class="pc-dev-hint">입력한 모델의 등록을 확인했다는 것과, 위 후보가 같은 제품이라는 것은 다릅니다. '
-            "후보의 금액은 가격 비교와 견적 판단에 넣지 않습니다.</div>",
-            unsafe_allow_html=True,
-        )
+    else:
+        st.markdown(dev.trade_empty_html(params, summary), unsafe_allow_html=True)
+    if st.button("가격 조사에서 자세히 보기 →", key="device_open_price_research", type="primary"):
+        _open_price_research(params)
 
 
 market_tab, safety_tab, udi_tab = st.tabs(list(dev.TAB_NAMES))
@@ -465,7 +446,7 @@ with market_tab:
                 status.update(
                     label=(
                         "일부를 확인하지 못했습니다. 아래 안내를 확인하세요."
-                        if failed or collected.procurement_error
+                        if failed or collected.track_b_error
                         else "확인을 마쳤습니다."
                     ),
                     state="error" if failed else "complete",
@@ -511,11 +492,12 @@ with safety_tab:
         if isinstance(recall_to_run, tuple):
             with st.spinner("회수·판매중지 정보를 확인하는 중입니다."):
                 lookup = _lookup_recall(*recall_to_run)
+            _note_recall_state(lookup)
             st.session_state[RECALL_SLOT] = {
                 "params": recall_to_run,
                 "result": lookup,
                 "permits": permit_numbers,
-                "checked_at": datetime.now().strftime("%m-%d %H:%M"),
+                "checked_at": dev.kst_time_text(),
             }
         saved_recall = st.session_state.get(RECALL_SLOT)
         if not saved_recall:
@@ -585,8 +567,10 @@ with safety_tab:
             with st.spinner("식약처 업체 허가·신고를 확인하는 중입니다."):
                 try:
                     outcome["rows"] = dev.business_rows(_business_client().search_company(company_to_run))
+                    _note_lookup(dev.SERVICE_COMPANY, answered=True)
                 except (PublicDataClientError, ValueError) as exc:
                     outcome["error"] = dev.safe_error_text(exc) or "응답을 받지 못했습니다"
+                    _note_lookup(dev.SERVICE_COMPANY, exc)
             st.session_state[COMPANY_SLOT] = outcome
         saved_company = st.session_state.get(COMPANY_SLOT)
         if saved_company:
@@ -595,7 +579,8 @@ with safety_tab:
                     dev.lookup_failed_html("식약처 업체 허가·신고", str(saved_company["error"])),
                     unsafe_allow_html=True,
                 )
-                _retry_button(COMPANY_SLOT, "company")
+                if not dev.is_not_approved_error(saved_company["error"]):
+                    _retry_button(COMPANY_SLOT, "company")
             elif saved_company["rows"]:
                 _table(saved_company["rows"])
             else:
@@ -625,29 +610,52 @@ with udi_tab:
     else:
         udi_to_run = _params_to_run(UDI_SLOT, udi_submitted, udi_text)
         if isinstance(udi_to_run, str):
-            udi_outcome: dict[str, object] = {"params": udi_to_run, "rows": [], "error": ""}
             with st.spinner("식약처 UDI 자료를 확인하는 중입니다."):
-                try:
-                    udi_client = MfdsUdiCodeClient(
+                udi_json = mfds_json_client(settings)
+                outcome = lookup_udi_with_fallback(
+                    udi_to_run,
+                    product_client=MfdsUdiProductInfoClient(
                         mfds_key,
-                        client=mfds_json_client(settings),
+                        client=udi_json,
+                        base_url=settings.mfds_product_info_base_url or MFDS_UDI_PRODUCT_INFO_BASE_URL,
+                        timeout_seconds=settings.mfds_request_timeout_seconds,
+                        max_retries=settings.mfds_max_retries,
+                    ),
+                    code_client=MfdsUdiCodeClient(
+                        mfds_key,
+                        client=udi_json,
                         base_url=settings.mfds_udi_code_base_url or MFDS_UDI_CODE_BASE_URL,
                         timeout_seconds=settings.mfds_request_timeout_seconds,
                         max_retries=settings.mfds_max_retries,
-                    )
-                    udi_outcome["rows"] = dev.udi_rows(udi_client.lookup_udi(udi_to_run))
-                except (PublicDataClientError, ValueError) as exc:
-                    udi_outcome["error"] = dev.safe_error_text(exc) or "응답을 받지 못했습니다"
-            st.session_state[UDI_SLOT] = udi_outcome
+                    ),
+                )
+            st.session_state[UDI_SLOT] = {"params": udi_to_run, "outcome": outcome}
         saved_udi = st.session_state.get(UDI_SLOT)
         if saved_udi:
-            if saved_udi["error"]:
+            udi_outcome = saved_udi["outcome"]
+            if udi_outcome.state == "not_connected":
+                _set_service_state(dev.SERVICE_UDI, dev.STATE_PENDING)
+                st.markdown(dev.udi_not_connected_html(), unsafe_allow_html=True)
+            elif udi_outcome.state == "failed":
                 st.markdown(
-                    dev.lookup_failed_html("UDI-DI", str(saved_udi["error"])), unsafe_allow_html=True
+                    dev.lookup_failed_html("UDI-DI", udi_outcome.error), unsafe_allow_html=True
                 )
                 _retry_button(UDI_SLOT, "udi")
-            elif saved_udi["rows"]:
-                _table(saved_udi["rows"])
             else:
-                st.markdown(dev.udi_not_found_html(str(saved_udi["params"])), unsafe_allow_html=True)
-    st.link_button("식약처 UDI 포털에서 직접 찾기", MFDS_UDI_PORTAL_URL)
+                _set_service_state(dev.SERVICE_UDI, dev.STATE_READY)
+                if udi_outcome.product_records:
+                    _table(dev.udi_product_rows(udi_outcome.product_records))
+                elif udi_outcome.code_records:
+                    _table(dev.udi_rows(udi_outcome.code_records))
+                else:
+                    st.markdown(dev.udi_not_found_html(str(saved_udi["params"])), unsafe_allow_html=True)
+    st.link_button(dev.UDI_PORTAL_BUTTON, MFDS_UDI_PORTAL_URL)
+
+chips_slot.markdown(
+    dev.connection_chips_html(
+        mfds_ready=bool(mfds_key),
+        g2b_ready=bool(g2b_key),
+        service_states=st.session_state.get(SERVICE_STATES_KEY),
+    ),
+    unsafe_allow_html=True,
+)
