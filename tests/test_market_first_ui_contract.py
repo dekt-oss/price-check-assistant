@@ -57,7 +57,7 @@ def test_quote_market_surface_handles_zero_extraction_without_mode_switch() -> N
     assert "def _render_inline_manual_item_form" in text
     assert "build_manual_quote_item(" in text
     assert "품목 저장 후 시장조사" in text
-    assert "다른 검토 모드로 이동할 필요 없이" in text
+    assert "다른 화면으로 옮길 필요 없이" in text
     assert "_render_inline_manual_item_form(state)" in text
 
 
