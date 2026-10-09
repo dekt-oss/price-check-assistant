@@ -48,6 +48,14 @@ def _render_r2_runtime_diagnostic() -> None:
     st.caption(f"R2_RUNTIME_DIAGNOSTIC code={diagnostic.code}{detail}")
 
 
+def _render_memory_diagnostic() -> None:
+    if str(st.query_params.get("_memdiag", "")).strip() != "1":
+        return
+    from purchase_price.ui.memory_diagnostic import format_snapshot, take_snapshot
+
+    st.caption(format_snapshot(take_snapshot()))
+
+
 def _render_runtime_readiness_notice() -> None:
     if Settings().r2_configured:
         return
@@ -58,6 +66,7 @@ def _render_runtime_readiness_notice() -> None:
 
 
 _render_r2_runtime_diagnostic()
+_render_memory_diagnostic()
 _render_runtime_readiness_notice()
 
 # The sidebar lists only what the purchasing team uses. Every other page stays registered so
