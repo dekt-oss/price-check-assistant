@@ -26,6 +26,7 @@ from purchase_price.scripts.run_g2b_track_b_daily import (
     _exit_code_for_collection,
     _restore_snapshot,
 )
+from purchase_price.services.g2b_daily_usage import record_calls, remaining_today
 from purchase_price.services.g2b_target_code_snapshot import load_target_code_snapshot
 from purchase_price.services.track_b_history_state import (
     HISTORY_STATE_NAME,
@@ -133,10 +134,16 @@ def run(
     exit_code = 0
     consecutive_errors = 0
 
+    cap_reached = False
     while not state.complete:
         if deadline is not None and batches:
             if clock() + request_budget * SECONDS_PER_REQUEST_ESTIMATE > deadline:
                 break
+        # Leave part of the shared daily quota for the production app's live lookups.
+        batch_budget = min(request_budget, remaining_today(state_store))
+        if batch_budget < 1:
+            cap_reached = True
+            break
         tier, begin, end = state.current_pass
         codes = state.current_codes
         store = ManifestingRawStore(R2RawEvidenceStore.from_settings(settings))
@@ -149,12 +156,13 @@ def run(
             begin=date.fromisoformat(begin),
             end=date.fromisoformat(end),
             start_cursor=state.cursor,
-            request_budget=request_budget,
+            request_budget=batch_budget,
             segments=tuple(sorted({code[:2] for code in codes})),
             explicit_target_codes=codes,
         )
         state.apply_collection(summary, object_keys=store.object_keys)
         state_store.write_json(HISTORY_STATE_NAME, state.to_payload())
+        record_calls(state_store, summary.total_requests)
         batches.append(
             {
                 "tier": tier,
@@ -188,7 +196,9 @@ def run(
             "status": "SUCCESS" if exit_code == 0 else "FAILED",
             "mode": "history_backfill",
             "stop_reason": "HISTORY_COMPLETE" if state.complete else (
-                batches[-1]["stop_reason"] if batches else "NO_BATCH"
+                "DAILY_CALL_CAP_REACHED" if cap_reached else (
+                    batches[-1]["stop_reason"] if batches else "NO_BATCH"
+                )
             ),
             "history_complete": state.complete,
             "batches": batches,

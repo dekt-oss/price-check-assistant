@@ -18,6 +18,7 @@ from purchase_price.scripts.collect_g2b_track_b_r2 import (
     collect_track_b_batch,
 )
 from purchase_price.services.g2b_catalog import G2B_CATALOG_BASE_URL
+from purchase_price.services.g2b_daily_usage import record_calls, remaining_today
 from purchase_price.services.g2b_target_code_snapshot import load_target_code_snapshot
 from purchase_price.services.track_b_pipeline_state import (
     BACKFILL_BEGIN_DATE,
@@ -249,6 +250,7 @@ def _run_rolling_collection(
     )
     state.apply_rolling_collection(summary, object_keys=manifesting_store.object_keys)
     state_store.write_json(STATE_NAME, state.to_payload())
+    record_calls(state_store, summary.total_requests)
     report = {
         **asdict(summary),
         "mode": "rolling_incremental",
@@ -286,6 +288,21 @@ def run_daily(
         output_path=summary_path.parent / "track-b-target-codes.json",
     )
     state = _load_or_bootstrap_pipeline_state(state_store=state_store, reader=reader)
+
+    # Leave part of the shared daily quota for the production app's live lookups.
+    remaining = remaining_today(state_store)
+    if remaining < 1:
+        _write_summary(
+            summary_path,
+            {
+                "status": "SUCCESS",
+                "mode": "rolling_incremental" if state.backfill_complete else "historical_backfill",
+                "stop_reason": "DAILY_CALL_CAP_REACHED",
+                "pending_object_count": len(state.pending_object_keys),
+            },
+        )
+        return 0
+    request_budget = min(request_budget, remaining)
 
     if not state.db_bootstrap_complete and state.db_bootstrap_cursor is not None:
         report: dict[str, Any] = {
@@ -333,6 +350,7 @@ def run_daily(
     )
     state.apply_collection(summary, object_keys=manifesting_store.object_keys)
     state_store.write_json(STATE_NAME, state.to_payload())
+    record_calls(state_store, summary.total_requests)
     report = {
         **asdict(summary),
         "mode": "historical_backfill",
