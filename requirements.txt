@@ -1,6 +1,7 @@
 -e .
 
 # Streamlit Community Cloud runtime parser manifest.
+# Revision 2026-10-09e: add the ?_memdiag=1 memory snapshot to find what the 2026-10-09 resource-limit stops were counting.
 # Revision 2026-10-09d: restart after the app went over its resource limit; index warm-up now sequential.
 # Revision 2026-10-09c: restart after Benchmark average-selection checkboxes.
 # Revision 2026-10-09b: restart after HIRA bed/type sync (#301).
