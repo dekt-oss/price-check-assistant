@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
+from typing import Any
 
 import streamlit as st
 
@@ -42,6 +43,9 @@ CATEGORY_MARKET_V1 = True
 CATEGORY_MARKET_PERIOD_V1 = True
 # Runtime marker: the 계산에서 뺀 거래 box lists 입력 오류 의심 lines with their reason.
 CATEGORY_MARKET_ENTRY_ERRORS_V1 = True
+# Runtime marker (2026-10-10): identical recent purchases from separate delivery requests are
+# shown once with their count.
+CATEGORY_MARKET_RECENT_GROUPED_V1 = True
 # Runtime marker: the block fits a 390px phone (stacked, wrapping, tables scroll inside their card).
 CATEGORY_MARKET_NARROW_V1 = True
 SECTION_TITLE = "같은 품목 시장"
@@ -275,17 +279,38 @@ def year_table_html(market: CategoryMarket) -> str:
 RECENT_SHOWN = 3
 
 
+def recent_groups(market: CategoryMarket, *, limit: int = RECENT_SHOWN) -> list[tuple[Any, int]]:
+    """Newest equipment purchases, one entry per (date, 기관, 모델, 1단위 가격) with its count.
+
+    Separate delivery requests can look identical (화성시문화관광재단 bought three HR-701PLUS on
+    2026-10-01 in three requests, each change order 00); they are real purchases, so they are
+    counted, not dropped, and shown once with "납품요구 3건".
+    """
+
+    groups: dict[tuple[str, str, str, str], list[Any]] = {}
+    for row in market.trades:
+        if row.kind != KIND_EQUIPMENT:
+            continue
+        trade = row.trade
+        key = (trade.transaction_date, trade.institution, trade.model_label, str(trade.unit_price))
+        if key not in groups and len(groups) >= limit:
+            break
+        groups.setdefault(key, []).append(trade)
+    return [(trades[0], len(trades)) for trades in groups.values()]
+
+
 def recent_html(market: CategoryMarket, *, limit: int = RECENT_SHOWN) -> str:
     """The newest equipment purchases in one line each (date · 기관 · 모델 · 1단위 가격)."""
 
-    rows = [row.trade for row in market.trades if row.kind == KIND_EQUIPMENT][:limit]
-    if not rows:
+    groups = recent_groups(market, limit=limit)
+    if not groups:
         return ""
     lines = "".join(
         f'<div class="cm-recent-row"><span class="cm-date">{esc(trade.transaction_date)}</span>'
-        f'<span class="cm-who">{esc(trade.institution)} · {esc(trade.model_label)}</span>'
-        f'<span class="cm-price">{esc(won(trade.unit_price))}</span></div>'
-        for trade in rows
+        f'<span class="cm-who">{esc(trade.institution)} · {esc(trade.model_label)}'
+        + (f" · 납품요구 {count}건" if count > 1 else "")
+        + f'</span><span class="cm-price">{esc(won(trade.unit_price))}</span></div>'
+        for trade, count in groups
     )
     return (
         '<div class="cm-recent"><div class="cm-recent-title">최근 장비 구매 · 전체는 아래 ‘도입 기관’</div>'

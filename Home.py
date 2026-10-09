@@ -56,9 +56,18 @@ def _render_r2_runtime_diagnostic() -> None:
 def _render_memory_diagnostic() -> None:
     if str(st.query_params.get("_memdiag", "")).strip() != "1":
         return
-    from purchase_price.ui.memory_diagnostic import format_snapshot, take_snapshot
+    import importlib
 
-    st.caption(format_snapshot(take_snapshot()))
+    from purchase_price.ui import memory_diagnostic
+
+    # A process started before #329 keeps the copy without the 부분검색 색인 line.
+    if not hasattr(memory_diagnostic, "SEARCH_INDEX_V1"):
+        try:
+            importlib.invalidate_caches()
+            memory_diagnostic = importlib.reload(memory_diagnostic)
+        except Exception:  # noqa: BLE001 - diagnostics never break the page
+            pass
+    st.caption(memory_diagnostic.format_snapshot(memory_diagnostic.take_snapshot()))
 
 
 def _render_runtime_readiness_notice() -> None:

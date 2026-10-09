@@ -171,7 +171,9 @@ def test_dashboard_routes_company_and_product_matches_to_overviews() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
     route = source.index('indexed_identity.match_type in {"company", "product"}')
-    assert route < source.index('"route": "candidate_selection"')
+    # The model-ambiguity picker inside _execute_search (the permit picker has its own builder).
+    search = source.index("def _execute_search(")
+    assert route < source.index('"route": "candidate_selection"', search)
     assert (
         "return _build_overview_state(\n            raw_search, indexed_identity, snapshot_runtime, "
         "prefer_traded_company=prefer_traded_company" in source

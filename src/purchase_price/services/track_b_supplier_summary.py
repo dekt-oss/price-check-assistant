@@ -19,6 +19,8 @@ from purchase_price.models import TrackBDeliveryLine
 from purchase_price.services import track_b_search_index as search_index
 from purchase_price.services.mfds_business_license_view import company_core_key
 
+# Runtime marker: pages/1_대시보드.py reloads a retained pre-#329 copy that lacks it.
+SEARCH_INDEX_V1 = True
 _LEGAL_FORMS = ("주식회사", "(주)", "㈜", "(유)", "유한회사", "(재)", "재단법인")
 CANDIDATE_LIMIT = 20000
 

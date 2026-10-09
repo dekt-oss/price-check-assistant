@@ -389,6 +389,31 @@ def test_dashboard_wires_the_view_into_result_overview_and_handoff() -> None:
     assert "identity_from_same_product" in source and "_retry_model_identity" in source
 
 
+def test_recent_purchases_group_identical_delivery_requests_without_dropping_them() -> None:
+    # 2026-10-01: 화성시문화관광재단 bought three HR-701PLUS in three delivery requests (each change
+    # order 00, quantity 1). They are real purchases: shown once, with the count.
+    trades = [
+        _trade("1980000", number=f"R26TB0236888{n}", date="2026-10-01", institution="재단법인 화성시문화관광재단",
+               model="Heart Guardian HR-701PLUS")
+        for n in (6, 7, 9)
+    ] + [
+        _trade("1540000", number="R26TB02362393", date="2026-09-30", institution="다 보건소", model="NT-381.B"),
+        _trade("1650000", number="R1", date="2026-09-29", institution="라 병원", model="CU-SP1"),
+    ]
+    codes = (cm.DetailCode("4217210101", "저출력심장충격기"),)
+    market = cm.build_category_market(trades, product_name="저출력심장충격기", codes=codes, data_as_of="2026-10-09")
+    groups = ui.recent_groups(market)
+    assert [(trade.institution, count) for trade, count in groups] == [
+        ("재단법인 화성시문화관광재단", 3),
+        ("다 보건소", 1),
+        ("라 병원", 1),
+    ]
+    html = ui.recent_html(market)
+    assert html.count("재단법인 화성시문화관광재단") == 1
+    assert "납품요구 3건" in html
+    assert len(market.equipment) == 5
+
+
 def test_block_fits_a_390px_phone_without_cutting_text():
     css = ui.CSS
     assert ui.CATEGORY_MARKET_NARROW_V1 is True

@@ -24,6 +24,8 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBReferenceCandidate,
 )
 
+# Runtime marker: pages/1_대시보드.py reloads a retained pre-#329 copy that lacks it.
+SEARCH_INDEX_V1 = True
 _GENERIC_TOKENS = {
     "machine",
     "system",

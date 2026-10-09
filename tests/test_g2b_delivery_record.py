@@ -106,7 +106,8 @@ def test_price_outliers_are_three_times_from_the_median_farthest_first() -> None
 
 def test_dashboard_wires_the_record_panel_and_reloads_new_helpers() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
-    assert "result_summary_ui.price_outlier_rows(direct_rows, median_price)" in source
+    # Outliers come from the comparison-unit trades only, and only with 3+ of them.
+    assert "result_summary_ui.comparable_outlier_rows(comparison_rows, median_price)" in source
     assert "_render_delivery_record(" in source
     assert 'key=record_table_key' in source and 'on_select="rerun"' in source
     assert '(track_b_transactions_ui, "AMOUNT_CHECK_WORDS")' in source

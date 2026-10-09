@@ -399,6 +399,8 @@ _CONDITION_COLUMNS = {
     "delivery_condition",
 }
 _BUSINESS_NAME_COLUMN = "business_name"
+# Runtime marker: pages/1_대시보드.py reloads a retained pre-#329 copy that lacks it.
+SEARCH_INDEX_V1 = True
 
 
 def _condition_columns_available(session: Session) -> frozenset[str]:

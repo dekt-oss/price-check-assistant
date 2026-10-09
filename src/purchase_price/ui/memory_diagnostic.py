@@ -14,6 +14,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+# Runtime marker: pages/1_대시보드.py reloads a retained pre-#329 copy that lacks it.
+SEARCH_INDEX_V1 = True
 CACHE_DIR_NAMES = ("price-check-track-b", "price-check-mfds", "price-check-mfds-item-status")
 _CGROUP_V2 = Path("/sys/fs/cgroup")
 _CGROUP_V1 = Path("/sys/fs/cgroup/memory")

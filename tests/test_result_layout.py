@@ -314,7 +314,8 @@ def test_quote_hint_shows_the_parsed_price_with_separators():
     assert "= 2,500,000원" in _text(rl.quote_hint_html(Decimal("2500000"), "대"))
     assert "1대 기준" in _text(rl.quote_hint_html(Decimal("2500000"), "대"))
     assert "원 / 1대 기준" in _text(rl.quote_hint_html(None, "대"))
-    assert "숫자로만" in _text(rl.quote_hint_html(None, "대", invalid=True))
+    assert "숫자로 넣으세요" in _text(rl.quote_hint_html(None, "대", invalid=True))
+    assert "0보다 큰" in _text(rl.quote_hint_html(None, "대", invalid=True, error="견적 단가는 0보다 큰 금액으로 넣으세요."))
 
 
 def test_record_fields_table_has_exactly_one_row_per_field():
