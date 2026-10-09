@@ -7,9 +7,10 @@ on:
       - "src/purchase_price/scripts/run_g2b_track_b_history.py"
       - "src/purchase_price/services/track_b_history_state.py"
   schedule:
-    # Every three hours at :40 UTC. Each run keeps collecting 2,000-call batches for up to 320 minutes,
-    # saving the cursor after each batch; a schedule that fires while one is running waits in the
-    # concurrency queue and continues where it stopped. Once 2021-2025 is complete a run exits at once.
+    # Every three hours at :40 UTC. Each run keeps collecting 2,000-call batches for up to 140 minutes,
+    # saving the cursor after each batch, then ends so the serving-index sync (same concurrency group)
+    # can publish what was collected. Runs of 320 minutes kept the index waiting for 6+ hours and one
+    # hit the job timeout (2026-10-09). Once 2021-2025 is complete a run exits at once.
     - cron: "40 */3 * * *"
   workflow_dispatch:
     inputs:
@@ -20,7 +21,7 @@ on:
       max_minutes:
         description: Keep collecting batches for up to this many minutes (0 = one batch)
         required: true
-        default: "320"
+        default: "140"
 
 concurrency:
   # Shares the production writer group with collection and the serving-index sync.
@@ -58,7 +59,7 @@ jobs:
     name: Track B history batch to R2
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-14
-    timeout-minutes: 350
+    timeout-minutes: 175
     env:
       PYTHONPATH: src
       # Collector calls per KST day stop here; the rest of the quota is for the app's live lookups.
@@ -91,7 +92,7 @@ jobs:
         run: >-
           python -m purchase_price.scripts.run_g2b_track_b_history
           --request-budget "${{ inputs.request_budget || vars.TRACK_B_HISTORY_REQUEST_BUDGET || '2000' }}"
-          --max-minutes "${{ inputs.max_minutes || '320' }}"
+          --max-minutes "${{ inputs.max_minutes || '140' }}"
           --output artifacts/track-b-history/collection-summary.json
       - name: Upload collection evidence
         if: always()

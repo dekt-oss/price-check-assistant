@@ -17,6 +17,18 @@ def test_r2_serving_index_workflow_runs_after_daily_backfill() -> None:
     assert "github.event.workflow_run.conclusion == 'failure'" in text
 
 
+def test_index_sync_follows_history_runs_even_when_they_hit_the_time_limit() -> None:
+    text = Path(".github/workflows/track-b-r2-serving-index.yml").read_text(encoding="utf-8")
+    history = Path(".github/workflows/track-b-history-backfill.yml").read_text(encoding="utf-8")
+
+    # A history job stopped by its timeout ends "cancelled"; its collected pages still need indexing.
+    assert "github.event.workflow_run.conclusion == 'cancelled'" in text
+    assert "github.event.workflow_run.name == 'Track B History Backfill'" in text
+    # Short history runs leave room for the index sync in the shared queue between schedules.
+    assert "inputs.max_minutes || '140'" in history
+    assert "timeout-minutes: 175" in history
+
+
 def test_r2_serving_index_pr_gate_is_read_only_recovery_proof() -> None:
     text = Path(".github/workflows/track-b-r2-serving-index.yml").read_text()
 
