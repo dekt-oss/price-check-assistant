@@ -3,7 +3,7 @@
 NAVER 뉴스 검색 결과는 '새 기사가 있는지'를 확인하고 제목·시간·링크를 그대로 보여 주는 데만 쓴다.
 검색 결과를 AI 요약·분석에 넘기지 않는다 (2026-09-07 네이버 검색 API 이용약관).
 
-Phase 2: a GitHub Actions job collects every 30 minutes into R2 (news/v1/index.json.gz) and this
+Phase 2: a GitHub Actions job collects every 10 minutes into R2 (news/v1/index.json.gz) and this
 page reads it (cached 5 minutes). NEWS_RADAR_INDEX_PATH points the page at a local file instead.
 Reading statuses are saved to news/v1/status.json when the credentials allow writing; otherwise
 they stay in this session. Without R2 or a local file the page behaves as in Phase 1.
@@ -60,6 +60,10 @@ SAVED_STATUSES_KEY = "news_radar_saved_statuses"
 STATUS_SESSION_ONLY_KEY = "news_radar_status_session_only"
 INDEX_CACHE_SECONDS = 300
 STALE_AFTER = timedelta(hours=1)
+SORT_EXPLANATIONS = {
+    "중요도순": "중요도순: 제목에 키워드가 있는 기사, 우리병원·경쟁병원 기사, 의학·병원 전문지 기사를 앞에 둡니다.",
+    "최신순": "최신순: 기사가 나온 시간이 최근인 것부터 보여 줍니다.",
+}
 
 
 def _secret(name: str) -> str | None:
@@ -353,7 +357,7 @@ if keyword_filter:
 if sort_mode == "중요도순":
     ranked = radar.by_priority(ranked)
 st.caption(
-    "중요도순: 제목에 키워드가 있는 기사, 우리병원·경쟁병원 기사, 의학·병원 전문지 기사를 앞에 둡니다."
+    SORT_EXPLANATIONS.get(sort_mode, "")
     + (f" 본문에서만 언급된 {hidden_body_only}건은 숨겼습니다." if not show_body_only and hidden_body_only else "")
 )
 entries = [r.entry for r in ranked]

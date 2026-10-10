@@ -1,8 +1,14 @@
-"""Scheduled News Radar collector (GitHub Actions, every 30 minutes) and daily digest.
+"""Scheduled News Radar collector (GitHub Actions, every 10 minutes) and daily digest.
 
     python -m purchase_price.scripts.collect_news_radar                    # R2 (writer secrets)
     python -m purchase_price.scripts.collect_news_radar --output news.json # local file, no R2
+    python -m purchase_price.scripts.collect_news_radar --loop-minutes 49  # a pass every 10 min
     python -m purchase_price.scripts.collect_news_radar --mode digest      # 08:30 KST digest
+
+GitHub's schedule ran the "*/10" collector only five times on 2026-10-09, so one workflow run
+now loops: a pass every ``--interval-minutes`` for ``--loop-minutes``, then the workflow starts
+its own next run (``next_news_radar_run``). Every NAVER call is counted per KST day and a pass
+that would cross the daily cap is skipped (``services/news_radar_budget.py``).
 
 Collect mode searches every enabled keyword on NAVER (sort=date, up to 100 per keyword), folds
 the results into the stored article list, purges anything older than 21 days and writes it back.
@@ -21,7 +27,8 @@ import argparse
 import json
 import os
 import sys
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,6 +40,7 @@ from purchase_price.clients.naver_news import MAX_DISPLAY, NaverNewsClient
 from purchase_price.config import Settings
 from purchase_price.services import news_alerts
 from purchase_price.services import news_radar as radar
+from purchase_price.services import news_radar_budget as budget
 from purchase_price.services import news_radar_index as nri
 from purchase_price.services import news_subscriptions as subs
 
@@ -52,6 +60,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--display", type=int, default=MAX_DISPLAY)
     parser.add_argument("--no-alert", action="store_true", help="Never post to the alert webhook.")
     parser.add_argument("--summary-json", type=Path, help="Also write the run summary to this file.")
+    parser.add_argument(
+        "--loop-minutes",
+        type=float,
+        default=0,
+        help="Collect mode: keep running passes for this long (0 = one pass; NEWS_RADAR_CHAIN=off forces 0).",
+    )
+    parser.add_argument("--interval-minutes", type=float, default=10, help="Minutes between pass starts.")
     parser.add_argument(
         "--subscribers-dir",
         type=Path,
@@ -162,13 +177,29 @@ def post_webhook(url: str, text: str, *, transport: httpx.BaseTransport | None =
     return "sent" if 200 <= response.status_code < 300 else f"failed (HTTP {response.status_code})"
 
 
+class CallCounter:
+    """Counts NAVER search calls (a 429 retry is another call)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def wrap(self, search: nri.SearchFn) -> nri.SearchFn:
+        def counted(text: str, display: int) -> Sequence[Any]:
+            self.calls += 1
+            return search(text, display)
+
+        return counted
+
+
 def run_collect(
     args: argparse.Namespace,
     settings: Settings,
     store: nri.NewsRadarStore,
     *,
     search: nri.SearchFn | None = None,
+    counter: CallCounter | None = None,
 ) -> dict[str, Any]:
+    counter = counter or CallCounter()
     groups = radar.load_keyword_groups(args.keywords_file)
     keywords = radar.active_keywords(groups)
     index = store.read_index() or nri.NewsRadarIndex()
@@ -188,14 +219,16 @@ def run_collect(
             result = nri.collect(
                 index,
                 keywords,
-                lambda text, display: client.search(text, display=display, sort="date"),
+                counter.wrap(lambda text, display: client.search(text, display=display, sort="date")),
                 groups=groups,
                 display=args.display,
             )
         finally:
             client.close()
     else:
-        result = nri.collect(index, keywords, search, groups=groups, display=args.display, pause_seconds=0)
+        result = nri.collect(
+            index, keywords, counter.wrap(search), groups=groups, display=args.display, pause_seconds=0
+        )
 
     written = store.write_index(index)
 
@@ -239,6 +272,7 @@ def run_collect(
         "status_count": len(pruned),
         "alert": alert,
         "subscribers": upkeep,
+        "naver_calls": counter.calls,
         **run.to_payload(include_logs=True),
     }
     lines = [
@@ -253,6 +287,125 @@ def run_collect(
         lines.append("- 실패 키워드: " + ", ".join(run.failed_keywords))
     _append_step_summary("\n".join(lines))
     return summary
+
+
+def usage_state(args: argparse.Namespace, settings: Settings) -> budget.JsonState | None:
+    """Where the daily NAVER call count lives: next to --output locally, R2 operational state otherwise."""
+
+    if args.output is not None:
+        return budget.LocalJsonState(args.output.parent)
+    try:
+        from purchase_price.storage.r2_state import R2OperationalStateStore
+
+        return R2OperationalStateStore.from_settings(settings)
+    except Exception as exc:  # noqa: BLE001 - counting must never stop the news collection
+        print(f"NAVER call counter unavailable: {type(exc).__name__}", file=sys.stderr)
+        return None
+
+
+def _used_today(state: budget.JsonState | None) -> int | None:
+    if state is None:
+        return None
+    try:
+        return budget.used_today(state)
+    except Exception as exc:  # noqa: BLE001
+        print(f"NAVER call count unreadable: {type(exc).__name__}", file=sys.stderr)
+        return None
+
+
+def _record(state: budget.JsonState | None, calls: int) -> int | None:
+    if state is None:
+        return None
+    try:
+        return budget.record_calls(state, calls)
+    except Exception as exc:  # noqa: BLE001
+        print(f"NAVER call count not saved: {type(exc).__name__}", file=sys.stderr)
+        return None
+
+
+def _utc_text(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def run_loop(
+    args: argparse.Namespace,
+    settings: Settings,
+    store: nri.NewsRadarStore,
+    state: budget.JsonState | None,
+    *,
+    search: nri.SearchFn | None = None,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    """Collect passes every ``--interval-minutes`` until ``--loop-minutes`` have passed.
+
+    The run then waits out the window, so the next chained run's first pass lands about one
+    interval after this run's last one. A failed pass never stops the loop; a pass that would
+    cross the daily NAVER call cap is skipped.
+    """
+
+    chain = budget.chain_enabled()
+    loop_seconds = max(0.0, float(args.loop_minutes) * 60) if chain else 0.0
+    interval_seconds = max(60.0, float(args.interval_minutes) * 60)
+    cap = budget.daily_cap()
+    keyword_count = len(radar.active_keywords(radar.load_keyword_groups(args.keywords_file)))
+    started = clock()
+    offsets = [0.0]
+    while offsets[-1] + interval_seconds < loop_seconds:
+        offsets.append(offsets[-1] + interval_seconds)
+
+    passes: list[dict[str, Any]] = []
+    calls_today = _used_today(state)
+    for offset in offsets:
+        wait = (started + timedelta(seconds=offset) - clock()).total_seconds()
+        if wait > 0:
+            sleep(wait)
+        if offset and (clock() - started).total_seconds() >= loop_seconds:
+            break  # a slow pass pushed this slot past the window; the next run takes it
+        entry: dict[str, Any] = {"started_at": _utc_text(clock())}
+        used = _used_today(state)
+        if used is not None:
+            calls_today = used
+            if used + keyword_count > cap:
+                entry.update(status="skipped", reason=f"하루 호출 상한 {cap:,}건 도달 (오늘 {used:,}건)")
+                passes.append(entry)
+                continue
+        counter = CallCounter()
+        try:
+            summary = run_collect(args, settings, store, search=search, counter=counter)
+        except Exception as exc:  # noqa: BLE001 - keep looping; the next pass may work
+            entry.update(status="failed", error=f"{type(exc).__name__}: {exc}"[:300])
+        else:
+            all_failed = bool(summary["keyword_count"]) and summary["ok_count"] == 0
+            entry.update(status="failed" if all_failed else "ok", summary=summary)
+        entry["naver_calls"] = counter.calls
+        recorded = _record(state, counter.calls)
+        if recorded is not None:
+            calls_today = recorded
+        elif calls_today is not None:
+            calls_today += counter.calls
+        passes.append(entry)
+
+    if loop_seconds:
+        wait = (started + timedelta(seconds=loop_seconds) - clock()).total_seconds()
+        if wait > 0:
+            sleep(wait)
+    return {
+        "mode": "collect",
+        "chain": chain,
+        "started_at": _utc_text(started),
+        "finished_at": _utc_text(clock()),
+        "loop_seconds": loop_seconds,
+        "interval_seconds": interval_seconds,
+        "keyword_count": keyword_count,
+        "daily_call_cap": cap,
+        "naver_calls": sum(int(p.get("naver_calls") or 0) for p in passes),
+        "naver_calls_today": calls_today,
+        "ok_passes": sum(1 for p in passes if p["status"] == "ok"),
+        "failed_passes": sum(1 for p in passes if p["status"] == "failed"),
+        "skipped_passes": sum(1 for p in passes if p["status"] == "skipped"),
+        "passes": passes,
+    }
 
 
 def run_digest(args: argparse.Namespace, store: nri.NewsRadarStore, *, now: datetime | None = None) -> dict[str, Any]:
@@ -288,14 +441,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     settings = Settings()
     store = _store(args, settings)
-    summary = run_collect(args, settings, store) if args.mode == "collect" else run_digest(args, store)
+    if args.mode == "collect":
+        summary = run_loop(args, settings, store, usage_state(args, settings))
+    else:
+        summary = run_digest(args, store)
     rendered = json.dumps(summary, ensure_ascii=False, indent=2)
     print(rendered)
     if args.summary_json is not None:
         args.summary_json.parent.mkdir(parents=True, exist_ok=True)
         args.summary_json.write_text(rendered + "\n", encoding="utf-8")
-    if args.mode == "collect" and summary["keyword_count"] and summary["ok_count"] == 0:
-        return 1  # every keyword failed: surface it as a failed job
+    if args.mode == "collect" and summary["failed_passes"] and not summary["ok_passes"]:
+        return 1  # every pass failed: surface it as a failed job
     return 0
 
 
