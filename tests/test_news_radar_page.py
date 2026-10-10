@@ -85,3 +85,14 @@ def test_status_falls_back_to_this_session_when_saving_fails(stored_list, monkey
     app.selectbox[0].set_value(radar.STATUS_READ).run()
     assert "읽음·중요 표시는 이 화면을 연 동안만 유지됩니다 (저장 권한이 없는 연결)." in _captions(app)
     assert sorted(box.value for box in app.selectbox) == ["new", "new", "read"]
+
+
+def test_sort_explanation_follows_the_chosen_sort(stored_list) -> None:
+    app = _run()
+    assert any(text.startswith("중요도순:") for text in _captions(app))
+
+    sort_radio = next(radio for radio in app.radio if radio.label == "정렬")
+    sort_radio.set_value("최신순").run()
+    captions = _captions(app)
+    assert any(text.startswith("최신순: 기사가 나온 시간이 최근인 것부터") for text in captions)
+    assert not any(text.startswith("중요도순:") for text in captions)

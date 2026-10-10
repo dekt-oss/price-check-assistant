@@ -37,7 +37,7 @@ from purchase_price.services import news_radar as radar
 INDEX_VERSION = 1
 STATUS_VERSION = 1
 RETENTION_DAYS = 21
-RUN_HISTORY_LIMIT = 48  # one day of 30-minute runs
+RUN_HISTORY_LIMIT = 144  # one day of 10-minute passes (only the newest keeps per-keyword logs)
 NEWS_PREFIX = "news/v1"
 INDEX_KEY = f"{NEWS_PREFIX}/index.json.gz"
 STATUS_KEY = f"{NEWS_PREFIX}/status.json"

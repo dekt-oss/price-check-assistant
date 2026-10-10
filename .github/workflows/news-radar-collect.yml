@@ -1,9 +1,19 @@
 name: News Radar Collect
+# Collect and digest runs get different titles so the chain step can tell them apart.
+run-name: "${{ (github.event.schedule == '30 23 * * *' || inputs.mode == 'digest') && 'News Radar digest' || 'News Radar collect' }}"
 
 # Every 10 minutes: search the News Radar keywords on NAVER and update news/v1/index.json.gz
 # in R2 (the Streamlit app only reads it). 08:30 KST: write the daily digest of "하루 1회 요약"
 # keywords to news/v1/digest/YYYY-MM-DD.md and the step summary.
 # NAVER results are display-only (2026-09-07 terms): no AI step, 21-day retention.
+#
+# GitHub's "*/10" schedule fired only a few times a day (2026-10-09: 03:02, 07:28, 14:35 UTC),
+# so one collect run loops for 49 minutes (a pass every 10 minutes) and then starts the next run
+# itself (next_news_radar_run.py). The cron stays as a fallback that restarts the chain.
+# Guards: one running + at most one waiting run (concurrency group), no self-start while another
+# collect run is queued or running, a daily NAVER call cap (repository variable
+# NEWS_RADAR_DAILY_CALL_CAP, default 5000; normal use ~3,888/day) and a kill switch (repository variable
+# NEWS_RADAR_CHAIN=off: one pass per trigger, no self-start).
 
 on:
   schedule:
@@ -29,13 +39,21 @@ jobs:
       ${{ (github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *') ||
           (github.event_name == 'workflow_dispatch' && inputs.mode == 'collect') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 49-minute loop + setup + a slow last pass (27 keywords with NAVER 429 backoff).
+    timeout-minutes: 70
     # One writer of the article list at a time; a queued run waits instead of overlapping.
+    # GitHub keeps at most one waiting run per group (a newer one replaces it).
     concurrency:
       group: news-radar-collect
       cancel-in-progress: false
+    permissions:
+      contents: read
+      # Starts the next collect run (see "Start the next collect run").
+      actions: write
     env:
       PYTHONPATH: src
+      NEWS_RADAR_CHAIN: ${{ vars.NEWS_RADAR_CHAIN }}
+      NEWS_RADAR_DAILY_CALL_CAP: ${{ vars.NEWS_RADAR_DAILY_CALL_CAP || '5000' }}
       NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
       NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -72,11 +90,31 @@ jobs:
           "pydantic-settings>=2.4,<3"
           "boto3>=1.35,<2"
           "httpx>=0.27,<1"
-      - name: Collect NAVER news into R2
+      - name: Collect NAVER news into R2 every 10 minutes for 49 minutes
         run: >-
           python -m purchase_price.scripts.collect_news_radar
           --mode collect
+          --loop-minutes 49
+          --interval-minutes 10
           --summary-json artifacts/news-radar/collect.json
+      - name: Start the next collect run
+        # Only from main, and not after a cancel; the script refuses after a short (crashed) loop.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p artifacts/news-radar
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow news-radar-collect.yml -L 20 \
+            --json databaseId,status,displayTitle > artifacts/news-radar/runs.json \
+            || echo '[]' > artifacts/news-radar/runs.json
+          next_run=$(python -m purchase_price.scripts.next_news_radar_run \
+            --loop-summary artifacts/news-radar/collect.json \
+            --runs-json artifacts/news-radar/runs.json \
+            --run-id "$GITHUB_RUN_ID")
+          echo "next collect run: ${next_run}"
+          if [ "$next_run" = dispatch ]; then
+            gh workflow run news-radar-collect.yml --repo "$GITHUB_REPOSITORY" --ref main -f mode=collect
+          fi
       - name: Upload run summary
         if: always()
         uses: actions/upload-artifact@v7
