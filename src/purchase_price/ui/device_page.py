@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from purchase_price.evidence_domain import IdentityEvidenceStatus
 from purchase_price.services.matching import exact_model_match
-from purchase_price.ui import product_identity, result_summary
+from purchase_price.ui import product_identity, result_layout, result_summary
 from purchase_price.ui.theme import (
     TONE_DANGER,
     TONE_INFO,
@@ -51,6 +51,9 @@ DEVICE_PAGE_UDI_INPUT_V1 = True
 DEVICE_PAGE_IDENTITY_V1 = True
 # 2026-10-10: the trade summary counts 입력 오류 의심 lines out and says so (same rule as 가격 조사).
 DEVICE_PAGE_ENTRY_ERRORS_V1 = True
+# 2026-10-10: the identity block and the trade card state the same period and count
+# ("같은 제품 거래 390건 (전체 기간) · 최근 3년 267건").
+DEVICE_PAGE_TRADE_PERIOD_V1 = True
 
 PAGE_TITLE = "의료기기 허가·안전"
 PAGE_SUBTITLE = (
@@ -619,6 +622,11 @@ def identity_header_fields(result: MarketResult) -> list[product_identity.Identi
         fields = [
             replace(f, status="허가 여러 건", tone=TONE_WARN) if f.key == "model" else f for f in fields
         ]
+    trades = getattr(result, "trades", None)
+    if trades is not None and candidates and getattr(trades, "all_period_count", 0):
+        # The trade card below counts the default period; say both so 390 and 267 read as one story.
+        note = trade_period_note(trades)
+        fields = [replace(f, note=note) if f.key == "detail_class" else f for f in fields]
     typed_product = " ".join(params.product_name.split())
     typed_maker = " ".join(params.manufacturer.split())
     adjusted = []
@@ -685,6 +693,8 @@ class TradeSummary:
     other_unit_count: int
     trades: tuple[Any, ...] = ()
     entry_error_count: int = 0
+    # Same-product trades of every period (before the period filter); 0 when not known.
+    all_period_count: int = 0
 
 
 def _positive_decimal(value: object) -> Decimal | None:
@@ -698,6 +708,7 @@ def _positive_decimal(value: object) -> Decimal | None:
 def build_trade_summary(track_b: Any, today: date | None = None) -> TradeSummary:
     today = today or kst_now().date()
     direct = strict_comparison_candidates(track_b)
+    all_period_count = len(direct)
     references = (*category_reference_candidates(track_b), *reference_candidates(track_b))
     choice = result_summary.choose_period(
         [getattr(candidate, "transaction_date", None) for candidate in direct],
@@ -734,6 +745,18 @@ def build_trade_summary(track_b: Any, today: date | None = None) -> TradeSummary
         other_unit_count=len(split.other),
         trades=tuple(ordered),
         entry_error_count=len(entry_errors),
+        all_period_count=all_period_count,
+    )
+
+
+def trade_period_note(summary: TradeSummary) -> str:
+    """'같은 제품 거래 390건 (전체 기간) · 최근 3년 267건': the one wording both the product block and
+    the trade card use, so the two counts never look like a disagreement."""
+
+    return result_layout.trade_count_note(
+        all_period_count=summary.all_period_count or summary.count,
+        period_count=summary.count,
+        period_label=summary.period_label,
     )
 
 
@@ -753,6 +776,13 @@ def entry_error_note_html(summary: TradeSummary) -> str:
     )
 
 
+def _count_card_sub(summary: TradeSummary) -> str:
+    sub = f"나라장터 · {summary.period_label}"
+    if summary.all_period_count and summary.all_period_count != summary.count:
+        sub += f" (전체 기간 {summary.all_period_count:,}건)"
+    return sub
+
+
 def trade_summary_cards(summary: TradeSummary) -> str:
     """Four equal cards: 같은 제품 거래, 가운데 값, 가격 범위, 참고 거래."""
 
@@ -760,7 +790,7 @@ def trade_summary_cards(summary: TradeSummary) -> str:
     count_card = metric_card_html(
         "같은 제품 거래",
         f"{summary.count:,}건",
-        f"나라장터 · {summary.period_label}",
+        _count_card_sub(summary),
         TONE_OK if summary.count else TONE_MUTED,
     )
     if summary.count:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -14,6 +15,8 @@ from purchase_price.ui.theme import metric_card_html
 QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
 # Runtime marker: the per-item status row is now wrapping cards with a short value (no "…" cut-off).
 QUOTE_REVIEW_ITEM_STATUS_V1 = True
+# Runtime marker: the 모든 품목 조사 상태 list is one wrapping card per item (no sideways scrolling table).
+QUOTE_REVIEW_STATUS_OVERVIEW_V1 = True
 
 
 @dataclass(frozen=True)
@@ -316,3 +319,52 @@ def item_status_cards_html(summary: QuoteItemIntelligenceSummary) -> str:
         for label, value, sub, tone in item_status_cards(summary)
     )
     return ITEM_STATUS_CSS + f'<div class="qi-cards">{cards}</div>'
+
+
+# ── 품목별 조사 상태: one card per item, every value wraps (a 9-column table was cut off) ──
+
+# Short labels for the card; ROW_LABELS stays the long names of the data rows.
+_OVERVIEW_FIELDS = (
+    ("trades", "같은 모델 거래(나라장터)", True),
+    ("other_unit", "단위 다른 거래", False),
+    ("permit", "식약처 허가 대조", False),
+    ("makers", "제조·수입업체", False),
+    ("license", "업체 허가", False),
+    ("suppliers", "납품업체", False),
+    ("safety", "회수·판매중지", False),
+)
+
+STATUS_OVERVIEW_CSS = """
+<style>
+.qo-list {display:flex; flex-direction:column; gap:10px; margin:4px 0 12px 0;}
+.qo-item {border:1px solid var(--pc-border, #DCE5EF); border-radius:12px; background:#fff; padding:12px 16px 14px 16px;}
+.qo-head {display:flex; align-items:baseline; gap:10px; margin-bottom:10px; font-size:14px; color:var(--pc-navy, #14304F);}
+.qo-no {flex:none; min-width:22px; height:22px; line-height:22px; text-align:center; border-radius:11px; background:#EAF1FA; color:#2B5FA0; font-size:12px; font-weight:700;}
+.qo-name {font-weight:700; overflow-wrap:anywhere; word-break:keep-all;}
+.qo-grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px 18px; margin:0;}
+.qo-grid > div {min-width:0;}
+.qo-grid .qo-wide {grid-column:span 2;}
+.qo-grid dt {font-size:11px; font-weight:700; color:var(--pc-muted, #6B7C93); margin:0 0 2px 0;}
+.qo-grid dd {font-size:13px; line-height:1.45; margin:0; overflow-wrap:anywhere; word-break:keep-all;}
+@media (max-width: 1200px) { .qo-grid {grid-template-columns:repeat(2,minmax(0,1fr));} }
+@media (max-width: 560px) { .qo-grid {grid-template-columns:minmax(0,1fr);} .qo-grid .qo-wide {grid-column:auto;} }
+</style>
+"""
+
+
+def status_overview_html(summaries: list[tuple[int, str, QuoteItemIntelligenceSummary]]) -> str:
+    """Every item's research status as a wrapping card: same facts as ``quote_item_intelligence_rows``."""
+
+    cards = []
+    for row, (index, item_name, _summary) in zip(quote_item_intelligence_rows(summaries), summaries, strict=True):
+        fields = "".join(
+            f'<div class="{"qo-wide" if wide else ""}"><dt>{html.escape(label)}</dt>'
+            f"<dd>{html.escape(str(row[ROW_LABELS[key]]))}</dd></div>"
+            for key, label, wide in _OVERVIEW_FIELDS
+        )
+        cards.append(
+            '<div class="qo-item"><div class="qo-head">'
+            f'<span class="qo-no">{index + 1}</span><span class="qo-name">{html.escape(item_name)}</span></div>'
+            f'<dl class="qo-grid">{fields}</dl></div>'
+        )
+    return STATUS_OVERVIEW_CSS + f'<div class="qo-list" id="quote-item-status-overview-v1">{"".join(cards)}</div>'

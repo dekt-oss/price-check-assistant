@@ -500,3 +500,40 @@ def test_card_and_notice_agree_with_the_header_when_the_full_index_confirms_the_
     assert "전체 허가 목록에서 확인" in cards and "찾지 못함" not in cards
     assert "pc-ok" in notice and "제허 19-527 호" in notice
     assert "찾지 못했습니다" in dev.identity_notice_html("DFM100", result.exact)
+
+
+def test_identity_block_and_trade_card_state_the_same_period_and_count() -> None:
+    track_b = _track_b(
+        _trade(MatchGrade.A, "1980000", "2026-09-29"),
+        _trade(MatchGrade.A, "1900000", "2026-08-01"),
+        _trade(MatchGrade.A, "1800000", "2021-01-05"),
+        _trade(MatchGrade.A, "1700000", "2019-03-05"),
+    )
+    summary = dev.build_trade_summary(track_b, TODAY)
+    assert (summary.all_period_count, summary.count) == (4, 2)
+    assert dev.trade_period_note(summary) == "같은 제품 거래 4건 (전체 기간) · 최근 3년 2건"
+
+    result = dev.MarketResult(
+        params=dev.MarketParams(product_name="저출력심장충격기", model_name="DFM100"),
+        track_b=track_b,
+        trades=summary,
+    )
+    fields = {field.key: field for field in dev.identity_header_fields(result)}
+    assert fields["detail_class"].note == "같은 제품 거래 4건 (전체 기간) · 최근 3년 2건"
+    cards = dev.trade_summary_cards(summary)
+    assert "2건" in cards and "나라장터 · 최근 3년 (전체 기간 4건)" in cards
+
+
+def test_trade_period_wording_is_plain_when_every_trade_is_in_the_period() -> None:
+    track_b = _track_b(_trade(MatchGrade.A, "1980000", "2026-09-29"), _trade(MatchGrade.A, "1900000", "2026-08-01"))
+    summary = dev.build_trade_summary(track_b, TODAY)
+
+    assert dev.trade_period_note(summary) == "같은 제품 거래 2건 (전체 기간)"
+    assert "전체 기간" not in dev.trade_summary_cards(summary)
+
+
+def test_device_page_reloads_the_trade_period_marker() -> None:
+    source = PAGE.read_text(encoding="utf-8")
+    assert '("purchase_price.ui.device_page", "DEVICE_PAGE_TRADE_PERIOD_V1")' in source
+    assert source.index("RESULT_LAYOUT_SEARCH_FIXES_V1") < source.index("DEVICE_PAGE_TRADE_PERIOD_V1")
+    assert dev.DEVICE_PAGE_TRADE_PERIOD_V1 is True
