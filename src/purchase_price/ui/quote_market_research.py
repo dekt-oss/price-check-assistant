@@ -50,7 +50,7 @@ from purchase_price.ui.quote_item_intelligence import (
     build_quote_item_intelligence_summary,
     item_status_cards_html,
     mfds_permit_note,
-    quote_item_intelligence_rows,
+    status_overview_html,
 )
 from purchase_price.ui.quote_review_contract import build_manual_quote_item
 from purchase_price.ui.quote_review_layout import (
@@ -99,6 +99,10 @@ QUOTE_REVIEW_IDENTITY_V1 = True
 QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
 # The per-item status row is wrapping cards with a short value instead of cut-off st.metric text.
 QUOTE_REVIEW_ITEM_STATUS_V1 = True
+# 모든 품목 조사 상태 is a list of wrapping per-item cards instead of a sideways-scrolling table.
+QUOTE_REVIEW_STATUS_OVERVIEW_V1 = True
+# The purchase summary is a list of wrapping cards too (re-imports render_purchase_review_summary).
+QUOTE_REVIEW_SUMMARY_CARDS_V1 = True
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(
@@ -1023,11 +1027,7 @@ def _render_research_details(state: QuoteReviewState, selected: int) -> None:
             "품목마다 나라장터 같은 모델 거래, 식약처 허가 대조, 납품업체, 회수·판매중지 확인 상태를 "
             "한 번에 봅니다. 거래 건수와 가격대는 위 비교표와 같은 기준(최근 거래, 가장 많이 쓰인 단위)입니다."
         )
-        st.dataframe(
-            quote_item_intelligence_rows(integrated_summaries),
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.markdown(status_overview_html(integrated_summaries), unsafe_allow_html=True)
         st.caption(PERMIT_VS_TRADES_NOTE)
 
         render_purchase_review_summary(state)

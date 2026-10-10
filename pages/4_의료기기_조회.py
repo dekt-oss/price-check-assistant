@@ -12,9 +12,11 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.price_entry_check", "ENTRY_CHECK_V1"),
     ("purchase_price.ui.track_b_transactions", "ENTRY_ERRORS_EXCLUDED_V1"),
     ("purchase_price.ui.track_b_transactions", "QUANTITY_COMMAS_V1"),
+    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_SEARCH_FIXES_V1"),
     ("purchase_price.ui.device_page", "DEVICE_PAGE_UDI_INPUT_V1"),
     ("purchase_price.ui.device_page", "DEVICE_PAGE_IDENTITY_V1"),
     ("purchase_price.ui.device_page", "DEVICE_PAGE_ENTRY_ERRORS_V1"),
+    ("purchase_price.ui.device_page", "DEVICE_PAGE_TRADE_PERIOD_V1"),
 )
 for _name, _marker in _UI_RUNTIME_MARKERS:
     _stale = sys.modules.get(_name)

@@ -19,6 +19,7 @@ from purchase_price.ui.quote_item_intelligence import (
     item_status_cards_html,
     mfds_permit_note,
     quote_item_intelligence_rows,
+    status_overview_html,
 )
 from purchase_price.ui.quote_review_state import QuoteReviewState
 
@@ -525,3 +526,42 @@ def test_status_cards_html_has_wrapping_grid_and_comma_counts() -> None:
     assert "qi-cards" in html and "max-width: 1200px" in html
     assert "1,234건" in html
     assert "…" not in html and "nowrap" not in html
+
+
+def test_status_overview_cards_keep_every_fact_and_never_use_a_sideways_table() -> None:
+    from purchase_price.ui import quote_item_intelligence as qii
+
+    summary = _summary(
+        direct_count=267,
+        supplier_names=("가나다 주식회사", "라마바사"),
+        responsible_companies=("(주)메디아나",),
+    )
+    html = status_overview_html([(0, "자동심장충격기", summary), (1, "<b>환자</b>감시장치", summary)])
+
+    assert qii.QUOTE_REVIEW_STATUS_OVERVIEW_V1 is True
+    assert html.count('class="qo-item"') == 2
+    for label in (
+        "같은 모델 거래(나라장터)", "단위 다른 거래", "식약처 허가 대조", "제조·수입업체", "업체 허가",
+        "납품업체", "회수·판매중지",
+    ):
+        assert html.count(f"<dt>{label}</dt>") == 2, label
+    for value in (
+        "자동심장충격기", "(주)메디아나", "가나다 주식회사 / 라마바사",
+        "같은 모델명이 여러 허가에 있어 직접 살펴봐야 함",
+    ):
+        assert value in html, value
+    assert "&lt;b&gt;환자" in html and "<b>환자" not in html
+    assert "<table" not in html and "nowrap" not in html and "…" not in html
+    assert "max-width: 1200px" in html
+
+
+def test_quote_page_reloads_the_status_overview_marker_and_uses_it() -> None:
+    from pathlib import Path
+
+    page = Path("pages/2_견적_검토.py").read_text(encoding="utf-8")
+    source = Path("src/purchase_price/ui/quote_market_research.py").read_text(encoding="utf-8")
+
+    for module in ("quote_item_intelligence", "quote_market_research"):
+        assert f'("purchase_price.ui.{module}", "QUOTE_REVIEW_STATUS_OVERVIEW_V1")' in page
+    assert "status_overview_html(integrated_summaries)" in source
+    assert "st.dataframe(\n            quote_item_intelligence_rows" not in source
