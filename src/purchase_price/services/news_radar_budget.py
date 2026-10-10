@@ -1,11 +1,11 @@
 """NAVER news-search calls per KST day for the News Radar collector, and its chain switch.
 
-The collector runs a pass every 10 minutes (27 keywords = 27 calls, plus a retry per NAVER 429),
-about 3,900 calls a day. NAVER counts search calls per application per day and resets at 00:00
+The collector runs a pass every 30 minutes (every 10 until 2026-10-11): 27 keywords = 27 calls,
+plus a retry per NAVER 429, about 1,300 calls a day. NAVER counts search calls per application per day and resets at 00:00
 KST (Developers Center: 25,000 a day; API HUB: per-day limit set in the console, free for now
 but metered once it turns paid). The collector records every call it makes in a small JSON state,
 skips a pass that would cross ``NEWS_RADAR_DAILY_CALL_CAP`` (default 5,000: normal use is about
-3,888 a day, so this leaves room for 429 retries and the page's own "새 기사 확인" button while
+1,296 a day, so this leaves room for 429 retries and the page's own "새 기사 확인" button while
 keeping a possible per-call bill small) and the self-chaining stops when the next loop would
 cross it.
 

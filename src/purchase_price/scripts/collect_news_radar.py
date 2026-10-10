@@ -1,8 +1,8 @@
-"""Scheduled News Radar collector (GitHub Actions, every 10 minutes) and daily digest.
+"""Scheduled News Radar collector (GitHub Actions, every 30 minutes) and daily digest.
 
     python -m purchase_price.scripts.collect_news_radar                    # R2 (writer secrets)
     python -m purchase_price.scripts.collect_news_radar --output news.json # local file, no R2
-    python -m purchase_price.scripts.collect_news_radar --loop-minutes 49  # a pass every 10 min
+    python -m purchase_price.scripts.collect_news_radar --loop-minutes 59 --interval-minutes 30  # a pass every 30 min
     python -m purchase_price.scripts.collect_news_radar --mode digest      # 08:30 KST digest
 
 GitHub's schedule ran the "*/10" collector only five times on 2026-10-09, so one workflow run

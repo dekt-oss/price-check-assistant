@@ -16,10 +16,10 @@ def _job(name: str) -> str:
 
 
 def test_schedules_and_manual_trigger() -> None:
-    assert 'cron: "*/10 * * * *"' in TEXT
+    assert 'cron: "*/30 * * * *"' in TEXT
     assert 'cron: "30 23 * * *"' in TEXT  # 08:30 KST
     assert "workflow_dispatch:" in TEXT
-    assert "github.event.schedule == '*/10 * * * *'" in _job("collect")
+    assert "github.event.schedule == '*/30 * * * *'" in _job("collect")
     assert "github.event.schedule == '30 23 * * *'" in _job("daily-digest")
 
 
@@ -51,8 +51,8 @@ def test_digest_job_uses_r2_only_and_its_own_group() -> None:
 
 def test_collect_job_loops_and_starts_its_own_next_run() -> None:
     job = _job("collect")
-    assert "--loop-minutes 49" in job and "--interval-minutes 10" in job
-    assert "timeout-minutes: 70" in job  # the loop plus setup fits inside the job timeout
+    assert "--loop-minutes 59" in job and "--interval-minutes 30" in job
+    assert "timeout-minutes: 80" in job  # the loop plus setup fits inside the job timeout
     assert "actions: write" in job and "contents: read" in job
     assert "GH_TOKEN: ${{ github.token }}" in job
     assert "NEWS_RADAR_CHAIN: ${{ vars.NEWS_RADAR_CHAIN }}" in job  # kill switch

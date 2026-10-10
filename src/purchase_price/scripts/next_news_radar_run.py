@@ -2,7 +2,7 @@
 
 GitHub's "*/10" schedule fired the collector only at 03:02, 07:28 and 14:35 UTC on 2026-10-09
 (plus two manual runs), so the 병원 News Radar page said "자동 확인이 1시간 넘게 멈춰 있습니다" most
-of the day. Each collect run now loops for ~49 minutes (a pass every 10 minutes) and then starts
+of the day. Each collect run now loops for ~59 minutes (a pass every 30 minutes) and then starts
 its own successor. The cron stays as a fallback that restarts the chain if it ever stops.
 
 Prints ``dispatch`` or ``none`` on stdout and the reason on stderr. No dispatch when:

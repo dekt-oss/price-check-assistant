@@ -2,22 +2,23 @@ name: News Radar Collect
 # Collect and digest runs get different titles so the chain step can tell them apart.
 run-name: "${{ (github.event.schedule == '30 23 * * *' || inputs.mode == 'digest') && 'News Radar digest' || 'News Radar collect' }}"
 
-# Every 10 minutes: search the News Radar keywords on NAVER and update news/v1/index.json.gz
+# Every 30 minutes: search the News Radar keywords on NAVER and update news/v1/index.json.gz
 # in R2 (the Streamlit app only reads it). 08:30 KST: write the daily digest of "하루 1회 요약"
 # keywords to news/v1/digest/YYYY-MM-DD.md and the step summary.
 # NAVER results are display-only (2026-09-07 terms): no AI step, 21-day retention.
 #
 # GitHub's "*/10" schedule fired only a few times a day (2026-10-09: 03:02, 07:28, 14:35 UTC),
-# so one collect run loops for 49 minutes (a pass every 10 minutes) and then starts the next run
-# itself (next_news_radar_run.py). The cron stays as a fallback that restarts the chain.
+# so one collect run loops for 59 minutes (a pass every 30 minutes; 10 minutes until 2026-10-11,
+# changed to save NAVER calls — the newest 100 per keyword still cover a 30-minute gap) and then
+# starts the next run itself (next_news_radar_run.py). The cron stays as a fallback that restarts the chain.
 # Guards: one running + at most one waiting run (concurrency group), no self-start while another
 # collect run is queued or running, a daily NAVER call cap (repository variable
-# NEWS_RADAR_DAILY_CALL_CAP, default 5000; normal use ~3,888/day) and a kill switch (repository variable
+# NEWS_RADAR_DAILY_CALL_CAP, default 5000; normal use ~1,296/day) and a kill switch (repository variable
 # NEWS_RADAR_CHAIN=off: one pass per trigger, no self-start).
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *"
     - cron: "30 23 * * *"
   workflow_dispatch:
     inputs:
@@ -36,11 +37,11 @@ permissions:
 jobs:
   collect:
     if: >-
-      ${{ (github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *') ||
+      ${{ (github.event_name == 'schedule' && github.event.schedule == '*/30 * * * *') ||
           (github.event_name == 'workflow_dispatch' && inputs.mode == 'collect') }}
     runs-on: ubuntu-latest
-    # 49-minute loop + setup + a slow last pass (27 keywords with NAVER 429 backoff).
-    timeout-minutes: 70
+    # 59-minute loop + setup + a slow last pass (27 keywords with NAVER 429 backoff).
+    timeout-minutes: 80
     # One writer of the article list at a time; a queued run waits instead of overlapping.
     # GitHub keeps at most one waiting run per group (a newer one replaces it).
     concurrency:
@@ -90,12 +91,12 @@ jobs:
           "pydantic-settings>=2.4,<3"
           "boto3>=1.35,<2"
           "httpx>=0.27,<1"
-      - name: Collect NAVER news into R2 every 10 minutes for 49 minutes
+      - name: Collect NAVER news into R2 every 30 minutes for 59 minutes
         run: >-
           python -m purchase_price.scripts.collect_news_radar
           --mode collect
-          --loop-minutes 49
-          --interval-minutes 10
+          --loop-minutes 59
+          --interval-minutes 30
           --summary-json artifacts/news-radar/collect.json
       - name: Start the next collect run
         # Only from main, and not after a cancel; the script refuses after a short (crashed) loop.
