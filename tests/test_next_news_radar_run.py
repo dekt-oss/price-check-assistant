@@ -26,7 +26,7 @@ def _decide(**overrides):
         "loop_summary": LOOP,
         "runs": [{"databaseId": 111, "status": "in_progress", "displayTitle": nxt.COLLECT_RUN_TITLE}],
         "own_run_id": OWN,
-        "daily_cap": 20_000,
+        "daily_cap": budget.DEFAULT_DAILY_CAP,
     }
     values.update(overrides)
     return nxt.choose_next_run(**values)
@@ -48,9 +48,15 @@ def test_no_dispatch_without_a_full_loop(summary) -> None:
 
 def test_budget_stops_the_chain_before_the_next_loop_would_cross_the_cap() -> None:
     # 27 keywords x 5 passes = 135 calls for the next loop.
-    assert _decide(loop_summary={**LOOP, "naver_calls_today": 20_000 - 135})[0] == nxt.DISPATCH
-    decision, reason = _decide(loop_summary={**LOOP, "naver_calls_today": 20_000 - 134})
-    assert decision == nxt.NONE and "cap 20,000" in reason
+    assert budget.DEFAULT_DAILY_CAP == 5_000
+    assert _decide(loop_summary={**LOOP, "naver_calls_today": 5_000 - 135})[0] == nxt.DISPATCH
+    decision, reason = _decide(loop_summary={**LOOP, "naver_calls_today": 5_000 - 134})
+    assert decision == nxt.NONE and "cap 5,000" in reason
+
+
+def test_a_normal_day_fits_under_the_default_cap() -> None:
+    # 27 keywords x 144 passes = 3,888 calls a day; the last loop of the day still starts.
+    assert _decide(loop_summary={**LOOP, "naver_calls_today": 27 * 144 - 135})[0] == nxt.DISPATCH
 
 
 def test_unknown_usage_still_dispatches() -> None:
@@ -98,7 +104,7 @@ def test_chain_switch_values(value, enabled) -> None:
     assert budget.chain_enabled(value) is enabled
 
 
-@pytest.mark.parametrize(("value", "cap"), [("", 20_000), ("5000", 5_000), ("abc", 20_000), ("-3", 0)])
+@pytest.mark.parametrize(("value", "cap"), [("", 5_000), ("20000", 20_000), ("abc", 5_000), ("-3", 0)])
 def test_daily_cap_values(value, cap) -> None:
     assert budget.daily_cap(value) == cap
 

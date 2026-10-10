@@ -56,7 +56,10 @@ def test_collect_job_loops_and_starts_its_own_next_run() -> None:
     assert "actions: write" in job and "contents: read" in job
     assert "GH_TOKEN: ${{ github.token }}" in job
     assert "NEWS_RADAR_CHAIN: ${{ vars.NEWS_RADAR_CHAIN }}" in job  # kill switch
-    assert "NEWS_RADAR_DAILY_CALL_CAP: ${{ vars.NEWS_RADAR_DAILY_CALL_CAP }}" in job
+    assert "NEWS_RADAR_DAILY_CALL_CAP: ${{ vars.NEWS_RADAR_DAILY_CALL_CAP || '5000' }}" in job
+    from purchase_price.services.news_radar_budget import DEFAULT_DAILY_CAP
+
+    assert DEFAULT_DAILY_CAP == 5_000  # the workflow fallback and the Python default agree
     step = job.split("- name: Start the next collect run", 1)[1].split("- name:", 1)[0]
     assert "!cancelled() && github.ref == 'refs/heads/main'" in step
     assert "gh run list" in step and "--json databaseId,status,displayTitle" in step

@@ -4,8 +4,10 @@ The collector runs a pass every 10 minutes (27 keywords = 27 calls, plus a retry
 about 3,900 calls a day. NAVER counts search calls per application per day and resets at 00:00
 KST (Developers Center: 25,000 a day; API HUB: per-day limit set in the console, free for now
 but metered once it turns paid). The collector records every call it makes in a small JSON state,
-skips a pass that would cross ``NEWS_RADAR_DAILY_CALL_CAP`` (default 20,000, leaving room for the
-page's own "새 기사 확인" button) and the self-chaining stops when the next loop would cross it.
+skips a pass that would cross ``NEWS_RADAR_DAILY_CALL_CAP`` (default 5,000: normal use is about
+3,888 a day, so this leaves room for 429 retries and the page's own "새 기사 확인" button while
+keeping a possible per-call bill small) and the self-chaining stops when the next loop would
+cross it.
 
 ``NEWS_RADAR_CHAIN=off`` (a repository variable) turns the chain off: each trigger then runs a
 single pass and starts nothing, as before 2026-10-10.
@@ -24,7 +26,7 @@ USAGE_STATE_NAME = "news-radar/naver-usage"
 USAGE_STATE_SCHEMA = "news-radar-naver-usage-v1"
 CAP_ENV = "NEWS_RADAR_DAILY_CALL_CAP"
 CHAIN_ENV = "NEWS_RADAR_CHAIN"
-DEFAULT_DAILY_CAP = 20_000
+DEFAULT_DAILY_CAP = 5_000
 KEEP_DAYS = 14
 KST = ZoneInfo("Asia/Seoul")
 _OFF_WORDS = frozenset({"off", "false", "0", "no", "stop", "disabled"})
