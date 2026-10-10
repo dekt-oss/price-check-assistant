@@ -55,7 +55,9 @@ def test_budget_stops_the_chain_before_the_next_loop_would_cross_the_cap() -> No
 
 
 def test_a_normal_day_fits_under_the_default_cap() -> None:
-    # 27 keywords x 144 passes = 3,888 calls a day; the last loop of the day still starts.
+    # 27 keywords x 48 passes (every 30 minutes) = 1,296 calls a day; even the old 10-minute
+    # cadence (144 passes, 3,888 calls) let the last loop of the day start.
+    assert _decide(loop_summary={**LOOP, "naver_calls_today": 27 * 48 - 135})[0] == nxt.DISPATCH
     assert _decide(loop_summary={**LOOP, "naver_calls_today": 27 * 144 - 135})[0] == nxt.DISPATCH
 
 
