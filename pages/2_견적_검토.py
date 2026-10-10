@@ -35,6 +35,9 @@ _UI_RUNTIME_MARKERS = (
     # 모든 품목 조사 상태: wrapping per-item cards instead of a cut-off table.
     ("purchase_price.ui.quote_item_intelligence", "QUOTE_REVIEW_STATUS_OVERVIEW_V1"),
     ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_STATUS_OVERVIEW_V1"),
+    # 구매 검토 요약: wrapping cards; quote_market_research must re-import the new render function.
+    ("purchase_price.ui.quote_review_summary", "QUOTE_REVIEW_SUMMARY_CARDS_V1"),
+    ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_SUMMARY_CARDS_V1"),
 )
 
 

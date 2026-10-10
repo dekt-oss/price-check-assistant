@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -13,6 +14,8 @@ from purchase_price.ui.quote_review_state import QuoteReviewState
 
 # Runtime marker: re-imports comparable_trade_stats, which now leaves 입력 오류 의심 trades out.
 QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
+# Runtime marker: 구매 검토 요약 is a wrapping card per item (no sideways-scrolling table).
+QUOTE_REVIEW_SUMMARY_CARDS_V1 = True
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,60 @@ DETAIL_VERIFY_NOTE = (
 )
 
 
+def purchase_summary_fields(row: PurchaseReviewSummaryRow) -> list[tuple[str, str, int]]:
+    """(label, value, columns spanned) for one item; the same facts the old 11-column table held."""
+
+    return [
+        ("견적 단가", _money(row.quote_unit_price), 1),
+        ("같은 모델 거래", f"{row.strict_count}건", 1),
+        ("단위가 다른 거래", f"{row.other_unit_count}건" if row.other_unit_count else "없음", 1),
+        ("이름이 비슷한 거래", f"{row.reference_count}건", 1),
+        (
+            "그 밖의 공개 가격 자료",
+            f"{row.public_direct_count}건" if row.public_direct_count is not None else "아직 찾지 않음",
+            1,
+        ),
+        ("거래 가격대", _range_text(row), 2),
+        ("거래 가운데 값", _money(row.observed_median), 1),
+        ("승인한 거래", f"{row.approved_count}건", 1),
+        ("상세 검증", row.review_status, 2),
+        ("거래 자료 상태", row.market_status, 1),
+    ]
+
+
+PURCHASE_SUMMARY_CSS = """
+<style>
+.qs-list {display:flex; flex-direction:column; gap:10px; margin:6px 0 10px 0;}
+.qs-item {border:1px solid var(--pc-border, #DCE5EF); border-radius:12px; background:#fff; padding:12px 16px 14px 16px;}
+.qs-name {font-size:14px; font-weight:700; color:var(--pc-navy, #14304F); margin-bottom:10px; overflow-wrap:anywhere; word-break:keep-all;}
+.qs-grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px 18px; margin:0;}
+.qs-grid > div {min-width:0;}
+.qs-grid .qs-span2 {grid-column:span 2;}
+.qs-grid dt {font-size:11px; font-weight:700; color:var(--pc-muted, #6B7C93); margin:0 0 2px 0;}
+.qs-grid dd {font-size:13px; line-height:1.45; margin:0; overflow-wrap:anywhere; word-break:keep-all;}
+@media (max-width: 1200px) { .qs-grid {grid-template-columns:repeat(2,minmax(0,1fr));} }
+@media (max-width: 560px) { .qs-grid {grid-template-columns:minmax(0,1fr);} .qs-grid .qs-span2 {grid-column:auto;} }
+</style>
+"""
+
+
+def purchase_summary_html(rows: list[PurchaseReviewSummaryRow]) -> str:
+    """One wrapping card per item instead of an 11-column table that was cut off on the right."""
+
+    cards = []
+    for row in rows:
+        fields = "".join(
+            f'<div class="{"qs-span2" if span > 1 else ""}"><dt>{html.escape(label)}</dt>'
+            f"<dd>{html.escape(value)}</dd></div>"
+            for label, value, span in purchase_summary_fields(row)
+        )
+        cards.append(
+            f'<div class="qs-item"><div class="qs-name">{row.item_index + 1}. {html.escape(row.item_name)}</div>'
+            f'<dl class="qs-grid">{fields}</dl></div>'
+        )
+    return PURCHASE_SUMMARY_CSS + f'<div class="qs-list" id="purchase-review-summary-cards-v1">{"".join(cards)}</div>'
+
+
 def render_purchase_review_summary(state: QuoteReviewState) -> None:
     rows = build_purchase_review_summary_rows(state)
     if not rows:
@@ -157,28 +214,5 @@ def render_purchase_review_summary(state: QuoteReviewState) -> None:
         c3.metric("상세 검증을 마친 품목", f"{sum(row.approved_count > 0 for row in rows)}건")
         c4.metric("상세 검증 전 품목", f"{sum(row.approved_count == 0 for row in rows)}건")
 
-        st.dataframe(
-            [
-                {
-                    "품목": row.item_name,
-                    "견적 단가": _money(row.quote_unit_price),
-                    "같은 모델 거래": f"{row.strict_count}건",
-                    "단위가 다른 거래": f"{row.other_unit_count}건" if row.other_unit_count else "없음",
-                    "이름이 비슷한 거래": f"{row.reference_count}건",
-                    "그 밖의 공개 가격 자료": (
-                        f"{row.public_direct_count}건"
-                        if row.public_direct_count is not None
-                        else "아직 찾지 않음"
-                    ),
-                    "거래 가격대": _range_text(row),
-                    "거래 가운데 값": _money(row.observed_median),
-                    "승인한 거래": f"{row.approved_count}건",
-                    "상세 검증": row.review_status,
-                    "거래 자료 상태": row.market_status,
-                }
-                for row in rows
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.markdown(purchase_summary_html(rows), unsafe_allow_html=True)
         st.caption(DETAIL_VERIFY_NOTE)

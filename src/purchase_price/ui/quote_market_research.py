@@ -101,6 +101,8 @@ QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
 QUOTE_REVIEW_ITEM_STATUS_V1 = True
 # 모든 품목 조사 상태 is a list of wrapping per-item cards instead of a sideways-scrolling table.
 QUOTE_REVIEW_STATUS_OVERVIEW_V1 = True
+# The purchase summary is a list of wrapping cards too (re-imports render_purchase_review_summary).
+QUOTE_REVIEW_SUMMARY_CARDS_V1 = True
 QUOTE_AUTO_ROUTE_FILE_SESSION_KEY = "quote_auto_route_file_v1"
 
 _FILENAME_SUFFIX_RE = re.compile(

@@ -103,3 +103,38 @@ def test_summary_counts_only_current_item_pair_approvals(monkeypatch) -> None:
     assert row.approved_count == 1
     assert row.public_direct_count == 2
     assert row.review_status == "검증 완료"
+
+
+def test_summary_cards_keep_every_column_of_the_old_table_and_wrap() -> None:
+    from pathlib import Path
+
+    state = QuoteReviewState()
+    state.items = [_item(product_name="<b>FLOW-C</b>")]
+    state.item_confirmed = {0: True}
+    state.track_b_db[0] = SimpleNamespace(
+        status="success",
+        candidates=(
+            SimpleNamespace(price=Decimal("10000000"), match_grade=MatchGrade.A),
+            SimpleNamespace(price=Decimal("14000000"), match_grade=MatchGrade.B),
+        ),
+        reference_candidates=(),
+    )
+    rows = summary.build_purchase_review_summary_rows(state)
+
+    html = summary.purchase_summary_html(rows)
+
+    assert summary.QUOTE_REVIEW_SUMMARY_CARDS_V1 is True
+    for label in (
+        "견적 단가", "같은 모델 거래", "단위가 다른 거래", "이름이 비슷한 거래", "그 밖의 공개 가격 자료",
+        "거래 가격대", "거래 가운데 값", "승인한 거래", "상세 검증", "거래 자료 상태",
+    ):
+        assert f"<dt>{label}</dt>" in html, label
+    for value in ("66,000,000원", "2건", "10,000,000 ~ 14,000,000원", "같은 모델 거래 있음", "아직 찾지 않음"):
+        assert value in html, value
+    assert "&lt;b&gt;FLOW-C" in html and "<b>FLOW-C" not in html
+    assert "<table" not in html and "nowrap" not in html and "max-width: 1200px" in html
+
+    page = Path("pages/2_견적_검토.py").read_text(encoding="utf-8")
+    assert '("purchase_price.ui.quote_review_summary", "QUOTE_REVIEW_SUMMARY_CARDS_V1")' in page
+    assert '("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_SUMMARY_CARDS_V1")' in page
+    assert "st.dataframe" not in Path("src/purchase_price/ui/quote_review_summary.py").read_text(encoding="utf-8")
