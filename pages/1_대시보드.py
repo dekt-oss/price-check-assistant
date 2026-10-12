@@ -118,6 +118,7 @@ from purchase_price.services.unified_search_intent import (
     interpret_unified_search,
 )
 from purchase_price.ui import category_market as category_market_ui
+from purchase_price.ui import price_trend as price_trend_ui
 from purchase_price.ui import product_identity as product_identity_ui
 from purchase_price.ui import quote_input as quote_input_ui
 from purchase_price.ui import result_layout as result_layout_ui
@@ -240,6 +241,12 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.market_survey_export", "MARKET_SURVEY_PRICE_CONTRACT_V1"),
     ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_PRICE_CONTRACT_V1"),
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_COMPARISON_V1"),
+    # UX v1.1 P3: 기간별 가격 (trend buckets in the contract, chart module) and the category
+    # market's top models.
+    ("purchase_price.services.price_metrics", "PRICE_TREND_V1"),
+    ("purchase_price.ui.price_trend", "PRICE_TREND_UI_V1"),
+    ("purchase_price.services.category_market", "CATEGORY_MARKET_TOP_MODELS_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_TOP_MODELS_V1"),
 )
 
 
@@ -2786,6 +2793,33 @@ def _render_entry_error_box(
             st.caption(f"나머지 {len(rows) - len(shown)}건은 Excel에 있습니다.")
 
 
+def _render_price_trend(price_result: Any, *, quote: Decimal | None, unit: str | None, key: str) -> None:
+    """기간별 가격 (P3a): dots + low–high bars per bucket, never joined; the numbers as a table."""
+
+    try:
+        trend = price_metrics_service.price_trend(
+            price_result.summary, today=datetime.now(ZoneInfo("Asia/Seoul")).date()
+        )
+    except Exception:
+        return
+    try:
+        chart = price_trend_ui.trend_chart(trend, quote=quote)
+        if chart is not None:
+            chart.to_dict()  # validate here, so a chart error never reaches the page
+    except Exception:
+        chart = None
+    if chart is not None:
+        st.markdown('<div id="purchase-price-trend-v1"></div>', unsafe_allow_html=True)
+        st.altair_chart(chart, use_container_width=True)
+    sentence = trend.change_sentence
+    if sentence:
+        st.markdown(result_layout_ui.esc(sentence))
+    st.caption(trend.caption)
+    if trend.granularity in {"month", "quarter"}:
+        with st.expander("기간별 숫자로 보기", expanded=False):
+            st.dataframe(price_trend_ui.trend_rows(trend, unit=unit), use_container_width=True, hide_index=True)
+
+
 def _render_price_sections(
     *,
     state: dict[str, Any],
@@ -2803,8 +2837,10 @@ def _render_price_sections(
     quote_key: str,
     market_shown: bool = False,
     entry_error_rows: Sequence[Mapping[str, object]] = (),
+    price_result: Any = None,
+    quote: Decimal | None = None,
 ) -> None:
-    """얼마에 거래됐나: tabs 연도별 · 단위·조건별 · 거래 전체 N건 (a row opens its record).
+    """얼마에 거래됐나: tabs 기간별 · 단위·조건별 · 거래 전체 N건 (a row opens its record).
 
     ``market_shown``: no same-model trade and 같은 품목 시장 already fills the body above, so the
     empty heading and its "no trade" box are left out (the 비슷한 품목 expander stays).
@@ -2836,12 +2872,15 @@ def _render_price_sections(
         year_rows = result_summary_ui.year_summary_rows(direct_rows, main_unit=unit_split.main_unit)
         all_groups = result_summary_ui.unit_group_rows(direct_rows, limit=len(direct_rows))
         unit_suffix = result_layout_ui.other_unit_suffix(len(unit_split.other), unit_split.other_units)
-        tab_labels = ["연도별", "단위·조건별", f"거래 전체 {strict_count}건{unit_suffix}"]
+        tab_labels = ["기간별", "단위·조건별", f"거래 전체 {strict_count}건{unit_suffix}"]
         if entry_error_rows:
             tab_labels[2] += f" (입력 오류 의심 {len(entry_error_rows)}건 제외)"
         year_tab, unit_tab, all_tab = st.tabs(tab_labels)
         with year_tab:
+            if price_result is not None:
+                _render_price_trend(price_result, quote=quote, unit=unit_split.main_unit, key=quote_key)
             if year_rows:
+                st.markdown("##### 연도별")
                 st.dataframe(year_rows, use_container_width=True, hide_index=True)
             st.caption("가격은 위 결론과 같은 단위만 묶었습니다. 다른 단위 거래는 건수만 따로 셉니다.")
         with unit_tab:
@@ -4013,6 +4052,8 @@ def _render_search_result(state: dict[str, Any]) -> None:
             quote_key=quote_key,
             market_shown=market_main,
             entry_error_rows=entry_error_rows,
+            price_result=price_result,
+            quote=workspace_quote,
         )
         _render_supplier_and_models(
             track_b=track_b,

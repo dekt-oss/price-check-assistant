@@ -45,6 +45,8 @@ from purchase_price.services.price_entry_check import entry_error
 
 # Runtime marker: callers holding an older copy check this before using the contract.
 PRICE_METRICS_V1 = True
+# Runtime marker (P3): price_trend and SameModelSummary.priced_trades.
+PRICE_TREND_V1 = True
 
 # ── Thresholds (docs/metrics/price.md §4). Change both together. ──
 MIN_COMPARABLE_TRADES = 3
@@ -239,6 +241,8 @@ class SameModelSummary:
     supplier_count: int
     outlier_count: int
     prices: tuple[Decimal, ...] = field(default=(), repr=False)
+    # The lines behind ``prices`` (P3 trend buckets read their dates).
+    priced_trades: tuple[PriceTrade, ...] = field(default=(), repr=False)
 
     @property
     def excluded_count(self) -> int:
@@ -307,6 +311,7 @@ def summarize_same_model(
         supplier_count=len({institution_key(t.supplier) for t in valid if institution_key(t.supplier)}),
         outlier_count=outliers,
         prices=prices,
+        priced_trades=tuple(priced),
     )
 
 
@@ -517,3 +522,122 @@ def build_price_result(
         data_as_of_stale=data_as_of_stale(data_as_of, today=today),
         show_category_in_conclusion=category_allowed_in_conclusion(summary),
     )
+
+
+# ── 기간별 가격 변동 (UX v1.1 P3) ──
+
+TREND_MIN_PER_BUCKET = 3
+TREND_MIN_BUCKETS = 2
+GRANULARITY_LABELS = {"month": "월별", "quarter": "분기별", "year": "연도별"}
+
+
+@dataclass(frozen=True)
+class TrendBucket:
+    key: str  # sortable: '2026-03', '2026-Q1', '2026'
+    label: str  # '2026년 3월', '2026년 1분기', '2026년'
+    count: int
+    median: Decimal | None
+    low: Decimal | None
+    high: Decimal | None
+    # Enough lines (TREND_MIN_PER_BUCKET) for its median to be compared with another bucket.
+    enough: bool
+    # The bucket contains today, so more trades can still arrive.
+    ongoing: bool
+
+
+@dataclass(frozen=True)
+class PriceTrend:
+    granularity: str | None  # None: too few lines in every granularity, draw no chart
+    buckets: tuple[TrendBucket, ...]
+    change_from: TrendBucket | None
+    change_to: TrendBucket | None
+    change_percent: Decimal | None
+
+    @property
+    def caption(self) -> str:
+        if self.granularity is None:
+            return (
+                f"거래가 {TREND_MIN_PER_BUCKET}건 이상인 기간이 {TREND_MIN_BUCKETS}개가 안 돼 기간별 그래프를 "
+                "그리지 않았습니다. 연도별 표를 보세요."
+            )
+        return (
+            f"{GRANULARITY_LABELS[self.granularity]} · 거래가 {TREND_MIN_PER_BUCKET}건 이상인 구간만 가운데 값을 "
+            "비교합니다(회색은 비교에서 뺀 구간). 거래가 없는 기간은 잇지 않습니다."
+        )
+
+    @property
+    def change_sentence(self) -> str | None:
+        if self.change_from is None or self.change_to is None or self.change_percent is None:
+            return None
+        ongoing = " (진행 중인 구간)" if self.change_to.ongoing else ""
+        basis = f"(각 {self.change_from.count}건·{self.change_to.count}건 기준)"
+        if self.change_percent == 0:
+            return f"{self.change_to.label}{ongoing} 가운데 값은 {_with_gwa(self.change_from.label)} 같습니다 {basis}."
+        moved = f"{abs(self.change_percent)}% {'높습니다' if self.change_percent > 0 else '낮습니다'}"
+        return f"{self.change_to.label}{ongoing} 가운데 값은 {self.change_from.label}보다 {moved} {basis}."
+
+
+def _with_gwa(word: str) -> str:
+    """'2026년 5월' -> '2026년 5월과', '2026년 1분기' -> '2026년 1분기와' (과 after a final consonant)."""
+
+    last = word[-1:] if word else ""
+    has_final = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
+    return f"{word}{'과' if has_final else '와'}"
+
+
+def _bucket_key(day: date, granularity: str) -> tuple[str, str]:
+    if granularity == "month":
+        return f"{day.year:04d}-{day.month:02d}", f"{day.year}년 {day.month}월"
+    if granularity == "quarter":
+        quarter = (day.month - 1) // 3 + 1
+        return f"{day.year:04d}-Q{quarter}", f"{day.year}년 {quarter}분기"
+    return f"{day.year:04d}", f"{day.year}년"
+
+
+def _buckets(trades: Sequence[PriceTrade], granularity: str, today: date) -> tuple[TrendBucket, ...]:
+    groups: dict[str, list[Decimal]] = {}
+    labels: dict[str, str] = {}
+    for trade in trades:
+        day = trade.date_value
+        if day is None or trade.unit_price is None:
+            continue
+        key, label = _bucket_key(day, granularity)
+        groups.setdefault(key, []).append(trade.unit_price)
+        labels[key] = label
+    today_key = _bucket_key(today, granularity)[0]
+    output = []
+    for key in sorted(groups):
+        prices = sorted(groups[key])
+        output.append(
+            TrendBucket(
+                key=key,
+                label=labels[key],
+                count=len(prices),
+                median=median(prices),
+                low=prices[0],
+                high=prices[-1],
+                enough=len(prices) >= TREND_MIN_PER_BUCKET,
+                ongoing=key == today_key,
+            )
+        )
+    return tuple(output)
+
+
+def price_trend(summary: SameModelSummary, *, today: date) -> PriceTrend:
+    """The finest of month / quarter / year in which at least TREND_MIN_BUCKETS buckets hold
+    TREND_MIN_PER_BUCKET priced lines each (2026-10-12 audit: 79% of medical models with 3+
+    trades in 3 years qualify for none). The change compares the two latest such buckets; no
+    words like 상승·하락·추세 are produced."""
+
+    for granularity in ("month", "quarter", "year"):
+        buckets = _buckets(summary.priced_trades, granularity, today)
+        enough = [bucket for bucket in buckets if bucket.enough]
+        if len(enough) >= TREND_MIN_BUCKETS:
+            before, after = enough[-2], enough[-1]
+            percent = (
+                percent_difference(after.median, before.median)
+                if after.median is not None and before.median is not None and before.median > 0
+                else None
+            )
+            return PriceTrend(granularity, buckets, before, after, percent)
+    return PriceTrend(None, _buckets(summary.priced_trades, "year", today), None, None, None)
