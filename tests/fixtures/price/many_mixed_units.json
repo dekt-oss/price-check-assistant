@@ -1,0 +1,206 @@
+{
+ "name": "many_mixed_units",
+ "today": "2026-10-12",
+ "description": "거래 다수·단위 혼합 (M40 환자감시장치 모양). 대 16건, set 2건.",
+ "quote_unit_price": "6500000",
+ "trades": [
+  {
+   "record_id": "delivery:R0001|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2026-09-01",
+   "institution": "인천소방본부",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0002|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2026-07-15",
+   "institution": "경기소방본부",
+   "supplier": "한국의료기",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0003|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2026-05-02",
+   "institution": "김포공항",
+   "supplier": "엠디솔루션",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0004|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2026-02-20",
+   "institution": "제주소방본부",
+   "supplier": "케어텍",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0005|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2025-12-11",
+   "institution": "강원소방본부",
+   "supplier": "바이오메드",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0006|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2025-10-05",
+   "institution": "충북소방본부",
+   "supplier": "대한메디칼",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0007|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2025-08-19",
+   "institution": "부산소방본부",
+   "supplier": "라이프테크",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0008|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2025-06-30",
+   "institution": "대구소방본부",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0009|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2025-04-14",
+   "institution": "광주소방본부",
+   "supplier": "한국의료기",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0010|change:0|line:1",
+   "unit_price": "4400000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4400000",
+   "trade_date": "2025-02-03",
+   "institution": "울산소방본부",
+   "supplier": "엠디솔루션",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0011|change:0|line:1",
+   "unit_price": "4389000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4389000",
+   "trade_date": "2024-12-09",
+   "institution": "세종소방본부",
+   "supplier": "케어텍",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0012|change:0|line:1",
+   "unit_price": "4389000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4389000",
+   "trade_date": "2024-10-21",
+   "institution": "전북소방본부",
+   "supplier": "바이오메드",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0013|change:0|line:1",
+   "unit_price": "4500000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4500000",
+   "trade_date": "2024-08-07",
+   "institution": "인천소방본부",
+   "supplier": "대한메디칼",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0014|change:0|line:1",
+   "unit_price": "4950000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "4950000",
+   "trade_date": "2024-05-28",
+   "institution": "경기소방본부",
+   "supplier": "라이프테크",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0015|change:0|line:1",
+   "unit_price": "6585500",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "6585500",
+   "trade_date": "2024-03-12",
+   "institution": "김포공항",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0016|change:0|line:1",
+   "unit_price": "5200000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "5200000",
+   "trade_date": "2024-01-25",
+   "institution": "제주소방본부",
+   "supplier": "한국의료기",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0017|change:0|line:1",
+   "unit_price": "36513000",
+   "unit": "set",
+   "quantity": "2",
+   "total_amount": "73026000",
+   "trade_date": "2025-09-03",
+   "institution": "OO의료원",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0018|change:0|line:1",
+   "unit_price": "4747080",
+   "unit": "SET",
+   "quantity": "8",
+   "total_amount": "37976640",
+   "trade_date": "2024-09-10",
+   "institution": "OO대학교병원",
+   "supplier": "한국의료기",
+   "grade": "A"
+  }
+ ]
+}
