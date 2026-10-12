@@ -251,6 +251,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_TOP_MODELS_V1"),
     # UX v1.1 P2b: alias registries cached per file (grading read the CSVs once per row).
     ("purchase_price.services.product_matching", "ALIAS_REGISTRY_CACHE_V1"),
+    ("purchase_price.services.search_routing", "MODEL_CODE_SKIP_V1"),
 )
 
 
@@ -2194,6 +2195,7 @@ def _execute_search(
         search_timings["category_market"] = round(monotonic() - category_started, 3)
     search_timings["track_b"] = round(monotonic() - track_b_started, 3)
 
+    overview_started = monotonic()
     unresolved_word = bool(
         selected_identity is None
         and raw_search
@@ -2217,7 +2219,11 @@ def _execute_search(
                 "reference_count": reference_total,
                 "track_b_data_as_of": track_b_data_as_of,
             }
-    if unresolved_word and search_routing.parse_permit_number(raw_search) is None:
+    if (
+        unresolved_word
+        and search_routing.parse_permit_number(raw_search) is None
+        and not search_routing.looks_like_model_code(raw_search)
+    ):
         # "필립스" / "Philips": no company of exactly that name, but registered or supplying
         # companies whose name contains it ((주)필립스코리아). Search expansion only.
         company_state = _partial_company_overview(raw_search, snapshot_runtime, prefer_traded_company)
@@ -2237,6 +2243,8 @@ def _execute_search(
                 "track_b_data_as_of": track_b_data_as_of,
             }
 
+    # P2b: a model-like word with no same-model trade is also tried as a company / 품목 name.
+    search_timings["overview_probe"] = round(monotonic() - overview_started, 3)
     stage("track_b_live")
     live_started = monotonic()
     track_b_live = _track_b_live_gap_fill(
@@ -2405,6 +2413,7 @@ SEARCH_TIMING_KEYS_V2 = (
     "track_b_lookup",
     "same_item_models",
     "category_market",
+    "overview_probe",
     "track_b_live",
     "mfds",
     "safety",
