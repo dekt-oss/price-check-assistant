@@ -1,0 +1,118 @@
+{
+ "name": "entry_errors_and_outlier",
+ "today": "2026-10-12",
+ "description": "입력 오류 의심 2건(단가 1원 단가·수량 뒤바뀜, 단가 5원)과 3배 넘게 높은 묶음 거래 1건 (HeartOn A16-DS 모양).",
+ "quote_unit_price": "2100000",
+ "trades": [
+  {
+   "record_id": "delivery:R0001|change:0|line:1",
+   "unit_price": "1",
+   "unit": "대",
+   "quantity": "1731000",
+   "total_amount": "1731000",
+   "trade_date": "2024-08-20",
+   "institution": "속초시",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0002|change:0|line:1",
+   "unit_price": "5",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "5",
+   "trade_date": "2025-03-03",
+   "institution": "OO보건소",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0003|change:0|line:1",
+   "unit_price": "1980000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "1980000",
+   "trade_date": "2026-09-10",
+   "institution": "OO보건소A",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0004|change:0|line:1",
+   "unit_price": "1980000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "1980000",
+   "trade_date": "2026-05-21",
+   "institution": "OO보건소B",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0005|change:0|line:1",
+   "unit_price": "1980000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "1980000",
+   "trade_date": "2025-11-02",
+   "institution": "OO보건소C",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0006|change:0|line:1",
+   "unit_price": "1980000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "1980000",
+   "trade_date": "2025-06-14",
+   "institution": "OO보건소A",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0007|change:0|line:1",
+   "unit_price": "1850000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "1850000",
+   "trade_date": "2025-01-30",
+   "institution": "OO보건소D",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0008|change:0|line:1",
+   "unit_price": "2050000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "2050000",
+   "trade_date": "2024-10-18",
+   "institution": "OO보건소E",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0009|change:0|line:1",
+   "unit_price": "1731000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "1731000",
+   "trade_date": "2024-04-04",
+   "institution": "OO보건소F",
+   "supplier": "메디아나",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0010|change:0|line:1",
+   "unit_price": "7920000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "7920000",
+   "trade_date": "2024-02-15",
+   "institution": "OO시청",
+   "supplier": "메디아나",
+   "grade": "A"
+  }
+ ]
+}
