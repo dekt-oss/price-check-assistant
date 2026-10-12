@@ -4,7 +4,7 @@
 | --- | --- |
 | 작업지시서 | `docs/coordination/UX_V11_WORK_ORDER_v1.2.md` |
 | 기준 브랜치 | `main` |
-| BASE_SHA | _(이 문서가 main에 머지된 뒤 Claude가 기록)_ |
+| BASE_SHA | `ecb888bada895fec30443a951dfc09ab2e90a54e` (PR #342 머지 커밋, 2026-10-12) |
 | 시작 시각 | 2026-10-12 (KST) |
 | Track P 브랜치 / 워크트리 | `claude/ux-v11-price` / `.worktrees/ux-v11-price` |
 | Track H 브랜치 / 워크트리 | `codex/ux-v11-news-management` / `.worktrees/ux-v11-news-management` (Codex가 자체 워크트리를 쓰면 같은 브랜치를 체크아웃) |
