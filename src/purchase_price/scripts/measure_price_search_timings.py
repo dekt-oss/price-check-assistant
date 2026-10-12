@@ -40,13 +40,27 @@ TIMING_KEYS = (
     "cold",
     "identity",
     "track-b",
+    "track-b-lookup",
+    "same-item-models",
     "category-market",
     "track-b-live",
     "mfds",
     "safety",
     "total",
 )
-SUMMARY_STAGES = ("wall", "warmup_wait", "identity", "track_b", "category_market", "track_b_live", "safety", "total", "render_card")
+SUMMARY_STAGES = (
+    "wall",
+    "warmup_wait",
+    "identity",
+    "track_b",
+    "track_b_lookup",
+    "same_item_models",
+    "category_market",
+    "track_b_live",
+    "safety",
+    "total",
+    "render_card",
+)
 RESULT_SELECTORS = ("#purchase-conclusion-v1", "#purchase-not-found-v1", "#category-market-status-v1")
 STATE_NAME = "perf/price-search-timings"
 MAX_SAMPLES = 600
