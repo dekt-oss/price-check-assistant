@@ -1,0 +1,64 @@
+name: Price Search Timings
+
+# UX v1.1 P2a: open Production with a few model searches and record how long each stage takes.
+# Samples roll into R2 state/v1/perf/price-search-timings.json (newest 600); the job summary
+# shows median and 90th percentile per stage, split by cold and warm searches.
+# GitHub schedules can run late or skip; the baseline only needs a week of whatever runs land.
+
+on:
+  schedule:
+    - cron: "17 0,4,8 * * *"  # 09:17, 13:17, 17:17 KST
+  workflow_dispatch:
+    inputs:
+      queries:
+        description: "Comma-separated searches (empty = default set)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: price-search-timings
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PRODUCTION_URL: https://bp-price-research.streamlit.app/
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install "playwright>=1.55,<2"
+          python -m playwright install --with-deps chromium
+
+      - name: Measure
+        env:
+          QUERIES: ${{ github.event.inputs.queries }}
+        run: |
+          args=(--output artifacts/price-search-timings.json --r2 --summary)
+          if [ -n "${QUERIES}" ]; then args+=(--queries "${QUERIES}"); fi
+          python -m purchase_price.scripts.measure_price_search_timings "${args[@]}"
+
+      - name: Upload samples
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: price-search-timings
+          path: artifacts/price-search-timings.json
+          if-no-files-found: ignore
