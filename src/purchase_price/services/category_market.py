@@ -39,6 +39,8 @@ from purchase_price.services.price_entry_check import entry_error
 CATEGORY_MARKET_PERIOD_V1 = True
 # Runtime marker: 입력 오류 의심 lines (KIND_ENTRY_ERROR) are left out of every price level.
 CATEGORY_MARKET_ENTRY_ERRORS_V1 = True
+# Runtime marker (P3b): top_models ranks the stated models of the 장비 구매 lines by trades / institutions.
+CATEGORY_MARKET_TOP_MODELS_V1 = True
 CATEGORY_TRADE_LIMIT = 6000
 PRICE_FACTOR = Decimal("3")
 PRICE_RULE_MIN_ROWS = 4
@@ -463,6 +465,112 @@ def supplier_summaries(rows: Sequence[ClassifiedTrade]) -> tuple[SupplierSummary
     summaries.sort(key=lambda item: item.latest, reverse=True)
     summaries.sort(key=lambda item: -item.count)
     return tuple(summaries)
+
+
+# ── Top models (P3b) ──
+
+TOP_MODELS_LIMIT = 5
+TOP_MODEL_SORTS = ("trades", "institutions")
+_INSTITUTION_NOISE = re.compile(r"[\s()\[\]{}（）［］【】]+")
+
+
+@dataclass(frozen=True)
+class TopModel:
+    """One model (maker + model name) of the 장비 구매 lines, counted as-is: nothing is merged by similarity."""
+
+    label: str
+    model_name: str
+    manufacturer: str
+    trade_count: int
+    institution_count: int
+    # Median 단가 over this model's lines in the market's main unit group; None when it has none.
+    median: Decimal | None
+    unit: str
+    latest: str
+
+    def matches(self, model_name: str) -> bool:
+        return bool(model_name) and normalize_text(self.model_name) == searched_model_key(model_name)
+
+
+def searched_model_key(model_name: str) -> str:
+    """The comparison key of a searched model name (same normalisation as the model counts)."""
+
+    return normalize_text(model_name or "")
+
+
+def institution_key(name: str) -> str:
+    """Institution name without spaces and brackets; different names are never merged."""
+
+    return _INSTITUTION_NOISE.sub("", name or "")
+
+
+def _main_unit(equipment: Sequence[CategoryTrade]) -> tuple[str, str]:
+    """(unit group key, display text) of the most common unit among the equipment lines."""
+
+    counts = Counter(unit_group(trade.unit) for trade in equipment)
+    counts.pop("", None)
+    if not counts:
+        return "", ""
+    key = max(counts, key=lambda item: (counts[item], item))
+    if key == MACHINE_UNIT:
+        return key, MACHINE_UNIT
+    display = next((" ".join(trade.unit.split()) for trade in equipment if unit_group(trade.unit) == key), key)
+    return key, display
+
+
+def model_stats(market: CategoryMarket) -> tuple[TopModel, ...]:
+    """Every stated model of the 장비 구매 lines (kind == equipment), unsorted."""
+
+    equipment = [row.trade for row in market.trades if row.kind == KIND_EQUIPMENT]
+    unit_key, unit_display = _main_unit(equipment)
+    grouped: dict[tuple[str, str], list[CategoryTrade]] = defaultdict(list)
+    for trade in equipment:
+        if not trade.model_stated:
+            continue
+        grouped[(normalize_text(trade.manufacturer or ""), normalize_text(trade.model_name))].append(trade)
+    stats = []
+    for trades in grouped.values():
+        prices = [trade.unit_price for trade in trades if unit_key and unit_group(trade.unit) == unit_key]
+        first = trades[0]
+        stats.append(
+            TopModel(
+                label=first.model_label,
+                model_name=first.model_name.strip(),
+                manufacturer=(first.manufacturer or "").strip(),
+                trade_count=len(trades),
+                institution_count=len({key for key in (institution_key(t.institution) for t in trades) if key}),
+                median=median(prices),
+                unit=unit_display if prices else "",
+                latest=max((trade.transaction_date for trade in trades), default=""),
+            )
+        )
+    return tuple(stats)
+
+
+def _ranked(stats: Sequence[TopModel], by: str) -> list[TopModel]:
+    if by not in TOP_MODEL_SORTS:
+        raise ValueError(f"by must be one of {TOP_MODEL_SORTS}, got {by!r}")
+    ordered = sorted(stats, key=lambda item: item.label)
+    ordered.sort(key=lambda item: item.latest, reverse=True)
+    if by == "trades":
+        ordered.sort(key=lambda item: (item.trade_count, item.institution_count), reverse=True)
+    else:
+        ordered.sort(key=lambda item: (item.institution_count, item.trade_count), reverse=True)
+    return ordered
+
+
+def top_models(market: CategoryMarket, *, by: str, limit: int = TOP_MODELS_LIMIT) -> tuple[TopModel, ...]:
+    """Most traded models (``by`` = "trades") or models with the most delivery institutions
+    ("institutions"). Counts only; not a quality or recommendation order."""
+
+    return tuple(_ranked(model_stats(market), by)[: max(limit, 0)])
+
+
+def searched_model_stats(market: CategoryMarket, model_name: str) -> TopModel | None:
+    """The searched model's own numbers (its most traded maker variant), None without 장비 구매 lines."""
+
+    matching = [item for item in model_stats(market) if item.matches(model_name)]
+    return _ranked(matching, "trades")[0] if matching else None
 
 
 def _text(value: object) -> str:
