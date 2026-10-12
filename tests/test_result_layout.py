@@ -104,7 +104,7 @@ def test_quote_headline_names_the_quote_and_colours_the_difference():
     quote = Decimal("1800000")
     lead = rl.lead_view(stats, _conclusion(stats, quote), quote=quote, unit="대", warn_count=2)
     # The production smoke waits for "내 견적가 12,000,000원은"-style text.
-    assert _text(lead.headline_html) == "내 견적가 1,800,000원은 1대당 거래 가운데 값보다 9.1% 낮습니다."
+    assert _text(lead.headline_html) == "내 견적가 1,800,000원은 1대당 거래 가운데 값보다 9.1% 낮습니다. (−180,000원)"
     assert 'class="rl-down"' in lead.headline_html
     assert lead.basis == "같은 제품 1대 단위 거래 93건 기준 · 가운데 값 1,980,000원 · 최근 거래 2026-10-01"
     assert lead.eyebrow.endswith("확인할 점 2가지") and lead.eyebrow_tone == rl.TONE_WARN

@@ -31,9 +31,9 @@ from purchase_price.services import g2b_delivery_record as delivery_record_servi
 from purchase_price.services import index_prefetch as index_prefetch_service
 from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_item_status_r2 as mfds_item_status_service
-from purchase_price.services import price_metrics as price_metrics_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services import price_entry_check as price_entry_check_service
+from purchase_price.services import price_metrics as price_metrics_service
 from purchase_price.services import search_routing
 from purchase_price.services import track_b_db_quote_comparison as track_b_comparison_service
 from purchase_price.services import track_b_live_gap_fill as track_b_live_service
@@ -3607,9 +3607,11 @@ def _render_search_result(state: dict[str, Any]) -> None:
 
     # ── 거래가 비교 결과 (UX v1.1 P1): the price contract over this period's same-model lines ──
     contract_today = datetime.now(ZoneInfo("Asia/Seoul")).date()
-    identity_exact = bool(
-        (identity_known and str(getattr(indexed_identity, "match_type", "") or "") in {"model", "udi"})
-        or (isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_confirmed)
+    # Same model is already settled by the A/B grade; the level drops only when the model name
+    # has several 식약처 registrations (ambiguous identity).
+    identity_exact = not (
+        (identity_known and mfds_identity_status(indexed_identity) == IdentityEvidenceStatus.AMBIGUOUS)
+        or (isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_ambiguous)
     )
     price_result = price_metrics_service.build_price_result(
         [price_metrics_service.PriceTrade.from_candidate(c) for c in grade_ab_candidates(track_b)],

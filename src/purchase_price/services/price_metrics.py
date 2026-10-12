@@ -424,7 +424,10 @@ def evidence_level(
     today: date,
 ) -> EvidenceLevel:
     """높음 needs all of: ≥10 priced lines, ≥3 institutions, a trade in the last 12 months, one unit,
-    an exact identity. 제한적 when fewer than 3 lines are priced or the identity is not exact.
+    an unambiguous identity. 제한적 when fewer than 3 lines are priced or the identity is ambiguous
+    (``identity_exact=False``: the model name has several 식약처 registrations). Match grade B alone
+    does not lower the level: a model-only search leaves the manufacturer unconfirmed (grade B)
+    for almost every trade.
     Everything else is 보통. Mixed units hold the level at 보통 only: 54% of medical models with 3+
     trades in 3 years mix units (audit 2026-10-12) and the median already uses the main unit.
     Reasons name every condition that held the level down."""
@@ -433,7 +436,7 @@ def evidence_level(
     if summary.priced_count < MIN_COMPARABLE_TRADES:
         limiting.append(f"가격 계산 거래 {summary.priced_count}건")
     if not identity_exact:
-        limiting.append("같은 제품 확인이 별칭·보강에 의존")
+        limiting.append("같은 모델명의 식약처 등록이 여러 건이라 같은 제품인지 모호함")
     if limiting:
         return EvidenceLevel(LEVEL_LIMITED, tuple(limiting))
 
