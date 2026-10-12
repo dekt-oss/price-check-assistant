@@ -28,6 +28,9 @@ from purchase_price.services.category_market import (
     CategoryModel,
     CategoryTrade,
     ClassifiedTrade,
+    TopModel,
+    searched_model_stats,
+    top_models,
 )
 from purchase_price.services.g2b_delivery_record import g2b_url_for_source_record
 from purchase_price.ui.theme import (
@@ -48,6 +51,8 @@ CATEGORY_MARKET_ENTRY_ERRORS_V1 = True
 CATEGORY_MARKET_RECENT_GROUPED_V1 = True
 # Runtime marker: the block fits a 390px phone (stacked, wrapping, tables scroll inside their card).
 CATEGORY_MARKET_NARROW_V1 = True
+# Runtime marker (P3b): two short rankings (거래 건수 / 납품 기관) above a collapsed full model list.
+CATEGORY_MARKET_TOP_MODELS_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -96,6 +101,20 @@ CSS = """
 .cm-strip-label {font-size:12px; font-weight:700; color:#5B6C82; white-space:nowrap;}
 .cm-strip-note {font-size:11.5px; color:#7A899B; line-height:1.5; min-width:0; overflow:hidden; text-overflow:ellipsis;
   white-space:nowrap;}
+.cm-top {padding:16px 20px !important; margin:0 0 12px 0;}
+.cm-top-caption {font-size:12px; color:#5B6C82; line-height:1.6; margin:0 0 10px 0; overflow-wrap:anywhere;}
+.cm-top-grid {display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 22px;}
+.cm-top-title {font-size:14px; font-weight:800; color:var(--pc-navy); margin:0 0 6px 0; letter-spacing:-0.3px;}
+.cm-top-list {list-style:none; margin:0; padding:0;}
+.cm-top-row {display:flex; gap:9px; align-items:flex-start; padding:7px 8px; border-radius:8px; margin:0 0 2px 0;}
+.cm-top-rank {flex:none; width:18px; font-size:12px; font-weight:800; color:#7A899B; font-variant-numeric:tabular-nums;}
+.cm-top-main {min-width:0; flex:1 1 auto;}
+.cm-top-name {font-size:13px; font-weight:700; color:#25466B; line-height:1.45; overflow-wrap:anywhere;}
+.cm-top-sub {font-size:12px; color:#5B6C82; line-height:1.5; overflow-wrap:anywhere;}
+.cm-top-me {background:#EEF6F5;}
+.cm-top-me .cm-top-name {color:var(--pc-teal);}
+.cm-top-self {font-size:12.5px; color:#25466B; line-height:1.55; margin:8px 0 0 0; padding:8px 10px; border-radius:8px;
+  background:#EEF6F5; overflow-wrap:anywhere;}
 .st-key-cm_block [data-baseweb="tab-list"] {gap:20px;}
 .st-key-cm_block [data-baseweb="tab"] p {font-size:13px;}
 .st-key-cm_block [data-baseweb="tab"][aria-selected="true"] p {font-weight:800;}
@@ -104,11 +123,13 @@ CSS = """
   margin-top:18px;}
 .cm-excluded li, .cm-excluded li span, .cm-basis, .cm-headline, .cm-rule {overflow-wrap:anywhere;}
 @container (max-width: 760px) {
+  .cm-top-grid {grid-template-columns:minmax(0,1fr);}
   .cm-grid {grid-template-columns:minmax(0,1fr);}
   .cm-grid > .pc-card {min-width:0; overflow-x:auto;}
   .cm-cq .pc-metrics {grid-template-columns:repeat(2,minmax(0,1fr));}
 }
 @container (max-width: 520px) {
+  .cm-top {padding:14px 14px !important;}
   .cm-head {padding:18px 16px !important;}
   .cm-headline {font-size:19px;}
   .cm-headline.cm-small {font-size:17px;}
@@ -395,6 +416,69 @@ def summary_html(
     )
 
 
+# ── Top models (P3b) ──
+
+TOP_MODELS_DOM_ID = "category-top-models-v1"
+TOP_MODELS_NOTE = "많이 거래된 순서일 뿐 품질이나 권장 순위가 아닙니다."
+
+
+def top_model_line(model: TopModel) -> str:
+    text = f"{model.trade_count:,}건 · 납품 기관 {model.institution_count:,}곳"
+    if model.median is not None:
+        text += f" · {unit_text(model.unit)}당 가운데 값 {won(model.median)}"
+    return text
+
+
+def _top_list_html(title: str, models: Sequence[TopModel], searched_model: str) -> str:
+    rows = []
+    for rank, model in enumerate(models, start=1):
+        mine = model.matches(searched_model)
+        label = f"▶ {model.label}" if mine else model.label
+        rows.append(
+            f'<li class="cm-top-row{" cm-top-me" if mine else ""}"><span class="cm-top-rank">{rank}</span>'
+            f'<div class="cm-top-main"><div class="cm-top-name">{esc(label)}</div>'
+            f'<div class="cm-top-sub">{esc(top_model_line(model))}</div></div></li>'
+        )
+    return f'<div><div class="cm-top-title">{esc(title)}</div><ol class="cm-top-list">{"".join(rows)}</ol></div>'
+
+
+def top_models_caption(market: CategoryMarket) -> str:
+    period = period_text(market)
+    scope = f"{period} " if period else ""
+    truncated = ""
+    if market.truncated:
+        first = market.level.first_date
+        truncated = (
+            f" 거래가 많아 최근 거래부터 일부({first} 이후)만 셉니다. 위 결론의 같은 제품 거래 수와 다를 수 있습니다."
+            if first
+            else " 거래가 많아 최근 거래부터 일부만 셉니다. 위 결론의 같은 제품 거래 수와 다를 수 있습니다."
+        )
+    return (
+        f"{scope}같은 품목의 장비 구매 줄만 셉니다(부품·수리, 동물용, 입력 오류 의심은 뺌).{truncated} {TOP_MODELS_NOTE}"
+    )
+
+
+def top_models_html(market: CategoryMarket, *, searched_model: str = "") -> str:
+    """Two short rankings of the stated models; '' when no equipment line states a model."""
+
+    by_trades = top_models(market, by="trades")
+    if not by_trades:
+        return ""
+    by_institutions = top_models(market, by="institutions")
+    body = (
+        f'<div class="cm-top-caption">{esc(top_models_caption(market))}</div>'
+        '<div class="cm-top-grid">'
+        + _top_list_html("거래 건수가 많은 모델", by_trades, searched_model)
+        + _top_list_html("납품 기관이 많은 모델", by_institutions, searched_model)
+        + "</div>"
+    )
+    if searched_model.strip() and not any(item.matches(searched_model) for item in (*by_trades, *by_institutions)):
+        own = searched_model_stats(market, searched_model)
+        if own is not None:
+            body += f'<div class="cm-top-self">{esc("▶ 검색한 모델: " + own.label + " · " + top_model_line(own))}</div>'
+    return f'<div class="cm-cq"><div class="pc-card cm-top" id="{TOP_MODELS_DOM_ID}">{body}</div></div>'
+
+
 # ── Tables ──
 
 
@@ -572,7 +656,9 @@ def render_category_market(
         )
         models_tab, buyers_tab, suppliers_tab = st.tabs(list(tab_labels(market)))
         with models_tab:
-            _render_models(market, key=key, on_open_model=on_open_model, count_note=model_count_note)
+            _render_models(
+                market, key=key, on_open_model=on_open_model, count_note=model_count_note, searched_model=searched_model
+            )
         with buyers_tab:
             _render_buyers(market, key=key, on_open_trade=on_open_trade)
         with suppliers_tab:
@@ -585,38 +671,43 @@ def _render_models(
     key: str,
     on_open_model: Callable[[CategoryModel], None],
     count_note: str = "",
+    searched_model: str = "",
 ) -> None:
+    top_html = top_models_html(market, searched_model=searched_model)
+    if top_html:
+        st.markdown(top_html, unsafe_allow_html=True)
     if not market.models:
         st.info("식약처에 같은 품목으로 등록된 모델을 찾지 못했습니다.")
         return
-    rows = model_rows(market.models)
-    event = st.dataframe(
-        rows,
-        use_container_width=True,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        key=f"cm_models::{key}",
-        height=_table_height(len(rows), 430),
-        column_config={
-            "모델": st.column_config.TextColumn("모델", width="medium"),
-            "가운데 값": st.column_config.TextColumn("가운데 값", width=110),
-            "거래 범위": st.column_config.TextColumn("거래 범위", width=200),
-            "참고": st.column_config.TextColumn("참고", width=150),
-        },
-    )
-    picked = list(getattr(getattr(event, "selection", None), "rows", []) or [])
-    if picked and 0 <= picked[0] < len(market.models):
-        on_open_model(market.models[picked[0]])
-    st.caption(
-        "식약처에 같은 품목으로 등록된 모델 전부입니다. 나라장터 거래가 있는 모델이 위에 오고, ▶ 표시는 검색한 모델입니다. "
-        "행을 누르면 그 모델의 가격 조사로 이동합니다. 성능이나 대체 가능 여부는 판단하지 않습니다. "
-        "거래 건수는 모델명이 같은 나라장터 거래만"
-        + (f" {market.data_as_of} 수집분 전체 기간으로" if market.data_as_of else " 전체 기간으로")
-        + " 셉니다"
-        + (" (위 거래 기간과 상관없이)." if market.period_start else ".")
-        + (f" {count_note}" if count_note else "")
-    )
+    with st.expander(f"같은 품목 모델 전체 {len(market.models)}개", expanded=False):
+        rows = model_rows(market.models)
+        event = st.dataframe(
+            rows,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key=f"cm_models::{key}",
+            height=_table_height(len(rows), 430),
+            column_config={
+                "모델": st.column_config.TextColumn("모델", width="medium"),
+                "가운데 값": st.column_config.TextColumn("가운데 값", width=110),
+                "거래 범위": st.column_config.TextColumn("거래 범위", width=200),
+                "참고": st.column_config.TextColumn("참고", width=150),
+            },
+        )
+        picked = list(getattr(getattr(event, "selection", None), "rows", []) or [])
+        if picked and 0 <= picked[0] < len(market.models):
+            on_open_model(market.models[picked[0]])
+        st.caption(
+            "식약처에 같은 품목으로 등록된 모델 전부입니다. 나라장터 거래가 있는 모델이 위에 오고, ▶ 표시는 검색한 모델입니다. "
+            "행을 누르면 그 모델의 가격 조사로 이동합니다. 성능이나 대체 가능 여부는 판단하지 않습니다. "
+            "거래 건수는 모델명이 같은 나라장터 거래만"
+            + (f" {market.data_as_of} 수집분 전체 기간으로" if market.data_as_of else " 전체 기간으로")
+            + " 셉니다"
+            + (" (위 거래 기간과 상관없이)." if market.period_start else ".")
+            + (f" {count_note}" if count_note else "")
+        )
 
 
 def _render_buyers(
