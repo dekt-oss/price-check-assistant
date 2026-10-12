@@ -166,3 +166,13 @@ def test_dashboard_tries_partial_company_names_before_the_empty_state() -> None:
     )
     assert 'state["matched_from"] = raw_search' in source
     assert "업체 이름은 바꾸지 않고 등록된 그대로 보여줍니다" in source
+
+
+def test_model_code_like_words_skip_the_company_probe() -> None:
+    from purchase_price.services.search_routing import looks_like_model_code
+
+    for word in ("NT960XJG-K72AG", "PNB-704", "HeartOn A16-DS", "SJ-DFM100"):
+        assert looks_like_model_code(word), word
+    # Company names and short words keep the company-name probe.
+    for word in ("필립스", "Philips", "3M", "M40", "B.Braun", "삼성전자", "GE", "2026", "ABC-12", "3M코리아"):
+        assert not looks_like_model_code(word), word

@@ -441,3 +441,32 @@ def test_lookup_limit_covers_models_with_over_a_thousand_trades() -> None:
     assert comparison.MAX_LOOKUP_LIMIT >= 5_000
     with pytest.raises(ValueError):
         comparison.compare_track_b_quote(None, ProductQuery(model_name="X"), quote_unit_price=None, limit=5_001)
+
+
+def test_lookup_reads_conditions_without_one_select_per_row(session: Session) -> None:
+    """UX v1.1 P2b: deferred condition columns used to cost 4 lazy SELECTs per row."""
+
+    items = []
+    for sequence in range(1, 31):
+        item = _item()
+        item["prdctSno"] = str(sequence)
+        items.append(item)
+    ingest_track_b_page(session, _page(items))
+    session.commit()
+    session.expunge_all()
+
+    selects = 0
+
+    def count_selects(_conn, _cursor, statement, _parameters, _context, _executemany) -> None:
+        nonlocal selects
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects += 1
+
+    event.listen(session.bind, "before_cursor_execute", count_selects)
+    try:
+        result = compare_track_b_quote(session, _query(), quote_unit_price=None, limit=500)
+    finally:
+        event.remove(session.bind, "before_cursor_execute", count_selects)
+
+    assert len(result.candidates) == 30
+    assert selects <= 2

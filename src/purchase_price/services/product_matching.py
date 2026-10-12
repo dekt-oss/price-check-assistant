@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import csv
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from time import monotonic
 
 from purchase_price.domain import MatchGrade
 from purchase_price.schemas import ProductQuery
@@ -82,9 +84,47 @@ class ModelAliasError(RuntimeError):
     pass
 
 
+# Runtime marker (UX v1.1 P2b): alias registries are read once per file, not once per call.
+# Grading 6,760 same-품목 trades used to open the two CSVs ~20,000 times (17 of 20 s).
+ALIAS_REGISTRY_CACHE_V1 = True
+# How long a cached registry is trusted before the file's size/mtime is checked again.
+ALIAS_RECHECK_SECONDS = 60.0
+_ALIAS_CACHE: dict[tuple[str, str], tuple[float, tuple[int, int], dict[str, str]]] = {}
+
+
+def _cached_registry(kind: str, path: Path, read: Callable[[Path], dict[str, str]]) -> dict[str, str]:
+    """The parsed registry for ``path``; re-read when its size or mtime changed. Callers must
+    treat the returned mapping as read-only (it is shared)."""
+
+    key = (kind, str(path))
+    now = monotonic()
+    cached = _ALIAS_CACHE.get(key)
+    if cached is not None and now - cached[0] < ALIAS_RECHECK_SECONDS:
+        return cached[2]
+    try:
+        stat = path.stat()
+        signature = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        signature = (-1, -1)
+    if cached is not None and cached[1] == signature:
+        _ALIAS_CACHE[key] = (now, signature, cached[2])
+        return cached[2]
+    registry = read(path)
+    _ALIAS_CACHE[key] = (now, signature, registry)
+    return registry
+
+
+def clear_alias_cache() -> None:
+    _ALIAS_CACHE.clear()
+
+
 def load_manufacturer_aliases(
     path: Path = DEFAULT_MANUFACTURER_ALIAS_PATH,
 ) -> dict[str, str]:
+    return _cached_registry("manufacturer", path, _read_manufacturer_aliases)
+
+
+def _read_manufacturer_aliases(path: Path) -> dict[str, str]:
     if not path.exists():
         raise ManufacturerAliasError(f"manufacturer alias registry not found: {path}")
 
@@ -123,6 +163,10 @@ def canonical_manufacturer(
 def load_model_aliases(
     path: Path = DEFAULT_MODEL_ALIAS_PATH,
 ) -> dict[str, str]:
+    return _cached_registry("model", path, _read_model_aliases)
+
+
+def _read_model_aliases(path: Path) -> dict[str, str]:
     if not path.exists():
         raise ModelAliasError(f"model alias registry not found: {path}")
 

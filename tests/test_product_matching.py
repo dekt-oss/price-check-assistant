@@ -464,3 +464,33 @@ def test_lenovo_thinkstation_p2_workstation_suffix_is_verified_model_alias() -> 
     assert decision.grade == MatchGrade.B
     assert decision.model_state == "verified_alias_with_verified_origin"
     assert decision.manufacturer_state == "exact_or_alias"
+
+
+def test_alias_registry_is_read_once_and_reread_when_the_file_changes(tmp_path, monkeypatch) -> None:
+    import os
+
+    from purchase_price.services import product_matching as pm
+
+    registry = tmp_path / "model_aliases.csv"
+    registry.write_text("canonical_model,alias\nDFM100,SJ-DFM100\n", encoding="utf-8")
+    reads = 0
+    original = pm._read_model_aliases
+
+    def counting(path):
+        nonlocal reads
+        reads += 1
+        return original(path)
+
+    monkeypatch.setattr(pm, "_read_model_aliases", counting)
+    pm.clear_alias_cache()
+    for _ in range(50):
+        assert pm.load_model_aliases(registry)["sjdfm100"] == "dfm100"
+    assert reads == 1
+
+    registry.write_text("canonical_model,alias\nDFM100,SJ-DFM100\nM40,M-40\n", encoding="utf-8")
+    stat = registry.stat()
+    os.utime(registry, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+    monkeypatch.setattr(pm, "ALIAS_RECHECK_SECONDS", 0.0)
+    assert pm.load_model_aliases(registry)["m40"] == "m40"
+    assert reads == 2
+    pm.clear_alias_cache()
