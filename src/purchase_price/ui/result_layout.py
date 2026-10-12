@@ -42,6 +42,10 @@ RESULT_LAYOUT_ENTRY_ERRORS_V1 = True
 RESULT_LAYOUT_SEARCH_FIXES_V1 = True
 # Runtime marker (2026-10-10): 누가 파는가 / 같은 품목의 다른 모델 stack below ~1200px.
 RESULT_LAYOUT_STACK_V1 = True
+# Runtime marker (UX v1.1 P1, 2026-10-12): 거래가 비교 결과 card reads services.price_metrics —
+# status pill, evidence level, difference in won, excluded-count note, latest 원문 links,
+# short-evidence category line, stale-data chip.
+RESULT_LAYOUT_COMPARISON_V1 = True
 
 RESULT_CSS = """
 <style>
@@ -96,6 +100,15 @@ RESULT_CSS = """
 .rl-headline em.rl-up {color:#B42318;}
 .rl-headline em.rl-down {color:#1D4ED8;}
 .rl-basis {font-size:12.5px; color:#5B6C82; line-height:1.6; word-break:keep-all;}
+.rl-status {display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin:0 0 10px 0;}
+.rl-status .pc-pill {font-size:12.5px; font-weight:800;}
+.rl-evidence {font-size:12px; color:#5B6C82; word-break:keep-all;}
+.rl-evidence b {color:var(--pc-navy);}
+.rl-diff {font-size:15px; font-weight:700; color:#5B6C82; white-space:nowrap;}
+.rl-sources {font-size:12px; color:#5B6C82; margin-top:8px; line-height:1.7; word-break:keep-all;}
+.rl-sources a {color:#1D4ED8; text-decoration:none; white-space:nowrap;}
+.rl-category-ref {font-size:12.5px; color:#5B6C82; background:#F4F6F9; border:1px dashed #C9D3DF;
+  border-radius:9px; padding:8px 12px; margin-top:10px; line-height:1.6; word-break:keep-all;}
 .rl-rail-wrap {position:relative; margin:24px 22px 4px 22px;}
 .rl-rail {position:relative; height:11px; border-radius:9px;
   background:linear-gradient(90deg,#E3EBF5 0%,#A9C3EE 50%,#E3EBF5 100%);}
@@ -436,6 +449,112 @@ class LeadView:
     basis: str
 
 
+# ── 거래가 비교 결과 (UX v1.1 P1): everything below reads services.price_metrics ──
+
+_STATUS_TONES = {
+    "in_range": TONE_OK,
+    "check": TONE_WARN,
+    "insufficient": TONE_MUTED,
+    "identity_needed": TONE_WARN,
+}
+
+
+def comparison_status_html(result: Any, *, quote_entered: bool) -> str:
+    """Status pill (one of four) and the evidence level with its reasons.
+
+    Without a typed quote there is nothing to compare, so the pill only shows when the data itself
+    is short (or the identity is unconfirmed); the evidence level always shows."""
+
+    from purchase_price.services.price_metrics import MIN_COMPARABLE_TRADES, STATUS_IDENTITY_NEEDED
+
+    comparison = result.comparison
+    summary = result.summary
+    parts: list[str] = []
+    if (
+        quote_entered
+        or comparison.status == STATUS_IDENTITY_NEEDED
+        or summary.priced_count < MIN_COMPARABLE_TRADES
+    ):
+        parts.append(pill_html(comparison.label, _STATUS_TONES.get(comparison.status, TONE_MUTED)))
+    evidence = result.evidence
+    reasons = " · ".join(evidence.reasons)
+    parts.append(
+        f'<span class="rl-evidence">근거 수준 <b>{esc(evidence.label)}</b>'
+        + (f" · {esc(reasons)}" if reasons else "")
+        + "</span>"
+    )
+    return f'<div class="rl-status rl-keep" id="purchase-comparison-status-v1">{"".join(parts)}</div>'
+
+
+def excluded_note(summary: Any) -> str:
+    """' (제외 3건: 입력 오류 의심 1 · 다른 단위 2(set))', or '' when every line entered the price."""
+
+    parts: list[str] = []
+    if summary.entry_error_count:
+        parts.append(f"입력 오류 의심 {summary.entry_error_count}")
+    if summary.other_unit_count:
+        units = "·".join(summary.other_units)
+        parts.append(f"다른 단위 {summary.other_unit_count}" + (f"({units})" if units else ""))
+    if summary.calculated_price_count:
+        parts.append(f"계산 단가 {summary.calculated_price_count}")
+    if not parts or summary.excluded_count <= 0:
+        return ""
+    return f" (제외 {summary.excluded_count}건: {' · '.join(parts)})"
+
+
+def difference_amount_html(quote: Decimal | None, median: Decimal | None) -> str:
+    """'(+120,000원)' next to the percentage; empty without both numbers."""
+
+    if quote is None or median is None or quote == median:
+        return ""
+    amount = quote - median
+    sign = "+" if amount > 0 else "−"
+    return f' <span class="rl-diff">({sign}{abs(amount):,.0f}원)</span>'
+
+
+RECENT_SOURCES_SHOWN = 3
+
+
+def recent_sources_html(rows: Sequence[Mapping[str, object]], *, unit: str | None = None) -> str:
+    """'최근 원문 · 2026-09-01 4,400,000원 · …' for the three latest priced trades with a 나라장터 link."""
+
+    from purchase_price.ui.result_summary import _g2b_url
+
+    linked: list[tuple[str, str, str]] = []
+    for row in rows:
+        url = _g2b_url(row.get("원천기록"))
+        price = _decimal(row.get("가격"))
+        when = str(row.get("거래일") or "").strip()
+        if url and price is not None and when and when != "미확인":
+            linked.append((when, _won(price), url))
+    if not linked:
+        return ""
+    linked.sort(key=lambda item: item[0], reverse=True)
+    per = _per(unit)
+    links = " · ".join(
+        f'<a href="{esc(url)}" target="_blank" rel="noopener">{esc(when)} {esc(per)}{esc(price)} ↗</a>'
+        for when, price, url in linked[:RECENT_SOURCES_SHOWN]
+    )
+    return f'<div class="rl-sources rl-keep" id="purchase-recent-sources-v1">최근 거래 원문 · {links}</div>'
+
+
+def category_reference_html(market: Any, *, priced_count: int) -> str:
+    """Grey line under a 1~2-trade conclusion: the same-품목 reference price, never as the answer."""
+
+    level = getattr(market, "level", None)
+    median = getattr(level, "median", None)
+    count = int(getattr(level, "count", 0) or 0)
+    if market is None or median is None or count == 0 or priced_count <= 0:
+        return ""
+    unit = getattr(level, "unit", None)
+    return (
+        '<div class="rl-category-ref rl-keep" id="purchase-category-reference-v1">'
+        "이 모델의 직접 비교 거래가 부족합니다. 같은 품목의 다른 모델을 포함한 참고 시세는 "
+        f"{esc(_per(unit))}가운데 값 <b>{esc(_won(median))}</b>(장비 구매 {count:,}건)입니다. "
+        "같은 제품의 가격이 아니니 아래 '같은 품목' 표에서 모델과 구성을 확인하세요.</div>"
+    )
+
+
 def _delta_html(quote: Decimal, base: Decimal) -> str:
     """'9.1% 낮습니다' with thousands separators, or 'N배 넘게 높습니다' far above the price."""
 
@@ -455,8 +574,12 @@ def lead_view(
     unit: str | None,
     warn_count: int = 0,
     unavailable: bool = False,
+    excluded_text: str | None = None,
 ) -> LeadView:
-    """Eyebrow, one headline (the quote position when a quote is entered) and one basis line."""
+    """Eyebrow, one headline (the quote position when a quote is entered) and one basis line.
+
+    ``excluded_text`` (from ``excluded_note`` over the price contract) replaces the older
+    entry-error-only note when given."""
 
     direct = int(getattr(stats, "direct_count", 0) or 0)
     low = getattr(stats, "min_price", None)
@@ -464,8 +587,9 @@ def lead_view(
     mid = getattr(stats, "median_price", None)
     latest = getattr(stats, "latest_transaction_date", None)
     quote = quote if quote is not None and quote > 0 else None
-    excluded = int(getattr(stats, "entry_error_count", 0) or 0)
-    excluded_text = f" (입력 오류 의심 {excluded}건 제외)" if excluded else ""
+    if excluded_text is None:
+        excluded = int(getattr(stats, "entry_error_count", 0) or 0)
+        excluded_text = f" (입력 오류 의심 {excluded}건 제외)" if excluded else ""
     eyebrow = "나라장터 같은 제품 거래 비교"
     tone = TONE_OK
     if warn_count:
@@ -493,6 +617,7 @@ def lead_view(
     if direct >= 3 and low != high and mid is not None:
         headline = (
             f"내 견적가 {quote_text}은 {esc(_per(unit))}거래 가운데 값보다 {_delta_html(quote, mid)}."
+            + difference_amount_html(quote, mid)
         )
         basis = f"{scope} {direct}건 기준{excluded_text} · 가운데 값 {_won(mid)}{latest_text}"
     elif direct == 2 and low != high:
@@ -599,18 +724,27 @@ def price_points_html(stats: Any, *, quote: Decimal | None, unit: str | None) ->
     return f'<div class="rl-points rl-keep" id="purchase-price-band-v1">{cells}</div>'
 
 
-def lead_row_html(lead: LeadView, *, price_html: str, panel_html: str, foot_html: str = "") -> str:
-    """Conclusion card (eyebrow, headline, basis, rail, then the basis chips at the bottom) and
-    the check panel, inside a width-aware wrapper so they stack when the column is narrow."""
+def lead_row_html(
+    lead: LeadView,
+    *,
+    price_html: str,
+    panel_html: str,
+    foot_html: str = "",
+    status_html: str = "",
+    after_price_html: str = "",
+) -> str:
+    """Conclusion card (eyebrow, status, headline, basis, rail, then the basis chips at the bottom)
+    and the check panel, inside a width-aware wrapper so they stack when the column is narrow."""
 
     eyebrow_class = {TONE_WARN: " rl-warn", TONE_MUTED: " rl-muted"}.get(lead.eyebrow_tone, "")
     basis = f'<div class="rl-basis">{esc(lead.basis)}</div>' if lead.basis else ""
     return (
         '<div class="rl-cq rl-keep"><div class="rl-lead rl-keep">'
         '<div class="pc-card" id="purchase-conclusion-v1">'
-        f'<div class="rl-eyebrow{eyebrow_class}">{esc(lead.eyebrow)}</div>'
+        f'<div class="rl-eyebrow{eyebrow_class}">{esc(lead.eyebrow)}</div>{status_html}'
         f'<div class="rl-headline">{lead.headline_html}</div>{basis}'
         + (f'<div class="rl-price">{price_html}</div>' if price_html else "")
+        + after_price_html
         + (f'<div class="rl-foot">{foot_html}</div>' if foot_html else "")
         + "</div>"
         f"{panel_html}</div></div>"
@@ -814,8 +948,10 @@ def basis_chip(
     live_failed: bool = False,
     mfds_coverage_percent: float | None = None,
     mfds_complete: bool = False,
+    stale: bool = False,
 ) -> Chip | None:
-    """A live-check failure is said as a failure, never as '0건'."""
+    """A live-check failure is said as a failure, never as '0건'. ``stale`` (data older than the
+    contract's DATA_AS_OF_STALE_DAYS with no live check) turns the chip amber."""
 
     if track_b_data_as_of:
         text = f"나라장터 {track_b_data_as_of} 수집분"
@@ -824,6 +960,9 @@ def basis_chip(
             text += f" + {live_checked_until}까지 실시간 확인"
         elif live_failed:
             text += " · 최근 며칠 실시간 확인 실패(빠진 거래가 있을 수 있음)"
+            tone = TONE_WARN
+        if stale and not live_checked_until:
+            text += " · 자료가 3일 넘게 갱신되지 않음"
             tone = TONE_WARN
     elif index_updated_at:
         text, tone = f"나라장터 자료 갱신 {index_updated_at}", TONE_MUTED
