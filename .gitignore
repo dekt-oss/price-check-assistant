@@ -25,3 +25,4 @@ artifacts/
 .idea/
 .DS_Store
 Thumbs.db
+.worktrees/
