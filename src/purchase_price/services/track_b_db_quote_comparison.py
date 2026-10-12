@@ -5,10 +5,11 @@ import json
 import re
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import and_, exists, inspect, or_, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, undefer
 
 from purchase_price.domain import MatchGrade
 from purchase_price.evidence_domain import PriceEvidenceStatus, UnitPriceBasis
@@ -406,6 +407,10 @@ _CONDITION_COLUMNS = {
 _BUSINESS_NAME_COLUMN = "business_name"
 # Runtime marker: pages/1_대시보드.py reloads a retained pre-#329 copy that lacks it.
 SEARCH_INDEX_V1 = True
+# Runtime marker (UX v1.1 P2b): the lookup reads the optional condition columns in its one SELECT
+# (they are deferred on the model, so each row used to fire 4 more SELECTs) and grades each
+# distinct 품명 once per lookup.
+LOOKUP_NO_LAZY_LOADS_V1 = True
 
 
 def _condition_columns_available(session: Session) -> frozenset[str]:
@@ -503,6 +508,7 @@ def _candidate_from_row(
     quote_unit_price: Decimal | None,
     include_conditions: bool,
     condition_columns_available: bool | frozenset[str] = False,
+    grade_cache: dict[str, tuple[Any, Any]] | None = None,
 ) -> TrackBQuoteCandidate | None:
     if row.product_title is None:
         return None
@@ -510,8 +516,13 @@ def _candidate_from_row(
     if price is None:
         return None
 
-    identity = parse_g2b_identity(row.product_title)
-    decision = grade_product_identity(query, identity)
+    cached = grade_cache.get(row.product_title) if grade_cache is not None else None
+    if cached is None:
+        identity = parse_g2b_identity(row.product_title)
+        cached = (identity, grade_product_identity(query, identity))
+        if grade_cache is not None:
+            grade_cache[row.product_title] = cached
+    identity, decision = cached
     effective_grade = decision.grade
     effective_note = decision.note
     if effective_grade == MatchGrade.A and unit_price_basis == UnitPriceBasis.CALCULATED_UNIT_PRICE:
@@ -748,8 +759,16 @@ def compare_track_b_quote(
         if model_keys
         else TrackBDeliveryLine.class_key == class_key
     )
+    condition_columns_available = _condition_columns_available(session)
+    # Deferred on the model so an older index without them still loads; read the ones this index
+    # has in the same SELECT instead of one lazy SELECT per row and column.
+    eager = [
+        undefer(getattr(TrackBDeliveryLine, name))
+        for name in sorted(condition_columns_available)
+    ]
     rows = session.scalars(
         select(TrackBDeliveryLine)
+        .options(*eager)
         .where(
             current,
             identity_filter,
@@ -759,8 +778,8 @@ def compare_track_b_quote(
         .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
         .limit(limit + 1)
     ).all()
-    condition_columns_available = _condition_columns_available(session)
     candidates: list[TrackBQuoteCandidate] = []
+    grade_cache: dict[str, tuple[Any, Any]] = {}
     for row in rows[:limit]:
         candidate = _candidate_from_row(
             row,
@@ -768,6 +787,7 @@ def compare_track_b_quote(
             quote_unit_price=quote_unit_price,
             include_conditions=True,
             condition_columns_available=condition_columns_available,
+            grade_cache=grade_cache,
         )
         if candidate is not None:
             candidates.append(candidate)

@@ -200,6 +200,8 @@ _TRACK_B_RUNTIME_MARKERS = (
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
     (track_b_transactions_ui, "AMOUNT_CHECK_WORDS"),
     (same_item_ui, "ITEM_STATUS_AWARE"),
+    # UX v1.1 P2b: one SELECT per lookup (no per-row lazy loads), grading cached per 품명.
+    (track_b_comparison_service, "LOOKUP_NO_LAZY_LOADS_V1"),
 )
 
 
