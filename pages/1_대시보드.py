@@ -249,6 +249,8 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.price_trend", "PRICE_TREND_UI_V1"),
     ("purchase_price.services.category_market", "CATEGORY_MARKET_TOP_MODELS_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_TOP_MODELS_V1"),
+    # UX v1.1 P2b: alias registries cached per file (grading read the CSVs once per row).
+    ("purchase_price.services.product_matching", "ALIAS_REGISTRY_CACHE_V1"),
 )
 
 
@@ -2120,6 +2122,7 @@ def _execute_search(
                     query = model_probe_query
                     model_probe_used = True
 
+        search_timings["track_b_lookup"] = round(monotonic() - track_b_started, 3)
         live_detail_codes: tuple[str, ...] = ()
         if getattr(track_b_snapshot, "session", None) is not None and (query.model_name or "").strip():
             try:
@@ -2163,12 +2166,14 @@ def _execute_search(
             if matched:
                 indexed_identity = MfdsIdentityLookup("success", raw_search or query.model_name or "", "model", matched)
         model_stats: dict[str, Any] = {}
+        same_item_started = monotonic()
         mfds_procurement_crosslinks = _build_mfds_procurement_crosslinks(
             same_product_identity,
             track_b_snapshot=track_b_snapshot,
             current_model=query.model_name or "",
             stats_out=model_stats,
         )
+        search_timings["same_item_models"] = round(monotonic() - same_item_started, 3)
         stage("category_market")
         category_started = monotonic()
         category_market = (
@@ -2397,6 +2402,8 @@ SEARCH_TIMING_KEYS_V2 = (
     "cold",
     "identity",
     "track_b",
+    "track_b_lookup",
+    "same_item_models",
     "category_market",
     "track_b_live",
     "mfds",
