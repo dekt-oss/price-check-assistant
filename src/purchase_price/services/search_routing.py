@@ -108,6 +108,25 @@ def _alias_group(key: str) -> tuple[str, ...] | None:
     return None
 
 
+# Runtime marker (UX v1.1 P2b): model-code-like words skip the company-name probe.
+MODEL_CODE_SKIP_V1 = True
+_MODEL_CODE_MIN_LENGTH = 6
+
+
+def looks_like_model_code(text: object) -> bool:
+    """'NT960XJG-K72AG', 'PNB-704', 'M40-1234': Latin letters with 2+ digits, 6+ characters after
+    normalising, no Hangul. Such a word with no same-model trade and no 식약처 identity is not a
+    company name, so the slow 납품업체 substring scan is skipped (P2b, ~6-12 s per search)."""
+
+    raw = str(text or "")
+    if re.search(r"[가-힣]", raw):
+        return False
+    key = normalize_text(raw)
+    if len(key) < _MODEL_CODE_MIN_LENGTH or not re.fullmatch(r"[a-z0-9]+", key):
+        return False
+    return len(re.findall(r"\d", key)) >= 2 and len(re.findall(r"[a-z]", key)) >= 2
+
+
 def company_search_needles(text: object) -> tuple[str, ...]:
     """Normalised names to look for inside registered company and supplier names.
 
