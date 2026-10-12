@@ -1,0 +1,140 @@
+{
+ "name": "many_single_unit",
+ "today": "2026-10-12",
+ "description": "거래 다수·단일 단위 (PNB-704 생물안전작업대 모양). 2023-05-10 거래는 최근 3년 밖.",
+ "quote_unit_price": "12000000",
+ "trades": [
+  {
+   "record_id": "delivery:R0001|change:0|line:1",
+   "unit_price": "10500000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "10500000",
+   "trade_date": "2026-08-20",
+   "institution": "서울대학교병원",
+   "supplier": "씨에이치씨랩",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0002|change:0|line:1",
+   "unit_price": "10500000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "10500000",
+   "trade_date": "2026-06-11",
+   "institution": "경북대학교병원",
+   "supplier": "씨에이치씨랩",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0003|change:0|line:1",
+   "unit_price": "11880000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "11880000",
+   "trade_date": "2026-03-05",
+   "institution": "부산대학교병원",
+   "supplier": "한국과학",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0004|change:0|line:1",
+   "unit_price": "11880000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "11880000",
+   "trade_date": "2025-12-02",
+   "institution": "충남대학교병원",
+   "supplier": "한국과학",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0005|change:0|line:1",
+   "unit_price": "11880000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "11880000",
+   "trade_date": "2025-10-15",
+   "institution": "서울대학교병원",
+   "supplier": "씨에이치씨랩",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0006|change:0|line:1",
+   "unit_price": "10692000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "10692000",
+   "trade_date": "2025-07-01",
+   "institution": "전남대학교병원",
+   "supplier": "바이오랩",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0007|change:0|line:1",
+   "unit_price": "11880000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "11880000",
+   "trade_date": "2025-05-20",
+   "institution": "경북대학교병원",
+   "supplier": "한국과학",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0008|change:0|line:1",
+   "unit_price": "11880000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "11880000",
+   "trade_date": "2025-02-14",
+   "institution": "부산대학교병원",
+   "supplier": "씨에이치씨랩",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0009|change:0|line:1",
+   "unit_price": "11880000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "11880000",
+   "trade_date": "2024-11-30",
+   "institution": "충남대학교병원",
+   "supplier": "바이오랩",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0010|change:0|line:1",
+   "unit_price": "11880000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "11880000",
+   "trade_date": "2024-06-03",
+   "institution": "서울대학교병원",
+   "supplier": "한국과학",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0011|change:0|line:1",
+   "unit_price": "11880000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "11880000",
+   "trade_date": "2024-01-22",
+   "institution": "전남대학교병원",
+   "supplier": "씨에이치씨랩",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0012|change:0|line:1",
+   "unit_price": "11880000",
+   "unit": "대",
+   "quantity": "1",
+   "total_amount": "11880000",
+   "trade_date": "2023-05-10",
+   "institution": "부산대학교병원",
+   "supplier": "한국과학",
+   "grade": "A"
+  }
+ ]
+}

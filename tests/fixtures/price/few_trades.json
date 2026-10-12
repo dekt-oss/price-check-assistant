@@ -1,0 +1,30 @@
+{
+ "name": "few_trades",
+ "today": "2026-10-12",
+ "description": "거래 2건 (Efficia DFM100 모양).",
+ "quote_unit_price": "12000000",
+ "trades": [
+  {
+   "record_id": "delivery:R0001|change:0|line:1",
+   "unit_price": "13200000",
+   "unit": "식",
+   "quantity": "1",
+   "total_amount": "13200000",
+   "trade_date": "2025-04-01",
+   "institution": "강원대학교병원",
+   "supplier": "필립스코리아대리점",
+   "grade": "A"
+  },
+  {
+   "record_id": "delivery:R0002|change:0|line:1",
+   "unit_price": "12900000",
+   "unit": "식",
+   "quantity": "1",
+   "total_amount": "12900000",
+   "trade_date": "2023-12-01",
+   "institution": "제주대학교병원",
+   "supplier": "메디칼유통",
+   "grade": "A"
+  }
+ ]
+}

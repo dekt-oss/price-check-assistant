@@ -4,7 +4,7 @@ import dataclasses
 import importlib
 import sqlite3
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
@@ -33,6 +33,7 @@ from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_item_status_r2 as mfds_item_status_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services import price_entry_check as price_entry_check_service
+from purchase_price.services import price_metrics as price_metrics_service
 from purchase_price.services import search_routing
 from purchase_price.services import track_b_db_quote_comparison as track_b_comparison_service
 from purchase_price.services import track_b_live_gap_fill as track_b_live_service
@@ -148,6 +149,7 @@ from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 from purchase_price.ui.theme import notice_html, page_header_html
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
+    grade_ab_candidates,
     has_transaction_candidates,
     strict_comparison_candidates,
     transaction_rows,
@@ -232,6 +234,12 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_SEARCH_FIXES_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_RECENT_GROUPED_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_NARROW_V1"),
+    # UX v1.1 P1: every same-model number comes from the price contract (price_metrics first,
+    # then the modules that read it).
+    ("purchase_price.services.price_metrics", "PRICE_METRICS_V1"),
+    ("purchase_price.services.market_survey_export", "MARKET_SURVEY_PRICE_CONTRACT_V1"),
+    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_PRICE_CONTRACT_V1"),
+    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_COMPARISON_V1"),
 )
 
 
@@ -302,11 +310,50 @@ def _wait_for_index_warmup() -> None:
         return
 
 
+# Hidden-marker timing (UX v1.1 P2a): how long the last search waited for the start-up index
+# download, and whether the indexes were still coming down when it started (a cold search).
+_WARMUP_TIMING_KEY = "_price_search_warmup_timing"
+
+# Stage labels shown in the search status box while _execute_search runs (P2a).
+SEARCH_STAGE_LABELS = {
+    "identity": "1/4 제품 확인 중 · 식약처 허가정보",
+    "track_b": "2/4 같은 제품 거래 찾는 중 · 나라장터",
+    "category_market": "3/4 같은 품목 참고 시세 계산 중",
+    "track_b_live": "3/4 최근 며칠 거래 실시간 확인 중 · 나라장터",
+    "safety": "4/4 회수·판매중지 확인 중 · 식약처",
+}
+
+
 @contextmanager
 def _search_status(label: str):
+    cold = False
+    try:
+        cold = bool(index_prefetch_service.indexes_warming())
+    except Exception:
+        cold = False
+    waited_from = monotonic()
     _wait_for_index_warmup()
+    st.session_state[_WARMUP_TIMING_KEY] = {
+        "warmup_wait": round(monotonic() - waited_from, 3),
+        "cold": 1.0 if cold else 0.0,
+    }
     with st.status(label, expanded=False) as status:
         yield status
+
+
+def _stage_reporter(status: Any) -> Callable[[str], None]:
+    """status.update(label=...) for each search stage; never lets a UI error stop the search."""
+
+    def report(stage: str) -> None:
+        label = SEARCH_STAGE_LABELS.get(stage)
+        if not label:
+            return
+        try:
+            status.update(label=label)
+        except Exception:
+            pass
+
+    return report
 
 
 def _lookup_mfds_identity_runtime(query: str):
@@ -1795,6 +1842,7 @@ def _render_identity_candidate_selection(state: dict[str, Any]) -> None:
         selected = candidates[int(selected_index)]
         with _search_status("고른 제품의 거래가와 허가정보를 찾고 있습니다...") as status:
             resolved = _execute_search(
+                progress=_stage_reporter(status),
                 search_text=state.get("search_text") or selected.model_name or "",
                 product_name=selected.product_name or "",
                 manufacturer="",
@@ -1872,12 +1920,25 @@ def _execute_search(
     selected_identity: MfdsIdentityRecord | None = None,
     selected_identity_token: str = "",
     prefer_traded_company: bool = True,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
+    def stage(name: str) -> None:
+        if progress is not None:
+            progress(name)
+
     snapshot_runtime, live_runtime = _track_b_runtime()
     merge_live_gap = live_runtime.merge_live_gap
     raw_search = search_text.strip()
     search_started = monotonic()
     search_timings: dict[str, float] = {}
+    warmup = st.session_state.get(_WARMUP_TIMING_KEY)
+    if isinstance(warmup, dict):
+        for key in ("warmup_wait", "cold"):
+            try:
+                search_timings[key] = float(warmup.get(key, 0.0))
+            except (TypeError, ValueError):
+                continue
+    stage("identity")
     if selected_identity is None:
         (
             product_name,
@@ -2014,6 +2075,7 @@ def _execute_search(
 
     search_timings["identity"] = round(monotonic() - search_started, 3)
 
+    stage("track_b")
     model_probe_used = False
     track_b_started = monotonic()
     track_b_data_as_of: str | None = None
@@ -2098,6 +2160,7 @@ def _execute_search(
             current_model=query.model_name or "",
             stats_out=model_stats,
         )
+        stage("category_market")
         category_started = monotonic()
         category_market = (
             _build_category_market(
@@ -2160,6 +2223,7 @@ def _execute_search(
                 "track_b_data_as_of": track_b_data_as_of,
             }
 
+    stage("track_b_live")
     live_started = monotonic()
     track_b_live = _track_b_live_gap_fill(
         query,
@@ -2202,6 +2266,7 @@ def _execute_search(
         )
     search_timings["mfds"] = round(monotonic() - mfds_started, 3)
 
+    stage("safety")
     safety_started = monotonic()
     safety_lookup = _lookup_mfds_recall_isolated(
         model_name=query.model_name,
@@ -2318,6 +2383,19 @@ def _money_text(value: Decimal | None) -> str:
     return f"{value:,.0f}원" if value is not None else "근거 없음"
 
 
+SEARCH_TIMING_KEYS_V2 = (
+    "warmup_wait",
+    "cold",
+    "identity",
+    "track_b",
+    "category_market",
+    "track_b_live",
+    "mfds",
+    "safety",
+    "total",
+)
+
+
 def _render_diagnostic_markers(state: dict[str, Any]) -> None:
     """Hidden spans the production smoke reads; they never show on screen."""
 
@@ -2332,6 +2410,19 @@ def _render_diagnostic_markers(state: dict[str, Any]) -> None:
         st.markdown(
             '<span id="purchase-search-timings-v1" '
             + " ".join(timing_attrs)
+            + ' style="display:none"></span>',
+            unsafe_allow_html=True,
+        )
+        # v2 (UX v1.1 P2a): every stage, the start-up wait and whether the search started cold.
+        v2_attrs: list[str] = []
+        for key in SEARCH_TIMING_KEYS_V2:
+            try:
+                v2_attrs.append(f'data-{key.replace("_", "-")}="{float(timings.get(key, 0.0)):.3f}"')
+            except (TypeError, ValueError):
+                continue
+        st.markdown(
+            '<span id="purchase-search-timings-v2" '
+            + " ".join(v2_attrs)
             + ' style="display:none"></span>',
             unsafe_allow_html=True,
         )
@@ -2466,6 +2557,7 @@ def _open_quote_item(quote_state: QuoteReviewState, index: int, file_name: str) 
     try:
         with _search_status(f"{index + 1}번 품목을 조사하고 있습니다...") as status:
             result = _execute_search(
+                progress=_stage_reporter(status),
                 search_text=(item.model_name or item.product_name or ""),
                 product_name="",
                 manufacturer="",
@@ -3201,6 +3293,7 @@ def _result_identity_fields(
 
 
 def _render_search_result(state: dict[str, Any]) -> None:
+    render_started = monotonic()
     heading = state["heading"]
     review_input = state["review_input"]
     query = state["query"]
@@ -3597,6 +3690,26 @@ def _render_search_result(state: dict[str, Any]) -> None:
         if live_note and getattr(live, "truncated_window", False):
             live_note += " (최근 62일만 조회)"
 
+    # ── 거래가 비교 결과 (UX v1.1 P1): the price contract over this period's same-model lines ──
+    contract_today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    # Same model is already settled by the A/B grade; the level drops only when the model name
+    # has several 식약처 registrations (ambiguous identity).
+    identity_exact = not (
+        (identity_known and mfds_identity_status(indexed_identity) == IdentityEvidenceStatus.AMBIGUOUS)
+        or (isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_ambiguous)
+    )
+    price_result = price_metrics_service.build_price_result(
+        [price_metrics_service.PriceTrade.from_candidate(c) for c in grade_ab_candidates(track_b)],
+        quote_unit_price=workspace_quote,
+        identity_confirmed=True,
+        identity_exact=identity_exact,
+        period_label=period_choice.label,
+        cutoff=None,  # track_b is already limited to the chosen period
+        preferred_unit=all_period_unit,
+        data_as_of=live_checked_until or track_b_data_as_of,
+        today=contract_today,
+    )
+
     # ── 결론 줄: 왼쪽 결론 카드 + 가격 막대, 오른쪽 "최종 판단 전에 확인하세요" ──
     median_price = stats.median_price
     main_unit_id = result_summary_ui.unit_key(unit_split.main_unit)
@@ -3631,6 +3744,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         unit=unit_split.main_unit,
         warn_count=sum(1 for point in points if point.tone in {"warn", "danger"}),
         unavailable=track_b_unavailable,
+        excluded_text=result_layout_ui.excluded_note(price_result.summary),
     )
     if market_main and category_market is not None:
         # No same-model trade: the conclusion points straight at the category market below it.
@@ -3670,16 +3784,38 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 live_failed=live_failed,
                 mfds_coverage_percent=mfds_coverage,
                 mfds_complete=mfds_complete,
+                stale=price_result.data_as_of_stale,
             ),
         ]
     )
+    after_price_html = ""
+    if not track_b_unavailable:
+        after_price_html = result_layout_ui.recent_sources_html(comparison_rows, unit=unit_split.main_unit)
+        if price_result.show_category_in_conclusion and not market_main and category_market is not None:
+            after_price_html += result_layout_ui.category_reference_html(
+                category_market, priced_count=price_result.summary.priced_count
+            )
     st.markdown(
         result_layout_ui.lead_row_html(
             lead,
             price_html=price_html,
             panel_html=result_layout_ui.check_panel_html(points),
             foot_html=chip_row,
+            status_html=(
+                ""
+                if track_b_unavailable
+                else result_layout_ui.comparison_status_html(
+                    price_result, quote_entered=workspace_quote is not None
+                )
+            ),
+            after_price_html=after_price_html,
         ),
+        unsafe_allow_html=True,
+    )
+    # P2a: seconds from the start of this render to the conclusion card (hidden, for timing runs).
+    st.markdown(
+        f'<span id="purchase-render-timings-v1" data-card="{monotonic() - render_started:.3f}" '
+        'style="display:none"></span>',
         unsafe_allow_html=True,
     )
 
@@ -3836,6 +3972,13 @@ def _render_search_result(state: dict[str, Any]) -> None:
         supplier_rows=supplier_rows(track_b),
         identity_rows=export_identity_rows,
         data_as_of=track_b_data_as_of,
+        price_result=price_result,
+        direct_row_basis=[
+            "포함"
+            if result_summary_ui.unit_key(row.get("단위")) in {"", main_unit_id}
+            else "제외 (다른 단위)"
+            for row in direct_rows
+        ],
     )
     safe_export_name = "".join(
         character if character.isalnum() or character in {"-", "_"} else "_"
@@ -4199,6 +4342,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v15" style="display:none">purchase-workspace-runtime-v15</span>'
     '<span id="purchase-workspace-runtime-v16" style="display:none">purchase-workspace-runtime-v16</span>'
     '<span id="purchase-workspace-runtime-v21" style="display:none">purchase-workspace-runtime-v21</span>'
+    '<span id="purchase-workspace-runtime-v22" style="display:none">purchase-workspace-runtime-v22</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
@@ -4306,6 +4450,7 @@ if handoff is not None:
     try:
         with _search_status("견적서 품목의 거래가·허가정보를 찾고 있습니다...") as status:
             search_state = _execute_search(
+                progress=_stage_reporter(status),
                 search_text=(handoff.model_name or handoff.product_name),
                 product_name="",
                 manufacturer="",
@@ -4341,6 +4486,7 @@ if not isinstance(search_state, dict) and shared_query and handoff is None:
     try:
         with _search_status("공유된 검색을 다시 불러오고 있습니다...") as status:
             search_state = _execute_search(
+                progress=_stage_reporter(status),
                 search_text=shared_query,
                 product_name="",
                 manufacturer="",
@@ -4502,6 +4648,7 @@ if submitted:
     try:
         with _search_status("거래가와 허가정보를 찾고 있습니다...") as status:
             search_state = _execute_search(
+                progress=_stage_reporter(status),
                 search_text=search_text,
                 product_name=product_name,
                 manufacturer=manufacturer,

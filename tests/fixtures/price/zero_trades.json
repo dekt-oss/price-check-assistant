@@ -1,0 +1,7 @@
+{
+ "name": "zero_trades",
+ "today": "2026-10-12",
+ "description": "같은 제품 거래 0건.",
+ "quote_unit_price": "5000000",
+ "trades": []
+}

@@ -17,10 +17,10 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
-from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from purchase_price.services import price_metrics
 from purchase_price.services.safety_support import SafetyCheckStatus
 from purchase_price.ui import result_summary
 from purchase_price.ui.theme import TONE_MUTED, TONE_OK, TONE_WARN, pill_html
@@ -40,15 +40,18 @@ QUOTE_REVIEW_IDENTITY_V1 = True
 QUOTE_REVIEW_ENTRY_ERRORS_V1 = True
 # Summary-card sub lines wrap instead of ending in "…" (2026-10-10).
 QUOTE_REVIEW_CARD_WRAP_V1 = True
+# Runtime marker: same-product numbers and the verdict status come from services/price_metrics
+# (UX v1.1 P1); the 판정 words are the contract's labels.
+QUOTE_REVIEW_PRICE_CONTRACT_V1 = True
 
 # A quote this many percent above the median of same-product trades is flagged for a check.
 QUOTE_CHECK_THRESHOLD_PERCENT = Decimal("20")
 # Below this many same-product trades the median is too thin to judge a quote against.
 MIN_COMPARABLE_TRADES = 3
 
-VERDICT_IN_RANGE = "거래 범위 안"
-VERDICT_CHECK = "확인 필요"
-VERDICT_INSUFFICIENT = "판단 부족"
+VERDICT_IN_RANGE = price_metrics.STATUS_LABELS[price_metrics.STATUS_IN_RANGE]
+VERDICT_CHECK = price_metrics.STATUS_LABELS[price_metrics.STATUS_CHECK]
+VERDICT_INSUFFICIENT = price_metrics.STATUS_LABELS[price_metrics.STATUS_INSUFFICIENT]
 VERDICT_ORDER = (VERDICT_CHECK, VERDICT_INSUFFICIENT, VERDICT_IN_RANGE)
 VERDICT_TONES = {
     VERDICT_CHECK: TONE_WARN,
@@ -89,7 +92,32 @@ class QuoteVerdict:
 
 
 def percent_difference(quote: Decimal, base: Decimal) -> Decimal:
-    return ((quote - base) / base * 100).quantize(Decimal("0.1"))
+    return price_metrics.percent_difference(quote, base)
+
+
+def _verdict_summary(median_price: Decimal | None, comparable_count: int) -> price_metrics.SameModelSummary:
+    """The two numbers the status rule reads, as a contract summary."""
+
+    return price_metrics.SameModelSummary(
+        cutoff=None,
+        main_unit=None,
+        unit_changed=False,
+        confirmed_count=comparable_count,
+        priced_count=max(comparable_count, 0),
+        entry_error_count=0,
+        other_unit_count=0,
+        other_units=(),
+        calculated_price_count=0,
+        median=median_price,
+        low=None,
+        high=None,
+        total_quantity=None,
+        first_date="",
+        latest_date="",
+        institution_count=0,
+        supplier_count=0,
+        outlier_count=0,
+    )
 
 
 def quote_verdict(
@@ -100,24 +128,29 @@ def quote_verdict(
     threshold: Decimal = QUOTE_CHECK_THRESHOLD_PERCENT,
     min_trades: int = MIN_COMPARABLE_TRADES,
 ) -> QuoteVerdict:
-    """판단 부족 below ``min_trades`` trades, 확인 필요 above the median by more than ``threshold`` %."""
+    """Status from ``price_metrics.compare_quote``: 비교 근거 부족 below ``min_trades`` trades,
+    확인 필요 above the median by more than ``threshold`` %, otherwise 거래 범위 안 (조건 미확인)."""
 
-    if comparable_count < min_trades or median_price is None or median_price <= 0:
+    comparison = price_metrics.compare_quote(
+        quote_unit_price,
+        _verdict_summary(median_price, comparable_count),
+        threshold=threshold,
+        min_priced=min_trades,
+    )
+    if comparison.status == price_metrics.STATUS_INSUFFICIENT:
         if comparable_count <= 0:
             reason = "같은 제품으로 확인된 나라장터 거래가 없어 비교하지 않았습니다."
-        else:
+        elif comparable_count < min_trades or median_price is None or median_price <= 0:
             reason = (
-                f"같은 제품 거래가 {comparable_count}건뿐이라 가운데 값으로 판단하기에는 부족합니다."
+                f"같은 제품 거래가 {comparable_count}건뿐이라 가운데 값으로 비교하기에는 부족합니다."
             )
+        else:
+            reason = "견적서에서 단가를 읽지 못해 거래 가격과 비교하지 않았습니다."
         return QuoteVerdict(VERDICT_INSUFFICIENT, VERDICT_INSUFFICIENT, reason)
-    if quote_unit_price is None or quote_unit_price <= 0:
-        return QuoteVerdict(
-            VERDICT_INSUFFICIENT,
-            VERDICT_INSUFFICIENT,
-            "견적서에서 단가를 읽지 못해 거래 가격과 비교하지 않았습니다.",
-        )
-    delta = percent_difference(quote_unit_price, median_price)
-    if delta > threshold:
+    delta = comparison.difference_percent
+    if delta is None:  # compare_quote only returns CHECK/IN_RANGE with a percent
+        return QuoteVerdict(VERDICT_INSUFFICIENT, VERDICT_INSUFFICIENT, comparison.reason)
+    if comparison.status == price_metrics.STATUS_CHECK:
         return QuoteVerdict(
             VERDICT_CHECK,
             f"{VERDICT_CHECK} (가운데 값보다 {delta:.1f}% 높음)",
@@ -131,7 +164,7 @@ def quote_verdict(
     return QuoteVerdict(
         VERDICT_IN_RANGE,
         VERDICT_IN_RANGE,
-        f"견적 단가가 같은 제품 거래 {comparable_count}건의 {where}",
+        f"견적 단가가 같은 제품 거래 {comparable_count}건의 {where} VAT·설치·옵션 조건이 같은지는 확인하지 않았습니다.",
     )
 
 
@@ -289,7 +322,8 @@ def _check_points(
 
 @dataclass(frozen=True)
 class TradeStats:
-    """The trades one item is judged on: default period, same-product (A/B) rows, main unit only.
+    """The trades one item is judged on: default period, same-product (A/B) rows, main unit only,
+    computed by ``price_metrics.summarize_same_model``.
 
     Every place on this page that shows a trade count or price range reads it from here, so the
     table, the card and the folded status lists never disagree.
@@ -301,6 +335,8 @@ class TradeStats:
     prices: tuple[Decimal, ...]
     reference_count: int
     entry_error_count: int = 0
+    # The contract summary these numbers come from (None only for hand-built stats in tests).
+    summary: price_metrics.SameModelSummary | None = None
 
     @property
     def count(self) -> int:
@@ -308,7 +344,7 @@ class TradeStats:
 
     @property
     def median(self) -> Decimal | None:
-        return Decimal(str(median(self.prices))) if self.prices else None
+        return price_metrics.median(self.prices)
 
     @property
     def low(self) -> Decimal | None:
@@ -345,27 +381,27 @@ def comparable_trade_stats(track_b: Any, *, today: date | None = None) -> TradeS
         user_chose=False,
         today=today,
     )
+    # The unit chosen over every period wins whenever this period has a trade in it (same as the
+    # result screen), so 최근 3년 / 5년 / 전체 compare one unit.
+    trades = [price_metrics.PriceTrade.from_candidate(candidate) for candidate in direct]
+    summary = price_metrics.summarize_same_model(
+        trades, cutoff=choice.cutoff, preferred_unit=price_metrics.main_unit(trades)
+    )
     direct = result_summary.filter_candidates(direct, choice.cutoff)
     references = result_summary.filter_candidates(references, choice.cutoff)
-    split = result_summary.split_by_main_unit(direct)
+    split = result_summary.split_by_main_unit(direct, preferred=summary.main_unit)
     entry_errors = result_summary.filter_candidates(
         [candidate for candidate, _error in entry_error_candidates(track_b)] if track_b is not None else (),
         choice.cutoff,
-    )
-    prices = tuple(
-        sorted(
-            price
-            for price in (_decimal(getattr(candidate, "price", None)) for candidate in split.kept)
-            if price is not None and price > 0
-        )
     )
     return TradeStats(
         period_label=choice.label,
         period_note=choice.note,
         split=split,
-        prices=prices,
+        prices=summary.prices,
         reference_count=len(references),
         entry_error_count=len(entry_errors),
+        summary=summary,
     )
 
 
