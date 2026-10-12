@@ -52,7 +52,7 @@ H0 최초 PR #344의 CI `test`, `bundled-ocr`는 모두 성공했다. 최초 로
 - `pytest -q tests/test_streamlit_startup_smoke.py`: `1 passed in 16.46s`.
 - 작업지시서의 Track H 지정 17개 테스트 파일: `164 passed, 1 warning in 22.31s`.
 - 첫 두 Track H 실행은 각각 `C:\tmp` 쓰기 권한과 저장소 내부 basetemp 부모 폴더 부재로 `129 passed, 35 setup errors`였고, 부모 폴더를 만든 뒤 같은 테스트를 재실행해 위 통과 결과를 얻었다. 애플리케이션 assertion 실패는 아니었다.
-- 보완 PR CI: 미실행(PR 생성 전).
+- 보완 PR #351 첫 CI: `test` 1분 39초 성공, `bundled-ocr` 51초 성공. 아래 최종 문서 커밋 뒤 CI도 병합 전에 다시 확인한다.
 
 ## 7. 미검증 항목
 
