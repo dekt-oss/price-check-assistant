@@ -105,3 +105,13 @@ def test_chart_spec_is_valid_with_and_without_a_quote() -> None:
     for quote in (None, Decimal("150")):
         spec = ui.trend_chart(trend, quote=quote).to_dict()
         assert len(spec["layer"]) == (4 if quote else 3)
+
+
+def test_mostly_thin_months_fall_back_to_quarters() -> None:
+    # Two full months, four single-trade months: months would be mostly grey dots.
+    rows = [("2026-01-05", "100"), ("2026-01-06", "100"), ("2026-01-07", "100"),
+            ("2026-02-05", "100"), ("2026-02-06", "100"), ("2026-02-07", "100"),
+            ("2026-03-05", "100"), ("2026-04-05", "110"), ("2026-05-05", "110"), ("2026-06-05", "110")]
+    trend = pm.price_trend(summary_of(rows), today=TODAY)
+    assert trend.granularity == "quarter"
+    assert [b.count for b in trend.buckets] == [7, 3]

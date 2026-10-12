@@ -528,6 +528,9 @@ def build_price_result(
 
 TREND_MIN_PER_BUCKET = 3
 TREND_MIN_BUCKETS = 2
+# At least this share of the buckets that hold a trade must have TREND_MIN_PER_BUCKET lines, so
+# a month view is not a row of grey dots (PNB-704: 70 trades, most months hold 1~2).
+TREND_MIN_ENOUGH_SHARE = Decimal("0.5")
 GRANULARITY_LABELS = {"month": "월별", "quarter": "분기별", "year": "연도별"}
 
 
@@ -625,14 +628,14 @@ def _buckets(trades: Sequence[PriceTrade], granularity: str, today: date) -> tup
 
 def price_trend(summary: SameModelSummary, *, today: date) -> PriceTrend:
     """The finest of month / quarter / year in which at least TREND_MIN_BUCKETS buckets hold
-    TREND_MIN_PER_BUCKET priced lines each (2026-10-12 audit: 79% of medical models with 3+
-    trades in 3 years qualify for none). The change compares the two latest such buckets; no
-    words like 상승·하락·추세 are produced."""
+    TREND_MIN_PER_BUCKET priced lines each and those are at least half of the buckets
+    (2026-10-12 audit: 79% of medical models with 3+ trades in 3 years qualify for none). The
+    change compares the two latest such buckets; no words like 상승·하락·추세 are produced."""
 
     for granularity in ("month", "quarter", "year"):
         buckets = _buckets(summary.priced_trades, granularity, today)
         enough = [bucket for bucket in buckets if bucket.enough]
-        if len(enough) >= TREND_MIN_BUCKETS:
+        if len(enough) >= TREND_MIN_BUCKETS and Decimal(len(enough)) >= TREND_MIN_ENOUGH_SHARE * len(buckets):
             before, after = enough[-2], enough[-1]
             percent = (
                 percent_difference(after.median, before.median)

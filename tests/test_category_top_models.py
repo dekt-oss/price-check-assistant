@@ -206,3 +206,18 @@ def test_html_uses_no_verdict_words() -> None:
         for word in BANNED:
             assert word not in text, word
         assert text.count("권장") == text.count("권장 순위가 아닙니다") >= 1
+
+
+def test_caption_names_the_counted_start_when_trades_were_cut() -> None:
+    import dataclasses
+
+    from purchase_price.services.category_market import CategoryMarket, PriceLevel
+    from purchase_price.ui.category_market import top_models_caption
+
+    market = CategoryMarket(status="success", product_name="심장충격기")
+    cut = dataclasses.replace(
+        market, truncated=True, level=PriceLevel("대", 10, None, None, None, first_date="2025-02-01")
+    )
+    assert "2025-02-01 이후" in top_models_caption(cut)
+    assert "다를 수 있습니다" in top_models_caption(cut)
+    assert "일부" not in top_models_caption(market)

@@ -445,8 +445,16 @@ def _top_list_html(title: str, models: Sequence[TopModel], searched_model: str) 
 def top_models_caption(market: CategoryMarket) -> str:
     period = period_text(market)
     scope = f"{period} " if period else ""
+    truncated = ""
+    if market.truncated:
+        first = market.level.first_date
+        truncated = (
+            f" 거래가 많아 최근 거래부터 일부({first} 이후)만 셉니다. 위 결론의 같은 제품 거래 수와 다를 수 있습니다."
+            if first
+            else " 거래가 많아 최근 거래부터 일부만 셉니다. 위 결론의 같은 제품 거래 수와 다를 수 있습니다."
+        )
     return (
-        f"{scope}같은 품목의 장비 구매 줄만 셉니다(부품·수리, 동물용, 입력 오류 의심은 뺌). {TOP_MODELS_NOTE}"
+        f"{scope}같은 품목의 장비 구매 줄만 셉니다(부품·수리, 동물용, 입력 오류 의심은 뺌).{truncated} {TOP_MODELS_NOTE}"
     )
 
 
