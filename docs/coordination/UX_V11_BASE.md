@@ -1,0 +1,21 @@
+# UX v1.1 작업 — Gate 0 기록
+
+| 항목 | 값 |
+| --- | --- |
+| 작업지시서 | `docs/coordination/UX_V11_WORK_ORDER_v1.2.md` |
+| 기준 브랜치 | `main` |
+| BASE_SHA | _(이 문서가 main에 머지된 뒤 Claude가 기록)_ |
+| 시작 시각 | 2026-10-12 (KST) |
+| Track P 브랜치 / 워크트리 | `claude/ux-v11-price` / `.worktrees/ux-v11-price` |
+| Track H 브랜치 / 워크트리 | `codex/ux-v11-news-management` / `.worktrees/ux-v11-news-management` (Codex가 자체 워크트리를 쓰면 같은 브랜치를 체크아웃) |
+| Integration 브랜치 | `claude/ux-v11-integration` (I0 착수 시 BASE 이후 main에서 생성) |
+| Integration 담당 | Claude (제안 — 사용자 확정 필요) |
+| PR #341 상태 | 미머지(2026-10-12 기준 CI 녹색, mergeable). 사용자 머지 뒤 Track H가 `git merge origin/main` 1회 |
+
+## 재사용 금지 워크트리
+`.worktrees/claude-price`(브랜치 `news-radar-30min`), `.claude/worktrees/agent-*`(과거 작업), `~/.codex/worktrees/windows-test-reliability`(PR #341 작업분). 이번 작업에는 쓰지 않는다.
+
+## 로컬 실행 분리
+- Track P: Streamlit 포트 8502~8509
+- Track H: Streamlit 포트 8602~8609, `NEWS_RADAR_INDEX_PATH=.local/news-radar.json.gz`
+- 두 트랙 모두 `main` 체크아웃(`C:\Users\임준혁\projects\price-check-assistant`)에서는 커밋하지 않는다.
