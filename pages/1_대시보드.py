@@ -33,6 +33,7 @@ from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_item_status_r2 as mfds_item_status_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services import price_entry_check as price_entry_check_service
+from purchase_price.services import price_metrics as price_metrics_service
 from purchase_price.services import search_routing
 from purchase_price.services import track_b_db_quote_comparison as track_b_comparison_service
 from purchase_price.services import track_b_live_gap_fill as track_b_live_service
@@ -148,6 +149,7 @@ from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 from purchase_price.ui.theme import notice_html, page_header_html
 from purchase_price.ui.track_b_transactions import (
     candidate_counts,
+    grade_ab_candidates,
     has_transaction_candidates,
     strict_comparison_candidates,
     transaction_rows,
@@ -232,6 +234,12 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_SEARCH_FIXES_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_RECENT_GROUPED_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_NARROW_V1"),
+    # UX v1.1 P1: every same-model number comes from the price contract (price_metrics first,
+    # then the modules that read it).
+    ("purchase_price.services.price_metrics", "PRICE_METRICS_V1"),
+    ("purchase_price.services.market_survey_export", "MARKET_SURVEY_PRICE_CONTRACT_V1"),
+    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_PRICE_CONTRACT_V1"),
+    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_COMPARISON_V1"),
 )
 
 
@@ -3597,6 +3605,26 @@ def _render_search_result(state: dict[str, Any]) -> None:
         if live_note and getattr(live, "truncated_window", False):
             live_note += " (최근 62일만 조회)"
 
+    # ── 거래가 비교 결과 (UX v1.1 P1): the price contract over this period's same-model lines ──
+    contract_today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    # Same model is already settled by the A/B grade; the level drops only when the model name
+    # has several 식약처 registrations (ambiguous identity).
+    identity_exact = not (
+        (identity_known and mfds_identity_status(indexed_identity) == IdentityEvidenceStatus.AMBIGUOUS)
+        or (isinstance(mfds, MfdsWorkspaceResult) and mfds.exact_ambiguous)
+    )
+    price_result = price_metrics_service.build_price_result(
+        [price_metrics_service.PriceTrade.from_candidate(c) for c in grade_ab_candidates(track_b)],
+        quote_unit_price=workspace_quote,
+        identity_confirmed=True,
+        identity_exact=identity_exact,
+        period_label=period_choice.label,
+        cutoff=None,  # track_b is already limited to the chosen period
+        preferred_unit=all_period_unit,
+        data_as_of=live_checked_until or track_b_data_as_of,
+        today=contract_today,
+    )
+
     # ── 결론 줄: 왼쪽 결론 카드 + 가격 막대, 오른쪽 "최종 판단 전에 확인하세요" ──
     median_price = stats.median_price
     main_unit_id = result_summary_ui.unit_key(unit_split.main_unit)
@@ -3631,6 +3659,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
         unit=unit_split.main_unit,
         warn_count=sum(1 for point in points if point.tone in {"warn", "danger"}),
         unavailable=track_b_unavailable,
+        excluded_text=result_layout_ui.excluded_note(price_result.summary),
     )
     if market_main and category_market is not None:
         # No same-model trade: the conclusion points straight at the category market below it.
@@ -3670,15 +3699,31 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 live_failed=live_failed,
                 mfds_coverage_percent=mfds_coverage,
                 mfds_complete=mfds_complete,
+                stale=price_result.data_as_of_stale,
             ),
         ]
     )
+    after_price_html = ""
+    if not track_b_unavailable:
+        after_price_html = result_layout_ui.recent_sources_html(comparison_rows, unit=unit_split.main_unit)
+        if price_result.show_category_in_conclusion and not market_main and category_market is not None:
+            after_price_html += result_layout_ui.category_reference_html(
+                category_market, priced_count=price_result.summary.priced_count
+            )
     st.markdown(
         result_layout_ui.lead_row_html(
             lead,
             price_html=price_html,
             panel_html=result_layout_ui.check_panel_html(points),
             foot_html=chip_row,
+            status_html=(
+                ""
+                if track_b_unavailable
+                else result_layout_ui.comparison_status_html(
+                    price_result, quote_entered=workspace_quote is not None
+                )
+            ),
+            after_price_html=after_price_html,
         ),
         unsafe_allow_html=True,
     )
@@ -3836,6 +3881,13 @@ def _render_search_result(state: dict[str, Any]) -> None:
         supplier_rows=supplier_rows(track_b),
         identity_rows=export_identity_rows,
         data_as_of=track_b_data_as_of,
+        price_result=price_result,
+        direct_row_basis=[
+            "포함"
+            if result_summary_ui.unit_key(row.get("단위")) in {"", main_unit_id}
+            else "제외 (다른 단위)"
+            for row in direct_rows
+        ],
     )
     safe_export_name = "".join(
         character if character.isalnum() or character in {"-", "_"} else "_"
@@ -4199,6 +4251,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v15" style="display:none">purchase-workspace-runtime-v15</span>'
     '<span id="purchase-workspace-runtime-v16" style="display:none">purchase-workspace-runtime-v16</span>'
     '<span id="purchase-workspace-runtime-v21" style="display:none">purchase-workspace-runtime-v21</span>'
+    '<span id="purchase-workspace-runtime-v22" style="display:none">purchase-workspace-runtime-v22</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

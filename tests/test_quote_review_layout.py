@@ -62,7 +62,9 @@ def test_rule_constants_are_named_and_stated_in_plain_words() -> None:
     sentence = rule_sentence()
     assert "3건 이상" in sentence
     assert "20% 넘게 높으면" in sentence
-    assert "판단 부족" in sentence
+    assert "비교 근거 부족" in sentence
+    assert "거래 범위 안 (조건 미확인)" in sentence
+    assert "판단 부족" not in sentence
 
 
 def test_fewer_than_three_trades_is_not_judged() -> None:
@@ -71,7 +73,7 @@ def test_fewer_than_three_trades_is_not_judged() -> None:
             quote_unit_price=Decimal("100"), median_price=Decimal("50"), comparable_count=count
         )
         assert verdict.kind == VERDICT_INSUFFICIENT
-        assert verdict.label == "판단 부족"
+        assert verdict.label == "비교 근거 부족"
 
 
 def test_quote_far_above_median_needs_a_check_with_the_percent_in_the_label() -> None:
@@ -102,9 +104,19 @@ def test_threshold_boundary_and_lower_quotes_stay_in_range() -> None:
     )
     lower = quote_verdict(quote_unit_price=Decimal("50"), median_price=Decimal("100"), comparable_count=5)
     assert at_threshold.kind == VERDICT_IN_RANGE
+    assert at_threshold.label == "거래 범위 안 (조건 미확인)"
     assert just_above.kind == VERDICT_CHECK
     assert lower.kind == VERDICT_IN_RANGE
     assert "50.0% 낮습니다" in lower.reason
+
+
+def test_verdict_words_are_the_contract_labels() -> None:
+    from purchase_price.services import price_metrics as pm
+
+    assert VERDICT_IN_RANGE == pm.STATUS_LABELS[pm.STATUS_IN_RANGE] == "거래 범위 안 (조건 미확인)"
+    assert VERDICT_CHECK == pm.STATUS_LABELS[pm.STATUS_CHECK] == "확인 필요"
+    assert VERDICT_INSUFFICIENT == pm.STATUS_LABELS[pm.STATUS_INSUFFICIENT] == "비교 근거 부족"
+    assert layout.QUOTE_REVIEW_PRICE_CONTRACT_V1 is True
 
 
 def test_missing_quote_price_is_not_judged() -> None:
@@ -131,6 +143,26 @@ def test_item_comparison_uses_same_product_main_unit_trades_only() -> None:
     assert comparison.delta_percent == Decimal("47.7")
     assert comparison.verdict.kind == VERDICT_CHECK
     assert any("단위가 다른 거래 1건" in point for point in comparison.check_points)
+
+
+def test_item_comparison_keeps_the_all_period_unit_when_the_period_has_it() -> None:
+    # 전체 기간은 set 5건 · 대 3건. 최근 3년에는 대 3건 · set 1건이지만 기준 단위는 set(결과 화면과 같음).
+    old = [_candidate(str(9_000_000 + i), unit="set", day=f"2022-0{i + 1}-01") for i in range(4)]
+    recent_set = _candidate("9500000", unit="set", day="2026-02-01")
+    recent_units = [_candidate(str(3_000_000 + i * 100_000), unit="대", day=f"2026-0{i + 3}-01") for i in range(3)]
+    track_b = _track_b(*old, recent_set, *recent_units)
+
+    stats = layout.comparable_trade_stats(track_b, today=date(2026, 10, 12))
+    assert stats.period_label == "최근 3년"
+    assert (stats.main_unit, stats.count, stats.median) == ("set", 1, Decimal("9500000"))
+    assert stats.other_count == 3
+    assert stats.split.main_unit == "set" and len(stats.split.kept) == 1
+
+    comparison = build_item_comparison(0, _item(unit="set", unit_price=Decimal("3300000")), track_b, today=date(2026, 10, 12))
+    assert comparison.comparable_count == 1
+    assert comparison.verdict.kind == VERDICT_INSUFFICIENT
+    assert comparison.verdict.label == "비교 근거 부족"
+    assert comparison.other_unit_count == 3
 
 
 def test_item_comparison_widens_the_period_like_the_price_screen() -> None:

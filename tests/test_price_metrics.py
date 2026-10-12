@@ -205,7 +205,7 @@ def test_contract_matches_result_screen(name: str) -> None:
         assert contract(case).comparison.difference_percent == price_stats.quote_vs_median_percent
 
 
-@pytest.mark.parametrize("name", [name for name in NAMES if name != "unit_changes_by_period"])
+@pytest.mark.parametrize("name", NAMES)
 def test_contract_matches_quote_review(name: str) -> None:
     case = load(name)
     result = contract(case)
@@ -218,21 +218,6 @@ def test_contract_matches_quote_review(name: str) -> None:
         qr.VERDICT_CHECK: pm.STATUS_CHECK,
         qr.VERDICT_INSUFFICIENT: pm.STATUS_INSUFFICIENT,
     }[verdict.kind] == result.comparison.status
-
-
-def test_known_gap_quote_review_picks_the_period_unit() -> None:
-    """docs/metrics/price.md §6 차이 1: the quote review uses the period's own main unit, the result
-    screen (and the contract) keeps the all-period unit. Remove this test when P1 aligns them."""
-
-    case = load("unit_changes_by_period")
-    result = contract(case)
-    stats = qr.comparable_trade_stats(case.track_b, today=case.today)
-    assert (result.summary.main_unit, result.summary.priced_count, result.summary.median) == (
-        "set",
-        1,
-        Decimal("9500000"),
-    )
-    assert (stats.split.main_unit, stats.count, stats.median) == ("대", 3, Decimal("3100000"))
 
 
 def test_known_gap_category_groups_machine_units() -> None:
