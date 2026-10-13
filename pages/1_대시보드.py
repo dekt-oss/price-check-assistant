@@ -31,6 +31,7 @@ from purchase_price.services import g2b_delivery_record as delivery_record_servi
 from purchase_price.services import index_prefetch as index_prefetch_service
 from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_item_status_r2 as mfds_item_status_service
+from purchase_price.services import mfds_recall as mfds_recall_service
 from purchase_price.services import mfds_workspace as mfds_workspace_service
 from purchase_price.services import price_entry_check as price_entry_check_service
 from purchase_price.services import price_metrics as price_metrics_service
@@ -252,6 +253,7 @@ _UI_RUNTIME_MARKERS = (
     # UX v1.1 P2b: alias registries cached per file (grading read the CSVs once per row).
     ("purchase_price.services.product_matching", "ALIAS_REGISTRY_CACHE_V1"),
     ("purchase_price.services.search_routing", "MODEL_CODE_SKIP_V1"),
+    ("purchase_price.services.mfds_recall", "MFDS_RECALL_BUDGET_V1"),
 )
 
 
@@ -637,10 +639,15 @@ def _lookup_mfds_recall_isolated(*, model_name: str, product_name: str) -> objec
     """
 
     try:
-        result = lookup_mfds_recall(
-            model_name=model_name,
-            product_name=product_name,
-        )
+        # P2b: at most RECALL_SEARCH_BUDGET_SECONDS; a slow MFDS API becomes "확인 못 함".
+        bounded = getattr(mfds_recall_service, "lookup_mfds_recall_within", None)
+        if callable(bounded):
+            result = bounded(model_name=model_name, product_name=product_name)
+        else:
+            result = lookup_mfds_recall(
+                model_name=model_name,
+                product_name=product_name,
+            )
     except Exception as exc:
         return mfds_recall_exception_result(
             exc,
