@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import html
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -992,6 +992,64 @@ def choose_period(
             widened = DEFAULT_PERIOD_LABEL if candidate_label != DEFAULT_PERIOD_LABEL else None
             return PeriodChoice(candidate_label, cutoff, widened)
     return PeriodChoice(DEFAULT_PERIOD_LABEL, period_cutoff(3, today))
+
+
+# ── 거래 기간 URL 보존: ?period=3y|5y|all (새로 고침·공유 링크가 같은 기간을 연다) ──
+
+# Runtime marker: the dashboard reloads a retained copy that lacks the period URL helpers.
+PERIOD_URL_V1 = True
+PERIOD_URL_PARAM = "period"
+PERIOD_URL_TOKENS: tuple[tuple[str, str], ...] = (
+    ("최근 3년", "3y"),
+    ("최근 5년", "5y"),
+    ("전체", "all"),
+)
+
+
+def period_url_token(label: object) -> str | None:
+    """URL token for a period label (``"최근 5년"`` -> ``"5y"``); None for anything else."""
+
+    return dict(PERIOD_URL_TOKENS).get(str(label or ""))
+
+
+def period_label_from_url(token: object) -> str | None:
+    """Period label for a URL token (``"5y"`` -> ``"최근 5년"``); None for junk or a missing value."""
+
+    text = str(token or "").strip().lower()
+    for label, value in PERIOD_URL_TOKENS:
+        if value == text:
+            return label
+    return None
+
+
+def adopt_url_period(
+    state: MutableMapping[str, Any], *, key: str, picked_key: str, url_value: object
+) -> bool:
+    """Pre-select the period from ``?period=`` unless the reader already picked one this session.
+
+    A period in the URL was picked by a person (here or by whoever shared the link), so it counts
+    as a choice: it is marked picked and never widened. An invalid value is ignored.
+    """
+
+    if state.get(picked_key):
+        return False
+    label = period_label_from_url(url_value)
+    if label is None:
+        return False
+    state[key] = label
+    state[picked_key] = True
+    return True
+
+
+def remember_picked_period(
+    state: MutableMapping[str, Any], query_params: MutableMapping[str, Any], *, key: str, picked_key: str
+) -> None:
+    """Mark the period as picked and write it to the URL (deselecting means the default period)."""
+
+    state[picked_key] = True
+    token = period_url_token(state.get(key) or DEFAULT_PERIOD_LABEL)
+    if token is not None:
+        query_params[PERIOD_URL_PARAM] = token
 
 
 def period_caption(choice: PeriodChoice, *, oldest_collected: str | None = None) -> str:
