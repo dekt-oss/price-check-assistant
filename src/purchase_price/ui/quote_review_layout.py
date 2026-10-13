@@ -43,6 +43,7 @@ QUOTE_REVIEW_CARD_WRAP_V1 = True
 # Runtime marker: same-product numbers and the verdict status come from services/price_metrics
 # (UX v1.1 P1); the 판정 words are the contract's labels.
 QUOTE_REVIEW_PRICE_CONTRACT_V1 = True
+QUOTE_REVIEW_LOW_CHECK_V1 = True
 
 # A quote this many percent above the median of same-product trades is flagged for a check.
 QUOTE_CHECK_THRESHOLD_PERCENT = Decimal("20")
@@ -150,6 +151,14 @@ def quote_verdict(
     delta = comparison.difference_percent
     if delta is None:  # compare_quote only returns CHECK/IN_RANGE with a percent
         return QuoteVerdict(VERDICT_INSUFFICIENT, VERDICT_INSUFFICIENT, comparison.reason)
+    if comparison.status == price_metrics.STATUS_CHECK and delta < 0:
+        # Far below the traded range: a unit/quantity/configuration question, not a bargain.
+        return QuoteVerdict(
+            VERDICT_CHECK,
+            f"{VERDICT_CHECK} (가운데 값보다 {abs(delta):.1f}% 낮음)",
+            f"견적 단가가 같은 제품 거래 {comparable_count}건의 가운데 값보다 {abs(delta):.1f}% 낮습니다. "
+            "단위·수량·구성(설치·옵션 포함 여부)이 거래와 같은지 확인하세요.",
+        )
     if comparison.status == price_metrics.STATUS_CHECK:
         return QuoteVerdict(
             VERDICT_CHECK,

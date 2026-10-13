@@ -43,7 +43,7 @@ def _reload_retained_modules() -> None:
     )
     if all(hasattr(obj, name) for obj, name in markers) and getattr(
         benchmark, "MODULES_REVISION", ""
-    ) == "2026-10-13-h2-review":
+    ) == "2026-10-13-final":
         return
     for name in (
         "purchase_price.services.hospital_metrics",

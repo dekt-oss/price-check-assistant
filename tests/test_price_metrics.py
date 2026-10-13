@@ -276,6 +276,19 @@ def test_check_status_starts_above_twenty_percent() -> None:
     assert pm.compare_quote(Decimal("120100"), summary).status == pm.STATUS_CHECK
 
 
+def test_check_status_also_flags_a_quote_far_below_the_traded_range() -> None:
+    """A quote 20% under the median is a unit/configuration question, not a bargain verdict."""
+
+    summary = pm.summarize_same_model(
+        [pm.PriceTrade.from_mapping({"record_id": str(i), "unit_price": "100000", "unit": "대"}) for i in range(3)]
+    )
+    assert pm.compare_quote(Decimal("80000"), summary).status == pm.STATUS_IN_RANGE
+    low = pm.compare_quote(Decimal("79900"), summary)
+    assert low.status == pm.STATUS_CHECK
+    assert "낮습니다" in low.reason and "단위" in low.reason
+    assert low.difference_percent == Decimal("-20.1")
+
+
 def test_quantity_weighted_mean_needs_every_quantity() -> None:
     rows = [
         {"record_id": "a", "unit_price": "100", "unit": "대", "quantity": "1"},

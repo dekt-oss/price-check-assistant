@@ -45,6 +45,8 @@ from purchase_price.services.price_entry_check import entry_error
 
 # Runtime marker: callers holding an older copy check this before using the contract.
 PRICE_METRICS_V1 = True
+# Final review 2026-10-13: a quote more than 20% *below* the median is a check item too.
+PRICE_METRICS_LOW_CHECK_V1 = True
 # Runtime marker (P3): price_trend and SameModelSummary.priced_trades.
 PRICE_TREND_V1 = True
 
@@ -400,6 +402,16 @@ def compare_quote(
             percent,
             f"견적 단가가 같은 제품 거래 {summary.priced_count}건의 가운데 값보다 {percent}% 높아 "
             f"기준({threshold:g}%)을 넘었습니다.",
+        )
+    if percent is not None and percent < -threshold:
+        # A quote far *below* the traded range usually means a different unit, pack size or
+        # configuration rather than a bargain, so it is a check item too (final review 2026-10-13).
+        return QuoteComparison(
+            STATUS_CHECK,
+            amount,
+            percent,
+            f"견적 단가가 같은 제품 거래 {summary.priced_count}건의 가운데 값보다 {-percent}% 낮습니다. "
+            "단위·수량·구성(설치·옵션 포함 여부)이 거래와 같은지 확인하세요.",
         )
     return QuoteComparison(
         STATUS_IN_RANGE,

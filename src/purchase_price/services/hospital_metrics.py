@@ -163,7 +163,10 @@ def compute_metrics(
     revenue = get("medical_revenue")
     drug = get("drug_cost")
     supply = get("supply_cost")
-    material = None if drug is None and supply is None else (drug or Decimal(0)) + (supply or Decimal(0))
+    # 재료비 = 약품비 + 진료재료비. When either account is missing the sum would understate the cost
+    # and look complete, so the metric stays 자료 없음 (final review 2026-10-13, H-02). The committed
+    # 2016–2024 data has both accounts for every hospital-year, so no displayed number changes.
+    material = None if drug is None or supply is None else drug + supply
     labor = get("labor_cost")
     beds = Decimal(bed_count) if bed_count else None
 
