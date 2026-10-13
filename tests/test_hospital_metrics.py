@@ -39,6 +39,17 @@ def test_ratios_are_computed_deterministically() -> None:
     assert result["revenue_growth"].quantize(Decimal("0.01")) == Decimal("8.70")
 
 
+def test_material_ratio_needs_both_cost_accounts() -> None:
+    """A missing 약품비 or 진료재료비 must not turn into a smaller 'complete' 재료비 (H-02)."""
+
+    only_drug = hm.compute_metrics({"medical_revenue": 100, "drug_cost": 10, "supply_cost": None})
+    only_supply = hm.compute_metrics({"medical_revenue": 100, "supply_cost": 10})
+    assert only_drug["material_ratio"] is None and only_supply["material_ratio"] is None
+    assert only_drug["drug_ratio"] == Decimal("10")  # the single account is still shown on its own
+    both = hm.compute_metrics({"medical_revenue": 100, "drug_cost": 10, "supply_cost": 5})
+    assert both["material_ratio"] == Decimal("15")
+
+
 def test_missing_inputs_stay_none_instead_of_being_estimated() -> None:
     result = hm.compute_metrics({"medical_revenue": 100}, bed_count=None)
     assert result["labor_ratio"] is None

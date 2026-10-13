@@ -241,6 +241,8 @@ _UI_RUNTIME_MARKERS = (
     # UX v1.1 P1: every same-model number comes from the price contract (price_metrics first,
     # then the modules that read it).
     ("purchase_price.services.price_metrics", "PRICE_METRICS_V1"),
+    ("purchase_price.services.price_metrics", "PRICE_METRICS_LOW_CHECK_V1"),
+    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_LOW_CHECK_V1"),
     ("purchase_price.services.market_survey_export", "MARKET_SURVEY_PRICE_CONTRACT_V1"),
     ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_PRICE_CONTRACT_V1"),
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_COMPARISON_V1"),
@@ -4426,6 +4428,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v22" style="display:none">purchase-workspace-runtime-v22</span>'
     '<span id="purchase-workspace-runtime-v23" style="display:none">purchase-workspace-runtime-v23</span>'
     '<span id="purchase-workspace-runtime-v24" style="display:none">purchase-workspace-runtime-v24</span>'
+    '<span id="purchase-workspace-runtime-v25" style="display:none">purchase-workspace-runtime-v25</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

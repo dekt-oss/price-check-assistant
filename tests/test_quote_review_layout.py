@@ -95,7 +95,10 @@ def test_verdict_uses_median_percent_not_min_max_range() -> None:
     assert "범위 밖" not in verdict.label
 
 
-def test_threshold_boundary_and_lower_quotes_stay_in_range() -> None:
+def test_threshold_boundary_and_far_lower_quotes_are_check_items() -> None:
+    """Both sides of ±20% are 확인 필요: a far lower quote is a unit/configuration question
+    (final review 2026-10-13, M-03), not a bargain verdict."""
+
     at_threshold = quote_verdict(
         quote_unit_price=Decimal("120"), median_price=Decimal("100"), comparable_count=3
     )
@@ -106,8 +109,10 @@ def test_threshold_boundary_and_lower_quotes_stay_in_range() -> None:
     assert at_threshold.kind == VERDICT_IN_RANGE
     assert at_threshold.label == "거래 범위 안 (조건 미확인)"
     assert just_above.kind == VERDICT_CHECK
-    assert lower.kind == VERDICT_IN_RANGE
-    assert "50.0% 낮습니다" in lower.reason
+    assert lower.kind == VERDICT_CHECK
+    assert "50.0% 낮습니다" in lower.reason and "단위" in lower.reason
+    slightly_lower = quote_verdict(quote_unit_price=Decimal("80"), median_price=Decimal("100"), comparable_count=5)
+    assert slightly_lower.kind == VERDICT_IN_RANGE
 
 
 def test_verdict_words_are_the_contract_labels() -> None:
