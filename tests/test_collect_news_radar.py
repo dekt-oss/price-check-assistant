@@ -21,6 +21,7 @@ def _keywords_file(tmp_path):
     path.write_text(
         json.dumps(
             {
+                "issue_roundup_terms": ["이모저모", "한눈에"],
                 "groups": [
                     {
                         "key": "g",
@@ -38,6 +39,29 @@ def _keywords_file(tmp_path):
         encoding="utf-8",
     )
     return path
+
+
+def test_collect_passes_source_tiers_and_roundup_terms_to_issue_clustering(
+    tmp_path, monkeypatch
+) -> None:
+    args = cli._parse_args(
+        ["--output", str(tmp_path / "news.json"), "--keywords-file", str(_keywords_file(tmp_path))]
+    )
+    store = cli._store(args, Settings(_env_file=None))
+    tier = radar.SourceTier("medical", "의료 전문지", 2, ("medical.kr",))
+    seen: dict[str, object] = {}
+    original = nri.collect
+
+    def captured(*args, **kwargs):
+        seen["tiers"] = kwargs.get("tiers")
+        seen["roundup_terms"] = kwargs.get("roundup_terms")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(radar, "load_source_tiers", lambda: (tier,))
+    monkeypatch.setattr(nri, "collect", captured)
+    cli.run_collect(args, Settings(_env_file=None), store, search=_search_factory({})[0])
+
+    assert seen == {"tiers": (tier,), "roundup_terms": ("이모저모", "한눈에")}
 
 
 def _search_factory(urls_by_keyword):

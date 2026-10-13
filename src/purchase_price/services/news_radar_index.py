@@ -20,6 +20,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import logging
 import os
 import re
 import tempfile
@@ -34,7 +35,7 @@ from purchase_price.clients.naver_news import NaverNewsClientError, NaverNewsIte
 from purchase_price.config import Settings
 from purchase_price.services import news_radar as radar
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 STATUS_VERSION = 1
 RETENTION_DAYS = 21
 RUN_HISTORY_LIMIT = 144  # one day of 10-minute passes (only the newest keeps per-keyword logs)
@@ -42,7 +43,8 @@ NEWS_PREFIX = "news/v1"
 INDEX_KEY = f"{NEWS_PREFIX}/index.json.gz"
 STATUS_KEY = f"{NEWS_PREFIX}/status.json"
 DIGEST_PREFIX = f"{NEWS_PREFIX}/digest"
-INDEX_SCHEMA = "news-radar-index-v1"
+INDEX_SCHEMA = "news-radar-index-v2"
+READABLE_INDEX_SCHEMAS = {"news-radar-index-v1", INDEX_SCHEMA}
 STATUS_SCHEMA = "news-radar-status-v1"
 DATA_CLASSIFICATION = "naver-display-cache-21d"
 MAX_INDEX_STORED_BYTES = 64 * 1024 * 1024
@@ -50,6 +52,7 @@ SOURCE_NAME = "naver_news"
 KST = radar.SEOUL
 ALERT_ITEM_LIMIT = 20
 _DIGEST_KEY_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.md$")
+LOGGER = logging.getLogger(__name__)
 
 
 class NewsRadarIndexError(RuntimeError):
@@ -172,6 +175,7 @@ class NewsRadarIndex:
     generated_at: datetime | None = None
     keywords: tuple[dict[str, Any], ...] = ()
     items: dict[str, radar.NewsEntry] = field(default_factory=dict)
+    issues: tuple[radar.NewsIssue, ...] = ()
     runs: list[CollectionRun] = field(default_factory=list)  # oldest first
     version: int = INDEX_VERSION
 
@@ -236,6 +240,44 @@ def entry_from_payload(raw: Mapping[str, Any]) -> radar.NewsEntry:
     )
 
 
+def issue_to_payload(issue: radar.NewsIssue) -> dict[str, Any]:
+    return {
+        "issue_id": issue.issue_id,
+        "title": issue.title,
+        "article_ids": list(issue.article_ids),
+        "group_keys": list(issue.group_keys),
+        "group_names": list(issue.group_names),
+        "source_count": issue.source_count,
+        "article_count": issue.article_count,
+        "first_published_at": _iso(issue.first_published_at),
+        "latest_published_at": _iso(issue.latest_published_at),
+        "representative_article_id": issue.representative_article_id,
+        "score": issue.score,
+    }
+
+
+def issue_from_payload(raw: Mapping[str, Any]) -> radar.NewsIssue:
+    first = _parse_time(raw.get("first_published_at"))
+    latest = _parse_time(raw.get("latest_published_at"))
+    issue_id = str(raw.get("issue_id") or "").strip()
+    representative = str(raw.get("representative_article_id") or "").strip()
+    if not issue_id or not representative or first is None or latest is None:
+        raise NewsRadarIndexError("news issue is missing identity or time fields")
+    return radar.NewsIssue(
+        issue_id=issue_id,
+        title=str(raw.get("title") or ""),
+        article_ids=tuple(str(value) for value in raw.get("article_ids") or []),
+        group_keys=tuple(str(value) for value in raw.get("group_keys") or []),
+        group_names=tuple(str(value) for value in raw.get("group_names") or []),
+        source_count=int(raw.get("source_count") or 0),
+        article_count=int(raw.get("article_count") or 0),
+        first_published_at=first,
+        latest_published_at=latest,
+        representative_article_id=representative,
+        score=int(raw.get("score") or 0),
+    )
+
+
 def index_to_payload(index: NewsRadarIndex) -> dict[str, Any]:
     runs = index.runs[-RUN_HISTORY_LIMIT:]
     return {
@@ -247,6 +289,7 @@ def index_to_payload(index: NewsRadarIndex) -> dict[str, Any]:
             entry_to_payload(entry)
             for entry in sorted(index.items.values(), key=lambda e: (_aware(e.detected_at), e.article_id))
         ],
+        "issues": [issue_to_payload(issue) for issue in index.issues],
         # Per-keyword logs only for the newest run keeps the object small.
         "runs": [run.to_payload(include_logs=i == len(runs) - 1) for i, run in enumerate(runs)],
     }
@@ -254,17 +297,27 @@ def index_to_payload(index: NewsRadarIndex) -> dict[str, Any]:
 
 def index_from_payload(payload: Mapping[str, Any]) -> NewsRadarIndex:
     version = payload.get("version")
-    if version != INDEX_VERSION:
+    if version not in {1, INDEX_VERSION}:
         raise NewsRadarIndexError(f"unsupported news index version: {version!r}")
     items: dict[str, radar.NewsEntry] = {}
     for raw in payload.get("items") or []:
         if isinstance(raw, Mapping):
             entry = entry_from_payload(raw)
             items[entry.article_id] = entry
+    issues: list[radar.NewsIssue] = []
+    if version >= 2:
+        for raw in payload.get("issues") or []:
+            if not isinstance(raw, Mapping):
+                continue
+            try:
+                issues.append(issue_from_payload(raw))
+            except (NewsRadarIndexError, TypeError, ValueError) as exc:
+                LOGGER.warning("Skipping invalid derived news issue: %s", exc)
     return NewsRadarIndex(
         generated_at=_parse_time(payload.get("generated_at")),
         keywords=tuple(dict(k) for k in payload.get("keywords") or [] if isinstance(k, Mapping)),
         items=items,
+        issues=tuple(issues),
         runs=[CollectionRun.from_payload(r) for r in payload.get("runs") or [] if isinstance(r, Mapping)],
     )
 
@@ -376,6 +429,8 @@ def collect(
     search: SearchFn,
     *,
     groups: Sequence[radar.KeywordGroup] = (),
+    tiers: Sequence[radar.SourceTier] = (),
+    roundup_terms: Sequence[str] = radar.DEFAULT_ISSUE_ROUNDUP_TERMS,
     display: int = 100,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     sleep: Callable[[float], None] = time.sleep,
@@ -416,6 +471,14 @@ def collect(
     index.generated_at = finished
     if groups:
         index.keywords = keyword_snapshot(groups, keywords)
+    index.version = INDEX_VERSION
+    index.issues = radar.cluster_news_issues(
+        index.items.values(),
+        keywords,
+        tiers,
+        now=finished,
+        roundup_terms=roundup_terms,
+    )
     return CollectionResult(run=run, new_by_keyword=new_by_keyword, bootstrap=bootstrap)
 
 
@@ -585,7 +648,7 @@ def daily_digest_markdown(
         lines.append(f"## {keyword} ({len(entries)}건)")
         lines.append("")
         for entry in entries[:per_keyword_limit]:
-            title = entry.title.replace("[", "(").replace("]", ")")
+            title = radar.markdown_link_title(entry.title)
             source = entry.source_domain or "출처 확인 안 됨"
             lines.append(f"- [{title}]({entry.url}) · {source} · {_when(entry.published_at)}")
         if len(entries) > per_keyword_limit:
@@ -734,7 +797,7 @@ class R2NewsRadarStore:
             if size > MAX_INDEX_STORED_BYTES:
                 raise NewsRadarIndexError(f"news index is unexpectedly large: {size} bytes")
             metadata = response.get("Metadata") or {}
-            if metadata.get("schema") != INDEX_SCHEMA or not metadata.get("sha256"):
+            if metadata.get("schema") not in READABLE_INDEX_SCHEMAS or not metadata.get("sha256"):
                 raise NewsRadarIndexError("news index metadata is invalid")
             with tempfile.TemporaryDirectory(prefix="news-radar-") as folder:
                 destination = Path(folder) / "index.json"

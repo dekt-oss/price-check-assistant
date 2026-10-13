@@ -35,7 +35,7 @@ def _reload_retained_modules() -> None:
     import importlib
     import sys
 
-    if hasattr(radar, "rank_entries") and hasattr(radar.Keyword, "exclude_terms"):
+    if getattr(radar, "MODULES_REVISION", "") == "2026-10-13-h1-review":
         return
     for name in (
         "purchase_price.clients.naver_news",
@@ -50,6 +50,7 @@ def _reload_retained_modules() -> None:
 
 _reload_retained_modules()
 
+NEWS_PAGE_REVISION = "2026-10-13-h1-review"
 NEWS_STATE_KEY = "news_radar_state"
 GROUP_TOGGLE_PREFIX = "news_radar_group::"
 STATUS_WIDGET_PREFIX = "news_radar_status::"
@@ -228,7 +229,7 @@ _handle_subscription_links(subscriber_store)
 st.title("병원 뉴스")
 st.caption("관심 키워드로 병원과 정책 뉴스를 빠르게 확인합니다. 기사 제목·시간·링크는 원문 그대로 보여 줍니다.")
 
-# Counts cover articles whose title matches a keyword; body-only mentions are not counted.
+# Counts cover articles whose title matches a keyword; other search results are not counted.
 _all_keywords = [k for g in groups for k in g.keywords]
 summary = radar.summarize(
     r.entry for r in radar.rank_entries(state.entries.values(), _all_keywords, include_ignored=True) if r.relevant
@@ -284,13 +285,54 @@ else:
             except NaverNewsClientError as exc:
                 st.error(f"뉴스 검색에 실패했습니다: {exc}")
             else:
-                st.success(f"새 기사 {new_count}건을 찾았습니다.")
+                latest_logs = [log for log in state.logs if log.scanned_at == state.last_scan_at]
+                if latest_logs and all(not log.ok for log in latest_logs):
+                    st.warning("뉴스를 확인하지 못했습니다. 기존에 모은 기사는 그대로 표시합니다. 잠시 뒤 다시 확인해 주세요.")
+                else:
+                    st.success(f"새 기사 {new_count}건을 찾았습니다.")
                 st.rerun()
 
 if subscriber_store is None:
     st.info("문자·이메일 알림 준비 중 · 관심 키워드별 새 기사 알림 기능을 준비하고 있습니다.")
 else:
     st.info("문자 알림 준비 중 · 이메일 알림은 화면 아래에서 신청할 수 있습니다.")
+
+st.subheader("최근 3일 주요 이슈")
+active_group_keys = {group.key for group in groups if enabled_overrides[group.key]}
+stored_issues = [
+    issue
+    for issue in radar.recent_news_issues(
+        stored_index.issues if stored_index is not None else (), now=datetime.now(UTC)
+    )
+    if active_group_keys.intersection(issue.group_keys)
+][:5]
+if not keywords:
+    st.info("활성화된 관심 키워드가 없습니다. 관심 키워드 설정에서 한 개 이상 켜 주세요.")
+elif index_failed:
+    st.warning("주요 이슈를 불러오지 못했습니다. 잠시 뒤 다시 열거나 새 기사 확인 버튼을 눌러 주세요.")
+elif stored_index is None:
+    st.info("아직 자동 수집 자료가 없습니다. 뉴스 검색을 연결하면 다음 자동 확인 뒤 주요 이슈가 표시됩니다.")
+elif not stored_issues:
+    st.info("최근 3일에 묶어서 보여 줄 주요 이슈가 없습니다. 다음 자동 확인 뒤 다시 확인해 주세요.")
+else:
+    for issue in stored_issues:
+        representative = stored_index.items.get(issue.representative_article_id)
+        related = [stored_index.items[key] for key in issue.article_ids if key in stored_index.items]
+        with st.container(border=True):
+            st.markdown(f"**{issue.title}**")
+            st.caption(
+                f"{' · '.join(issue.group_names) or '분류 확인 안 됨'} · "
+                f"매체 {issue.source_count}곳 · 기사 {issue.article_count}건"
+            )
+            st.caption(
+                f"최초 {_time_text(issue.first_published_at)} · 최근 {_time_text(issue.latest_published_at)}"
+            )
+            if representative is not None:
+                st.link_button("대표 기사 보기", representative.url)
+            with st.expander(f"관련 기사 {issue.article_count}건", expanded=False):
+                for article in related:
+                    title = radar.markdown_link_title(article.title)
+                    st.markdown(f"- [{title}]({article.url}) · {_time_text(article.published_at)}")
 
 st.caption(
     f"관심 키워드 {len(keywords)}개"
@@ -308,8 +350,8 @@ with st.expander("관심 키워드 설정", expanded=False):
 failed_logs = [log for log in state.logs if not log.ok and log.scanned_at == state.last_scan_at]
 if failed_logs:
     st.warning(
-        "일부 키워드는 확인하지 못했습니다: "
-        + ", ".join(f"{log.keyword} ({log.error})" for log in failed_logs)
+        "일부 키워드는 확인하지 못했습니다. 확인된 기사만 표시합니다: "
+        + ", ".join(log.keyword for log in failed_logs)
     )
 
 st.subheader("최신 기사")
@@ -334,7 +376,7 @@ with st.expander("상세 필터", expanded=False):
         if st.session_state.get(STATUS_SESSION_ONLY_KEY):
             st.caption("읽음·중요 표시는 이 화면을 연 동안만 유지됩니다 (저장 권한이 없는 연결).")
         else:
-            st.caption("읽음·중요 표시는 저장되어 다음에 열어도 그대로 보입니다.")
+            st.caption("읽음·중요 표시의 저장 연결 상태는 표시를 처음 바꿀 때 확인됩니다.")
     else:
         st.caption("읽음·중요 표시는 이 화면을 연 동안만 유지됩니다.")
 
@@ -348,9 +390,9 @@ with st.expander("상세 필터", expanded=False):
     body_col_opt, ignored_col = st.columns(2)
     with body_col_opt:
         show_body_only = st.checkbox(
-            "본문에서만 언급된 기사도 보기",
+            "제목에 키워드가 없는 검색 결과도 보기",
             value=False,
-            help="제목에 키워드가 없고 본문 어딘가에만 단어가 있는 기사입니다. 대부분 관련 없는 기사라 기본으로 숨깁니다.",
+            help="검색 결과에는 포함됐지만 제목이 관심 키워드 조건과 맞지 않는 기사입니다. 기본으로 숨깁니다.",
         )
     with ignored_col:
         show_ignored = st.checkbox("관심없음으로 표시한 기사도 보기", value=False)
@@ -367,13 +409,16 @@ if sort_mode == "중요도순":
     ranked = radar.by_priority(ranked)
 st.caption(
     SORT_EXPLANATIONS.get(sort_mode, "")
-    + (f" 본문에서만 언급된 {hidden_body_only}건은 숨겼습니다." if not show_body_only and hidden_body_only else "")
+    + (f" 제목에 키워드가 없는 검색 결과 {hidden_body_only}건은 숨겼습니다." if not show_body_only and hidden_body_only else "")
 )
 entries = [r.entry for r in ranked]
 rank_by_id = {r.entry.article_id: r for r in ranked}
 
 if not entries:
-    st.write("아직 확인된 기사가 없습니다. 위의 새 기사 확인 버튼을 누르면 여기에 쌓입니다.")
+    if state.entries:
+        st.write("선택한 조건에 맞는 기사가 없습니다. 키워드 필터를 확인해 주세요.")
+    else:
+        st.write("아직 확인된 기사가 없습니다. 뉴스 검색 연결 뒤 새 기사 확인을 누르거나 다음 자동 확인을 기다려 주세요.")
 
 # Hundreds of cards make the page sluggish; show the first batch and let the reader extend it.
 page_size = st.session_state.setdefault("news_radar_page_size", PAGE_SIZE)
@@ -395,7 +440,7 @@ for entry in visible_entries:
             if info and info.tier:
                 badges.append(info.tier.label)
             if info and not info.relevant:
-                badges.append("본문에서만 언급")
+                badges.append("제목에 키워드 없음")
             st.caption(
                 f"{entry.source_domain or '출처 확인 안 됨'} | {_time_text(entry.published_at)}"
                 + (" | " + " · ".join(badges) if badges else "")

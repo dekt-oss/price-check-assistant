@@ -86,6 +86,7 @@ class BenchmarkReport:
     peers: tuple[master_service.Hospital, ...]
     rows: list[metrics.ComparisonRow]
     findings: list[metrics.Finding]
+    briefing: metrics.ManagementBriefing
     quality: list[str]
     period: tuple[str, str] | None
     full_table: list[dict[str, str]]
@@ -113,13 +114,21 @@ def build_report(
         wanted = set(peer_ids)
         peers = tuple(p for p in peers if p.hospital_id in wanted)
     rows = benchmark.compare(data, target, peers, fiscal_year, HEADLINE_METRICS)
-    findings = (
-        metrics.describe_findings(
-            rows, benchmark.gap_history(data, target, peers, fiscal_year, HEADLINE_METRICS)
-        )
-        if peers
-        else []
+    history = benchmark.gap_history(
+        data,
+        target,
+        peers,
+        fiscal_year,
+        HEADLINE_METRICS,
+        min_peer_count=metrics.BRIEFING_MIN_PEERS,
     )
+    briefing = metrics.build_management_briefing(
+        rows,
+        history,
+        fiscal_year=fiscal_year,
+        peer_count=len(peers),
+    )
+    findings = list(briefing.differences)
     quality = benchmark.quality_report(data, target, peers, fiscal_year)
     hospitals = [target, *peers]
     full_table: list[dict[str, str]] = []
@@ -143,6 +152,7 @@ def build_report(
         peers=peers,
         rows=rows,
         findings=findings,
+        briefing=briefing,
         quality=quality_notes(quality),
         period=benchmark.target_period(data, target.hospital_id, fiscal_year),
         full_table=full_table,
@@ -206,6 +216,14 @@ def report_markdown(report: BenchmarkReport) -> str:
         "- 회계기간: " + (f"{report.period[0]} ~ {report.period[1]}" if report.period else "확인 안 됨"),
         f"- 출처: {SOURCE_NAME}. 가져온 날: " + (", ".join(report.fetched) or "-"),
         "",
+        "## 경영 브리핑",
+        "",
+        f"**{report.briefing.heading}**",
+        "",
+    ]
+    lines += [f"- {line}" for line in report.briefing.lines[1:]]
+    lines += [
+        "",
         "## 주요 경영지표",
         "",
         f"| 지표 | {t.short_name} | 비교군 평균 | 비교 병원 수 | 위치 |",
@@ -216,13 +234,9 @@ def report_markdown(report: BenchmarkReport) -> str:
             f"| {row.label} | {metrics.format_metric(row.value, row.unit)} | "
             f"{metrics.format_metric(row.peer_average, row.unit)} | {row.peer_count}곳 | {row.position_text} |"
         )
-    lines += ["", "## 해석", ""]
+    lines += ["", "## 선택형 AI 설명", ""] if report.explanation else []
     if report.explanation:
         lines += [report.explanation, "", f"_{report.explanation_note}_", ""]
-    if report.findings:
-        lines += [f"- {f.text}" for f in report.findings]
-    else:
-        lines.append("- 비교군 평균과 눈에 띄게 다른 지표가 없거나, 비교할 자료가 부족합니다.")
     lines += ["", "숫자와 계산 문장은 모두 프로그램이 공시 원자료로 계산했습니다.", ""]
     lines += ["## 최근 5년 추이", ""]
     for key, title, scale in TREND_METRICS:
@@ -281,9 +295,18 @@ def report_workbook(report: BenchmarkReport) -> bytes:
     for i, (k, v) in enumerate(meta, start=2):
         ws.cell(row=i, column=1, value=k).font = header_font
         ws.cell(row=i, column=2, value=v)
+    ws["A7"] = "경영 브리핑"
+    ws["A7"].font = header_font
+    ws["A8"] = report.briefing.heading
+    r = 9
+    for line in report.briefing.lines[1:]:
+        ws.cell(row=r, column=1, value=f"- {line}")
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+        ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True, vertical="top")
+        r += 1
     end = write_table(
         ws,
-        7,
+        r + 1,
         ["지표", t.short_name, "비교군 평균", "비교 병원 수", "위치"],
         (
             [
@@ -297,7 +320,7 @@ def report_workbook(report: BenchmarkReport) -> bytes:
         ),
     )
     r = end + 2
-    ws.cell(row=r, column=1, value="해석").font = header_font
+    ws.cell(row=r, column=1, value="선택형 AI 설명").font = header_font
     r += 1
     if report.explanation:
         cell = ws.cell(row=r, column=1, value=report.explanation)
@@ -306,12 +329,6 @@ def report_workbook(report: BenchmarkReport) -> bytes:
         ws.row_dimensions[r].height = 120
         r += 1
         ws.cell(row=r, column=1, value=report.explanation_note)
-        r += 1
-    for finding in report.findings or []:
-        ws.cell(row=r, column=1, value=f"- {finding.text}")
-        r += 1
-    if not report.findings:
-        ws.cell(row=r, column=1, value="- 비교군 평균과 눈에 띄게 다른 지표가 없거나, 비교할 자료가 부족합니다.")
         r += 1
     ws.cell(row=r + 1, column=1, value="숫자와 계산 문장은 모두 프로그램이 공시 원자료로 계산했습니다.")
     autosize(ws, {1: 26, 2: 40})

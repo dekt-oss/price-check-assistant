@@ -202,6 +202,8 @@ def run_collect(
     counter = counter or CallCounter()
     groups = radar.load_keyword_groups(args.keywords_file)
     keywords = radar.active_keywords(groups)
+    tiers = radar.load_source_tiers()
+    roundup_terms = radar.load_issue_roundup_terms(args.keywords_file)
     index = store.read_index() or nri.NewsRadarIndex()
 
     if search is None:
@@ -221,13 +223,22 @@ def run_collect(
                 keywords,
                 counter.wrap(lambda text, display: client.search(text, display=display, sort="date")),
                 groups=groups,
+                tiers=tiers,
+                roundup_terms=roundup_terms,
                 display=args.display,
             )
         finally:
             client.close()
     else:
         result = nri.collect(
-            index, keywords, counter.wrap(search), groups=groups, display=args.display, pause_seconds=0
+            index,
+            keywords,
+            counter.wrap(search),
+            groups=groups,
+            tiers=tiers,
+            roundup_terms=roundup_terms,
+            display=args.display,
+            pause_seconds=0,
         )
 
     written = store.write_index(index)
@@ -238,7 +249,6 @@ def run_collect(
         store.write_statuses(pruned, now=datetime.now(UTC))
 
     alert = "not needed"
-    tiers = radar.load_source_tiers()
     items = news_alerts.immediate_items(result.new_by_keyword, groups, tiers)
     if result.bootstrap and result.run.new_count:
         alert = "skipped (first run backlog)"

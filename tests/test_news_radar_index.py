@@ -143,6 +143,64 @@ def test_index_round_trip_has_display_fields_only() -> None:
     assert restored.last_run.logs[0].keyword == KW_IMMEDIATE.text
 
 
+def test_index_v2_round_trip_keeps_derived_issues_and_reads_v1() -> None:
+    index = nri.NewsRadarIndex()
+    items = [
+        _item("https://a.kr/1", "부산백병원 카카오 복약 알림 서비스"),
+        _item("https://b.kr/2", "부산백병원 카카오톡 복약 안내 서비스"),
+    ]
+    nri.collect(
+        index,
+        [KW_IMMEDIATE],
+        lambda _text, _display: items,
+        groups=_groups(),
+        clock=_Clock(NOW),
+    )
+
+    payload = nri.index_to_payload(index)
+    assert payload["version"] == 2
+    assert len(payload["issues"]) == 1
+    assert set(payload["issues"][0]) == {
+        "issue_id",
+        "title",
+        "article_ids",
+        "group_keys",
+        "group_names",
+        "source_count",
+        "article_count",
+        "first_published_at",
+        "latest_published_at",
+        "representative_article_id",
+        "score",
+    }
+    assert nri.index_from_payload(payload).issues == index.issues
+
+    v1 = dict(payload)
+    v1["version"] = 1
+    v1.pop("issues")
+    restored_v1 = nri.index_from_payload(v1)
+    assert restored_v1.items == index.items
+    assert restored_v1.issues == ()
+
+
+def test_broken_derived_issue_does_not_hide_valid_articles() -> None:
+    index = nri.NewsRadarIndex()
+    nri.collect(
+        index,
+        [KW_IMMEDIATE],
+        lambda _text, _display: [_item("https://a.kr/1", "부산백병원 새 소식")],
+        groups=_groups(),
+        clock=_Clock(NOW),
+    )
+    payload = nri.index_to_payload(index)
+    payload["issues"] = [{"issue_id": "broken"}, *payload["issues"]]
+
+    restored = nri.index_from_payload(payload)
+
+    assert restored.items == index.items
+    assert restored.issues == index.issues
+
+
 def test_unknown_index_version_is_rejected() -> None:
     with pytest.raises(nri.NewsRadarIndexError):
         nri.index_from_payload({"version": 99, "items": []})
@@ -289,6 +347,31 @@ def test_r2_store_streams_verified_index_and_statuses() -> None:
     store.write_digest(date(2026, 10, 8), "new")
     assert store.prune_digests(date(2026, 9, 17)) == 1
     assert "news/v1/digest/2026-10-08.md" in s3.objects
+
+
+def test_r2_store_reads_v1_metadata_during_index_upgrade() -> None:
+    s3 = _FakeS3()
+    store = nri.R2NewsRadarStore(client=s3, bucket="b")
+    index = nri.NewsRadarIndex()
+    nri.collect(
+        index, [KW_DAILY], lambda t, d: [_item("https://a.kr/1")], groups=_groups(), clock=_Clock(NOW)
+    )
+    payload = nri.index_to_payload(index)
+    payload["version"] = 1
+    payload.pop("issues")
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    s3.put_object(
+        Bucket="b",
+        Key=nri.INDEX_KEY,
+        Body=gzip.compress(raw),
+        Metadata={"schema": "news-radar-index-v1", "sha256": hashlib.sha256(raw).hexdigest()},
+    )
+
+    restored = store.read_index()
+
+    assert restored is not None
+    assert restored.items == index.items
+    assert restored.issues == ()
 
 
 def test_resolve_store_prefers_local_path(tmp_path) -> None:

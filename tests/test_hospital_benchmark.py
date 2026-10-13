@@ -175,10 +175,18 @@ def test_page_shows_loaded_values_and_quality_box(monkeypatch, tmp_path: Path) -
     labor = headline[headline["지표"] == "인건비율"].iloc[0]
     assert labor["부산백병원"] == "48.0%"
     assert labor["위치"] == "높은 편"
-    assert any("인건비율이 비교군 평균보다" in m.value for m in app.markdown)
+    assert any("2024 회계연도 공시 기준 · 비교병원" in m.value for m in app.markdown)
+    assert any("비교 보류: 유효한 비교병원이 3곳 미만입니다." in m.value for m in app.markdown)
     warnings = " ".join(w.value for w in app.warning)
     assert "부산대병원: 2024-01-01 ~ 2024-12-31" in warnings
     assert "2024 회계자료 없음" in warnings  # region peers without data say so, never a number
+
+
+def test_page_marks_briefing_on_hold_when_valid_peers_are_below_three(monkeypatch, tmp_path: Path) -> None:
+    app = _run_page(monkeypatch, _write_fixture(tmp_path / "fin.csv"))
+    app.radio[0].set_value("same_type").run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("비교 보류: 유효한 비교병원이 3곳 미만입니다." in m.value for m in app.markdown)
 
 
 def test_committed_data_covers_all_master_hospitals() -> None:

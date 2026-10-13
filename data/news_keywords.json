@@ -1,5 +1,8 @@
 {
   "_note": "title_terms: 기사 제목에 반드시 있어야 하는 단어(안쪽 목록은 '이 중 하나', 바깥 목록은 '모두'). exclude_terms: 제목에 있으면 제외. alert: immediate(10분마다 즉시 알림) / daily(매일 아침 요약) / none. 우리병원 즉시 알림은 좋은 기사·나쁜 기사 구분 없이 제목에 우리병원이 나오면 모두 보낸다.",
+  "issue_roundup_terms": [
+    "이모저모"
+  ],
   "groups": [
     {
       "key": "our_hospital",
