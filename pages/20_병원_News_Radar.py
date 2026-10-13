@@ -225,79 +225,45 @@ nri.seed_state(
 subscriber_store = _subscriber_store()
 _handle_subscription_links(subscriber_store)
 
-st.title("병원 News Radar")
-st.caption("등록한 키워드로 새 기사를 자동 확인합니다. 기사 제목·시간·링크를 그대로 보여 주고 요약하지 않습니다.")
+st.title("병원 뉴스")
+st.caption("관심 키워드로 병원과 정책 뉴스를 빠르게 확인합니다. 기사 제목·시간·링크는 원문 그대로 보여 줍니다.")
 
 # Counts cover articles whose title matches a keyword; body-only mentions are not counted.
 _all_keywords = [k for g in groups for k in g.keywords]
 summary = radar.summarize(
     r.entry for r in radar.rank_entries(state.entries.values(), _all_keywords, include_ignored=True) if r.relevant
 )
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("오늘", f"{summary.today}건")
-m2.metric("이번 주", f"{summary.this_week}건")
-m3.metric("중요 표시", f"{summary.important}건")
-m4.metric("아직 안 읽음", f"{summary.unread}건")
-
-if store is not None:
-    last_run = stored_index.last_run if stored_index is not None else None
-    if index_failed:
-        st.warning("자동으로 모아 둔 기사를 불러오지 못했습니다. 잠시 뒤 다시 열거나 새 기사 확인 버튼을 눌러 주세요.")
-    elif last_run is None:
-        st.caption("자동 수집 상태: 아직 자동으로 모은 기사가 없습니다. 첫 자동 확인이 끝나면 여기에 쌓입니다.")
-    else:
-        same_day = radar.to_seoul(last_run.finished_at).date() == radar.to_seoul(datetime.now(UTC)).date()
-        last_text = radar.seoul_time_text(last_run.finished_at, "%H:%M" if same_day else "%m-%d %H:%M")
-        status_text = (
-            f"자동 수집 상태: 마지막 자동 확인 {last_text} · 키워드 {last_run.keyword_count}개 중 "
-            f"{last_run.ok_count}개 확인 · 새 기사 {last_run.new_count}건 · 30분마다 자동 확인"
-        )
-        if last_run.failed_keywords:
-            status_text += " · 확인 못 한 키워드: " + ", ".join(last_run.failed_keywords)
-        st.caption(status_text)
-        if datetime.now(UTC) - last_run.finished_at > STALE_AFTER:
-            st.warning("자동 확인이 1시간 넘게 멈춰 있습니다. 새 기사 확인 버튼으로 직접 확인할 수 있습니다.")
-    if st.session_state.get(STATUS_SESSION_ONLY_KEY):
-        st.caption("읽음·중요 표시는 이 화면을 연 동안만 유지됩니다 (저장 권한이 없는 연결).")
-    else:
-        st.caption("읽음·중요 표시는 저장되어 다음에 열어도 그대로 보입니다.")
-else:
-    st.caption("읽음·중요 표시는 이 화면을 연 동안만 유지됩니다.")
-
-with st.expander("관심 키워드 관리", expanded=not state.entries):
-    st.caption(
-        "그룹 단위로 켜고 끌 수 있습니다(이 화면에만 적용). 즉시 알림 키워드는 새 기사가 나오면 알림 채널로 "
-        "보내고, 하루 1회 요약 키워드는 매일 오전 8시 30분에 모아 정리합니다."
-    )
-    for group in groups:
-        toggle_col, list_col = st.columns([1, 3])
-        with toggle_col:
-            st.toggle(group.name, value=group.enabled, key=GROUP_TOGGLE_PREFIX + group.key)
-        with list_col:
-            st.write(
-                " · ".join(f"{keyword.text} ({keyword.alert_label})" for keyword in group.keywords)
-            )
-
 enabled_overrides = {group.key: _group_enabled(group) for group in groups}
 keywords = radar.active_keywords(groups, enabled_overrides)
+active_groups = [group.name for group in groups if enabled_overrides[group.key]]
+last_run = stored_index.last_run if stored_index is not None else None
+last_checked_at = last_run.finished_at if last_run is not None else state.last_scan_at
+last_checked_text = _time_text(last_checked_at) if last_checked_at is not None else "확인 전"
+
+m1, m2, m3 = st.columns(3)
+m1.metric("새 기사", f"{summary.unread}건")
+m2.metric("오늘 기사", f"{summary.today}건")
+m3.metric("마지막 확인", last_checked_text)
 
 if credentials is None:
+    action_col, note_col = st.columns([1, 2])
+    with action_col:
+        st.button("새 기사 확인", type="primary", disabled=True, width="stretch")
+    with note_col:
+        st.caption(f"현재 {len(keywords)}개 키워드 · 뉴스 검색 연결 후 직접 확인할 수 있습니다.")
     st.info(
         "뉴스 검색 연결 설정이 없습니다. NAVER API HUB에서 뉴스 검색 API를 켠 Application의 "
         "NAVER_CLIENT_ID 와 NAVER_CLIENT_SECRET 을 운영 설정에 넣으면 바로 새 기사 확인을 "
         "시작할 수 있습니다. 키워드 관리는 지금도 가능합니다."
     )
 else:
-    action_col, note_col = st.columns([1, 3])
+    action_col, note_col = st.columns([1, 2])
     with action_col:
         run_scan = st.button(
-            f"새 기사 확인 ({len(keywords)}개 키워드)", type="primary", disabled=not keywords
+            "새 기사 확인", type="primary", disabled=not keywords, width="stretch"
         )
     with note_col:
-        if state.last_scan_at is not None:
-            st.caption(
-                f"마지막 직접 확인 {_time_text(state.last_scan_at)} · 새로 찾은 기사 {state.last_new_count}건"
-            )
+        st.caption(f"현재 {len(keywords)}개 키워드 확인 · 마지막 직접 확인 {_time_text(state.last_scan_at)}")
     if run_scan:
         client_id, client_secret = credentials
         settings = get_settings()
@@ -321,6 +287,24 @@ else:
                 st.success(f"새 기사 {new_count}건을 찾았습니다.")
                 st.rerun()
 
+if subscriber_store is None:
+    st.info("문자·이메일 알림 준비 중 · 관심 키워드별 새 기사 알림 기능을 준비하고 있습니다.")
+else:
+    st.info("문자 알림 준비 중 · 이메일 알림은 화면 아래에서 신청할 수 있습니다.")
+
+st.caption(
+    f"관심 키워드 {len(keywords)}개"
+    + (f" · 활성 그룹: {', '.join(active_groups)}" if active_groups else " · 활성 그룹 없음")
+)
+with st.expander("관심 키워드 설정", expanded=False):
+    st.caption("그룹을 켜거나 끄면 이 화면에서 확인할 뉴스 범위가 바로 바뀝니다.")
+    for group in groups:
+        toggle_col, list_col = st.columns([1, 3])
+        with toggle_col:
+            st.toggle(group.name, value=group.enabled, key=GROUP_TOGGLE_PREFIX + group.key)
+        with list_col:
+            st.write(" · ".join(keyword.text for keyword in group.keywords))
+
 failed_logs = [log for log in state.logs if not log.ok and log.scanned_at == state.last_scan_at]
 if failed_logs:
     st.warning(
@@ -328,23 +312,48 @@ if failed_logs:
         + ", ".join(f"{log.keyword} ({log.error})" for log in failed_logs)
     )
 
-st.subheader("오늘의 병원동향")
-filter_col, sort_col = st.columns([2, 1])
-with filter_col:
-    keyword_filter = st.multiselect(
-        "키워드로 좁혀 보기", [keyword.text for keyword in keywords], placeholder="전체 키워드"
-    )
-with sort_col:
-    sort_mode = st.radio("정렬", ["중요도순", "최신순"], horizontal=True)
-body_col_opt, ignored_col = st.columns(2)
-with body_col_opt:
-    show_body_only = st.checkbox(
-        "본문에서만 언급된 기사도 보기",
-        value=False,
-        help="제목에 키워드가 없고 본문 어딘가에만 단어가 있는 기사입니다. 대부분 관련 없는 기사라 기본으로 숨깁니다.",
-    )
-with ignored_col:
-    show_ignored = st.checkbox("관심없음으로 표시한 기사도 보기", value=False)
+st.subheader("최신 기사")
+with st.expander("상세 필터", expanded=False):
+    if store is not None:
+        if index_failed:
+            st.warning("자동으로 모아 둔 기사를 불러오지 못했습니다. 잠시 뒤 다시 열거나 새 기사 확인 버튼을 눌러 주세요.")
+        elif last_run is None:
+            st.caption("자동 수집 상태: 아직 자동으로 모은 기사가 없습니다. 첫 자동 확인이 끝나면 여기에 쌓입니다.")
+        else:
+            same_day = radar.to_seoul(last_run.finished_at).date() == radar.to_seoul(datetime.now(UTC)).date()
+            last_text = radar.seoul_time_text(last_run.finished_at, "%H:%M" if same_day else "%m-%d %H:%M")
+            status_text = (
+                f"자동 수집 상태: 마지막 자동 확인 {last_text} · 키워드 {last_run.keyword_count}개 중 "
+                f"{last_run.ok_count}개 확인 · 새 기사 {last_run.new_count}건 · 30분마다 자동 확인"
+            )
+            if last_run.failed_keywords:
+                status_text += " · 확인 못 한 키워드: " + ", ".join(last_run.failed_keywords)
+            st.caption(status_text)
+            if datetime.now(UTC) - last_run.finished_at > STALE_AFTER:
+                st.warning("자동 확인이 1시간 넘게 멈춰 있습니다. 새 기사 확인 버튼으로 직접 확인할 수 있습니다.")
+        if st.session_state.get(STATUS_SESSION_ONLY_KEY):
+            st.caption("읽음·중요 표시는 이 화면을 연 동안만 유지됩니다 (저장 권한이 없는 연결).")
+        else:
+            st.caption("읽음·중요 표시는 저장되어 다음에 열어도 그대로 보입니다.")
+    else:
+        st.caption("읽음·중요 표시는 이 화면을 연 동안만 유지됩니다.")
+
+    filter_col, sort_col = st.columns([2, 1])
+    with filter_col:
+        keyword_filter = st.multiselect(
+            "키워드로 좁혀 보기", [keyword.text for keyword in keywords], placeholder="전체 키워드"
+        )
+    with sort_col:
+        sort_mode = st.radio("정렬", ["중요도순", "최신순"], horizontal=True)
+    body_col_opt, ignored_col = st.columns(2)
+    with body_col_opt:
+        show_body_only = st.checkbox(
+            "본문에서만 언급된 기사도 보기",
+            value=False,
+            help="제목에 키워드가 없고 본문 어딘가에만 단어가 있는 기사입니다. 대부분 관련 없는 기사라 기본으로 숨깁니다.",
+        )
+    with ignored_col:
+        show_ignored = st.checkbox("관심없음으로 표시한 기사도 보기", value=False)
 
 tiers = radar.load_source_tiers()
 ranked = radar.rank_entries(state.entries.values(), keywords, tiers, include_ignored=show_ignored)
@@ -374,15 +383,13 @@ if len(entries) > len(visible_entries):
 
 for entry in visible_entries:
     with st.container(border=True):
-        head_col, body_col, status_col = st.columns([1, 4, 1.2])
-        with head_col:
+        body_col, status_col = st.columns([5, 1.3])
+        with body_col:
             if entry.status == radar.STATUS_NEW:
                 st.markdown(f"**NEW** {_time_text(entry.published_at)}")
             else:
                 st.markdown(_time_text(entry.published_at))
             info = rank_by_id.get(entry.article_id)
-            st.caption(" · ".join(info.matched_keywords if info and info.matched_keywords else entry.keywords))
-        with body_col:
             st.markdown(f"**{entry.title}**")
             badges = []
             if info and info.tier:
@@ -393,9 +400,12 @@ for entry in visible_entries:
                 f"{entry.source_domain or '출처 확인 안 됨'} | {_time_text(entry.published_at)}"
                 + (" | " + " · ".join(badges) if badges else "")
             )
+            st.caption(
+                "키워드 · " + " · ".join(info.matched_keywords if info and info.matched_keywords else entry.keywords)
+            )
             link_col, naver_col = st.columns(2)
             with link_col:
-                st.link_button("원문보기", entry.url)
+                st.link_button("원문 보기", entry.url)
             with naver_col:
                 if entry.naver_link and entry.naver_link != entry.url:
                     st.link_button("네이버에서 보기", entry.naver_link)
@@ -417,15 +427,12 @@ if len(entries) > len(visible_entries):
         st.session_state["news_radar_page_size"] = page_size + PAGE_SIZE
         st.rerun()
 
-st.divider()
-st.subheader("이메일 알림 받기")
-st.caption(
-    "우리병원(부산백병원·인제대 백병원·백중앙의료원) 기사가 제목에 나오면 좋은 기사든 나쁜 기사든 약 10분 안에 "
-    "메일로 보내 드립니다. 매일 아침 8시 30분에는 병원 전체 동향 요약을 보내 드립니다."
-)
-if subscriber_store is None:
-    st.info("이메일 알림 신청은 관리자 설정이 끝나면 열립니다.")
-else:
+if subscriber_store is not None:
+    st.divider()
+    st.subheader("이메일 알림")
+    st.caption(
+        "우리병원 기사가 제목에 나오면 빠르게 알려 드리고, 매일 아침에는 병원 전체 동향을 모아 보냅니다."
+    )
     with st.form("news_subscribe", clear_on_submit=True):
         email = st.text_input("이메일 주소", placeholder="name@example.com")
         want_immediate = st.checkbox(subs.PREF_LABELS[subs.PREF_IMMEDIATE], value=True)

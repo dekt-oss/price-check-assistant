@@ -73,6 +73,60 @@ HOME_CSS = """
 .pc-home-group {font-size:17px; font-weight:700; color:var(--pc-navy); margin:26px 0 12px 0;}
 .pc-home-card h4 {font-size:16px; font-weight:800; color:var(--pc-navy); margin:2px 0 6px 0;}
 .pc-home-card p {font-size:13px; color:#5B6C82; line-height:1.6; margin:0 0 6px 0; min-height:42px; word-break:keep-all;}
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card) {
+  position:relative;
+  transition:border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card):hover {
+  border-color:#7FA6E8;
+  box-shadow:0 8px 20px rgba(25, 62, 116, 0.10);
+  transform:translateY(-1px);
+}
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card):focus-within {
+  border-color:#376FD0;
+  box-shadow:0 0 0 3px rgba(55, 111, 208, 0.18);
+}
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card) [data-testid="stElementContainer"]:has(> [data-testid="stPageLink"]) {
+  position:absolute;
+  inset:0;
+  z-index:2;
+}
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card) [data-testid="stPageLink"] {
+  width:100%;
+  height:100%;
+}
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card) [data-testid="stPageLink"] > div,
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card) [data-testid="stPageLink"] a {
+  width:100%;
+  height:100%;
+  min-height:100%;
+  border:0;
+  background:transparent;
+  font-size:0;
+}
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card) [data-testid="stPageLink"] a > span {
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0, 0, 0, 0);
+  white-space:nowrap;
+  border:0;
+}
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card) [data-testid="stPageLink"] a::after {
+  content:"→";
+  position:absolute;
+  right:16px;
+  bottom:13px;
+  color:#376FD0;
+  font-size:20px;
+  line-height:1;
+}
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card) [data-testid="stPageLink"] a:hover {
+  background:transparent;
+}
 </style>
 """
 
@@ -81,7 +135,7 @@ def _page_link(path: str, label: str, icon: str) -> None:
     """Link to a sibling page; when this file runs on its own (startup smoke) just say so."""
 
     try:
-        st.page_link(path, label=label, icon=icon)
+        st.page_link(path, label=label, icon=icon, width="stretch")
     except StreamlitPageNotFoundError:
         st.caption(f"{label} (홈 화면에서 열 수 있습니다)")
 
@@ -94,7 +148,7 @@ def _card_row(cards: tuple[tuple[str, str, str, str], ...], per_row: int = 3) ->
                 f'<div class="pc-home-card"><h4>{esc(title)}</h4><p>{esc(text)}</p></div>',
                 unsafe_allow_html=True,
             )
-            _page_link(path, f"{title} 열기", icon)
+            _page_link(path, f"{title} 화면으로 이동", icon)
 
 
 st.markdown(HOME_CSS, unsafe_allow_html=True)
