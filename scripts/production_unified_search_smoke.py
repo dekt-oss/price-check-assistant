@@ -12,11 +12,13 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v21"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v22"
 # The simplified result screen (2026-10) states counts in plain words on the price card.
 WORKSPACE_DIRECT_PATTERN = re.compile(r"같은 제품 거래\s*(\d+)건")
 REFERENCE_PATTERN = re.compile(r"비슷한 품목 거래\s*(\d+)건")
 RESULT_SECTIONS = ("얼마에 거래됐나", "누가 파는가")
+# How long the bottom of the result page may take to arrive after the conclusion is visible.
+SECTIONS_RENDER_SECONDS = 45
 ERROR_TEXTS = (
     "AttributeError",
     "This app has encountered an error",
@@ -155,7 +157,7 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-runtime-v21 in time")
+    raise RuntimeError("Production did not expose purchase-workspace-runtime-v22 in time")
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -189,8 +191,17 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
     started = time.monotonic()
     app = _app(page)
 
-    body = _body_text(page)
-    _assert_no_error_text(body)
+    # The page streams in: the conclusion and 얼마에 거래됐나 appear before the same-품목 market and
+    # the 입찰·계약 section at the bottom, which Production can draw seconds later.
+    body = ""
+    sections_deadline = time.monotonic() + SECTIONS_RENDER_SECONDS
+    while time.monotonic() < sections_deadline:
+        body = _body_text(page)
+        _assert_no_error_text(body)
+        if "얼마에 거래됐나" in body and "입찰·계약 참고자료" in body:
+            break
+        page.wait_for_timeout(1_000)
+    report["sections_render_seconds"] = round(time.monotonic() - started, 2)
     if "얼마에 거래됐나" not in body or "입찰·계약 참고자료" not in body:
         raise RuntimeError("Default price result did not render after DFM100 search")
     report["price_section_rendered"] = True

@@ -272,3 +272,33 @@ def test_lookup_does_not_require_settings_dunder_dict(monkeypatch) -> None:
     assert captured["base_url"] == MFDS_RECALL_BASE_URL
     assert captured["timeout_seconds"] == 9.0
     assert captured["max_retries"] == 2
+
+
+def test_search_time_budget_turns_a_slow_recall_api_into_a_failure() -> None:
+    import time
+
+    from purchase_price.services.mfds_recall import TIMEOUT_ERROR_TYPE, lookup_mfds_recall_within
+
+    class SlowClient:
+        def search_model(self, model_name, **_kwargs):
+            time.sleep(1.0)
+            return ()
+
+    started = time.monotonic()
+    result = lookup_mfds_recall_within(model_name="DFM100", budget_seconds=0.2, client=SlowClient())
+    assert time.monotonic() - started < 0.8
+    assert result.status == "failure"
+    assert result.error_type == TIMEOUT_ERROR_TYPE
+    assert result.query == "DFM100"
+    assert not result.checked
+
+
+def test_search_time_budget_keeps_a_fast_answer() -> None:
+    from purchase_price.services.mfds_recall import lookup_mfds_recall_within
+
+    class FastClient:
+        def search_model(self, model_name, **_kwargs):
+            return ()
+
+    result = lookup_mfds_recall_within(model_name="DFM100", budget_seconds=5, client=FastClient())
+    assert result.status == "success_0"
