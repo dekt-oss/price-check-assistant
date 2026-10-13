@@ -254,6 +254,8 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.product_matching", "ALIAS_REGISTRY_CACHE_V1"),
     ("purchase_price.services.search_routing", "MODEL_CODE_SKIP_V1"),
     ("purchase_price.services.mfds_recall", "MFDS_RECALL_BUDGET_V1"),
+    # UX v1.1 P4: the chosen trade period is kept in the URL (?period=3y|5y|all).
+    ("purchase_price.ui.result_summary", "PERIOD_URL_V1"),
 )
 
 
@@ -2516,10 +2518,21 @@ def _main_unit_view(track_b: Any, *, preferred_unit: str | None = None) -> tuple
 
 
 def _apply_search_period(track_b: Any, direct_rows, reference_rows, *, slot, quote_key: str):
-    """Filter one result to the chosen trade period (default 최근 3년, widened when empty)."""
+    """Filter one result to the chosen trade period (default 최근 3년, widened when empty).
+
+    The picked period is also kept in the URL as ``?period=3y|5y|all`` so a refresh or a shared
+    link reopens the same view. A URL period counts as a reader's choice (never widened), but a
+    period picked earlier in this session for this result wins over the URL.
+    """
 
     key = f"workspace_period::{quote_key}"
     picked_key = f"{key}::picked"
+    result_summary_ui.adopt_url_period(
+        st.session_state,
+        key=key,
+        picked_key=picked_key,
+        url_value=st.query_params.get(result_summary_ui.PERIOD_URL_PARAM),
+    )
     today = datetime.now(ZoneInfo("Asia/Seoul")).date()
     direct_dates = [
         getattr(candidate, "transaction_date", None)
@@ -2536,7 +2549,9 @@ def _apply_search_period(track_b: Any, direct_rows, reference_rows, *, slot, quo
         st.session_state[key] = choice.label
 
     def _mark_picked() -> None:
-        st.session_state[picked_key] = True
+        result_summary_ui.remember_picked_period(
+            st.session_state, st.query_params, key=key, picked_key=picked_key
+        )
 
     slot.segmented_control(
         "거래 기간",
@@ -4447,8 +4462,13 @@ def _open_query(query: str) -> None:
     """Search ``query`` through the shared-link path so examples and recent searches act alike."""
 
     st.session_state.pop(HOME_SEARCH_STATE_KEY, None)
+    # A new search keeps the trade period the reader picked (?period=); the other parameters
+    # belonged to the previous result. "새 검색" clears everything, the period included.
+    period = st.query_params.get(result_summary_ui.PERIOD_URL_PARAM)
     st.query_params.clear()
     st.query_params["q"] = query
+    if result_summary_ui.period_label_from_url(period) is not None:
+        st.query_params[result_summary_ui.PERIOD_URL_PARAM] = str(period)
     st.rerun()
 
 
@@ -4727,6 +4747,7 @@ if submitted:
             st.session_state[HOME_SEARCH_STATE_KEY] = search_state
             st.session_state[HOME_SEARCH_DETAILS_KEY] = False
             _remember_search(search_text)
+            # ?period= stays: a new search keeps the trade period the reader picked.
             st.query_params["q"] = search_text.strip()
             st.query_params.pop("view", None)
             st.query_params.pop("identity", None)
