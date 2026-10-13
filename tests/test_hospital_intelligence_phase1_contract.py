@@ -42,8 +42,10 @@ def test_home_management_card_states_the_loaded_fiscal_year_not_pending_wording(
 
     source = (REPO_ROOT / "pages" / "0_홈.py").read_text(encoding="utf-8")
     assert "아직 연계 전" not in source
-    assert "hospital_benchmark.load_benchmark_data().fiscal_years" in source
-    assert "회계공시까지 반영돼 있습니다" in source
+    # UX v1.1 I0-b: the card shows the newest 경영 브리핑 first line (회계연도 · 비교병원 수) from the same
+    # committed data the 병원 경영 비교 page reads.
+    assert "hospital_benchmark.load_benchmark_data()" in source
+    assert "공시 기준" in source
     assert hospital_benchmark.load_benchmark_data().fiscal_years  # the sentence is true for the committed data
 
 

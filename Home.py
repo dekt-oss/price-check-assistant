@@ -89,12 +89,11 @@ price_page = st.Page("pages/1_대시보드.py", title="가격 조사", icon="�
 # The integrated home lives at /home so the root URL keeps opening the price search that the
 # production smokes and purchasing-team bookmarks expect.
 home_page = st.Page("pages/0_홈.py", title="홈", icon="🏠", url_path="home")
-news_page = st.Page(
-    "pages/20_병원_News_Radar.py", title="병원 News Radar", icon="📰", url_path="news-radar"
-)
+# Titles match the page headings (병원 뉴스 / 병원 경영 비교) so the browser tab says the same thing.
+news_page = st.Page("pages/20_병원_News_Radar.py", title="병원 뉴스", icon="📰", url_path="news-radar")
 benchmark_page = st.Page(
     "pages/21_병원_경영_Benchmark.py",
-    title="병원 경영 Benchmark",
+    title="병원 경영 비교",
     icon="📈",
     url_path="hospital-benchmark",
 )

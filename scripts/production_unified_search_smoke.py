@@ -12,7 +12,13 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v22"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v23"
+# The news and management pages are served from their own files; Production has kept an old copy of
+# a page after a deploy before (2026-10-13), so the smoke opens both and checks their new headings.
+TRACK_H_PAGES = (
+    ("news-radar", "병원 뉴스", "주요 이슈"),
+    ("hospital-benchmark", "병원 경영 비교", "경영 브리핑"),
+)
 # The simplified result screen (2026-10) states counts in plain words on the price card.
 WORKSPACE_DIRECT_PATTERN = re.compile(r"같은 제품 거래\s*(\d+)건")
 REFERENCE_PATTERN = re.compile(r"비슷한 품목 거래\s*(\d+)건")
@@ -157,7 +163,27 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
-    raise RuntimeError("Production did not expose purchase-workspace-runtime-v22 in time")
+    raise RuntimeError(f"Production did not expose {DEPLOYMENT_MARKER[1:]} in time")
+
+
+def _verify_track_h_pages(page: Any, report: dict[str, object]) -> None:
+    """Open the 병원 뉴스 and 병원 경영 비교 pages and wait for their current headings and first block."""
+
+    results: dict[str, str] = {}
+    report["track_h_pages"] = results
+    for url_path, title, block in TRACK_H_PAGES:
+        page.goto(PRODUCTION_URL.rstrip("/") + "/" + url_path, wait_until="domcontentloaded", timeout=60_000)
+        page.wait_for_timeout(3_000)
+        app = _app(page)
+        try:
+            app.get_by_text(title, exact=True).first.wait_for(state="visible", timeout=60_000)
+            app.get_by_text(block).first.wait_for(state="visible", timeout=60_000)
+            _assert_no_error_text(_body_text(page))
+        except Exception:
+            results[url_path] = "fail"
+            _save_snapshot(page, report, f"{url_path}-failure")
+            raise
+        results[url_path] = "pass"
 
 
 def _wait_for_nonzero_result(page: Any, *, timeout_seconds: float = 75) -> tuple[int, int]:
@@ -395,6 +421,7 @@ def main() -> None:
                 _wait_for_deployed_app(page, report)
                 _submit_dfm100(page, report)
                 _verify_quote_upload_uses_unified_workspace(browser, report)
+                _verify_track_h_pages(page, report)
                 report["status"] = "pass"
             except Exception:
                 _save_snapshot(page, report, "unified-search-dfm100-failure")
