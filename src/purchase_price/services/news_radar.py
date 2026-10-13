@@ -8,6 +8,7 @@ Nothing here feeds an AI step.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -20,6 +21,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from purchase_price.clients.naver_news import NaverNewsClientError, NaverNewsItem
 
 DEFAULT_KEYWORD_FILE = Path(__file__).resolve().parents[3] / "data" / "news_keywords.json"
+MODULES_REVISION = "2026-10-13-h1"
+ISSUE_WINDOW = timedelta(hours=96)
+ISSUE_SIMILARITY_THRESHOLD = 0.18
+ISSUE_REGULATORY_TERMS = ("회수", "판매중지", "리콜", "안전성")
 
 STATUS_NEW = "new"
 STATUS_READ = "read"
@@ -260,6 +265,203 @@ class NewsEntry:
     @property
     def status_label(self) -> str:
         return STATUS_LABELS.get(self.status, STATUS_LABELS[STATUS_NEW])
+
+
+@dataclass(frozen=True)
+class NewsIssue:
+    issue_id: str
+    title: str
+    article_ids: tuple[str, ...]
+    group_keys: tuple[str, ...]
+    group_names: tuple[str, ...]
+    source_count: int
+    article_count: int
+    first_published_at: datetime
+    latest_published_at: datetime
+    representative_article_id: str
+    score: int
+
+
+_TITLE_TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]+")
+_TITLE_ALIASES = {
+    "카카오톡": "카카오",
+    "인제대학교": "인제대",
+    "영아": "아기",
+    "건전지꿀꺽": "건전지 삼킨",
+    "권역모자의료센터": "모자 의료 센터",
+    "모자의료센터": "모자 의료 센터",
+    "10주년": "10년",
+    "원내약": "약",
+    "조제현황": "조제",
+}
+_TITLE_STOPWORDS = {"ai", "기사", "뉴스", "병원", "의료", "의료기기"}
+_TITLE_SUFFIXES = ("으로", "에서", "에게", "까지", "부터", "처럼", "의", "이", "가", "은", "는", "을", "를", "과", "와", "도", "에", "로")
+
+
+def _issue_title_parts(title: str) -> tuple[set[str], set[str]]:
+    normalized = title.casefold()
+    for source, target in _TITLE_ALIASES.items():
+        normalized = normalized.replace(source.casefold(), target.casefold())
+    tokens: set[str] = set()
+    for raw_token in _TITLE_TOKEN_RE.findall(normalized):
+        token = raw_token
+        for suffix in _TITLE_SUFFIXES:
+            if len(token) - len(suffix) >= 2 and token.endswith(suffix):
+                token = token[: -len(suffix)]
+                break
+        if (len(token) >= 2 or token == "약") and token not in _TITLE_STOPWORDS and "병원" not in token:
+            tokens.add(token)
+    compact = "".join(_TITLE_TOKEN_RE.findall(normalized))
+    bigrams = {compact[i : i + 2] for i in range(max(0, len(compact) - 1))}
+    return tokens, bigrams
+
+
+def _issue_title_similarity(left: str, right: str) -> tuple[int, float]:
+    left_tokens, left_bigrams = _issue_title_parts(left)
+    right_tokens, right_bigrams = _issue_title_parts(right)
+    shared_tokens = len(left_tokens & right_tokens)
+    denominator = len(left_bigrams) + len(right_bigrams)
+    dice = 0.0 if not denominator else 2 * len(left_bigrams & right_bigrams) / denominator
+    return shared_tokens, dice
+
+
+def cluster_news_issues(
+    entries: Iterable[NewsEntry],
+    keywords: Iterable[Keyword],
+    tiers: Iterable[SourceTier] = (),
+    *,
+    now: datetime | None = None,
+) -> tuple[NewsIssue, ...]:
+    """Deterministically group title-matching articles that report the same event."""
+
+    current = now or datetime.now(UTC)
+    keyword_list = tuple(keywords)
+    by_text = {keyword.text: keyword for keyword in keyword_list}
+    ranked = [item for item in rank_entries(entries, keyword_list, tiers) if item.relevant]
+    ordered = sorted(
+        ranked,
+        key=lambda item: (
+            _aware_issue_time(item.entry.published_at or item.entry.detected_at),
+            item.entry.article_id,
+        ),
+    )
+    parents = list(range(len(ordered)))
+    component_first = [
+        _aware_issue_time(item.entry.published_at or item.entry.detected_at) for item in ordered
+    ]
+    component_latest = list(component_first)
+
+    def root(position: int) -> int:
+        while parents[position] != position:
+            parents[position] = parents[parents[position]]
+            position = parents[position]
+        return position
+
+    def union(left: int, right: int) -> bool:
+        left_root, right_root = root(left), root(right)
+        if left_root == right_root:
+            return True
+        first = min(component_first[left_root], component_first[right_root])
+        latest = max(component_latest[left_root], component_latest[right_root])
+        if latest - first > ISSUE_WINDOW:
+            return False
+        parents[right_root] = left_root
+        component_first[left_root] = first
+        component_latest[left_root] = latest
+        return True
+
+    for left_position, left in enumerate(ordered):
+        left_entry = left.entry
+        if "이모저모" in left_entry.title:
+            continue
+        left_time = _aware_issue_time(left_entry.published_at or left_entry.detected_at)
+        left_groups = {by_text[text].group_key for text in left.matched_keywords if text in by_text}
+        for right_position in range(left_position + 1, len(ordered)):
+            right = ordered[right_position]
+            right_entry = right.entry
+            if "이모저모" in right_entry.title:
+                continue
+            right_time = _aware_issue_time(right_entry.published_at or right_entry.detected_at)
+            if right_time - left_time > ISSUE_WINDOW:
+                break
+            right_groups = {by_text[text].group_key for text in right.matched_keywords if text in by_text}
+            if not left_groups.intersection(right_groups):
+                continue
+            shared, similarity = _issue_title_similarity(left_entry.title, right_entry.title)
+            same_event = shared >= 2 and similarity >= ISSUE_SIMILARITY_THRESHOLD
+            if same_event:
+                union(left_position, right_position)
+
+    grouped: dict[int, list[RankedEntry]] = {}
+    for position, item in enumerate(ordered):
+        grouped.setdefault(root(position), []).append(item)
+    clusters = list(grouped.values())
+
+    issues: list[NewsIssue] = []
+    for cluster in clusters:
+        cluster_entries = [item.entry for item in cluster]
+        representative = max(
+            cluster,
+            key=lambda item: (
+                item.score,
+                _aware_issue_time(item.entry.published_at or item.entry.detected_at),
+                item.entry.article_id,
+            ),
+        )
+        times = [_aware_issue_time(entry.published_at or entry.detected_at) for entry in cluster_entries]
+        group_keys = sorted(
+            {
+                by_text[text].group_key
+                for item in cluster
+                for text in item.matched_keywords
+                if text in by_text
+            }
+        )
+        group_names = tuple(
+            dict.fromkeys(
+                by_text[text].group_name
+                for item in cluster
+                for text in item.matched_keywords
+                if text in by_text
+            )
+        )
+        unique_sources = len({entry.source_domain for entry in cluster_entries if entry.source_domain})
+        age = _aware_issue_time(current) - max(times)
+        recency = 2 if age <= timedelta(hours=24) else 1 if age <= timedelta(hours=72) else 0
+        regulatory = 3 if any(
+            term in text
+            for item in cluster
+            for text in item.matched_keywords
+            for term in ISSUE_REGULATORY_TERMS
+        ) else 0
+        score = representative.score + regulatory + min(max(unique_sources - 1, 0), 3) + recency
+        article_ids = tuple(entry.article_id for entry in cluster_entries)
+        digest = hashlib.sha256("\n".join(article_ids).encode("utf-8")).hexdigest()[:16]
+        issues.append(
+            NewsIssue(
+                issue_id=f"issue-{digest}",
+                title=representative.entry.title,
+                article_ids=article_ids,
+                group_keys=tuple(group_keys),
+                group_names=group_names,
+                source_count=unique_sources,
+                article_count=len(cluster_entries),
+                first_published_at=min(times),
+                latest_published_at=max(times),
+                representative_article_id=representative.entry.article_id,
+                score=score,
+            )
+        )
+    return tuple(
+        sorted(
+            issues,
+            key=lambda issue: (-issue.score, -issue.latest_published_at.timestamp(), issue.issue_id),
+        )
+    )
+
+
+def _aware_issue_time(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.astimezone()
 
 
 @dataclass(frozen=True)
