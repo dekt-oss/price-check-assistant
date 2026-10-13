@@ -4409,6 +4409,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v16" style="display:none">purchase-workspace-runtime-v16</span>'
     '<span id="purchase-workspace-runtime-v21" style="display:none">purchase-workspace-runtime-v21</span>'
     '<span id="purchase-workspace-runtime-v22" style="display:none">purchase-workspace-runtime-v22</span>'
+    '<span id="purchase-workspace-runtime-v23" style="display:none">purchase-workspace-runtime-v23</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

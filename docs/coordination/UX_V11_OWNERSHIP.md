@@ -29,7 +29,7 @@
 | 워크플로·외부 | `.github/workflows/news-radar-collect.yml`, `hospital-weekly-report.yml`, `khidi-monthly-check.yml`, `cloudflare/news-radar-cron/*` |
 | 데이터 | `data/news_keywords.json`, `data/news_sources.json`, `data/hospital_master.json`, `data/hospital_financial.csv`, `data/alio_disclosure.csv`, `data/alio_raw/`, `data/khidi_raw/` |
 | 테스트 | `tests/test_collect_news_radar.py`, `test_naver_news_client.py`, `test_news_radar.py`, `test_news_radar_index.py`, `test_news_radar_page.py`, `test_news_radar_workflow_contract.py`, `test_news_relevance_and_alerts.py`, `test_news_subscriptions.py`, `test_next_news_radar_run.py`, `test_alio_disclosure.py`, `test_hira_hospital_info.py`, `test_hospital_benchmark.py`, `test_hospital_intelligence_phase1_contract.py`(루트 주소·AI 미사용 단언은 유지), `test_hospital_master.py`, `test_hospital_metrics.py`, `test_hospital_phase4.py`, `test_khidi_financials.py`, `tests/fixtures/alio/`, `tests/fixtures/khidi/`, `tests/fixtures/news/`(신규), `tests/fixtures/hospital/`(신규) |
-| 문서 | `docs/metrics/news.md`, `docs/metrics/hospital_management.md`, `docs/handoffs/HANDOFF_H*.md`, `docs/HOSPITAL_*.md`, `docs/NEWS_RADAR_ALERTS.md` |
+| 문서 | `docs/metrics/news.md`, `docs/metrics/hospital_management.md`, `docs/handoffs/HANDOFF_H*.md`, `docs/HOSPITAL_*.md`, `docs/NEWS_*.md`(평가·알림 문서 포함) |
 
 주의: `tests/test_match_benchmark.py`, `tests/test_evaluate_match_benchmark_cli.py`는 이름에 benchmark가 있어도 **가격 매칭** 테스트다(Track P).
 
