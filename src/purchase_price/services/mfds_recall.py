@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
@@ -309,3 +311,48 @@ def lookup_mfds_recall(
         records=records,
         checked_at=_checked_at(),
     )
+
+
+# ── Search-time budget (UX v1.1 P2b) ──
+
+# Runtime marker: the price search waits at most RECALL_SEARCH_BUDGET_SECONDS for the recall check.
+MFDS_RECALL_BUDGET_V1 = True
+# The client allows 20 s per request, 3 retries and 3 pages, so a slow MFDS API could hold the whole
+# price search for minutes (Production, 2026-10-13: searches stuck at "4/4 회수·판매중지 확인 중").
+RECALL_SEARCH_BUDGET_SECONDS = 8.0
+TIMEOUT_ERROR_TYPE = "MfdsRecallTimeout"
+_BUDGET_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mfds-recall")
+
+
+def lookup_mfds_recall_within(
+    *,
+    model_name: str = "",
+    product_name: str = "",
+    budget_seconds: float = RECALL_SEARCH_BUDGET_SECONDS,
+    settings: Settings | None = None,
+    client: MfdsRecallClient | None = None,
+) -> MfdsRecallLookupResult:
+    """``lookup_mfds_recall`` that gives up after ``budget_seconds`` with a ``failure`` result, so
+    the price result shows "확인 못 함" instead of waiting. The late call finishes in its worker and
+    is discarded."""
+
+    future = _BUDGET_EXECUTOR.submit(
+        lookup_mfds_recall,
+        model_name=model_name,
+        product_name=product_name,
+        settings=settings,
+        client=client,
+    )
+    try:
+        return future.result(timeout=budget_seconds)
+    except FutureTimeout:
+        model = model_name.strip()
+        return MfdsRecallLookupResult(
+            status="failure",
+            query_type="model" if model else "product",
+            query=model or product_name.strip(),
+            error_type=TIMEOUT_ERROR_TYPE,
+            error_message=f"식약처 회수·판매중지 조회가 {budget_seconds:g}초 안에 끝나지 않았습니다.",
+            checked_at=_checked_at(),
+        )
+
