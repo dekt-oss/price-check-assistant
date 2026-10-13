@@ -35,7 +35,7 @@ def _reload_retained_modules() -> None:
     import importlib
     import sys
 
-    if getattr(radar, "MODULES_REVISION", "") == "2026-10-13-h1-review":
+    if getattr(radar, "MODULES_REVISION", "") == "2026-10-13-h1-review2":
         return
     for name in (
         "purchase_price.clients.naver_news",
@@ -50,7 +50,7 @@ def _reload_retained_modules() -> None:
 
 _reload_retained_modules()
 
-NEWS_PAGE_REVISION = "2026-10-13-h1-review"
+NEWS_PAGE_REVISION = "2026-10-13-h1-review2"
 NEWS_STATE_KEY = "news_radar_state"
 GROUP_TOGGLE_PREFIX = "news_radar_group::"
 STATUS_WIDGET_PREFIX = "news_radar_status::"

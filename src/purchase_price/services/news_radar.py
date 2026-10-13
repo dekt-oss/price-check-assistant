@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from purchase_price.clients.naver_news import NaverNewsClientError, NaverNewsItem
 
 DEFAULT_KEYWORD_FILE = Path(__file__).resolve().parents[3] / "data" / "news_keywords.json"
-MODULES_REVISION = "2026-10-13-h1-review"
+MODULES_REVISION = "2026-10-13-h1-review2"
 ISSUE_WINDOW = timedelta(hours=96)
 ISSUE_RECENT_WINDOW = timedelta(hours=72)
 ISSUE_SIMILARITY_THRESHOLD = 0.18
@@ -304,7 +304,18 @@ _TITLE_ALIASES = {
     "원내약": "약",
     "조제현황": "조제",
 }
-_TITLE_STOPWORDS = {"ai", "기사", "뉴스", "병원", "의료", "의료기기"}
+# Words that appear in most hospital/health-tech headlines and therefore say nothing about *which*
+# event a title reports. They are dropped before counting shared tokens, so two titles only count as
+# the same event when they share distinctive words (names, places, products, numbers). Added after
+# the 2026-10-13 holdout, where "AI 진료 솔루션 도입/공급" alone merged three companies' news.
+_TITLE_STOPWORDS = {
+    "ai", "기사", "뉴스", "병원", "의료", "의료기기", "의료기관", "의료ai", "의료진", "의료계",
+    "진료", "솔루션", "도입", "운영", "공개", "소개", "참가", "확대", "협력", "공급", "지원", "서비스",
+    "플랫폼", "시스템", "데이터", "기술", "디지털", "스마트", "혁신", "전환", "기반", "활용",
+    "발표", "구축", "맞손", "추진", "강화", "마련", "개최", "진행", "실시", "시행", "선보인다", "선보여",
+    "대상", "국내", "최초", "첫", "통해", "위한", "위해", "함께", "나선다", "시대", "준비", "확산", "체감",
+    "사업", "기업", "글로벌", "시장", "진출", "개발", "연구", "환자", "건강", "돌봄",
+}
 _TITLE_SUFFIXES = ("으로", "에서", "에게", "까지", "부터", "처럼", "의", "이", "가", "은", "는", "을", "를", "과", "와", "도", "에", "로")
 
 
