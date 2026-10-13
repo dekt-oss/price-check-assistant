@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from decimal import Decimal, DivisionByZero, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, DivisionByZero, InvalidOperation
 
 # Standardised KHIDI income-statement / balance-sheet account keys.
 ACCOUNT_LABELS: dict[str, str] = {
@@ -333,10 +333,10 @@ class ManagementBriefing:
     @property
     def lines(self) -> tuple[str, ...]:
         parts = [self.heading]
-        parts.extend(finding.text for finding in self.differences)
-        parts.extend(finding.text for finding in self.trends)
         if self.status:
             parts.append(self.status)
+        parts.extend(finding.text for finding in self.differences)
+        parts.extend(finding.text for finding in self.trends)
         parts.extend(self.followups)
         return tuple(parts)
 
@@ -394,17 +394,19 @@ def describe_findings(
             continue
         diff = row.value - row.peer_average
         if row.unit == "%":
-            if abs(diff) <= min_gap_points:
+            displayed = _display_decimal(abs(diff))
+            if displayed <= min_gap_points:
                 continue
-            amount = f"{abs(diff):.1f}%p"
+            amount = f"{displayed:.1f}%p"
             direction = "높습니다" if diff > 0 else "낮습니다"
         else:
             if row.peer_average == 0:
                 continue
             relative = diff / abs(row.peer_average) * 100
-            if abs(relative) <= min_gap_percent:
+            displayed = _display_decimal(abs(relative))
+            if displayed <= min_gap_percent:
                 continue
-            amount = f"{abs(relative):.1f}%"
+            amount = f"{displayed:.1f}%"
             direction = "많습니다" if diff > 0 else "적습니다"
         text = f"{_subject(row.label)} 비교군 평균보다 {amount} {direction}."
         history = tuple(sorted((gap_history or {}).get(row.metric_key, ())))
@@ -427,22 +429,30 @@ def _difference_strength(
         return None
     diff = row.value - row.peer_average
     if row.unit == "%":
-        return None if abs(diff) <= min_gap_points else abs(diff) / min_gap_points
+        displayed = _display_decimal(abs(diff))
+        return None if displayed <= min_gap_points else displayed / min_gap_points
     if row.peer_average == 0:
         return None
     relative = diff / abs(row.peer_average) * 100
-    return None if abs(relative) <= min_gap_percent else abs(relative) / min_gap_percent
+    displayed = _display_decimal(abs(relative))
+    return None if displayed <= min_gap_percent else displayed / min_gap_percent
+
+
+def _display_decimal(value: Decimal) -> Decimal:
+    """Round once for both threshold decisions and one-decimal display."""
+
+    return value.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
 
 
 def _difference_finding(row: ComparisonRow) -> Finding:
     assert row.value is not None and row.peer_average is not None
     diff = row.value - row.peer_average
     if row.unit == "%":
-        amount = f"{abs(diff):.1f}%p"
+        amount = f"{_display_decimal(abs(diff)):.1f}%p"
         direction = "높습니다" if diff > 0 else "낮습니다"
     else:
         relative = diff / abs(row.peer_average) * 100
-        amount = f"{abs(relative):.1f}%"
+        amount = f"{_display_decimal(abs(relative)):.1f}%"
         direction = "많습니다" if diff > 0 else "적습니다"
     return Finding(
         metric_key=row.metric_key,
@@ -466,8 +476,9 @@ def _trend_finding(row: ComparisonRow, history: Sequence[tuple[int, Decimal]]) -
     previous_year, previous_gap = recent[-2]
     latest_year, latest_gap = recent[-1]
     direction = "커졌습니다" if trend == "widening" else "줄었습니다"
+    side = "높은" if latest_gap > 0 else "낮은"
     text = (
-        f"{row.label}의 비교군 평균과의 차이는 최근 3년간 {direction} "
+        f"{_topic(row.label)} 최근 3년간 비교군 평균보다 {side} 쪽 차이가 {direction} "
         f"({previous_year}년 {_gap_amount(previous_gap, row.unit)}에서 "
         f"{latest_year}년 {_gap_amount(latest_gap, row.unit)})."
     )
@@ -481,8 +492,9 @@ def _trend_finding(row: ComparisonRow, history: Sequence[tuple[int, Decimal]]) -
 
 
 def _followups(metric_keys: Iterable[str]) -> tuple[str, ...]:
+    keys = tuple(metric_keys)
     groups: list[str] = []
-    for key in metric_keys:
+    for key in keys:
         if key in {"revenue_growth", "revenue_cagr_3y", "revenue_cagr_5y", "revenue_per_bed"}:
             group = "revenue"
         elif key in {
@@ -506,7 +518,32 @@ def _followups(metric_keys: Iterable[str]) -> tuple[str, ...]:
         "cost": "비용 구조 차이는 인력 구성, 재료·약품 사용량, 외주·관리비 자료를 추가 확인해야 합니다.",
         "finance": "재무구조 차이는 차입 조건, 상환 일정, 유동자산·부채 구성을 추가 확인해야 합니다.",
     }
-    return tuple(texts[group] for group in groups)
+    result = [texts[group] for group in groups]
+    if any(key.endswith("_per_bed") for key in keys):
+        result.append(
+            "병상당 지표는 해당 연도 회계공시 병상수(없으면 심평원 허가병상수) 기준이며, "
+            "유사 규모 묶음은 심평원 허가병상수 기준입니다."
+        )
+    return tuple(result)
+
+
+def _trend_strength(
+    row: ComparisonRow,
+    history: Sequence[tuple[int, Decimal]],
+    *,
+    min_gap_points: Decimal,
+    min_gap_percent: Decimal,
+) -> Decimal | None:
+    recent = sorted(history)[-3:]
+    if len(recent) < 3:
+        return None
+    change = abs(abs(recent[-1][1]) - abs(recent[-2][1]))
+    if row.unit == "%":
+        return change / min_gap_points
+    if row.peer_average in (None, 0):
+        return None
+    relative_change = change / abs(row.peer_average) * 100
+    return relative_change / min_gap_percent
 
 
 def build_management_briefing(
@@ -548,9 +585,14 @@ def build_management_briefing(
         finding = _trend_finding(row, history)
         if finding is None:
             continue
-        recent = history[-3:]
-        change = abs(abs(recent[-1][1]) - abs(recent[-2][1]))
-        ranked_trends.append((change, order.get(row.metric_key, len(order)), finding))
+        strength = _trend_strength(
+            row,
+            history,
+            min_gap_points=min_gap_points,
+            min_gap_percent=min_gap_percent,
+        )
+        if strength is not None:
+            ranked_trends.append((strength, order.get(row.metric_key, len(order)), finding))
     ranked_trends.sort(key=lambda item: (-item[0], item[1]))
     trends = tuple(item[2] for item in ranked_trends[:max_trends])
 
@@ -565,6 +607,8 @@ def build_management_briefing(
         trends = ()
     elif held_rows:
         status = "비교 보류: 유효한 비교병원이 3곳 미만인 지표는 브리핑에서 제외했습니다."
+        if not differences and not trends:
+            status += " 허용폭을 넘는 차이가 없거나 비교할 자료가 부족합니다."
     elif not differences and not trends:
         status = "허용폭을 넘는 차이가 없거나 비교할 자료가 부족합니다."
     else:

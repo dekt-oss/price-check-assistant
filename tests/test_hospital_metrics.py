@@ -193,3 +193,78 @@ def test_management_briefing_uses_natural_topic_particle() -> None:
     )
 
     assert briefing.differences[0].text.startswith("병상당 인건비는 ")
+
+
+def test_management_briefing_normalizes_trend_strength_across_units() -> None:
+    rows = [
+        _comparison_row("labor_ratio", "58", "50"),
+        _comparison_row("revenue_per_bed", "110000000", "100000000"),
+    ]
+    briefing = hm.build_management_briefing(
+        rows,
+        {
+            "labor_ratio": [(2022, Decimal("1")), (2023, Decimal("3")), (2024, Decimal("8"))],
+            "revenue_per_bed": [
+                (2022, Decimal("1000000")),
+                (2023, Decimal("2000000")),
+                (2024, Decimal("4000000")),
+            ],
+        },
+        fiscal_year=2024,
+        peer_count=4,
+        max_trends=1,
+    )
+
+    assert [finding.metric_key for finding in briefing.trends] == ["labor_ratio"]
+
+
+def test_management_briefing_trend_states_direction_against_average() -> None:
+    briefing = hm.build_management_briefing(
+        [_comparison_row("admin_ratio", "10", "20")],
+        {"admin_ratio": [(2022, Decimal("-2")), (2023, Decimal("-5")), (2024, Decimal("-10"))]},
+        fiscal_year=2024,
+        peer_count=4,
+    )
+
+    assert "평균보다 낮은 쪽 차이가 커졌습니다" in briefing.trends[0].text
+
+
+def test_management_briefing_explains_bed_count_basis_for_per_bed_metrics() -> None:
+    briefing = hm.build_management_briefing(
+        [_comparison_row("revenue_per_bed", "120", "100")],
+        {},
+        fiscal_year=2024,
+        peer_count=4,
+    )
+
+    assert any("회계공시 병상수" in text and "심평원 허가병상수" in text for text in briefing.followups)
+
+
+def test_management_briefing_lines_match_screen_order_and_keep_no_difference_notice() -> None:
+    briefing = hm.build_management_briefing(
+        [
+            _comparison_row("labor_ratio", "46", "45", peer_count=4),
+            _comparison_row("medical_margin", "4", "2", peer_count=2),
+        ],
+        {},
+        fiscal_year=2024,
+        peer_count=4,
+    )
+
+    assert briefing.lines[1].startswith("비교 보류:")
+    assert "허용폭을 넘는 차이가 없거나 비교할 자료가 부족합니다." in briefing.lines[1]
+
+
+def test_management_briefing_uses_the_same_rounding_for_threshold_and_display() -> None:
+    briefing = hm.build_management_briefing(
+        [
+            _comparison_row("medical_margin", "3.04", "2"),
+            _comparison_row("revenue_per_bed", "105.04", "100"),
+        ],
+        {},
+        fiscal_year=2024,
+        peer_count=4,
+    )
+
+    assert briefing.differences == ()
+    assert briefing.status == "허용폭을 넘는 차이가 없거나 비교할 자료가 부족합니다."

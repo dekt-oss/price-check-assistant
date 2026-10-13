@@ -7,7 +7,9 @@ services/hospital_metrics.py가 계산하고, 자료가 없는 칸은 '자료 �
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -18,6 +20,7 @@ from purchase_price.services import hospital_benchmark as benchmark
 from purchase_price.services import hospital_master as master_service
 from purchase_price.services import hospital_metrics as metrics
 from purchase_price.services import hospital_report as report_service
+from purchase_price.services import khidi_financials as khidi
 from purchase_price.ui import benchmark_charts as charts
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 
@@ -40,7 +43,7 @@ def _reload_retained_modules() -> None:
     )
     if all(hasattr(obj, name) for obj, name in markers) and getattr(
         benchmark, "MODULES_REVISION", ""
-    ) == "2026-10-13-h2":
+    ) == "2026-10-13-h2-review":
         return
     for name in (
         "purchase_price.services.hospital_metrics",
@@ -90,6 +93,48 @@ COST_TREND_CHARTS = (
 SOURCE_NAME = "의료기관 회계정보 공시(한국보건산업진흥원, haspa.khidi.or.kr)"
 
 
+def _benchmark_source_revision() -> tuple[tuple[str, int, int], ...]:
+    """Invalidate page caches when either committed serving file changes."""
+
+    paths = (Path(master_service.DEFAULT_MASTER_FILE), Path(khidi.DEFAULT_FINANCIAL_CSV))
+    return tuple(
+        (str(path.resolve()), path.stat().st_mtime_ns, path.stat().st_size) for path in paths
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _cached_benchmark_data(
+    source_revision: tuple[tuple[str, int, int], ...],
+) -> benchmark.BenchmarkData:
+    del source_revision  # the value exists to invalidate Streamlit's cache key
+    return benchmark.load_benchmark_data()
+
+
+@st.cache_data(show_spinner=False)
+def _cached_screen_report(
+    source_revision: tuple[tuple[str, int, int], ...],
+    target_id: str,
+    peer_kind: str,
+    fiscal_year: int,
+    custom_ids: tuple[str, ...],
+    bed_range: tuple[int, int] | None,
+    peer_ids: tuple[str, ...],
+) -> report_service.BenchmarkReport:
+    cached_data = _cached_benchmark_data(source_revision)
+    cached_target = cached_data.master.get(target_id)
+    if cached_target is None:
+        raise ValueError(f"Unknown hospital: {target_id}")
+    return report_service.build_report(
+        cached_data,
+        cached_target,
+        peer_kind,
+        fiscal_year,
+        custom_ids=custom_ids,
+        bed_range=bed_range,
+        peer_ids=peer_ids,
+    )
+
+
 def _render_trend_charts(
     data: benchmark.BenchmarkData,
     hospitals: list[master_service.Hospital],
@@ -110,7 +155,8 @@ def _render_trend_charts(
             st.markdown(f"**단위: {unit}** · 소수점 아래는 반올림했습니다.")
             st.dataframe(charts.wide_table(frame, unit=unit), hide_index=True, width="stretch")
 
-data = benchmark.load_benchmark_data()
+source_revision = _benchmark_source_revision()
+data = _cached_benchmark_data(source_revision)
 master = data.master
 hospitals = master.hospitals
 by_id = {hospital.hospital_id: hospital for hospital in hospitals}
@@ -246,15 +292,16 @@ screen_report = None
 if fiscal_year is None:
     rows = metrics.compare_to_peers({}, [], metric_keys=HEADLINE_METRICS)
 else:
-    screen_report = report_service.build_report(
-        data,
-        target,
+    screen_report = _cached_screen_report(
+        source_revision,
+        target.hospital_id,
         peer_kind,
         fiscal_year,
-        custom_ids=custom_ids,
-        bed_range=bed_range,
-        peer_ids=[p.hospital_id for p in peers],
+        tuple(custom_ids),
+        bed_range,
+        tuple(p.hospital_id for p in peers),
     )
+    screen_report.generated_at = datetime.now().astimezone()
     rows = screen_report.rows
 
 st.subheader("경영 브리핑")
