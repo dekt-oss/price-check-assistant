@@ -122,6 +122,10 @@ def test_weekly_report_from_committed_data_has_real_rows_and_no_invented_values(
     assert target is not None
     report = report_service.build_report(data, target, "region", 2024, now=datetime(2026, 10, 12, 8, tzinfo=KST))
     text = report_service.report_markdown(report)
+    assert "## 경영 브리핑" in text
+    assert report.briefing.heading in text
+    for line in report.briefing.lines:
+        assert line in text
     assert "| 인건비율 | 50.4% | 47.6% | 4곳 | 높은 편 |" in text
     assert "| 병상당 의료수익 | 4.2억원 | 4.0억원 | 4곳 | 평균 이상 |" in text  # 810 beds from the 2024 disclosure
     assert "2024-03-01 ~ 2025-02-28" in text
@@ -130,7 +134,52 @@ def test_weekly_report_from_committed_data_has_real_rows_and_no_invented_values(
 
     wb = load_workbook(io.BytesIO(report_service.report_workbook(report)))
     assert wb.sheetnames[:4] == ["요약", "병원별 전체 지표", "5년 추이", "자료 상태"]
-    assert wb["요약"]["B8"].value == "-14.1%"
+    summary_values = [cell.value for row in wb["요약"].iter_rows() for cell in row if cell.value]
+    assert report.briefing.heading in summary_values
+    for line in report.briefing.lines[1:]:
+        assert f"- {line}" in summary_values or line in summary_values
+    assert "-14.1%" in summary_values
+
+
+def test_reports_build_for_eight_core_hospitals_and_all_five_peer_groups() -> None:
+    data = benchmark.load_benchmark_data()
+    core = [hospital for hospital in data.master.hospitals if hospital.group == "core"]
+    assert len(core) == 8
+    peer_kinds = tuple(data.master.PEER_GROUP_LABELS) if hasattr(data.master, "PEER_GROUP_LABELS") else (
+        "region",
+        "network",
+        "similar_size",
+        "same_type",
+        "custom",
+    )
+    assert len(peer_kinds) == 5
+
+    for target in core:
+        custom_ids = [hospital.hospital_id for hospital in core if hospital is not target][:3]
+        for peer_kind in peer_kinds:
+            report = report_service.build_report(
+                data,
+                target,
+                peer_kind,
+                2024,
+                custom_ids=custom_ids,
+                bed_range=(700, 850),
+                now=datetime(2026, 10, 13, 9, tzinfo=KST),
+            )
+            assert report.briefing.heading.startswith("2024 회계연도 공시 기준 · 비교병원 ")
+            assert len(report.briefing.differences) <= 3
+            assert len(report.briefing.trends) <= 2
+            assert metrics.briefing_banned_term("\n".join(report.briefing.lines)) is None
+            assert report_service.report_markdown(report).startswith(f"# {target.short_name}")
+            assert report_service.report_workbook(report)
+
+
+def test_report_briefing_contains_no_banned_judgment_terms() -> None:
+    data = benchmark.load_benchmark_data()
+    target = data.master.get("H-BUSAN-PAIK")
+    assert target is not None
+    report = report_service.build_report(data, target, "region", 2024)
+    assert metrics.briefing_banned_term("\n".join(report.briefing.lines)) is None
 
 
 def test_news_lines_keep_only_recent_titles_for_chosen_keywords() -> None:
@@ -167,5 +216,8 @@ def test_benchmark_page_keeps_plain_words_and_ai_fallback_text() -> None:
 
     source = (ROOT / "pages" / "21_병원_경영_Benchmark.py").read_text(encoding="utf-8")
     assert "AI 설명 보기" in source and "엑셀 리포트 내려받기" in source
-    assert "위 계산 문장으로 확인해 주세요" in source
+    assert "AI 설명 연결 설정이 아직 없습니다" not in source
+    assert source.index('st.subheader("경영 브리핑")') < source.index('st.subheader("핵심 지표")')
+    assert source.index('st.subheader("핵심 지표")') < source.index('st.subheader("의료수익·의료이익률 추이")')
+    assert source.index('st.subheader("의료수익·의료이익률 추이")') < source.index('st.subheader("비용 구조")')
     assert rs.has_banned_term(source) is None

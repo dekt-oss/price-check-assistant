@@ -40,7 +40,7 @@ def _reload_retained_modules() -> None:
     )
     if all(hasattr(obj, name) for obj, name in markers) and getattr(
         benchmark, "MODULES_REVISION", ""
-    ) == "2026-10-09c":
+    ) == "2026-10-13-h2":
         return
     for name in (
         "purchase_price.services.hospital_metrics",
@@ -79,20 +79,43 @@ HEADLINE_METRICS = (
 )
 TREND_YEARS = 5
 DEFAULT_BED_RANGE = (700, 850)
-TREND_CHARTS = (
+PRIMARY_TREND_CHARTS = (
     ("medical_revenue", "의료수익 (억원)", Decimal(100_000_000)),
-    ("labor_ratio", "인건비율 (%)", Decimal(1)),
-    ("material_ratio", "재료비율 (%)", Decimal(1)),
     ("medical_margin", "의료이익률 (%)", Decimal(1)),
 )
+COST_TREND_CHARTS = (
+    ("labor_ratio", "인건비율 (%)", Decimal(1)),
+    ("material_ratio", "재료비율 (%)", Decimal(1)),
+)
 SOURCE_NAME = "의료기관 회계정보 공시(한국보건산업진흥원, haspa.khidi.or.kr)"
+
+
+def _render_trend_charts(
+    data: benchmark.BenchmarkData,
+    hospitals: list[master_service.Hospital],
+    target_name: str,
+    years: list[int],
+    specs: tuple[tuple[str, str, Decimal], ...],
+) -> None:
+    for metric_key, title, scale in specs:
+        st.markdown(f"**{title}**")
+        table = benchmark.trend_table(data, hospitals, metric_key, years)
+        frame = charts.trend_frame(table, target_name, scale)
+        if frame.empty:
+            st.caption("이 기간에는 표시할 자료가 없습니다.")
+            continue
+        unit = title.split("(")[-1].rstrip(")") if "(" in title else ""
+        st.altair_chart(charts.trend_chart(frame, unit_label=unit), width="stretch")
+        with st.expander(f"{title} 숫자로 보기"):
+            st.markdown(f"**단위: {unit}** · 소수점 아래는 반올림했습니다.")
+            st.dataframe(charts.wide_table(frame, unit=unit), hide_index=True, width="stretch")
 
 data = benchmark.load_benchmark_data()
 master = data.master
 hospitals = master.hospitals
 by_id = {hospital.hospital_id: hospital for hospital in hospitals}
 
-st.title("병원 경영 Benchmark")
+st.title("병원 경영 비교")
 st.caption("공개 회계자료로 병원을 같은 기준에서 비교합니다. 숫자는 모두 프로그램이 계산합니다.")
 
 target_options = [h.hospital_id for h in hospitals if h.group == "core"] + [
@@ -153,13 +176,13 @@ if peer_kind == master_service.PEER_SIMILAR_SIZE:
 peers = master.peer_group(target, peer_kind, custom_ids=custom_ids, bed_range=bed_range)
 peers_ready = True
 if peer_kind == master_service.PEER_SIMILAR_SIZE and target.size_beds is None:
-    st.warning("병상수 자료가 아직 없어 유사 규모 비교군을 만들 수 없습니다.")
+    st.warning("병상수 자료가 아직 없어 유사 규모 비교군을 만들 수 없습니다. 다른 비교 방식을 선택해 주세요.")
     peers_ready = False
 elif peer_kind == master_service.PEER_CUSTOM and len(peers) < 2:
     st.info("비교할 병원을 2개 이상 고르면 비교표가 만들어집니다.")
     peers_ready = False
 elif not peers:
-    st.info("이 조건에 맞는 비교 병원이 병원 명단에 없습니다.")
+    st.info("이 조건에 맞는 비교 병원이 없습니다. 비교 방식을 바꿔 주세요.")
     peers_ready = False
 else:
     peer_table = pd.DataFrame(
@@ -202,7 +225,6 @@ else:
 if not peers_ready:
     peers = ()
 
-st.subheader("주요 경영지표")
 fiscal_years = data.fiscal_years
 if not fiscal_years:
     st.info("회계자료가 아직 적재되지 않았습니다. 아래 표는 모두 '자료 없음'으로 표시됩니다.")
@@ -220,10 +242,43 @@ else:
         f"{fiscal_years[0] + 3}년 1월 전후에 나올 예정입니다."
     )
 
+screen_report = None
 if fiscal_year is None:
     rows = metrics.compare_to_peers({}, [], metric_keys=HEADLINE_METRICS)
 else:
-    rows = benchmark.compare(data, target, peers, fiscal_year, HEADLINE_METRICS)
+    screen_report = report_service.build_report(
+        data,
+        target,
+        peer_kind,
+        fiscal_year,
+        custom_ids=custom_ids,
+        bed_range=bed_range,
+        peer_ids=[p.hospital_id for p in peers],
+    )
+    rows = screen_report.rows
+
+st.subheader("경영 브리핑")
+if screen_report is None:
+    st.caption("회계자료가 적재되면 선택한 회계연도 기준 브리핑이 표시됩니다.")
+else:
+    briefing = screen_report.briefing
+    with st.container(border=True):
+        st.markdown(f"**{briefing.heading}**")
+        if briefing.status:
+            st.markdown(briefing.status)
+        for finding in briefing.differences:
+            st.markdown(f"- {finding.text}")
+        if briefing.trends:
+            st.markdown("**최근 변화**")
+            for finding in briefing.trends:
+                st.markdown(f"- {finding.text}")
+        if briefing.followups:
+            st.markdown("**추가 확인**")
+            for text in briefing.followups:
+                st.markdown(f"- {text}")
+        st.caption("브리핑은 아래 표의 공시 수치만으로 프로그램이 만들며 원인을 확정하지 않습니다.")
+
+st.subheader("핵심 지표")
 st.dataframe(
     pd.DataFrame(
         [
@@ -241,49 +296,59 @@ st.dataframe(
     width="stretch",
 )
 
-if fiscal_year is not None and peers:
-    findings = metrics.describe_findings(
-        rows, benchmark.gap_history(data, target, peers, fiscal_year, HEADLINE_METRICS)
-    )
-    st.markdown("**해석**")
-    if findings:
-        for finding in findings:
-            st.markdown(f"- {finding.text}")
-    else:
-        st.caption("비교군 평균과 눈에 띄게 다른 지표가 없거나, 비교할 자료가 부족합니다.")
-    st.caption("해석 문장은 위 표의 숫자만으로 프로그램이 만든 문장입니다.")
-
+if screen_report is not None and peers:
+    findings = list(screen_report.briefing.differences)
     ai_key = ai_explanation.resolve_api_key(_streamlit_secrets())
     explain_key = f"benchmark_ai::{target_id}::{peer_kind}::{','.join(custom_ids)}::{fiscal_year}"
     quality_for_ai = report_service.quality_notes(
         benchmark.quality_report(data, target, peers, fiscal_year)
     )
-    with st.container(border=True):
-        st.markdown("**AI 경영분석 설명**")
-        if ai_key is None:
-            st.caption("AI 설명 연결 설정이 아직 없습니다. 위 계산 문장으로 확인해 주세요.")
-        elif st.button("AI 설명 보기", key=f"btn::{explain_key}"):
-            source = ai_explanation.build_input(
-                target_name=target.short_name,
-                fiscal_year=fiscal_year,
-                peer_label=master_service.PEER_GROUP_LABELS[peer_kind],
-                peer_names=[p.short_name for p in peers],
-                rows=rows,
-                findings=findings,
-                quality_notes=quality_for_ai,
-            )
-            with st.spinner("계산 결과를 바탕으로 설명을 쓰는 중입니다."):
-                try:
-                    st.session_state[explain_key] = ai_explanation.explain(source, api_key=ai_key).text
-                except ai_explanation.ExplanationError as exc:
-                    st.session_state[explain_key] = None
-                    st.warning(f"{exc} 위 계산 문장을 기준으로 봐 주세요.")
-        if st.session_state.get(explain_key):
-            st.write(st.session_state[explain_key])
-            st.caption(
-                "AI는 위 표의 계산 결과만 받아 문장으로 풀어 썼습니다. 설명 속 숫자는 모두 계산 결과와 "
-                "대조했고, 계산 결과에 없는 숫자가 나오면 표시하지 않습니다."
-            )
+    if ai_key is not None:
+        with st.expander("AI로 계산 결과 풀어보기 (선택)"):
+            if st.button("AI 설명 보기", key=f"btn::{explain_key}"):
+                source = ai_explanation.build_input(
+                    target_name=target.short_name,
+                    fiscal_year=fiscal_year,
+                    peer_label=master_service.PEER_GROUP_LABELS[peer_kind],
+                    peer_names=[p.short_name for p in peers],
+                    rows=rows,
+                    findings=findings,
+                    quality_notes=quality_for_ai,
+                )
+                with st.spinner("계산 결과를 바탕으로 설명을 쓰는 중입니다."):
+                    try:
+                        st.session_state[explain_key] = ai_explanation.explain(source, api_key=ai_key).text
+                    except ai_explanation.ExplanationError as exc:
+                        st.session_state[explain_key] = None
+                        st.warning(f"{exc} 위 계산 문장을 기준으로 봐 주세요.")
+            if st.session_state.get(explain_key):
+                st.write(st.session_state[explain_key])
+                st.caption(
+                    "AI는 위 표의 계산 결과만 받아 문장으로 풀어 썼습니다. 설명 속 숫자는 모두 계산 결과와 "
+                    "대조했고, 계산 결과에 없는 숫자가 나오면 표시하지 않습니다."
+                )
+
+st.subheader("의료수익·의료이익률 추이")
+if fiscal_year is None:
+    st.caption("회계자료가 적재되면 그래프가 표시됩니다.")
+else:
+    trend_years = [y for y in range(fiscal_year - TREND_YEARS + 1, fiscal_year + 1)]
+    chart_hospitals = [target, *peers]
+    st.caption(
+        f"파란 선은 {target.short_name}, 검은 점선은 비교군 평균, 회색 선은 비교 병원 하나하나입니다. "
+        "선이나 점에 마우스를 올리면 병원 이름과 값이 보입니다. 세로축은 차이가 잘 보이도록 값의 범위에 맞췄고, "
+        "값이 아주 크거나 작은 비교 병원 선은 그래프 가장자리에서 잘립니다(정확한 값은 '숫자로 보기')."
+    )
+    if data.get(target.hospital_id, fiscal_year) is None:
+        st.info(f"{target.short_name}의 {fiscal_year} 회계자료가 없습니다. 다른 회계연도를 선택해 주세요.")
+    _render_trend_charts(data, chart_hospitals, target.short_name, trend_years, PRIMARY_TREND_CHARTS)
+    st.caption("빈 칸은 그해 공시가 없다는 뜻입니다. 빈 해를 다른 값으로 채우지 않습니다.")
+
+st.subheader("비용 구조")
+if fiscal_year is None:
+    st.caption("회계자료가 적재되면 인건비율과 재료비율 추이가 표시됩니다.")
+else:
+    _render_trend_charts(data, chart_hospitals, target.short_name, trend_years, COST_TREND_CHARTS)
 
 if fiscal_year is not None:
     with st.expander("병원별 전체 지표 보기"):
@@ -329,31 +394,6 @@ with st.expander("지표 계산 방식"):
         hide_index=True,
         width="stretch",
     )
-
-st.subheader("최근 5년 추이")
-if fiscal_year is None:
-    st.caption("회계자료가 적재되면 그래프가 표시됩니다.")
-else:
-    trend_years = [y for y in range(fiscal_year - TREND_YEARS + 1, fiscal_year + 1)]
-    chart_hospitals = [target, *peers]
-    st.caption(
-        f"파란 선은 {target.short_name}, 검은 점선은 비교군 평균, 회색 선은 비교 병원 하나하나입니다. "
-        "선이나 점에 마우스를 올리면 병원 이름과 값이 보입니다. 세로축은 차이가 잘 보이도록 값의 범위에 맞췄고, "
-        "값이 아주 크거나 작은 비교 병원 선은 그래프 가장자리에서 잘립니다(정확한 값은 '숫자로 보기')."
-    )
-    for metric_key, title, scale in TREND_CHARTS:
-        st.markdown(f"**{title}**")
-        table = benchmark.trend_table(data, chart_hospitals, metric_key, trend_years)
-        frame = charts.trend_frame(table, target.short_name, scale)
-        if frame.empty:
-            st.caption("이 기간에는 표시할 자료가 없습니다.")
-            continue
-        unit = title.split("(")[-1].rstrip(")") if "(" in title else ""
-        st.altair_chart(charts.trend_chart(frame, unit_label=unit), use_container_width=True)
-        with st.expander(f"{title} 숫자로 보기"):
-            st.markdown(f"**단위: {unit}** · 소수점 아래는 반올림했습니다.")
-            st.dataframe(charts.wide_table(frame, unit=unit), hide_index=True, width="stretch")
-    st.caption("빈 칸은 그해 공시가 없다는 뜻입니다. 빈 해를 다른 값으로 채우지 않습니다.")
 
 st.subheader("자료 상태")
 if fiscal_year is None:
@@ -426,18 +466,10 @@ if alio_hospitals:
             )
 
 st.subheader("리포트 내려받기")
-if fiscal_year is None or not peers:
+if fiscal_year is None or not peers or screen_report is None:
     st.caption("회계연도와 비교군이 정해지면 리포트를 내려받을 수 있습니다.")
 else:
-    report = report_service.build_report(
-        data,
-        target,
-        peer_kind,
-        fiscal_year,
-        custom_ids=custom_ids,
-        bed_range=bed_range,
-        peer_ids=[p.hospital_id for p in peers],
-    )
+    report = screen_report
     ai_text = st.session_state.get(
         f"benchmark_ai::{target_id}::{peer_kind}::{','.join(custom_ids)}::{fiscal_year}"
     )
