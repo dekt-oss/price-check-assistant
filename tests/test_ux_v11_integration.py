@@ -116,3 +116,9 @@ def test_production_smoke_waits_for_the_current_deployment_marker() -> None:
     markers = [int(v) for v in re.findall(r'id="purchase-workspace-runtime-v(\d+)"', dashboard)]
     expected = max(markers)
     assert f'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v{expected}"' in smoke
+
+
+def test_production_smoke_waits_for_the_bottom_of_the_result_page() -> None:
+    smoke = (ROOT / "scripts" / "production_unified_search_smoke.py").read_text(encoding="utf-8")
+    assert "SECTIONS_RENDER_SECONDS" in smoke
+    assert "sections_deadline" in smoke
