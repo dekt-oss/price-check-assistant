@@ -35,7 +35,7 @@ def _reload_retained_modules() -> None:
     import importlib
     import sys
 
-    if getattr(radar, "MODULES_REVISION", "") == "2026-10-13-h1":
+    if getattr(radar, "MODULES_REVISION", "") == "2026-10-13-h1-review":
         return
     for name in (
         "purchase_price.clients.naver_news",
@@ -50,7 +50,7 @@ def _reload_retained_modules() -> None:
 
 _reload_retained_modules()
 
-NEWS_PAGE_REVISION = "2026-10-13-h1"
+NEWS_PAGE_REVISION = "2026-10-13-h1-review"
 NEWS_STATE_KEY = "news_radar_state"
 GROUP_TOGGLE_PREFIX = "news_radar_group::"
 STATUS_WIDGET_PREFIX = "news_radar_status::"
@@ -297,11 +297,13 @@ if subscriber_store is None:
 else:
     st.info("문자 알림 준비 중 · 이메일 알림은 화면 아래에서 신청할 수 있습니다.")
 
-st.subheader("오늘의 주요 이슈")
+st.subheader("최근 3일 주요 이슈")
 active_group_keys = {group.key for group in groups if enabled_overrides[group.key]}
 stored_issues = [
     issue
-    for issue in (stored_index.issues if stored_index is not None else ())
+    for issue in radar.recent_news_issues(
+        stored_index.issues if stored_index is not None else (), now=datetime.now(UTC)
+    )
     if active_group_keys.intersection(issue.group_keys)
 ][:5]
 if not keywords:
@@ -311,7 +313,7 @@ elif index_failed:
 elif stored_index is None:
     st.info("아직 자동 수집 자료가 없습니다. 뉴스 검색을 연결하면 다음 자동 확인 뒤 주요 이슈가 표시됩니다.")
 elif not stored_issues:
-    st.info("묶어서 보여 줄 주요 이슈가 아직 없습니다. 다음 자동 확인 뒤 다시 확인해 주세요.")
+    st.info("최근 3일에 묶어서 보여 줄 주요 이슈가 없습니다. 다음 자동 확인 뒤 다시 확인해 주세요.")
 else:
     for issue in stored_issues:
         representative = stored_index.items.get(issue.representative_article_id)
@@ -329,7 +331,8 @@ else:
                 st.link_button("대표 기사 보기", representative.url)
             with st.expander(f"관련 기사 {issue.article_count}건", expanded=False):
                 for article in related:
-                    st.markdown(f"- [{article.title}]({article.url}) · {_time_text(article.published_at)}")
+                    title = radar.markdown_link_title(article.title)
+                    st.markdown(f"- [{title}]({article.url}) · {_time_text(article.published_at)}")
 
 st.caption(
     f"관심 키워드 {len(keywords)}개"

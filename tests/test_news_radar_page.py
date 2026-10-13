@@ -15,7 +15,7 @@ from purchase_price.services import news_radar_index as nri
 
 AppTest = importlib.import_module("streamlit.testing.v1").AppTest
 PAGE = Path(__file__).resolve().parents[1] / "pages" / "20_병원_News_Radar.py"
-FINISHED = datetime(2026, 10, 8, 10, 48, tzinfo=UTC)  # 19:48 KST
+FINISHED = datetime.now(UTC).replace(microsecond=0)
 
 
 @pytest.fixture
@@ -68,11 +68,11 @@ def test_page_shows_stored_articles_and_collection_status_in_korean_time(stored_
     app = _run()
     captions = _captions(app)
     status = next(text for text in captions if text.startswith("자동 수집 상태"))
-    assert "19:48" in status  # 10:48 UTC, shown as Korean time
+    assert radar.seoul_time_text(FINISHED, "%H:%M") in status
     assert "키워드 2개 중 1개 확인" in status and "확인 못 한 키워드: 병원 AI 도입" in status
     assert "읽음·중요 표시의 저장 연결 상태는 표시를 처음 바꿀 때 확인됩니다." in captions
     assert len(app.selectbox) == 3
-    assert any("**NEW** 10-08 19:48" == item.value for item in app.markdown)
+    assert any(f"**NEW** {radar.seoul_time_text(FINISHED)}" == item.value for item in app.markdown)
     assert all("HTTP 500" not in warning.value for warning in app.warning)
     assert all("HTTP 500" not in caption for caption in captions)
 
@@ -83,7 +83,7 @@ def test_page_presents_a_simple_primary_news_workflow(stored_list) -> None:
     assert app.title[0].value == "병원 뉴스"
     assert [metric.label for metric in app.metric] == ["새 기사", "오늘 기사", "마지막 확인"]
     assert app.button[0].label == "새 기사 확인"
-    assert app.subheader[0].value == "오늘의 주요 이슈"
+    assert app.subheader[0].value == "최근 3일 주요 이슈"
     assert any("관련 기사 3건" in expander.label for expander in app.expander)
     assert [expander.label for expander in app.expander if expander.label in {"관심 키워드 설정", "상세 필터"}] == [
         "관심 키워드 설정",

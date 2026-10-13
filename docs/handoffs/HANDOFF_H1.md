@@ -1,6 +1,6 @@
 # HANDOFF H1 — 병원 뉴스 주요 이슈
 
-> 구현·로컬 검증 완료, PR/운영 검증 전 · 2026-10-13 KST
+> H1 리뷰 후속 수정 진행 · 운영 재검증 전 · 2026-10-13 KST
 
 ## 1. 기준 커밋과 작업 브랜치
 
@@ -52,19 +52,22 @@
 - v2의 `issues`는 `issue_id`, 대표 원문 `title`, `article_ids`, `group_keys`, `group_names`, `source_count`, `article_count`, `first_published_at`, `latest_published_at`, `representative_article_id`, 내부 `score`만 가진다.
 - 기사 payload 필드는 바꾸지 않았다. 본문·검색 결과 설명·생성형 모델 결과·사용자 상태는 이슈 입력과 payload에 없다.
 - v1 payload와 v1 R2 메타데이터는 읽으면 `issues=()`로 처리하고 다음 수집 때 v2로 갱신한다.
-- `news_radar.MODULES_REVISION`과 페이지 `NEWS_PAGE_REVISION`은 `2026-10-13-h1`이다.
+- H1 리뷰 후속 런타임 마커 `news_radar.MODULES_REVISION`과 페이지 `NEWS_PAGE_REVISION`은 `2026-10-13-h1-review`다.
 
 ## 6. 실행한 테스트와 실제 결과
 
+- 리뷰 지적을 테스트로 먼저 고정한 RED 확인: `8 failed, 42 passed`.
+- H1 후속 수정 집중 회귀 4개 파일: `51 passed in 13.71s`.
+- 최종 H1 집중 회귀 + Streamlit 시작 테스트(`--basetemp .local/pytest-h1-final`): `52 passed in 32.66s`.
+- H1 뉴스·계약·시작 회귀: `121 passed, 1 warning in 32.38s`.
+- 작업지시서 Track H 지정 테스트: `190 passed, 1 warning in 33.57s`.
 - `ruff check .`: `All checks passed!`.
-- `pytest -q tests/test_streamlit_startup_smoke.py`: `1 passed in 15.38s`.
-- 작업지시서 Track H 지정 17개 테스트 파일: `175 passed, 1 warning in 25.73s`.
-- H1 집중 회귀: `62 passed, 1 warning in 14.68s`.
-- 전체 `pytest -q`: `1763 passed, 14 failed, 1 warning in 88.63s`.
+- 전체 `pytest -q`: `1789 passed, 14 failed, 1 warning in 135.70s`.
   - 알려진 Windows OCR 실환경 실패 4건.
   - 견적 OCR/업로드 관련 가격 영역 3건.
   - Windows 기본 cp949로 UTF-8 가격 워크플로 파일을 읽는 가격 영역 7건.
   - H1 허용목록 파일에서 발생한 실패는 없었고, 소유권 밖 파일은 수정하지 않았다.
+- 기본 pytest 임시 폴더와 `C:\tmp`는 현재 샌드박스에서 접근이 거부되어, 최종 집중 회귀는 워크트리 내부 전용 임시 경로로 재실행했다. 전용 경로는 실행 후 삭제했다.
 - Streamlit AppTest: 주요 이슈 카드·접기·빈 상태·기존 목록을 확인했다.
 - 로컬 포트 8602 브라우저 점검: 3건/2건/1건 이슈 카드, 알림 준비 안내, 기존 메뉴를 화면에서 확인했다.
 
@@ -81,6 +84,9 @@
 - 50건 표본에서는 잘못 묶임 0/1,171쌍, 누락 0/54쌍이지만 전체 기사 정확도를 뜻하지 않는다.
 - 제목 표현이 새로 생기면 군집 누락이 생길 수 있다. 원문 문장을 생성하거나 의미 추론으로 보완하지 않는다.
 - Fable Review에서 중간 심각도 1건을 찾았다. 90시간 간격 기사 세 개가 연쇄 연결되면 이슈 전체가 96시간을 넘는 문제였다. 결합 전 구성요소의 최초~최근 시각이 96시간 안인지 검사하고 회귀 테스트를 추가해 닫았다.
+- Claude 리뷰의 H-2, M-1, M-3, M-4, L-1, L-2, L-3은 재현 테스트를 추가하고 수정했다. 출처 등급 전달, 최근 72시간 제한, 제목 특징 재사용, 손상 이슈 격리, 제목 기반 규제 가점, 설정 기반 종합 소식 구분어, Markdown 링크 안전화를 확인했다.
+- H-1은 현재 v2를 되돌리지 않고 이후 스키마 변경에 `리더 선배포 → 운영 확인 → 라이터 전환` 절차를 적용하도록 문서화했다. 현재 운영 프로세스가 구버전 모듈을 유지 중인지는 Reboot 전이라 미검증이다.
+- M-2의 별도 홀드아웃 평가는 최신 workflow artifact에 인덱스가 없고 로컬 R2도 설정되지 않아 실행하지 못했다. 기존 파라미터는 변경하지 않았다.
 - 그 밖의 Critical/High 결함은 재현되지 않았다. v1 호환, 종합 기사 분리, 같은 병원 다른 사건 분리, 알림·요약 유지, 빈 상태를 점검했다.
 
 ## 9. 다음 Phase 시작 지점
@@ -112,3 +118,16 @@ pytest -q
 ## 12. 공통 파일 변경 요청
 
 없음.
+
+## 13. Claude H1 리뷰 후속 조치
+
+- 수집 Job이 `data/news_sources.json`의 출처 등급을 이슈 군집에 전달하도록 수정했다.
+- 회수·판매중지·리콜·안전성 가점은 매칭 키워드와 기사 제목을 함께 확인한다.
+- 상단 이슈는 최근 보도 시각 72시간 안으로 제한하고 제목을 `최근 3일 주요 이슈`로 바꿨다.
+- 기사별 제목 토큰·2-gram은 한 번만 계산해 쌍 비교에서 재사용한다.
+- 파생 이슈 한 건이 깨져도 원본 기사와 정상 이슈는 계속 읽는다.
+- 종합 소식 구분어를 `data/news_keywords.json`의 `issue_roundup_terms`로 옮겼다.
+- 관련 기사 Markdown 링크 제목의 대괄호를 중립화한다.
+- 다음 인덱스 변경은 리더 먼저 배포하고 운영 반영을 확인한 뒤 라이터를 바꾸는 규칙을 `docs/metrics/news.md`에 추가했다. 현재 v2 형식은 되돌리지 않았다.
+- 최신순·전체 그룹 50건 홀드아웃은 로컬 운영 인덱스와 R2 설정이 없어 미실행이다. 파라미터는 변경하지 않았다.
+- 운영 Streamlit Reboot는 외부 운영 변경이므로 실행하지 않았다. `/news-radar` 운영 화면은 후속 배포 뒤 다시 확인해야 한다.

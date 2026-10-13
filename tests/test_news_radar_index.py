@@ -183,6 +183,24 @@ def test_index_v2_round_trip_keeps_derived_issues_and_reads_v1() -> None:
     assert restored_v1.issues == ()
 
 
+def test_broken_derived_issue_does_not_hide_valid_articles() -> None:
+    index = nri.NewsRadarIndex()
+    nri.collect(
+        index,
+        [KW_IMMEDIATE],
+        lambda _text, _display: [_item("https://a.kr/1", "부산백병원 새 소식")],
+        groups=_groups(),
+        clock=_Clock(NOW),
+    )
+    payload = nri.index_to_payload(index)
+    payload["issues"] = [{"issue_id": "broken"}, *payload["issues"]]
+
+    restored = nri.index_from_payload(payload)
+
+    assert restored.items == index.items
+    assert restored.issues == index.issues
+
+
 def test_unknown_index_version_is_rejected() -> None:
     with pytest.raises(nri.NewsRadarIndexError):
         nri.index_from_payload({"version": 99, "items": []})
