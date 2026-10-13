@@ -29,6 +29,11 @@ from purchase_price.ui.theme import (
 hydrate_streamlit_runtime_secrets()
 
 NEWS_STATE_KEY = "news_radar_state"
+# Written by the 가격 조사 page (pages/1_대시보드.py _remember_search): [(검색어, "HH:MM"), ...], newest first.
+RECENT_SEARCHES_KEY = "home_recent_searches"
+RECENT_SHOWN = 3
+# Runtime marker (UX v1.1 I0-a): the price card shows this session's recent searches.
+HOME_RECENT_SEARCHES_V1 = True
 HOME_SUBTITLE = "구매 업무와 병원 경영 정보를 한곳에서 확인합니다."
 
 # (제목, 설명, 이동할 페이지, 아이콘). 사이드 메뉴의 이름과 같게 둔다.
@@ -71,6 +76,9 @@ HOME_CSS = """
 <style>
 .pc-home-metrics .pc-metrics {grid-template-columns:repeat(3,minmax(0,1fr));}
 .pc-home-group {font-size:17px; font-weight:700; color:var(--pc-navy); margin:26px 0 12px 0;}
+.pc-home-recent {font-size:13px; color:#5B6C82; margin:-4px 0 10px 0; line-height:1.8; word-break:keep-all;}
+.pc-home-recent a {color:#1D4ED8; font-weight:700; text-decoration:none; white-space:nowrap;}
+.pc-home-recent a:focus-visible {outline:2px solid #376FD0; outline-offset:2px; border-radius:3px;}
 .pc-home-card h4 {font-size:16px; font-weight:800; color:var(--pc-navy); margin:2px 0 6px 0;}
 .pc-home-card p {font-size:13px; color:#5B6C82; line-height:1.6; margin:0 0 6px 0; min-height:42px; word-break:keep-all;}
 [data-testid="stColumn"] > [data-testid="stVerticalBlock"]:has(.pc-home-card) {
@@ -131,6 +139,31 @@ HOME_CSS = """
 """
 
 
+def recent_searches(state: object) -> list[tuple[str, str]]:
+    """(검색어, 시각) pairs the 가격 조사 page stored in this session; anything malformed is skipped."""
+
+    items = []
+    for item in state if isinstance(state, (list, tuple)) else ():
+        if isinstance(item, (list, tuple)) and len(item) == 2 and str(item[0]).strip():
+            items.append((str(item[0]).strip(), str(item[1] or "").strip()))
+    return items
+
+
+def recent_links_html(items: list[tuple[str, str]]) -> str:
+    """'최근 조사 · PNB-704 (14:05) · …' as links that reopen the result (root URL = 가격 조사)."""
+
+    from urllib.parse import quote
+
+    if not items:
+        return ""
+    links = " · ".join(
+        f'<a href="./?q={esc(quote(query))}" target="_self">{esc(query)}</a>'
+        + (f" ({esc(when)})" if when else "")
+        for query, when in items[:RECENT_SHOWN]
+    )
+    return f'<div class="pc-home-recent" id="home-recent-searches-v1">최근 조사 · {links}</div>'
+
+
 def _page_link(path: str, label: str, icon: str) -> None:
     """Link to a sibling page; when this file runs on its own (startup smoke) just say so."""
 
@@ -172,6 +205,7 @@ def _latest_fiscal_year() -> int | None:
     return max(years) if years else None
 
 
+recent = recent_searches(st.session_state.get(RECENT_SEARCHES_KEY))
 latest_fiscal_year = _latest_fiscal_year()
 management_sub = (
     f"{latest_fiscal_year}년 회계공시까지 반영돼 있습니다."
@@ -203,8 +237,17 @@ st.markdown(
                 management_sub,
                 TONE_INFO,
             ),
-            metric_card_html(
-                "가격 조사", "제품·견적 검색", "나라장터 거래가격과 식약처 자료로 확인합니다.", TONE_INFO
+            (
+                metric_card_html(
+                    "가격 조사 · 이번 접속 최근 조사",
+                    recent[0][0],
+                    f"{recent[0][1]} 조사 · 모두 {len(recent)}건" if recent[0][1] else f"모두 {len(recent)}건",
+                    TONE_OK,
+                )
+                if recent
+                else metric_card_html(
+                    "가격 조사", "제품·견적 검색", "나라장터 거래가격과 식약처 자료로 확인합니다.", TONE_INFO
+                )
             ),
         ]
     )
@@ -213,6 +256,8 @@ st.markdown(
 )
 
 st.markdown('<div class="pc-home-group">구매 업무</div>', unsafe_allow_html=True)
+if recent:
+    st.markdown(recent_links_html(recent), unsafe_allow_html=True)
 _card_row(PURCHASE_CARDS)
 
 st.markdown('<div class="pc-home-group">병원 경영 정보</div>', unsafe_allow_html=True)

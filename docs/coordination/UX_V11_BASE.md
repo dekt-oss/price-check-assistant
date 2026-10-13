@@ -8,9 +8,9 @@
 | 시작 시각 | 2026-10-12 (KST) |
 | Track P 브랜치 / 워크트리 | `claude/ux-v11-price` / `.worktrees/ux-v11-price` |
 | Track H 브랜치 / 워크트리 | `codex/ux-v11-news-management` / `.worktrees/ux-v11-news-management` (Codex가 자체 워크트리를 쓰면 같은 브랜치를 체크아웃) |
-| Integration 브랜치 | `claude/ux-v11-integration` (I0 착수 시 BASE 이후 main에서 생성) |
-| Integration 담당 | Claude (제안 — 사용자 확정 필요) |
-| PR #341 상태 | 미머지(2026-10-12 기준 CI 녹색, mergeable). 사용자 머지 뒤 Track H가 `git merge origin/main` 1회 |
+| Integration 브랜치 / 워크트리 | `claude/ux-v11-integration` / `.worktrees/ux-v11-integration` (`8a84477`에서 생성, I0-a) |
+| Integration 담당 | Claude (사용자 확정 2026-10-13) |
+| PR #341 상태 | 머지됨(`8a84477`, 2026-10-13) |
 
 ## 재사용 금지 워크트리
 `.worktrees/claude-price`(브랜치 `news-radar-30min`), `.claude/worktrees/agent-*`(과거 작업), `~/.codex/worktrees/windows-test-reliability`(PR #341 작업분). 이번 작업에는 쓰지 않는다.
