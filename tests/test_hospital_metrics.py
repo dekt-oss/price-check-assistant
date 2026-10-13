@@ -92,3 +92,104 @@ def test_format_metric_speaks_plainly() -> None:
     assert hm.format_metric(Decimal("46.27"), "%") == "46.3%"
     assert hm.format_metric(Decimal("500000000"), "원") == "5.0억원"
     assert hm.format_metric(Decimal("1500"), "원") == "1,500원"
+
+
+def _comparison_row(
+    key: str,
+    value: str,
+    peer_average: str,
+    *,
+    peer_count: int = 4,
+) -> hm.ComparisonRow:
+    label, unit, _ = hm.METRIC_SPECS[key]
+    return hm.ComparisonRow(
+        key,
+        label,
+        unit,
+        Decimal(value),
+        Decimal(peer_average),
+        peer_count,
+        "above" if Decimal(value) > Decimal(peer_average) else "below",
+    )
+
+
+def test_management_briefing_ranks_differences_and_separates_recent_changes() -> None:
+    rows = [
+        _comparison_row("medical_margin", "4", "2"),
+        _comparison_row("labor_ratio", "50", "45"),
+        _comparison_row("revenue_per_bed", "120", "100"),
+        _comparison_row("admin_ratio", "17", "14"),
+    ]
+    history = {
+        "medical_margin": [(2022, Decimal("1.1")), (2023, Decimal("1.5")), (2024, Decimal("2"))],
+        "labor_ratio": [(2022, Decimal("1")), (2023, Decimal("3")), (2024, Decimal("5"))],
+        "revenue_per_bed": [(2022, Decimal("5")), (2023, Decimal("10")), (2024, Decimal("20"))],
+        "admin_ratio": [(2022, Decimal("1.1")), (2023, Decimal("2")), (2024, Decimal("3"))],
+    }
+
+    briefing = hm.build_management_briefing(
+        rows,
+        history,
+        fiscal_year=2024,
+        peer_count=4,
+    )
+
+    assert briefing.heading == "2024 회계연도 공시 기준 · 비교병원 4곳"
+    assert [finding.metric_key for finding in briefing.differences] == [
+        "labor_ratio",
+        "revenue_per_bed",
+        "admin_ratio",
+    ]
+    assert briefing.differences[0].text == "인건비율은 비교군 평균보다 5.0%p 높습니다."
+    assert briefing.differences[1].text == "병상당 의료수익은 비교군 평균보다 20.0% 많습니다."
+    assert len(briefing.trends) == 2
+    assert all("최근 3년" in finding.text for finding in briefing.trends)
+    assert any("환자 수, 진료단가, 환자구성" in text for text in briefing.followups)
+    assert any("인력 구성" in text for text in briefing.followups)
+
+
+def test_management_briefing_holds_comparison_below_three_valid_peers() -> None:
+    rows = [_comparison_row("labor_ratio", "50", "40", peer_count=2)]
+    briefing = hm.build_management_briefing(
+        rows,
+        {"labor_ratio": [(2022, Decimal("4")), (2023, Decimal("7")), (2024, Decimal("10"))]},
+        fiscal_year=2024,
+        peer_count=2,
+    )
+
+    assert briefing.heading == "2024 회계연도 공시 기준 · 비교병원 2곳"
+    assert briefing.status == "비교 보류: 유효한 비교병원이 3곳 미만입니다."
+    assert briefing.differences == ()
+    assert briefing.trends == ()
+
+
+def test_management_briefing_uses_thresholds_and_has_no_banned_judgment_terms() -> None:
+    rows = [
+        _comparison_row("medical_margin", "3", "2"),  # exactly 1%p: inside tolerance
+        _comparison_row("revenue_per_bed", "105", "100"),  # exactly 5%: inside tolerance
+    ]
+    briefing = hm.build_management_briefing(rows, {}, fiscal_year=2024, peer_count=4)
+
+    assert briefing.differences == ()
+    assert briefing.status == "허용폭을 넘는 차이가 없거나 비교할 자료가 부족합니다."
+    assert hm.briefing_banned_term("\n".join(briefing.lines)) is None
+
+
+def test_management_briefing_distinguishes_missing_target_data_from_missing_peers() -> None:
+    label, unit, _ = hm.METRIC_SPECS["labor_ratio"]
+    row = hm.ComparisonRow("labor_ratio", label, unit, None, Decimal("45"), 4, None)
+
+    briefing = hm.build_management_briefing([row], {}, fiscal_year=2024, peer_count=4)
+
+    assert briefing.status == "기준 병원의 이 회계연도 자료가 없어 비교 문장을 만들 수 없습니다."
+
+
+def test_management_briefing_uses_natural_topic_particle() -> None:
+    briefing = hm.build_management_briefing(
+        [_comparison_row("labor_per_bed", "110", "100")],
+        {},
+        fiscal_year=2024,
+        peer_count=4,
+    )
+
+    assert briefing.differences[0].text.startswith("병상당 인건비는 ")

@@ -69,6 +69,26 @@ METRIC_SPECS: dict[str, tuple[str, str, str]] = {
     "material_per_bed": ("병상당 재료비", "원", "neutral"),
 }
 
+BRIEFING_MIN_PEERS = 3
+BRIEFING_MAX_DIFFERENCES = 3
+BRIEFING_MAX_TRENDS = 2
+BRIEFING_BANNED_TERMS: tuple[str, ...] = (
+    "적정",
+    "권장",
+    "싸다",
+    "비싸다",
+    "절감액",
+    "대체 가능",
+    "안전한 제품",
+    "원인 확정",
+    "개선 필요",
+    "우수",
+    "부진",
+    "인기",
+    "대표",
+    "추천",
+)
+
 Accounts = Mapping[str, Decimal | int | float | None]
 
 
@@ -295,6 +315,32 @@ class Finding:
     gap_history: tuple[tuple[int, Decimal], ...] = ()
 
 
+@dataclass(frozen=True)
+class ManagementBriefing:
+    """Deterministic briefing shared by the screen and downloaded reports."""
+
+    fiscal_year: int
+    peer_count: int
+    differences: tuple[Finding, ...]
+    trends: tuple[Finding, ...]
+    followups: tuple[str, ...]
+    status: str | None = None
+
+    @property
+    def heading(self) -> str:
+        return f"{self.fiscal_year} 회계연도 공시 기준 · 비교병원 {self.peer_count}곳"
+
+    @property
+    def lines(self) -> tuple[str, ...]:
+        parts = [self.heading]
+        parts.extend(finding.text for finding in self.differences)
+        parts.extend(finding.text for finding in self.trends)
+        if self.status:
+            parts.append(self.status)
+        parts.extend(self.followups)
+        return tuple(parts)
+
+
 def _has_final_consonant(word: str) -> bool:
     last = word.strip()[-1:] if word.strip() else ""
     if not ("가" <= last <= "힣"):
@@ -304,6 +350,10 @@ def _has_final_consonant(word: str) -> bool:
 
 def _subject(word: str) -> str:
     return f"{word}{'이' if _has_final_consonant(word) else '가'}"
+
+
+def _topic(word: str) -> str:
+    return f"{word}{'은' if _has_final_consonant(word) else '는'}"
 
 
 def gap_trend(gaps: Sequence[tuple[int, Decimal]], *, years: int = 3) -> str | None:
@@ -365,3 +415,171 @@ def describe_findings(
             text += " 최근 3년간 차이가 줄고 있습니다."
         findings.append(Finding(row.metric_key, text, row.value, row.peer_average, history))
     return findings
+
+
+def _difference_strength(
+    row: ComparisonRow,
+    *,
+    min_gap_points: Decimal,
+    min_gap_percent: Decimal,
+) -> Decimal | None:
+    if row.value is None or row.peer_average is None:
+        return None
+    diff = row.value - row.peer_average
+    if row.unit == "%":
+        return None if abs(diff) <= min_gap_points else abs(diff) / min_gap_points
+    if row.peer_average == 0:
+        return None
+    relative = diff / abs(row.peer_average) * 100
+    return None if abs(relative) <= min_gap_percent else abs(relative) / min_gap_percent
+
+
+def _difference_finding(row: ComparisonRow) -> Finding:
+    assert row.value is not None and row.peer_average is not None
+    diff = row.value - row.peer_average
+    if row.unit == "%":
+        amount = f"{abs(diff):.1f}%p"
+        direction = "높습니다" if diff > 0 else "낮습니다"
+    else:
+        relative = diff / abs(row.peer_average) * 100
+        amount = f"{abs(relative):.1f}%"
+        direction = "많습니다" if diff > 0 else "적습니다"
+    return Finding(
+        metric_key=row.metric_key,
+        text=f"{_topic(row.label)} 비교군 평균보다 {amount} {direction}.",
+        value=row.value,
+        peer_average=row.peer_average,
+    )
+
+
+def _gap_amount(value: Decimal, unit: str) -> str:
+    if unit == "%":
+        return f"{abs(value):.1f}%p"
+    return format_metric(abs(value), unit)
+
+
+def _trend_finding(row: ComparisonRow, history: Sequence[tuple[int, Decimal]]) -> Finding | None:
+    trend = gap_trend(history)
+    if trend is None:
+        return None
+    recent = sorted(history)[-3:]
+    previous_year, previous_gap = recent[-2]
+    latest_year, latest_gap = recent[-1]
+    direction = "커졌습니다" if trend == "widening" else "줄었습니다"
+    text = (
+        f"{row.label}의 비교군 평균과의 차이는 최근 3년간 {direction} "
+        f"({previous_year}년 {_gap_amount(previous_gap, row.unit)}에서 "
+        f"{latest_year}년 {_gap_amount(latest_gap, row.unit)})."
+    )
+    return Finding(
+        metric_key=row.metric_key,
+        text=text,
+        value=row.value,
+        peer_average=row.peer_average,
+        gap_history=tuple(recent),
+    )
+
+
+def _followups(metric_keys: Iterable[str]) -> tuple[str, ...]:
+    groups: list[str] = []
+    for key in metric_keys:
+        if key in {"revenue_growth", "revenue_cagr_3y", "revenue_cagr_5y", "revenue_per_bed"}:
+            group = "revenue"
+        elif key in {
+            "medical_margin",
+            "net_margin",
+            "labor_ratio",
+            "material_ratio",
+            "drug_ratio",
+            "supply_ratio",
+            "admin_ratio",
+            "labor_per_bed",
+            "material_per_bed",
+        }:
+            group = "cost"
+        else:
+            group = "finance"
+        if group not in groups:
+            groups.append(group)
+    texts = {
+        "revenue": "의료수익 변화는 환자 수, 진료단가, 환자구성 자료를 추가 확인해야 합니다.",
+        "cost": "비용 구조 차이는 인력 구성, 재료·약품 사용량, 외주·관리비 자료를 추가 확인해야 합니다.",
+        "finance": "재무구조 차이는 차입 조건, 상환 일정, 유동자산·부채 구성을 추가 확인해야 합니다.",
+    }
+    return tuple(texts[group] for group in groups)
+
+
+def build_management_briefing(
+    rows: Sequence[ComparisonRow],
+    gap_history: Mapping[str, Sequence[tuple[int, Decimal]]] | None,
+    *,
+    fiscal_year: int,
+    peer_count: int,
+    min_peer_count: int = BRIEFING_MIN_PEERS,
+    max_differences: int = BRIEFING_MAX_DIFFERENCES,
+    max_trends: int = BRIEFING_MAX_TRENDS,
+    min_gap_points: Decimal = Decimal("1"),
+    min_gap_percent: Decimal = Decimal("5"),
+) -> ManagementBriefing:
+    """Build a short, deterministic management briefing from displayed comparison rows."""
+
+    order = {key: index for index, key in enumerate(METRIC_SPECS)}
+    eligible_rows = [
+        row
+        for row in rows
+        if row.peer_count >= min_peer_count and row.value is not None and row.peer_average is not None
+    ]
+    ranked_differences: list[tuple[Decimal, int, ComparisonRow]] = []
+    for row in eligible_rows:
+        strength = _difference_strength(
+            row,
+            min_gap_points=min_gap_points,
+            min_gap_percent=min_gap_percent,
+        )
+        if strength is not None:
+            ranked_differences.append((strength, order.get(row.metric_key, len(order)), row))
+    ranked_differences.sort(key=lambda item: (-item[0], item[1]))
+    differences = tuple(_difference_finding(item[2]) for item in ranked_differences[:max_differences])
+
+    ranked_trends: list[tuple[Decimal, int, Finding]] = []
+    history_map = gap_history or {}
+    for row in eligible_rows:
+        history = tuple(sorted(history_map.get(row.metric_key, ())))
+        finding = _trend_finding(row, history)
+        if finding is None:
+            continue
+        recent = history[-3:]
+        change = abs(abs(recent[-1][1]) - abs(recent[-2][1]))
+        ranked_trends.append((change, order.get(row.metric_key, len(order)), finding))
+    ranked_trends.sort(key=lambda item: (-item[0], item[1]))
+    trends = tuple(item[2] for item in ranked_trends[:max_trends])
+
+    held_rows = [row for row in rows if row.peer_count < min_peer_count]
+    if rows and all(row.value is None for row in rows):
+        status = "기준 병원의 이 회계연도 자료가 없어 비교 문장을 만들 수 없습니다."
+        differences = ()
+        trends = ()
+    elif peer_count < min_peer_count or (rows and not eligible_rows):
+        status = "비교 보류: 유효한 비교병원이 3곳 미만입니다."
+        differences = ()
+        trends = ()
+    elif held_rows:
+        status = "비교 보류: 유효한 비교병원이 3곳 미만인 지표는 브리핑에서 제외했습니다."
+    elif not differences and not trends:
+        status = "허용폭을 넘는 차이가 없거나 비교할 자료가 부족합니다."
+    else:
+        status = None
+
+    keys = [finding.metric_key for finding in (*differences, *trends)]
+    return ManagementBriefing(
+        fiscal_year=fiscal_year,
+        peer_count=peer_count,
+        differences=differences,
+        trends=trends,
+        followups=_followups(keys),
+        status=status,
+    )
+
+
+def briefing_banned_term(text: str) -> str | None:
+    return next((term for term in BRIEFING_BANNED_TERMS if term in text), None)

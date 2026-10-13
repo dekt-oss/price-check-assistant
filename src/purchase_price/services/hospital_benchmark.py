@@ -18,7 +18,7 @@ from purchase_price.services import khidi_financials as khidi
 
 # Bumped whenever this module or its siblings change behaviour; the Benchmark page reloads retained
 # copies (Streamlit Cloud keeps imported modules across a redeploy) when it sees an older value.
-MODULES_REVISION = "2026-10-09c"
+MODULES_REVISION = "2026-10-13-h2"
 
 # Accounts a headline metric needs; used to tell the reader which inputs are missing.
 REQUIRED_ACCOUNTS: tuple[str, ...] = (
@@ -119,13 +119,18 @@ def gap_history(
     metric_keys: Sequence[str],
     *,
     span: int = 3,
+    min_peer_count: int = 0,
 ) -> dict[str, list[tuple[int, Decimal]]]:
     """``{metric: [(year, target - peer_average)]}`` for the ``span`` years ending at ``year``."""
 
     result: dict[str, list[tuple[int, Decimal]]] = {key: [] for key in metric_keys}
     for y in range(year - span + 1, year + 1):
         for row in compare(data, target, peers, y, metric_keys):
-            if row.value is not None and row.peer_average is not None:
+            if (
+                row.value is not None
+                and row.peer_average is not None
+                and row.peer_count >= min_peer_count
+            ):
                 result[row.metric_key].append((y, row.value - row.peer_average))
     return result
 
