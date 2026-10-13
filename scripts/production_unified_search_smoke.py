@@ -12,7 +12,7 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v23"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v24"
 # The news and management pages are served from their own files; Production has kept an old copy of
 # a page after a deploy before (2026-10-13), so the smoke opens both and checks their new headings.
 TRACK_H_PAGES = (

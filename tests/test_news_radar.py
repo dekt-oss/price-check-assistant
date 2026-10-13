@@ -156,7 +156,7 @@ def test_cluster_news_issues_groups_title_variants_but_not_other_hospital_events
     keywords = (radar.Keyword("부산백병원", "our_hospital", "우리병원", "immediate"),)
     entries = [
         _entry("a", "부산백병원, 조제약 카카오 알림 서비스 시행", domain="one.kr"),
-        _entry("b", "부산백병원 약제부 카카오톡 복약 안내 서비스", hours=20, domain="two.kr"),
+        _entry("b", "부산백병원 약제부 카카오톡 조제약 복약 안내 서비스", hours=20, domain="two.kr"),
         _entry("c", "부산백병원 모자의료센터 개소 10주년", hours=22, domain="three.kr"),
     ]
 
@@ -167,6 +167,24 @@ def test_cluster_news_issues_groups_title_variants_but_not_other_hospital_events
     assert grouped.article_ids == ("a", "b")
     assert grouped.source_count == 2
     assert grouped.group_names == ("우리병원",)
+
+
+def test_cluster_news_issues_ignores_sector_words_shared_by_different_companies() -> None:
+    """2026-10-13 holdout: 'AI 진료 솔루션 도입/공급' alone merged three companies' news."""
+
+    keyword = radar.Keyword("의료 AI 병원", "ai_digital", "AI·디지털", "daily", title_terms=(("ai",),))
+    entries = [
+        _entry("gc1", "GC메디아이, KIMES 부산 참가…AI 진료·병원 운영 솔루션 공개", keywords=("의료 AI 병원",)),
+        _entry("gc2", "GC메디아이, 부산 의료기기 전시회서 AI 진료·병원 운영 솔루션 선보인다", hours=1, domain="b.kr", keywords=("의료 AI 병원",)),
+        _entry("ma1", "메디아크, 남아공 종합병원·의료기관 체인에 AI 진료 지원 솔루션 도입", hours=2, domain="c.kr", keywords=("의료 AI 병원",)),
+        _entry("ma2", "메디아크, 남아공 병원에 AI 진료지원 솔루션 공급 확대", hours=3, domain="d.kr", keywords=("의료 AI 병원",)),
+        _entry("vu", "뷰노, 유럽 의료기관과 AI 심정지 예측 연구 협력…현지 도입 기반", hours=4, domain="e.kr", keywords=("의료 AI 병원",)),
+    ]
+
+    issues = radar.cluster_news_issues(entries, (keyword,), now=NOW + timedelta(hours=5))
+
+    grouped = sorted(tuple(sorted(issue.article_ids)) for issue in issues)
+    assert grouped == [("gc1", "gc2"), ("ma1", "ma2"), ("vu",)]
 
 
 def test_cluster_news_issues_respects_time_window_and_keeps_roundups_separate() -> None:
