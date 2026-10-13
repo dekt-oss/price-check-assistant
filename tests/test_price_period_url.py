@@ -141,7 +141,11 @@ def test_picking_a_period_puts_it_in_the_url() -> None:
     app.button_group[0].set_value("전체").run()
     assert not app.exception
     # AppTest reports each URL parameter as a list of values.
-    assert dict(app.query_params) == {"q": ["PNB-704"], "period": ["all"]}
+    # AppTest returns each value as a str or a one-item list depending on the Streamlit build.
+    assert {k: (v[0] if isinstance(v, list) else v) for k, v in dict(app.query_params).items()} == {
+        "q": "PNB-704",
+        "period": "all",
+    }
 
 
 def test_dashboard_uses_the_period_url_helpers() -> None:
