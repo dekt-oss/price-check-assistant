@@ -12,6 +12,7 @@ import pytest
 
 from purchase_price.services import hospital_ai_explanation as ai
 from purchase_price.services import hospital_benchmark as benchmark
+from purchase_price.services import hospital_master as master_service
 from purchase_price.services import hospital_metrics as metrics
 from purchase_price.services import hospital_report as report_service
 from purchase_price.services import news_radar as radar
@@ -145,13 +146,7 @@ def test_reports_build_for_eight_core_hospitals_and_all_five_peer_groups() -> No
     data = benchmark.load_benchmark_data()
     core = [hospital for hospital in data.master.hospitals if hospital.group == "core"]
     assert len(core) == 8
-    peer_kinds = tuple(data.master.PEER_GROUP_LABELS) if hasattr(data.master, "PEER_GROUP_LABELS") else (
-        "region",
-        "network",
-        "similar_size",
-        "same_type",
-        "custom",
-    )
+    peer_kinds = tuple(master_service.PEER_GROUP_LABELS)
     assert len(peer_kinds) == 5
 
     for target in core:
@@ -220,4 +215,6 @@ def test_benchmark_page_keeps_plain_words_and_ai_fallback_text() -> None:
     assert source.index('st.subheader("경영 브리핑")') < source.index('st.subheader("핵심 지표")')
     assert source.index('st.subheader("핵심 지표")') < source.index('st.subheader("의료수익·의료이익률 추이")')
     assert source.index('st.subheader("의료수익·의료이익률 추이")') < source.index('st.subheader("비용 구조")')
+    assert "@st.cache_data" in source
+    assert "_cached_screen_report" in source
     assert rs.has_banned_term(source) is None
