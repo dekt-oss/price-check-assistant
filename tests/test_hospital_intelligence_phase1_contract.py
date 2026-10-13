@@ -67,6 +67,15 @@ def test_home_uses_the_app_name_and_the_new_menu_names() -> None:
         assert (REPO_ROOT / target).exists()
 
 
+def test_home_cards_make_the_native_page_link_cover_the_card() -> None:
+    source = (REPO_ROOT / "pages" / "0_홈.py").read_text(encoding="utf-8")
+    assert '[data-testid="stElementContainer"]:has(> [data-testid="stPageLink"])' in source
+    assert "position:absolute;" in source
+    assert "inset:0;" in source
+    assert 'st.page_link(path, label=label, icon=icon, width="stretch")' in source
+    assert 'f"{title} 화면으로 이동"' in source
+
+
 def test_new_screens_use_plain_words() -> None:
     offenders = [
         (page.name, line, text)

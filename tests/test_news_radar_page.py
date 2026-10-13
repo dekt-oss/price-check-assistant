@@ -65,6 +65,16 @@ def test_page_shows_stored_articles_and_collection_status_in_korean_time(stored_
     assert any("**NEW** 10-08 19:48" == item.value for item in app.markdown)
 
 
+def test_page_presents_a_simple_primary_news_workflow(stored_list) -> None:
+    app = _run()
+
+    assert app.title[0].value == "병원 뉴스"
+    assert [metric.label for metric in app.metric] == ["새 기사", "오늘 기사", "마지막 확인"]
+    assert app.button[0].label == "새 기사 확인"
+    assert [expander.label for expander in app.expander] == ["관심 키워드 설정", "상세 필터"]
+    assert any("문자·이메일 알림 준비 중" in item.value for item in app.info)
+
+
 def test_status_survives_a_new_session(stored_list) -> None:
     app = _run()
     app.selectbox[0].set_value(radar.STATUS_IMPORTANT).run()
@@ -73,7 +83,7 @@ def test_status_survives_a_new_session(stored_list) -> None:
 
     again = _run()
     assert sorted(box.value for box in again.selectbox) == ["important", "new", "new"]
-    assert [m.value for m in again.metric][2] == "1건"
+    assert again.metric[0].value == "2건"
 
 
 def test_status_falls_back_to_this_session_when_saving_fails(stored_list, monkeypatch) -> None:
