@@ -65,6 +65,7 @@ def test_seed_keyword_groups_match_the_plan() -> None:
     # Stand-alone generic words pulled in unrelated articles (2026-10-08 scan); keep them qualified.
     for generic in ("의료수가", "병상", "의료인력", "의료기기", "의료장비", "필수의료"):
         assert generic not in all_texts
+    assert radar.load_issue_roundup_terms() == ("이모저모",)
 
 
 def test_group_toggle_filters_active_keywords() -> None:
@@ -237,3 +238,63 @@ def test_issue_priority_boosts_recall_and_safety_keywords() -> None:
     issues = radar.cluster_news_issues([ordinary, recall], keywords, now=NOW)
 
     assert issues[0].representative_article_id == "recall"
+
+
+def test_issue_priority_reads_recall_terms_from_the_allowed_title_field() -> None:
+    keyword = radar.Keyword("부산백병원", "our_hospital", "우리병원", "immediate")
+    ordinary = _entry("ordinary", "부산백병원 새 소식", keywords=(keyword.text,))
+    recall = _entry(
+        "recall",
+        "부산백병원 의료기기 회수 안내",
+        hours=-10,
+        keywords=(keyword.text,),
+    )
+
+    issues = radar.cluster_news_issues([ordinary, recall], (keyword,), now=NOW)
+
+    assert issues[0].representative_article_id == "recall"
+
+
+def test_issue_priority_uses_medical_source_tier() -> None:
+    keyword = radar.Keyword("부산백병원", "our_hospital", "우리병원", "immediate")
+    general = _entry("general", "부산백병원 새 센터 개소", domain="general.kr")
+    medical = _entry("medical", "부산백병원 새 사업 협약", hours=-5, domain="medical.kr")
+    tiers = (radar.SourceTier("medical", "의료 전문지", 2, ("medical.kr",)),)
+
+    issues = radar.cluster_news_issues([general, medical], (keyword,), tiers, now=NOW)
+
+    assert issues[0].representative_article_id == "medical"
+
+
+def test_issue_clustering_parses_each_title_once(monkeypatch) -> None:
+    keyword = radar.Keyword("부산백병원", "our_hospital", "우리병원", "immediate")
+    entries = [
+        _entry(str(i), f"부산백병원 카카오 복약 안내 서비스 {i}", hours=i)
+        for i in range(8)
+    ]
+    original = radar._issue_title_parts
+    calls: list[str] = []
+
+    def counted(title: str):
+        calls.append(title)
+        return original(title)
+
+    monkeypatch.setattr(radar, "_issue_title_parts", counted)
+    radar.cluster_news_issues(entries, (keyword,), now=NOW + timedelta(hours=12))
+
+    assert len(calls) == len(entries)
+
+
+def test_recent_news_issues_excludes_old_high_score_items() -> None:
+    keyword = radar.Keyword("부산백병원", "our_hospital", "우리병원", "immediate")
+    old = _entry("old", "부산백병원 오래된 회수 소식", hours=-80, keywords=(keyword.text,))
+    recent = _entry("recent", "부산백병원 오늘 소식", hours=-2, keywords=(keyword.text,))
+    issues = radar.cluster_news_issues([old, recent], (keyword,), now=NOW)
+
+    recent_issues = radar.recent_news_issues(issues, now=NOW)
+
+    assert [issue.representative_article_id for issue in recent_issues] == ["recent"]
+
+
+def test_markdown_link_title_neutralizes_brackets() -> None:
+    assert radar.markdown_link_title("[단독] 소식 ](") == "(단독) 소식 )("

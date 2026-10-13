@@ -20,6 +20,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import logging
 import os
 import re
 import tempfile
@@ -51,6 +52,7 @@ SOURCE_NAME = "naver_news"
 KST = radar.SEOUL
 ALERT_ITEM_LIMIT = 20
 _DIGEST_KEY_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.md$")
+LOGGER = logging.getLogger(__name__)
 
 
 class NewsRadarIndexError(RuntimeError):
@@ -302,15 +304,20 @@ def index_from_payload(payload: Mapping[str, Any]) -> NewsRadarIndex:
         if isinstance(raw, Mapping):
             entry = entry_from_payload(raw)
             items[entry.article_id] = entry
+    issues: list[radar.NewsIssue] = []
+    if version >= 2:
+        for raw in payload.get("issues") or []:
+            if not isinstance(raw, Mapping):
+                continue
+            try:
+                issues.append(issue_from_payload(raw))
+            except (NewsRadarIndexError, TypeError, ValueError) as exc:
+                LOGGER.warning("Skipping invalid derived news issue: %s", exc)
     return NewsRadarIndex(
         generated_at=_parse_time(payload.get("generated_at")),
         keywords=tuple(dict(k) for k in payload.get("keywords") or [] if isinstance(k, Mapping)),
         items=items,
-        issues=tuple(
-            issue_from_payload(raw)
-            for raw in payload.get("issues") or []
-            if version >= 2 and isinstance(raw, Mapping)
-        ),
+        issues=tuple(issues),
         runs=[CollectionRun.from_payload(r) for r in payload.get("runs") or [] if isinstance(r, Mapping)],
     )
 
@@ -422,6 +429,8 @@ def collect(
     search: SearchFn,
     *,
     groups: Sequence[radar.KeywordGroup] = (),
+    tiers: Sequence[radar.SourceTier] = (),
+    roundup_terms: Sequence[str] = radar.DEFAULT_ISSUE_ROUNDUP_TERMS,
     display: int = 100,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     sleep: Callable[[float], None] = time.sleep,
@@ -463,7 +472,13 @@ def collect(
     if groups:
         index.keywords = keyword_snapshot(groups, keywords)
     index.version = INDEX_VERSION
-    index.issues = radar.cluster_news_issues(index.items.values(), keywords, now=finished)
+    index.issues = radar.cluster_news_issues(
+        index.items.values(),
+        keywords,
+        tiers,
+        now=finished,
+        roundup_terms=roundup_terms,
+    )
     return CollectionResult(run=run, new_by_keyword=new_by_keyword, bootstrap=bootstrap)
 
 
@@ -633,7 +648,7 @@ def daily_digest_markdown(
         lines.append(f"## {keyword} ({len(entries)}건)")
         lines.append("")
         for entry in entries[:per_keyword_limit]:
-            title = entry.title.replace("[", "(").replace("]", ")")
+            title = radar.markdown_link_title(entry.title)
             source = entry.source_domain or "출처 확인 안 됨"
             lines.append(f"- [{title}]({entry.url}) · {source} · {_when(entry.published_at)}")
         if len(entries) > per_keyword_limit:

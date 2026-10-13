@@ -21,10 +21,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from purchase_price.clients.naver_news import NaverNewsClientError, NaverNewsItem
 
 DEFAULT_KEYWORD_FILE = Path(__file__).resolve().parents[3] / "data" / "news_keywords.json"
-MODULES_REVISION = "2026-10-13-h1"
+MODULES_REVISION = "2026-10-13-h1-review"
 ISSUE_WINDOW = timedelta(hours=96)
+ISSUE_RECENT_WINDOW = timedelta(hours=72)
 ISSUE_SIMILARITY_THRESHOLD = 0.18
 ISSUE_REGULATORY_TERMS = ("회수", "판매중지", "리콜", "안전성")
+DEFAULT_ISSUE_ROUNDUP_TERMS = ("이모저모",)
 
 STATUS_NEW = "new"
 STATUS_READ = "read"
@@ -127,6 +129,14 @@ def load_keyword_groups(path: Path = DEFAULT_KEYWORD_FILE) -> tuple[KeywordGroup
                 )
             )
     return tuple(groups)
+
+
+def load_issue_roundup_terms(path: Path = DEFAULT_KEYWORD_FILE) -> tuple[str, ...]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    configured = tuple(
+        str(term).strip() for term in payload.get("issue_roundup_terms") or [] if str(term).strip()
+    )
+    return configured or DEFAULT_ISSUE_ROUNDUP_TERMS
 
 
 def _squash(text: str) -> str:
@@ -317,8 +327,14 @@ def _issue_title_parts(title: str) -> tuple[set[str], set[str]]:
 
 
 def _issue_title_similarity(left: str, right: str) -> tuple[int, float]:
-    left_tokens, left_bigrams = _issue_title_parts(left)
-    right_tokens, right_bigrams = _issue_title_parts(right)
+    return _issue_parts_similarity(_issue_title_parts(left), _issue_title_parts(right))
+
+
+def _issue_parts_similarity(
+    left: tuple[set[str], set[str]], right: tuple[set[str], set[str]]
+) -> tuple[int, float]:
+    left_tokens, left_bigrams = left
+    right_tokens, right_bigrams = right
     shared_tokens = len(left_tokens & right_tokens)
     denominator = len(left_bigrams) + len(right_bigrams)
     dice = 0.0 if not denominator else 2 * len(left_bigrams & right_bigrams) / denominator
@@ -331,6 +347,7 @@ def cluster_news_issues(
     tiers: Iterable[SourceTier] = (),
     *,
     now: datetime | None = None,
+    roundup_terms: Sequence[str] = DEFAULT_ISSUE_ROUNDUP_TERMS,
 ) -> tuple[NewsIssue, ...]:
     """Deterministically group title-matching articles that report the same event."""
 
@@ -350,6 +367,8 @@ def cluster_news_issues(
         _aware_issue_time(item.entry.published_at or item.entry.detected_at) for item in ordered
     ]
     component_latest = list(component_first)
+    title_parts = [_issue_title_parts(item.entry.title) for item in ordered]
+    roundup_list = tuple(term.casefold() for term in roundup_terms if term)
 
     def root(position: int) -> int:
         while parents[position] != position:
@@ -372,14 +391,14 @@ def cluster_news_issues(
 
     for left_position, left in enumerate(ordered):
         left_entry = left.entry
-        if "이모저모" in left_entry.title:
+        if any(term in left_entry.title.casefold() for term in roundup_list):
             continue
         left_time = _aware_issue_time(left_entry.published_at or left_entry.detected_at)
         left_groups = {by_text[text].group_key for text in left.matched_keywords if text in by_text}
         for right_position in range(left_position + 1, len(ordered)):
             right = ordered[right_position]
             right_entry = right.entry
-            if "이모저모" in right_entry.title:
+            if any(term in right_entry.title.casefold() for term in roundup_list):
                 continue
             right_time = _aware_issue_time(right_entry.published_at or right_entry.detected_at)
             if right_time - left_time > ISSUE_WINDOW:
@@ -387,7 +406,9 @@ def cluster_news_issues(
             right_groups = {by_text[text].group_key for text in right.matched_keywords if text in by_text}
             if not left_groups.intersection(right_groups):
                 continue
-            shared, similarity = _issue_title_similarity(left_entry.title, right_entry.title)
+            shared, similarity = _issue_parts_similarity(
+                title_parts[left_position], title_parts[right_position]
+            )
             same_event = shared >= 2 and similarity >= ISSUE_SIMILARITY_THRESHOLD
             if same_event:
                 union(left_position, right_position)
@@ -428,12 +449,16 @@ def cluster_news_issues(
         unique_sources = len({entry.source_domain for entry in cluster_entries if entry.source_domain})
         age = _aware_issue_time(current) - max(times)
         recency = 2 if age <= timedelta(hours=24) else 1 if age <= timedelta(hours=72) else 0
-        regulatory = 3 if any(
-            term in text
-            for item in cluster
-            for text in item.matched_keywords
-            for term in ISSUE_REGULATORY_TERMS
-        ) else 0
+        regulatory = (
+            3
+            if any(
+                term in item.entry.title.casefold()
+                or any(term in text.casefold() for text in item.matched_keywords)
+                for item in cluster
+                for term in ISSUE_REGULATORY_TERMS
+            )
+            else 0
+        )
         score = representative.score + regulatory + min(max(unique_sources - 1, 0), 3) + recency
         article_ids = tuple(entry.article_id for entry in cluster_entries)
         digest = hashlib.sha256("\n".join(article_ids).encode("utf-8")).hexdigest()[:16]
@@ -458,6 +483,24 @@ def cluster_news_issues(
             key=lambda issue: (-issue.score, -issue.latest_published_at.timestamp(), issue.issue_id),
         )
     )
+
+
+def recent_news_issues(
+    issues: Iterable[NewsIssue],
+    *,
+    now: datetime | None = None,
+    max_age: timedelta = ISSUE_RECENT_WINDOW,
+) -> tuple[NewsIssue, ...]:
+    """Keep issues whose latest article is recent enough for the top-of-page block."""
+
+    cutoff = _aware_issue_time(now or datetime.now(UTC)) - max_age
+    return tuple(issue for issue in issues if _aware_issue_time(issue.latest_published_at) >= cutoff)
+
+
+def markdown_link_title(title: str) -> str:
+    """Keep an original title readable without letting brackets break a Markdown link."""
+
+    return title.replace("[", "(").replace("]", ")")
 
 
 def _aware_issue_time(value: datetime) -> datetime:
