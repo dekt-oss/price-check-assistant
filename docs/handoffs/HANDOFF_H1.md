@@ -8,6 +8,8 @@
 - H0 보완 main 커밋: `2502f76453976d24f18b85eb9191731eb9872b48`
 - PR #341 main 커밋: `8a84477c42fb7ab351fc2680a66922ddcff21f19`
 - H1 구현 커밋: `adc0a78`
+- H1 리뷰 후속 커밋: `576409d`
+- H1 리뷰 후속 PR: `#356` (CI 3/3 통과, 병합 전)
 - 작업 브랜치: `codex/ux-v11-news-management`
 - 워크트리: `.worktrees/ux-v11-news-management`
 
@@ -73,7 +75,7 @@
 
 ## 7. 미검증 항목
 
-- H1 PR CI: PR 생성 전이므로 미검증.
+- H1 리뷰 후속 PR #356 CI: `test`, `bundled-ocr`, `golden-uat` 3/3 통과.
 - main 병합과 운영 배포: 미실행.
 - 운영 인덱스 v2 생성과 실제 2,432건 전체 군집: 첫 배포 뒤 수집 Job 실행 전이라 미검증.
 - 운영 `/news-radar` 주요 이슈 캡처: 머지 전이라 미검증.
