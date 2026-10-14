@@ -69,3 +69,31 @@
 - I0-a: 배포 마커를 v22로 올리고, 결과 화면 맨 아래까지 최대 45초 기다리게 고쳤다(#352·#353). 2026-10-13 02:10 수동 실행 전 단계 통과.
 - H1 배포(2026-10-13 01:44Z 머지) 뒤 운영에서 **뉴스·경영 페이지 파일만 옛 코드로 남았다**(홈·가격 조사는 새 코드). 수집 Job이 먼저 v2 인덱스를 써서 옛 뉴스 페이지가 기사 0건이 됐다. 사용자가 Reboot한 뒤(약 07:50Z) 두 화면 모두 새 코드로 확인했다.
 - I0-b: 배포 마커 v23. 스모크가 `/news-radar`와 `/hospital-benchmark`를 열어 새 제목("병원 뉴스", "병원 경영 비교")과 첫 블록("주요 이슈", "경영 브리핑")을 60초 안에 확인한다. 같은 일이 다시 생기면 스모크가 실패한다.
+
+## 8. 잔여 Integration UAT 후속 검증 (2026-10-13~14)
+
+기존 관찰을 삭제하지 않고 같은 운영 URL을 다시 확인했다. 브라우저 viewport 에뮬레이션이며 실제 휴대폰·태블릿 기기 검증은 아니다. 성능 표본에서는 runtime v24를 확인했지만, 뉴스 화면에서 운영 서버의 정확한 Git SHA를 노출하지 않아 뉴스 코드의 정확한 배포 커밋은 **미검증**이다.
+
+| 항목 | 환경·절차 | 후속 결과 | 판정 |
+| --- | --- | --- | --- |
+| 병원 뉴스 1024px | 운영 `/news-radar`, Chromium viewport 1024×900 | 문서 `scrollWidth=1024`, `clientWidth=1024`, 오른쪽 경계 밖 요소 0. 상단 지표 3개는 각 232px, 주요 이슈 카드와 5개 관련 기사 expander의 오른쪽 끝은 최대 1000px. `병원 뉴스`, `최근 3일 주요 이슈`, 관련 기사 접기, 관심 키워드 설정, 최신 기사 50개 영역을 화면과 DOM에서 확인 | **됨(브라우저 에뮬레이션)**. 뉴스 군집 내용 정확성은 범위 밖 |
+| 가격 그래프 폭 변경 | 운영 PNB-704 `period=5y`, 같은 세션에서 390×844 → 1280×900 → 390×844 | 문서 가로 넘침은 세 단계 모두 0. 그래프 2개는 362px → 878px → 362px로 재계산됐고 각 `scrollWidth=clientWidth`. 기존 기록의 “이전 폭으로 남아 잘림”은 현재 운영에서 재현되지 않음 | **됨(브라우저 에뮬레이션)** |
+| 가격 화면 새로고침 | 위 세션의 마지막 390px에서 새로고침 | 문서 가로 넘침 0, 그래프 2개 모두 362px 유지 | **됨(브라우저 에뮬레이션)** |
+| 가격 표 내부 폭 | 같은 네 단계 | 데이터프레임 일부는 내용 폭이 컨테이너보다 9px 커 내부 스크롤이 있었지만 문서 `scrollWidth`는 viewport와 같고 오른쪽 화면 밖으로 나가지 않음 | **부분**. 표 내부 스크롤은 관측됐으나 페이지 잘림은 아님 |
+| 외부 조회 실패 | 운영 장애를 만들지 않고 로컬 dependency/예외 주입 테스트 5개 실행 | 조회 실패는 0건으로 오인하지 않고 `확인 실패`/`조회 불가` 의미를 유지. URL·서비스 키·내부 예외 문자열을 사용자 메시지에서 제거하고 식약처 미인가 의미도 보존 | **로컬 실패 주입 통과 / 운영 미검증** |
+
+모바일 390px에서 경계 밖으로 잡힌 요소는 접힌 Streamlit 사이드바의 음수 좌표뿐이었고 오른쪽 넘침은 아니었다. 실제 기기 회전, 터치 조작, 모바일 브라우저별 레이아웃은 **미검증**이다.
+
+외부 조회 실패 재현 명령은 다음 5개 테스트였다.
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path src).Path
+python -m pytest -q `
+  tests/test_device_page_ui.py::test_failed_lookup_notice_hides_urls_and_keys `
+  tests/test_safety_support.py::test_recall_lookup_failure_is_check_failed_not_zero `
+  tests/test_production_runtime_research_safety.py::test_mfds_failure_kind_is_secret_safe_and_actionable `
+  tests/test_production_runtime_research_safety.py::test_uncaught_mfds_code_30_exception_keeps_not_authorized_semantics `
+  tests/test_data_go_kr_transport.py::test_exhausted_transport_retry_is_wrapped_and_secret_redacted
+```
+
+결과는 `5 passed in 2.99s`였다. 운영 네트워크·설정은 변경하지 않았고 운영 장애를 일부러 유발하지 않았다.
