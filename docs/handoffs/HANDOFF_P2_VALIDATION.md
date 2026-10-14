@@ -80,11 +80,11 @@ full-index cold와 피크 메모리를 다시 닫을 때는 운영을 재시작�
 
 ## 12. PR URL과 CI 상태
 
-- PR: 생성 후 갱신
+- PR: https://github.com/dekt-oss/price-check-assistant/pull/365
 - 로컬 검증:
   - `ruff check .`: 통과
   - 타깃 통합·시작 스모크: `12 passed in 18.36s`
   - 외부 실패 주입: `5 passed in 2.99s`
   - 전체: `1827 passed, 14 failed, 3 warnings in 85.32s`
   - 실패 14건은 기존 Windows 실패군과 일치: OCR 실환경 4건, 견적 업로드/OCR 3건, cp949 7건. 신규 실패 0건
-- CI: PR 생성 후 확인
+- CI: 기준 커밋 `cf09aa7`에서 OCR Readiness 통과, 본 CI 실행 중(2026-10-14 확인). 최신 상태는 PR Checks를 기준으로 한다.
