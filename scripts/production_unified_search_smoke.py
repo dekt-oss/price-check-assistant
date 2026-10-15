@@ -459,8 +459,19 @@ def _verify_numeric_sort(page: Any, report: dict[str, object], table: Any | None
         report["numeric_sort_check"] = {"status": "skipped", "note": f"fewer than 2 price values in {header}"}
         return
     # Hide every other column (the grid's own Show/hide menu) so the header to click sits at the left.
-    table.hover()
-    table.locator('[aria-label="Show/hide columns"]').first.click(timeout=10_000)
+    # The toolbar only appears while the pointer is over the grid: bring the grid on screen first
+    # (2026-10-15 a click right after the link check timed out off screen), then retry once.
+    toggle = table.locator('[aria-label="Show/hide columns"]').first
+    for attempt in range(2):
+        table.scroll_into_view_if_needed(timeout=10_000)
+        table.hover()
+        page.wait_for_timeout(800)
+        try:
+            toggle.click(timeout=10_000)
+            break
+        except Exception:
+            if attempt:
+                raise
     menu = app.locator('[data-testid="stDataFrameColumnVisibilityMenu"]')
     menu.wait_for(state="visible", timeout=10_000)
     boxes = menu.locator('input[type="checkbox"]')
