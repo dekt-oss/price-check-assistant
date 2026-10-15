@@ -9,7 +9,8 @@ def test_production_browser_smoke_gates_r2_before_dfm100() -> None:
     )
 
     gate = "python scripts/production_r2_runtime_diagnostic.py --require-ready"
-    dfm = "python scripts/production_unified_search_smoke.py"
+    # The DFM100 search step itself; the earlier `--wait-only` deploy wait uses the same script.
+    dfm = "run: python scripts/production_unified_search_smoke.py\n"
     quote = "python scripts/production_quote_uat_smoke.py"
 
     assert gate in workflow
