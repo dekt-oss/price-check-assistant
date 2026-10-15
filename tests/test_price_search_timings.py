@@ -61,3 +61,9 @@ def test_dashboard_reports_each_stage_and_emits_the_v2_marker() -> None:
     assert source.count("progress=_stage_reporter(status)") >= 5
     for key in m.TIMING_KEYS:
         assert key.replace("-", "_") in source
+
+
+def test_measure_clicks_the_streamlit_wake_button() -> None:
+    source = Path("src/purchase_price/scripts/measure_price_search_timings.py").read_text(encoding="utf-8")
+    assert "Yes, get this app back up!" in source
+    assert "woke = _wake_if_sleeping(page)" in source

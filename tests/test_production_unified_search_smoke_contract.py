@@ -35,3 +35,16 @@ def test_browser_workflow_runs_dedicated_unified_search_smoke_after_merge() -> N
     assert "Run Production DFM100 unified-search smoke" in workflow
     assert "python scripts/production_unified_search_smoke.py" in workflow
     assert "if: github.event_name != 'pull_request'" in workflow
+
+
+def test_workflow_waits_for_the_merged_build_before_other_checks() -> None:
+    workflow = Path(".github/workflows/production-browser-smoke.yml").read_text(encoding="utf-8")
+    script = Path("scripts/production_unified_search_smoke.py").read_text(encoding="utf-8")
+
+    wait_step = workflow.index("production_unified_search_smoke.py --wait-only")
+    assert wait_step < workflow.index("python scripts/production_browser_smoke.py")
+    assert 'DEPLOY_WAIT_SECONDS: "1500"' in workflow
+    assert "timeout-minutes: 45" in workflow
+    # A build that never turns over is reported as a deploy delay, not as a search failure.
+    assert "배포 지연" in script
+    assert "_wake_if_sleeping(page)" in script
