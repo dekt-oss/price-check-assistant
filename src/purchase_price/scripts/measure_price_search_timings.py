@@ -67,6 +67,10 @@ RESULT_SELECTORS = ("#purchase-conclusion-v1", "#purchase-not-found-v1", "#categ
 STATE_NAME = "perf/price-search-timings"
 MAX_SAMPLES = 600
 PAGE_TIMEOUT_SECONDS = 300
+# Streamlit Community Cloud puts an idle app to sleep and shows this screen instead of the app.
+# Without clicking the wake button every query waits out its full timeout (2026-10-14 04:55Z).
+STREAMLIT_SLEEP_MARKER = "This app has gone to sleep due to inactivity."
+STREAMLIT_WAKE_TEXT = "Yes, get this app back up!"
 
 
 # ── Pure parts (unit-tested) ──
@@ -184,7 +188,10 @@ def measure_query(page: Any, url: str, query: str) -> dict[str, Any]:
     page.goto(f"{url.rstrip('/')}/?q={quote(query)}", wait_until="domcontentloaded", timeout=120_000)
     deadline = started + PAGE_TIMEOUT_SECONDS
     root = page
+    woke = False
     while time.monotonic() < deadline:
+        if not woke:
+            woke = _wake_if_sleeping(page)
         root = _root(page)
         if any(root.locator(selector).count() > 0 for selector in RESULT_SELECTORS):
             status = "ok"
@@ -193,9 +200,24 @@ def measure_query(page: Any, url: str, query: str) -> dict[str, Any]:
     wall = time.monotonic() - started
     timings = _attributes(root, "#purchase-search-timings-v2", TIMING_KEYS) if status == "ok" else {}
     render = _attributes(root, "#purchase-render-timings-v1", ("card",)) if status == "ok" else {}
-    return sample_from_markers(
+    sample = sample_from_markers(
         query=query, wall=wall, timings=timings, render=render, status=status, at=datetime.now(UTC)
     )
+    if woke:
+        sample["woke"] = True
+    return sample
+
+
+def _wake_if_sleeping(page: Any) -> bool:
+    """Click Streamlit Cloud's wake button when the sleep screen is showing; True when clicked."""
+
+    try:
+        if STREAMLIT_SLEEP_MARKER not in page.locator("body").inner_text(timeout=2_000):
+            return False
+        page.get_by_text(STREAMLIT_WAKE_TEXT, exact=True).first.click(timeout=10_000)
+    except Exception:
+        return False
+    return True
 
 
 def run(url: str, queries: Sequence[str]) -> list[dict[str, Any]]:

@@ -36,7 +36,8 @@ concurrency:
 jobs:
   browser-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # Up to 25 minutes waiting for Streamlit Cloud to serve the merged build, then the checks.
+    timeout-minutes: 45
     env:
       PRODUCTION_URL: https://bp-price-research.streamlit.app/
       # PRs run against the currently deployed main, so they must not require features that exist
@@ -56,6 +57,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install "playwright>=1.55,<2" "openpyxl>=3.1,<4" "Pillow>=10,<12"
           python -m playwright install --with-deps chromium
+
+      - name: Wait for the merged build on Production
+        if: github.event_name != 'pull_request'
+        env:
+          DEPLOY_WAIT_SECONDS: "1500"
+        run: python scripts/production_unified_search_smoke.py --wait-only
 
       - name: Run production browser smoke
         run: python scripts/production_browser_smoke.py

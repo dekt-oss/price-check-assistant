@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,13 @@ PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamli
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
 DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v25"
+# Streamlit Cloud has kept serving the previous build 10~25 minutes after a merge (2026-10-09, 10-13).
+# `--wait-only` runs first in the workflow and waits this long, so a slow deploy shows up as its own
+# "배포 지연" failure instead of a broken search step. Later in-run waits stay short.
+DEPLOY_WAIT_SECONDS = float(os.getenv("DEPLOY_WAIT_SECONDS", "1500"))
+IN_RUN_WAIT_SECONDS = 240.0
+STREAMLIT_SLEEP_MARKER = "This app has gone to sleep due to inactivity."
+STREAMLIT_WAKE_TEXT = "Yes, get this app back up!"
 # The news and management pages are served from their own files; Production has kept an old copy of
 # a page after a deploy before (2026-10-13), so the smoke opens both and checks their new headings.
 TRACK_H_PAGES = (
@@ -119,16 +127,30 @@ def _assert_no_error_text(body: str) -> None:
         raise RuntimeError(f"Production search rendered error text: {error_text}")
 
 
-def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
+def _wake_if_sleeping(page: Any) -> None:
+    """Click Streamlit Cloud's wake button if the idle-sleep screen is showing."""
+
+    try:
+        if STREAMLIT_SLEEP_MARKER in page.locator("body").inner_text(timeout=3_000):
+            page.get_by_text(STREAMLIT_WAKE_TEXT, exact=True).first.click(timeout=10_000)
+            page.wait_for_timeout(10_000)
+    except Exception:
+        return
+
+
+def _wait_for_deployed_app(
+    page: Any, report: dict[str, object], *, wait_seconds: float = IN_RUN_WAIT_SECONDS
+) -> None:
     attempts: list[dict[str, object]] = []
     report["deployment_attempts"] = attempts
-    deadline = time.monotonic() + 240
+    deadline = time.monotonic() + wait_seconds
 
     while time.monotonic() < deadline:
         attempt = len(attempts) + 1
         try:
             response = page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_timeout(3_000)
+            _wake_if_sleeping(page)
             app = _app(page)
             app.get_by_label("통합 검색", exact=True).wait_for(state="visible", timeout=15_000)
             app.get_by_role("button", name="검색", exact=True).wait_for(
@@ -163,6 +185,12 @@ def _wait_for_deployed_app(page: Any, report: dict[str, object]) -> None:
             )
         page.wait_for_timeout(6_000)
 
+    old_builds = sum(1 for item in attempts if item.get("status") == "old_deployment")
+    if old_builds:
+        raise RuntimeError(
+            f"배포 지연: Production이 {wait_seconds / 60:.0f}분 동안 옛 배포를 보여 주었다"
+            f"({old_builds}회 확인, {DEPLOYMENT_MARKER[1:]} 없음). Streamlit Cloud에서 Reboot app이 필요할 수 있다"
+        )
     raise RuntimeError(f"Production did not expose {DEPLOYMENT_MARKER[1:]} in time")
 
 
@@ -402,6 +430,30 @@ def _verify_quote_upload_uses_unified_workspace(browser: Any, report: dict[str, 
     finally:
         page.close()
 
+def wait_only() -> None:
+    """Wait for the new deployment marker only (first workflow step after a merge)."""
+
+    from playwright.sync_api import sync_playwright
+
+    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    report: dict[str, object] = {"production_url": PRODUCTION_URL, "status": "failure"}
+    started = time.monotonic()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page(viewport={"width": 1440, "height": 1200})
+                _wait_for_deployed_app(page, report, wait_seconds=DEPLOY_WAIT_SECONDS)
+                report["status"] = "pass"
+            finally:
+                browser.close()
+    finally:
+        report["elapsed_seconds"] = round(time.monotonic() - started, 2)
+        output = ARTIFACT_DIR / "deployment-wait-report.json"
+        output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
 def main() -> None:
     from playwright.sync_api import sync_playwright
 
@@ -436,4 +488,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if "--wait-only" in sys.argv[1:]:
+        wait_only()
+    else:
+        main()
