@@ -128,6 +128,7 @@ from purchase_price.ui import result_layout as result_layout_ui
 from purchase_price.ui import result_summary as result_summary_ui
 from purchase_price.ui import same_item_compare as same_item_ui
 from purchase_price.ui import search_overviews as overview_ui
+from purchase_price.ui import table_actions as table_actions_ui
 from purchase_price.ui import track_b_transactions as track_b_transactions_ui
 from purchase_price.ui import workspace_header as workspace_header_ui
 from purchase_price.ui.market_research import (
@@ -269,6 +270,9 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.category_market", "NUMERIC_TABLES_V1"),
     # UX v1.2 Q2: other models open in a new tab (model_links is a new module).
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_NEW_TAB_V1"),
+    # UX v1.2 Q3: trade windows reopen on the same row; supplier/year rows filter 거래 전체
+    # (table_actions is a new module).
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_REOPEN_V1"),
 )
 
 
@@ -2856,6 +2860,50 @@ def _open_trade_dialog(row: Mapping[str, object]) -> None:
     st.dialog(result_layout_ui.trade_dialog_title(row), width="large")(_render_delivery_record)(row)
 
 
+def _trade_pick_callback(base: str, rows: Sequence[Mapping[str, object]]) -> Any:
+    """A 거래 전체 pick waits for this run's end of the table, then opens once (Q3: same row again works)."""
+
+    def picked(index: int) -> None:
+        if 0 <= index < len(rows):
+            table_actions_ui.queue_dialog(base, rows[index])
+
+    return table_actions_ui.pick_callback(base, picked)
+
+
+def _filter_pick_callback(base: str, result_key: str, values: Sequence[str], field: str) -> Any:
+    """A supplier or year row narrows 거래 전체 of this result and switches to that tab."""
+
+    def picked(index: int) -> None:
+        if 0 <= index < len(values) and values[index]:
+            if field == "year":
+                table_actions_ui.set_filter(result_key, year=values[index])
+            else:
+                table_actions_ui.set_filter(result_key, supplier=values[index])
+            table_actions_ui.show_trade_tab(result_key)
+
+    return table_actions_ui.pick_callback(base, picked)
+
+
+def _render_supplier_table(supplier_table: list[dict[str, object]], *, quote_key: str) -> None:
+    """누가 파는가: a row shows only that supplier's trades in 거래 전체 above."""
+
+    base = f"workspace_supplier_table::{quote_key}"
+    st.dataframe(
+        supplier_table,
+        use_container_width=True,
+        hide_index=True,
+        key=table_actions_ui.table_key(base),
+        on_select=_filter_pick_callback(
+            base, quote_key, [str(row.get("납품업체") or "") for row in supplier_table], "supplier"
+        ),
+        selection_mode="single-row",
+        column_config=number_columns_ui.number_column_config(supplier_table),
+    )
+    chosen = table_actions_ui.get_filter(quote_key).supplier
+    if chosen:
+        st.caption(f"위 '거래 전체' 탭에 {chosen}의 거래만 보여주는 중입니다. 탭의 '전체 보기'로 되돌립니다.")
+
+
 def _render_entry_error_box(
     rows: Sequence[Mapping[str, object]],
     *,
@@ -2978,19 +3026,34 @@ def _render_price_sections(
         tab_labels = ["기간별", "단위·조건별", f"거래 전체 {strict_count}건{unit_suffix}"]
         if entry_error_rows:
             tab_labels[2] += f" (입력 오류 의심 {len(entry_error_rows)}건 제외)"
-        year_tab, unit_tab, all_tab = st.tabs(tab_labels)
+        # A supplier or year pick switches to 거래 전체; until then the tabs stay plain (no rerun
+        # per tab click).
+        tabs_key = f"workspace_price_tabs::{quote_key}::{period_label}"
+        table_actions_ui.remember_tab_target(quote_key, tabs_key, tab_labels[2])
+        year_tab, unit_tab, all_tab = table_actions_ui.result_tabs(
+            tab_labels, result_key=quote_key, tabs_key=tabs_key
+        )
         with year_tab:
             if price_result is not None:
                 _render_price_trend(price_result, quote=quote, unit=unit_split.main_unit, key=quote_key)
             if year_rows:
                 st.markdown("##### 연도별")
+                year_base = f"workspace_year_table::{quote_key}::{period_label}"
                 st.dataframe(
                     year_rows,
                     use_container_width=True,
                     hide_index=True,
+                    key=table_actions_ui.table_key(year_base),
+                    on_select=_filter_pick_callback(
+                        year_base, quote_key, [str(row.get("연도") or "") for row in year_rows], "year"
+                    ),
+                    selection_mode="single-row",
                     column_config=number_columns_ui.number_column_config(year_rows),
                 )
-            st.caption("가격은 위 결론과 같은 단위만 묶었습니다. 다른 단위 거래는 건수만 따로 셉니다.")
+            st.caption(
+                "가격은 위 결론과 같은 단위만 묶었습니다. 다른 단위 거래는 건수만 따로 셉니다. "
+                "연도 행을 고르면 '거래 전체' 탭이 그 연도 거래만 보여줍니다."
+            )
         with unit_tab:
             if all_groups:
                 shown_groups = all_groups[: result_summary_ui.SUMMARY_ROW_LIMIT]
@@ -3043,16 +3106,41 @@ def _render_price_sections(
                 + "행을 누르면 그 거래의 조달청 공개 원문"
                 "(사업명·계약 방법·납품 기한 등)이 큰 창으로 열리고, '열기'를 누르면 나라장터에서 찾습니다."
             )
-            # The period is part of the key: a narrower period must not keep an old row index.
-            record_table_key = f"workspace_direct_table::{quote_key}::{period_label}"
-            record_applied_key = f"workspace_direct_table_applied::{quote_key}::{period_label}"
+            # A supplier (누가 파는가) or year (연도별) pick narrows this table; '전체 보기' clears it.
+            trade_filter = table_actions_ui.get_filter(quote_key)
+            shown_rows = (
+                table_actions_ui.filter_rows(direct_rows, trade_filter) if trade_filter.active else list(direct_rows)
+            )
+            if trade_filter.active:
+                line_col, clear_col = st.columns([5, 1.1], vertical_alignment="center")
+                line_col.markdown(
+                    notice_html(
+                        result_layout_ui.esc(table_actions_ui.filter_line(trade_filter, len(shown_rows))),
+                        tone="info",
+                        icon="i",
+                    ),
+                    unsafe_allow_html=True,
+                )
+                if clear_col.button(
+                    table_actions_ui.CLEAR_LABEL,
+                    key=f"workspace_trade_filter_clear::{quote_key}",
+                    use_container_width=True,
+                ):
+                    table_actions_ui.clear_filter(quote_key)
+                    st.rerun()
+                if not shown_rows:
+                    st.info("이 기간에는 고른 조건의 거래가 없습니다. '전체 보기'로 되돌리거나 기간을 넓히세요.")
+            # The period is part of the key: a narrower period must not keep an old row index. The key
+            # also changes after every pick, so the same row can be picked again (Q3).
+            record_base = f"workspace_direct_table::{quote_key}::{period_label}"
+            record_table_key = table_actions_ui.table_key(record_base)
             # 거래 총액 → 수량 → 1단위 가격 순서라 세트 거래도 헷갈리지 않습니다.
-            trade_rows = result_summary_ui.trade_table_rows(direct_rows)
-            event = st.dataframe(
+            trade_rows = result_summary_ui.trade_table_rows(shown_rows)
+            st.dataframe(
                 trade_rows,
                 use_container_width=True,
                 hide_index=True,
-                on_select="rerun",
+                on_select=_trade_pick_callback(record_base, shown_rows),
                 selection_mode="single-row",
                 key=record_table_key,
                 column_config=number_columns_ui.number_column_config(
@@ -3060,12 +3148,9 @@ def _render_price_sections(
                     {"나라장터": st.column_config.LinkColumn("나라장터", display_text="열기")},
                 ),
             )
-            picked_rows = list(getattr(getattr(event, "selection", None), "rows", []) or [])
-            picked = picked_rows[0] if picked_rows else None
-            if picked != st.session_state.get(record_applied_key):
-                st.session_state[record_applied_key] = picked
-                if picked is not None and 0 <= picked < len(direct_rows):
-                    _open_trade_dialog(direct_rows[picked])
+            picked_record = table_actions_ui.take_dialog(record_base)
+            if picked_record is not None:
+                _open_trade_dialog(picked_record)
     elif market_shown:
         pass
     elif track_b.status == "unavailable":
@@ -3148,15 +3233,11 @@ def _render_supplier_and_models(
             procurement_suppliers = supplier_rows(track_b)
             if procurement_suppliers:
                 supplier_table = result_summary_ui.supplier_summary_rows(procurement_suppliers)
-                st.dataframe(
-                    supplier_table,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config=number_columns_ui.number_column_config(supplier_table),
-                )
+                _render_supplier_table(supplier_table, quote_key=quote_key)
                 hidden_suppliers = len(procurement_suppliers) - result_summary_ui.SUMMARY_ROW_LIMIT
                 st.caption(
-                    "같은 제품을 나라장터에 납품한 업체입니다. 납품 실적이 있다고 공식 총판이라는 뜻은 아닙니다."
+                    "같은 제품을 나라장터에 납품한 업체입니다. 납품 실적이 있다고 공식 총판이라는 뜻은 아닙니다. "
+                    "업체 행을 고르면 위 '거래 전체' 탭이 그 업체 거래만 보여줍니다."
                     + (f" 나머지 {hidden_suppliers}곳은 Excel에 있습니다." if hidden_suppliers > 0 else "")
                 )
             elif track_b_unavailable:
@@ -3189,15 +3270,11 @@ def _render_supplier_and_models(
         procurement_suppliers = supplier_rows(track_b)
         if procurement_suppliers:
             supplier_table = result_summary_ui.supplier_summary_rows(procurement_suppliers)
-            st.dataframe(
-                supplier_table,
-                use_container_width=True,
-                hide_index=True,
-                column_config=number_columns_ui.number_column_config(supplier_table),
-            )
+            _render_supplier_table(supplier_table, quote_key=quote_key)
             hidden_suppliers = len(procurement_suppliers) - result_summary_ui.SUMMARY_ROW_LIMIT
             st.caption(
-                "같은 제품을 나라장터에 납품한 업체입니다. 납품 실적이 있다고 공식 총판이라는 뜻은 아닙니다."
+                "같은 제품을 나라장터에 납품한 업체입니다. 납품 실적이 있다고 공식 총판이라는 뜻은 아닙니다. "
+                "업체 행을 고르면 위 '거래 전체' 탭이 그 업체 거래만 보여줍니다."
                 + (f" 나머지 {hidden_suppliers}곳은 Excel에 있습니다." if hidden_suppliers > 0 else "")
             )
         elif track_b_unavailable:
@@ -4673,6 +4750,7 @@ if handoff is not None:
                 search_state["quote_item_index"] = _match_quote_item(review_state.items, handoff)
                 search_state["quote_item_count"] = len(review_state.items)
             st.session_state[HOME_SEARCH_STATE_KEY] = search_state
+            table_actions_ui.clear_all_filters()
             status.update(label="견적 품목 조사 완료", state="complete")
         st.rerun()
     except ValueError as exc:
@@ -4696,6 +4774,7 @@ if not isinstance(search_state, dict) and shared_query and handoff is None:
                 prefer_traded_company=str(st.query_params.get("exact") or "") != "1",
             )
             st.session_state[HOME_SEARCH_STATE_KEY] = search_state
+            table_actions_ui.clear_all_filters()
             _remember_search(shared_query)
             status.update(label="검색 결과를 불러왔습니다", state="complete")
             st.rerun()
@@ -4857,6 +4936,8 @@ if submitted:
             )
             st.session_state[HOME_SEARCH_STATE_KEY] = search_state
             st.session_state[HOME_SEARCH_DETAILS_KEY] = False
+            # A new search starts with 거래 전체 unfiltered (Q3).
+            table_actions_ui.clear_all_filters()
             _remember_search(search_text)
             # ?period= stays: a new search keeps the trade period the reader picked.
             st.query_params["q"] = search_text.strip()

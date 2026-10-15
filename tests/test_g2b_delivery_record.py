@@ -109,7 +109,7 @@ def test_dashboard_wires_the_record_panel_and_reloads_new_helpers() -> None:
     # Outliers come from the comparison-unit trades only, and only with 3+ of them.
     assert "result_summary_ui.comparable_outlier_rows(comparison_rows, median_price)" in source
     assert "_render_delivery_record(" in source
-    assert 'key=record_table_key' in source and 'on_select="rerun"' in source
+    assert 'key=record_table_key' in source and "on_select=_trade_pick_callback(record_base, shown_rows)" in source
     assert '(track_b_transactions_ui, "AMOUNT_CHECK_WORDS")' in source
     assert "G2B_SHOPPING_DATASET_URL" not in source
     assert 'link_col.link_button("나라장터에서 이 거래 보기", ref.g2b_url' in source

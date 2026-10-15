@@ -34,6 +34,7 @@ from purchase_price.services.category_market import (
     top_models,
 )
 from purchase_price.services.g2b_delivery_record import g2b_url_for_source_record
+from purchase_price.ui import table_actions
 from purchase_price.ui.model_links import LINK_COLUMN, LINK_TEXT
 from purchase_price.ui.number_columns import NUMBER_FORMAT, number, number_column_config
 from purchase_price.ui.theme import (
@@ -42,6 +43,7 @@ from purchase_price.ui.theme import (
     TONE_OK,
     esc,
     metric_card_html,
+    notice_html,
 )
 
 CATEGORY_MARKET_V1 = True
@@ -62,6 +64,9 @@ NUMERIC_TABLES_V1 = True
 # Runtime marker (UX v1.2 Q2): other models open in a new tab (top lists are links, the full model
 # table is shown directly with a 가격 조사 link column and no row selection).
 CATEGORY_MARKET_NEW_TAB_V1 = True
+# Runtime marker (UX v1.2 Q3): a 도입 기관 row reopens its trade window on every pick, and a
+# 납품업체 row shows only that supplier's trades in 도입 기관.
+CATEGORY_MARKET_REOPEN_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -701,7 +706,12 @@ def render_category_market(
             summary_html(market, searched_model=searched_model, has_direct=has_direct, show_headline=show_headline),
             unsafe_allow_html=True,
         )
-        models_tab, buyers_tab, suppliers_tab = st.tabs(list(tab_labels(market)))
+        labels = list(tab_labels(market))
+        tabs_key = f"cm_tabs::{key}"
+        table_actions.remember_tab_target(filter_result_key(key), tabs_key, labels[1])
+        models_tab, buyers_tab, suppliers_tab = table_actions.result_tabs(
+            labels, result_key=filter_result_key(key), tabs_key=tabs_key
+        )
         with models_tab:
             _render_models(
                 market, key=key, model_url=model_url, count_note=model_count_note, searched_model=searched_model
@@ -762,6 +772,17 @@ def models_table_caption(market: CategoryMarket, count_note: str = "") -> str:
     )
 
 
+def filter_result_key(key: str) -> str:
+    """Session key of this block's supplier filter (cleared by a new search like 거래 전체's)."""
+
+    return f"cm::{key}"
+
+
+def filter_by_supplier(rows: Sequence[ClassifiedTrade], supplier: str) -> list[ClassifiedTrade]:
+    wanted = " ".join(supplier.split())
+    return [row for row in rows if not wanted or " ".join(str(row.trade.supplier or "").split()) == wanted]
+
+
 def _render_buyers(
     market: CategoryMarket,
     *,
@@ -776,30 +797,48 @@ def _render_buyers(
             value=False,
             key=f"cm_buyers_all::{key}",
         )
-    rows, picked_rows = buyer_rows(market.trades, include_excluded=include)
+    result_key = filter_result_key(key)
+    supplier = table_actions.get_filter(result_key).supplier
+    trades = filter_by_supplier(market.trades, supplier) if supplier else list(market.trades)
+    rows, picked_rows = buyer_rows(trades, include_excluded=include)
+    if supplier:
+        line_col, clear_col = st.columns([5, 1.1], vertical_alignment="center")
+        line_col.markdown(
+            notice_html(
+                esc(table_actions.filter_line(table_actions.TradeFilter(supplier=supplier), len(rows))),
+                tone=TONE_INFO,
+                icon="i",
+            ),
+            unsafe_allow_html=True,
+        )
+        if clear_col.button(table_actions.CLEAR_LABEL, key=f"cm_buyers_clear::{key}", use_container_width=True):
+            table_actions.clear_filter(result_key)
+            st.rerun()
     if not rows:
         st.info("같은 품목의 나라장터 장비 구매가 없습니다.")
         return
-    table_key = f"cm_buyers::{key}::{int(include)}"
-    applied_key = f"{table_key}::applied"
-    event = st.dataframe(
+    # The key changes after every pick, so the same row opens its window again (Q3).
+    base = f"cm_buyers::{key}::{int(include)}"
+
+    def picked(index: int) -> None:
+        if 0 <= index < len(picked_rows):
+            table_actions.queue_dialog(base, trade_dialog_row(picked_rows[index].trade))
+
+    st.dataframe(
         rows,
         use_container_width=True,
         hide_index=True,
-        on_select="rerun",
+        on_select=table_actions.pick_callback(base, picked),
         selection_mode="single-row",
-        key=table_key,
+        key=table_actions.table_key(base),
         height=_table_height(len(rows), 430),
         column_config=number_column_config(
             rows, {"나라장터": st.column_config.LinkColumn("나라장터", display_text="열기")}
         ),
     )
-    picked = list(getattr(getattr(event, "selection", None), "rows", []) or [])
-    chosen = picked[0] if picked else None
-    if chosen != st.session_state.get(applied_key):
-        st.session_state[applied_key] = chosen
-        if chosen is not None and 0 <= chosen < len(picked_rows):
-            on_open_trade(trade_dialog_row(picked_rows[chosen].trade))
+    pending = table_actions.take_dialog(base)
+    if pending is not None:
+        on_open_trade(pending)
     shown_limit = len(rows) >= BUYER_ROW_LIMIT
     st.caption(
         "누가 언제 샀는지 최근 순으로 보여줍니다. 모델이 적히지 않은 거래(수요기관규격)는 '모델 미기재'로 두고, "
@@ -817,16 +856,30 @@ def _render_suppliers(
     st.markdown("##### 나라장터에 납품한 업체")
     suppliers = supplier_rows(market)
     if suppliers:
+        result_key = filter_result_key(key)
+        base = f"cm_suppliers::{key}"
+        names = [str(row["납품업체"] or "") for row in suppliers]
+
+        def picked(index: int) -> None:
+            if 0 <= index < len(names) and names[index]:
+                table_actions.set_filter(result_key, supplier=names[index])
+                table_actions.show_trade_tab(result_key)
+
         st.dataframe(
             suppliers,
             use_container_width=True,
             hide_index=True,
+            on_select=table_actions.pick_callback(base, picked),
+            selection_mode="single-row",
+            key=table_actions.table_key(base),
             height=_table_height(len(suppliers), 360),
             column_config=number_column_config(suppliers),
         )
+        chosen = table_actions.get_filter(result_key).supplier
         st.caption(
             "같은 품목 장비를 나라장터로 납품한 업체입니다(부품·수리·동물용 거래 제외). 납품 실적이 있다고 공식 총판이라는 "
-            "뜻은 아닙니다."
+            f"뜻은 아닙니다. 업체 행을 고르면 '{BUYERS_TAB}' 탭이 그 업체의 납품 거래만 보여줍니다."
+            + (f" 지금 {chosen}의 거래만 보여주는 중입니다." if chosen else "")
         )
     else:
         st.caption("같은 품목 장비를 납품한 업체가 없습니다.")
