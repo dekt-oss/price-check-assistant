@@ -4,7 +4,7 @@ from pathlib import Path
 def test_production_unified_search_smoke_uses_user_visible_result_contract() -> None:
     script = Path("scripts/production_unified_search_smoke.py").read_text(encoding="utf-8")
 
-    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v25"' in script
+    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v26"' in script
     assert 'fill("DFM100")' in script
     assert 'WORKSPACE_DIRECT_PATTERN = re.compile(r"같은 제품 거래\s*(\d+)건")' in script
     assert 'REFERENCE_PATTERN = re.compile(r"비슷한 품목 거래\s*(\d+)건")' in script
@@ -14,7 +14,7 @@ def test_production_unified_search_smoke_uses_user_visible_result_contract() -> 
     # One scrolling result: sections are checked in place and a quote-price rerun must keep it.
     assert 'RESULT_SECTIONS = ("얼마에 거래됐나", "누가 파는가")' in script
     assert "get_by_text(\"업체·조달\"" not in script
-    assert 'get_by_label("내 견적가 (원)", exact=True)' in script
+    assert 'get_by_label("내 견적 단가", exact=True)' in script
     assert '"내 견적가 12,000,000원은" in body' in script
     assert 'report["supplier_section_rendered"] = True' in script
     assert 'report["comparison_section_rendered"] = "같은 품목의 다른 모델" in body' in script

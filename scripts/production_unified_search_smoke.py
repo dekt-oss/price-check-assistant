@@ -13,7 +13,7 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v25"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v26"
 # Streamlit Cloud has kept serving the previous build 10~25 minutes after a merge (2026-10-09, 10-13).
 # `--wait-only` runs first in the workflow and waits this long, so a slow deploy shows up as its own
 # "배포 지연" failure instead of a broken search step. Later in-run waits stay short.
@@ -265,7 +265,7 @@ def _verify_workspace_sections_persist_result(page: Any, report: dict[str, objec
     # Only shown when MFDS lists the same item; absence is not a failure.
     report["comparison_section_rendered"] = "같은 품목의 다른 모델" in body
 
-    quote_input = app.get_by_label("내 견적가 (원)", exact=True)
+    quote_input = app.get_by_label("내 견적 단가", exact=True)
     quote_input.wait_for(state="visible", timeout=20_000)
     quote_input.fill("12000000")
     quote_input.press("Enter")

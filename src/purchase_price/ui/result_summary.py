@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
+from purchase_price.ui.number_columns import number
 from purchase_price.ui.quote_input import difference_phrase
 
 TONE_OK = "ok"
@@ -45,6 +46,10 @@ ENTRY_ERRORS_V1 = True
 # Runtime marker (2026-10-10 search fixes): quote differences as '1,234.5%' or 'N배 넘게', and
 # split_by_main_unit(preferred=...) keeps the all-period unit across periods.
 SEARCH_FIXES_V1 = True
+# Runtime marker (UX v1.2 Q1): price and count cells are numbers (None when missing), the unit
+# sits in the header ("거래 총액(원)"), "a ~ b" ranges are two columns and status words have
+# their own text column, so a header click sorts by value.
+NUMERIC_TABLES_V1 = True
 # Overview and same-item tables count the collected index only (no live days, all periods).
 COLLECTED_TRADES_LABEL = "같은 제품 거래(수집분)"
 
@@ -398,6 +403,20 @@ def display_rows(rows: Iterable[Mapping[str, object]]) -> list[dict[str, object]
     return output
 
 
+REFERENCE_NUMBER_COLUMNS = ("대당 단가", "총액", "수량")
+
+
+def reference_table_rows(rows: Iterable[Mapping[str, object]]) -> list[dict[str, object]]:
+    """비슷한 품목 거래: display_rows with the price, total and quantity as numbers."""
+
+    output = display_rows(rows)
+    for row in output:
+        for name in REFERENCE_NUMBER_COLUMNS:
+            if name in row:
+                row[name] = number(row[name])
+    return output
+
+
 def plain_status(text: str) -> str:
     return _STATUS_WORDS.get(text, text)
 
@@ -442,8 +461,8 @@ def supplier_summary_rows(
             "납품업체": row.get("공급업체") or "",
             "거래 건수": row.get("직접거래건수") or 0,
             "납품 기관 수": row.get("수요기관수") or 0,
-            "최저": _won(_decimal(row.get("최저단가"))) if row.get("최저단가") is not None else "",
-            "최고": _won(_decimal(row.get("최고단가"))) if row.get("최고단가") is not None else "",
+            "최저(원)": number(row.get("최저단가")),
+            "최고(원)": number(row.get("최고단가")),
             "최근 거래": row.get("최근거래일") or "",
         }
         for row in selected
@@ -476,9 +495,11 @@ def same_item_summary_rows(
         {
             "모델": row.get("모델") or "",
             "제조·수입업체": row.get("_company") or "",
-            COLLECTED_TRADES_LABEL: row.get("나라장터 거래") or "",
-            "가격범위": row.get("가격범위") or "",
+            COLLECTED_TRADES_LABEL: row.get("나라장터 거래"),
+            "최저(원)": row.get("최저(원)"),
+            "최고(원)": row.get("최고(원)"),
             "최근 거래": row.get("최근거래") or "",
+            "거래 자료 상태": row.get("나라장터 상태") or "",
         }
         for row in sorted(filled, key=order)[:limit]
     ]
@@ -815,15 +836,15 @@ def trade_table_rows(rows: Sequence[Mapping[str, object]]) -> list[dict[str, obj
     for row in rows:
         unit = " ".join(str(row.get("단위") or "").split())
         unit = "" if unit == "미확인" else unit
-        quantity = _quantity(row.get("수량"))
-        price = _decimal(row.get("가격"))
         output.append(
             {
                 "거래일": row.get("거래일") or "",
                 "모델": row.get("모델") or "",
-                "거래 총액": row.get("총액") if row.get("총액") not in (None, "미확인") else "확인 안 됨",
-                "수량": f"{_number(quantity)} {unit}".strip() if quantity is not None else "확인 안 됨",
-                "1단위 가격": f"{_won(price)} / {unit}" if unit else _won(price),
+                # Numbers (None = not in the record), so a header click sorts by value.
+                "거래 총액(원)": number(row.get("총액")),
+                "수량": number(_quantity(row.get("수량"))),
+                "단위": unit or "확인 안 됨",
+                "1단위 가격(원)": number(row.get("가격")),
                 # Next to the price, so the link is visible without scrolling the wide table.
                 "나라장터": _g2b_url(row.get("원천기록")),
                 # What the institution bought it for: explains a set, a package or an odd price.
@@ -872,6 +893,9 @@ def unit_group_rows(
         totals = [_decimal(m.get("총액")) for m in members]
         mid = prices[len(prices) // 2] if len(prices) % 2 else (prices[len(prices) // 2 - 1] + prices[len(prices) // 2]) / 2
         label = per_unit_label(unit or None).strip() or "1단위당"
+        quantity_known = all(q is not None for q in quantities)
+        total_known = all(t is not None for t in totals)
+        missing = [text for known, text in ((quantity_known, "총수량"), (total_known, "거래 총액")) if not known]
         row: dict[str, object] = {}
         if multiple_models:
             row["모델"] = model
@@ -880,19 +904,14 @@ def unit_group_rows(
                 "단위": unit or "확인 안 됨",
                 "거래조건": condition,
                 "건수": len(members),
-                "총수량": (
-                    f"{_number(sum(q for q in quantities if q is not None))} {unit}".strip()
-                    if all(q is not None for q in quantities)
-                    else "일부 확인 안 됨"
-                ),
-                "거래 총액 합계": (
-                    _won(sum(t for t in totals if t is not None))
-                    if all(t is not None for t in totals)
-                    else "일부 확인 안 됨"
-                ),
-                f"{label} 중앙값" if unit else "1단위 중앙값": _won(mid),
-                "1단위 최저~최고": _won(prices[0]) if prices[0] == prices[-1] else f"{prices[0]:,.0f} ~ {prices[-1]:,.0f}원",
+                "총수량": number(sum(q for q in quantities if q is not None)) if quantity_known else None,
+                "거래 총액 합계(원)": number(sum(t for t in totals if t is not None)) if total_known else None,
+                f"{label} 중앙값(원)" if unit else "1단위 중앙값(원)": number(mid),
+                "1단위 최저(원)": number(prices[0]),
+                "1단위 최고(원)": number(prices[-1]),
                 "최근 거래": max((str(m.get("거래일") or "") for m in members), default=""),
+                # A partly unknown sum stays empty (never a partial sum); this column says why.
+                "상태": f"{'·'.join(missing)} 일부 확인 안 됨" if missing else "",
             }
         )
         summaries.append((len(members), row))
@@ -901,7 +920,7 @@ def unit_group_rows(
     if len({tuple(r.keys()) for r in ordered}) > 1:
         normalized = []
         for r in ordered:
-            normalized.append({("1단위 중앙값" if k.endswith("중앙값") else k): v for k, v in r.items()})
+            normalized.append({("1단위 중앙값(원)" if k.endswith("중앙값(원)") else k): v for k, v in r.items()})
         ordered = normalized
     return ordered[:limit]
 
@@ -1076,6 +1095,7 @@ def year_summary_rows(
         y for y in years if not y.isdigit()
     ]
     label = per_unit_label(main_unit).strip() or "1단위"
+    quantity_header = f"총수량({main_unit})" if main_unit else "총수량"
     for year in ordered:
         year_rows = years[year]
         prices = sorted(
@@ -1096,12 +1116,11 @@ def year_summary_rows(
             {
                 "연도": year,
                 "거래 건수": len(year_rows),
-                "총수량": f"{_number(quantity)} {main_unit or ''}".strip() if quantity else "확인 안 됨",
-                f"{label} 중앙값": _won(_median(prices)) if prices else "—",
-                f"{label} 최저~최고": (
-                    f"{_won(prices[0])} ~ {_won(prices[-1])}" if prices else "—"
-                ),
-                "다른 단위 거래": f"{other}건" if other else "",
+                quantity_header: number(quantity) if quantity else None,
+                f"{label} 중앙값(원)": number(_median(prices)),
+                f"{label} 최저(원)": number(prices[0]) if prices else None,
+                f"{label} 최고(원)": number(prices[-1]) if prices else None,
+                "다른 단위 거래(건)": other or None,
             }
         )
     return output

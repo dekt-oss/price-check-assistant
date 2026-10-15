@@ -33,6 +33,7 @@ from purchase_price.services.category_market import (
     top_models,
 )
 from purchase_price.services.g2b_delivery_record import g2b_url_for_source_record
+from purchase_price.ui.number_columns import NUMBER_FORMAT, number, number_column_config
 from purchase_price.ui.theme import (
     TONE_INFO,
     TONE_MUTED,
@@ -53,6 +54,9 @@ CATEGORY_MARKET_RECENT_GROUPED_V1 = True
 CATEGORY_MARKET_NARROW_V1 = True
 # Runtime marker (P3b): two short rankings (거래 건수 / 납품 기관) above a collapsed full model list.
 CATEGORY_MARKET_TOP_MODELS_V1 = True
+# Runtime marker (UX v1.2 Q1): the model, buyer, supplier and company tables hold numbers
+# (None when missing) with the unit in the header, so a header click sorts by value.
+NUMERIC_TABLES_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -498,11 +502,11 @@ def model_rows(models: Sequence[CategoryModel]) -> list[dict[str, object]]:
     rows = []
     for model in models:
         if model.trade_count is None:
-            trades = "조회 불가"
+            trade_status = "조회 불가"
         elif model.trade_count:
-            trades = f"{model.trade_count:,}건"
+            trade_status = ""
         else:
-            trades = "나라장터 거래 없음"
+            trade_status = "나라장터 거래 없음"
         notes = []
         if model.veterinary_count:
             notes.append(f"동물용 구매 {model.veterinary_count}건 포함")
@@ -512,9 +516,12 @@ def model_rows(models: Sequence[CategoryModel]) -> list[dict[str, object]]:
             {
                 "모델": f"▶ {model.model}" if model.current else model.model,
                 "제조·수입업체": model.company or "확인 안 됨",
-                "같은 제품 거래": trades,
-                "가운데 값": won(model.median) if model.median is not None else "",
-                "거래 범위": f"{won(model.low)} ~ {won(model.high)}" if model.low is not None else "",
+                # A number (None = 조회 불가); the status words have their own column.
+                "같은 제품 거래": model.trade_count,
+                "거래 자료 상태": trade_status,
+                "가운데 값(원)": number(model.median),
+                "최저(원)": number(model.low),
+                "최고(원)": number(model.high) if model.low is not None else None,
                 "최근 거래": model.latest,
                 "참고": " · ".join(notes),
                 "허가번호": model.permit_number,
@@ -523,13 +530,6 @@ def model_rows(models: Sequence[CategoryModel]) -> list[dict[str, object]]:
             }
         )
     return rows
-
-
-def _quantity(trade: CategoryTrade) -> str:
-    if trade.quantity is None:
-        return trade.unit or ""
-    number = format(trade.quantity.normalize(), "f")
-    return f"{number} {trade.unit}".strip()
 
 
 _KIND_NOTES = {
@@ -559,8 +559,9 @@ def buyer_rows(
                 "날짜": trade.transaction_date,
                 "구매 기관": trade.institution,
                 "모델": trade.model_label,
-                "수량": _quantity(trade),
-                "1단위 가격": won(trade.unit_price),
+                "수량": number(trade.quantity),
+                "단위": trade.unit or "",
+                "1단위 가격(원)": number(trade.unit_price),
                 "납품업체": trade.supplier,
                 "사업명": trade.business_name,
                 "구분": note,
@@ -577,9 +578,9 @@ def supplier_rows(market: CategoryMarket) -> list[dict[str, object]]:
     return [
         {
             "납품업체": item.name,
-            "납품 건수": f"{item.count}건",
+            "납품 건수": item.count,
             "최근 납품": item.latest,
-            "구매 기관": f"{item.institutions}곳",
+            "구매 기관 수": item.institutions,
             "납품한 모델": " / ".join(item.models[:4]) + (f" 외 {len(item.models) - 4}개" if len(item.models) > 4 else ""),
         }
         for item in market.suppliers
@@ -590,8 +591,8 @@ def company_rows(market: CategoryMarket) -> list[dict[str, object]]:
     return [
         {
             "제조·수입업체 (식약처)": item.name,
-            "등록 모델": f"{item.model_count}개",
-            "나라장터 거래가 있는 모델": f"{item.traded_model_count}개",
+            "등록 모델 수": item.model_count,
+            "나라장터 거래가 있는 모델 수": item.traded_model_count,
             "대표 모델": " / ".join(item.models),
             "최근 허가일": item.latest_permit,
         }
@@ -689,12 +690,15 @@ def _render_models(
             selection_mode="single-row",
             key=f"cm_models::{key}",
             height=_table_height(len(rows), 430),
-            column_config={
-                "모델": st.column_config.TextColumn("모델", width="medium"),
-                "가운데 값": st.column_config.TextColumn("가운데 값", width=110),
-                "거래 범위": st.column_config.TextColumn("거래 범위", width=200),
-                "참고": st.column_config.TextColumn("참고", width=150),
-            },
+            column_config=number_column_config(
+                rows,
+                {
+                    "모델": st.column_config.TextColumn("모델", width="medium"),
+                    "같은 제품 거래": st.column_config.NumberColumn("같은 제품 거래", format=NUMBER_FORMAT),
+                    "가운데 값(원)": st.column_config.NumberColumn("가운데 값(원)", format=NUMBER_FORMAT, width=110),
+                    "참고": st.column_config.TextColumn("참고", width=150),
+                },
+            ),
         )
         picked = list(getattr(getattr(event, "selection", None), "rows", []) or [])
         if picked and 0 <= picked[0] < len(market.models):
@@ -738,7 +742,9 @@ def _render_buyers(
         selection_mode="single-row",
         key=table_key,
         height=_table_height(len(rows), 430),
-        column_config={"나라장터": st.column_config.LinkColumn("나라장터", display_text="열기")},
+        column_config=number_column_config(
+            rows, {"나라장터": st.column_config.LinkColumn("나라장터", display_text="열기")}
+        ),
     )
     picked = list(getattr(getattr(event, "selection", None), "rows", []) or [])
     chosen = picked[0] if picked else None
@@ -763,7 +769,13 @@ def _render_suppliers(
     st.markdown("##### 나라장터에 납품한 업체")
     suppliers = supplier_rows(market)
     if suppliers:
-        st.dataframe(suppliers, use_container_width=True, hide_index=True, height=_table_height(len(suppliers), 360))
+        st.dataframe(
+            suppliers,
+            use_container_width=True,
+            hide_index=True,
+            height=_table_height(len(suppliers), 360),
+            column_config=number_column_config(suppliers),
+        )
         st.caption(
             "같은 품목 장비를 나라장터로 납품한 업체입니다(부품·수리·동물용 거래 제외). 납품 실적이 있다고 공식 총판이라는 "
             "뜻은 아닙니다."
@@ -775,7 +787,13 @@ def _render_suppliers(
     if not companies:
         st.caption("식약처에 같은 품목으로 등록한 업체를 찾지 못했습니다.")
         return
-    st.dataframe(companies, use_container_width=True, hide_index=True, height=_table_height(len(companies), 360))
+    st.dataframe(
+        companies,
+        use_container_width=True,
+        hide_index=True,
+        height=_table_height(len(companies), 360),
+        column_config=number_column_config(companies),
+    )
     st.caption(
         "제품을 들여오거나 만드는 회사로, 위 납품업체와는 다른 관계입니다. 이름이 비슷해도 같은 회사로 보지 않습니다. "
         "공개 자료에는 전화번호가 없어 보여주지 않습니다. 주소는 아래에서 식약처 업허가로 확인할 수 있습니다."

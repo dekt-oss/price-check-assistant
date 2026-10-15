@@ -221,10 +221,11 @@ def test_conclusion_names_the_unit():
 def test_trade_rows_show_total_quantity_then_unit_price():
     rows = [{"거래일": "2026-09-28", "모델": "M40", "가격": "36,513,000원", "총액": "73,026,000원", "수량": "2", "단위": "set", "거래조건": "총액계약", "판매처": "세명", "구매처": "비에스", "규격": "미확인"}]
     table = rs.trade_table_rows(rows)
-    assert list(table[0])[:5] == ["거래일", "모델", "거래 총액", "수량", "1단위 가격"]
-    assert table[0]["거래 총액"] == "73,026,000원"
-    assert table[0]["수량"] == "2 set"
-    assert table[0]["1단위 가격"] == "36,513,000원 / set"
+    assert list(table[0])[:6] == ["거래일", "모델", "거래 총액(원)", "수량", "단위", "1단위 가격(원)"]
+    assert table[0]["거래 총액(원)"] == 73026000
+    assert table[0]["수량"] == 2
+    assert table[0]["단위"] == "set"
+    assert table[0]["1단위 가격(원)"] == 36513000
     assert rs.trade_amount_line(rows[0]) == "73,026,000원 ÷ 2 set = 1 set당 36,513,000원"
 
 
@@ -236,10 +237,11 @@ def test_unit_groups_never_mix_units():
     ]
     groups = rs.unit_group_rows(rows)
     assert [g["단위"] for g in groups] == ["대", "set"]
-    assert groups[0]["총수량"] == "3 대"
-    assert groups[0]["거래 총액 합계"] == "13,200,000원"
-    assert groups[0]["1단위 중앙값"] == "4,400,000원"
-    assert groups[1]["1단위 최저~최고"] == "36,513,000원"
+    assert groups[0]["총수량"] == 3
+    assert groups[0]["거래 총액 합계(원)"] == 13200000
+    assert groups[0]["1단위 중앙값(원)"] == 4400000
+    assert groups[1]["1단위 최저(원)"] == groups[1]["1단위 최고(원)"] == 36513000
+    assert groups[0]["상태"] == ""
 
 
 def test_unit_groups_merge_case_variants_of_one_unit():
@@ -250,4 +252,4 @@ def test_unit_groups_merge_case_variants_of_one_unit():
     groups = rs.unit_group_rows(rows)
     assert len(groups) == 1
     assert groups[0]["단위"] == "SET"
-    assert groups[0]["총수량"] == "10 SET"
+    assert groups[0]["총수량"] == 10

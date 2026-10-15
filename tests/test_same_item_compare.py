@@ -73,14 +73,15 @@ def test_unloaded_status_is_unknown_never_active_and_current_model_always_kept()
     assert [row["모델"] for row in view.rows] == ["▶ A1"]
     assert view.rows[0]["식약처 상태"] == same.STATUS_UNKNOWN
     assert view.status_loaded is False
-    assert view.rows[0]["나라장터 거래"] == "0건"
+    assert view.rows[0]["나라장터 거래"] == 0
 
 
 def test_unavailable_price_is_not_zero() -> None:
     link = _link("A1", "제허 1", "A사", 0, current=True)
     link["나라장터 직접거래"] = None
     view = same.build_same_item_rows([link], None)
-    assert view.rows[0]["나라장터 거래"] == "조회 불가"
+    assert view.rows[0]["나라장터 거래"] is None
+    assert view.rows[0]["나라장터 상태"] == "조회 불가"
 
 
 def test_dashboard_tabs_use_plain_headings() -> None:
