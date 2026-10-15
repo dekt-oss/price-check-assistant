@@ -215,9 +215,9 @@ DASHBOARD_TABLES = (
     "price_trend_ui.trend_rows(trend, unit=unit)",
     "result_summary_ui.year_summary_rows(direct_rows",
     "shown_groups = all_groups[",
-    "result_summary_ui.trade_table_rows(direct_rows)",
+    "result_summary_ui.trade_table_rows(shown_rows)",
     "result_summary_ui.reference_table_rows(reference_rows)",
-    "supplier_table = result_summary_ui.supplier_summary_rows(procurement_suppliers)",
+    "def _render_supplier_table(",  # both 누가 파는가 tables render through it (Q3)
     "result_summary_ui.same_item_summary_rows(summary_view.rows)",
     "result_summary_ui.display_rows(full_view.rows)",
     "result_summary_ui.display_rows(view.rows)",

@@ -4,7 +4,7 @@ from pathlib import Path
 def test_production_unified_search_smoke_uses_user_visible_result_contract() -> None:
     script = Path("scripts/production_unified_search_smoke.py").read_text(encoding="utf-8")
 
-    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v26"' in script
+    assert 'DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v27"' in script
     assert 'fill("DFM100")' in script
     assert 'WORKSPACE_DIRECT_PATTERN = re.compile(r"같은 제품 거래\s*(\d+)건")' in script
     assert 'REFERENCE_PATTERN = re.compile(r"비슷한 품목 거래\s*(\d+)건")' in script
@@ -25,7 +25,13 @@ def test_production_unified_search_smoke_uses_user_visible_result_contract() -> 
     assert "Initial DFM100 A/B workspace exceeded 25 second latency gate" in script
     assert "AttributeError" in script
     assert "This app has encountered an error" in script
-    assert 'data-testid="stDataFrame"' not in script
+    # UX v1.2 Q4: the result checks read the grid's accessibility table, after the DFM100 flow.
+    assert "_verify_result_interactions(page, report)" in script
+    assert script.rindex("_submit_dfm100(page, report)") < script.rindex("_verify_result_interactions(page, report)")
+    for key in ("model_link_check", "numeric_sort_check", "trade_dialog_reopen_check"):
+        assert f'report["{key}"] = {{' in script and f'report["{key}"] = {{"status": "skipped"' in script
+    assert '"/~/+/" in href' in script and '"?q=" not in href' in script
+    assert "raise RuntimeError(f\"Trade window did not open on pick" in script
 
 
 def test_browser_workflow_runs_dedicated_unified_search_smoke_after_merge() -> None:

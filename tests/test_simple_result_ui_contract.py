@@ -100,7 +100,7 @@ def test_full_tables_are_one_expander_away() -> None:
     # The full list is the third tab of 얼마에 거래됐나 (design step 3, 2026-10-09).
     assert '["기간별", "단위·조건별", f"거래 전체 {strict_count}건{unit_suffix}"]' in source
     assert "result_summary_ui.unit_group_rows(direct_rows" in source
-    assert "result_summary_ui.trade_table_rows(direct_rows)" in source
+    assert "result_summary_ui.trade_table_rows(shown_rows)" in source  # direct_rows narrowed by a Q3 filter
     assert "supplier_summary_rows(" in source
     assert "same_item_summary_rows(" in source
 
