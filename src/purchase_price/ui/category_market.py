@@ -29,10 +29,12 @@ from purchase_price.services.category_market import (
     CategoryTrade,
     ClassifiedTrade,
     TopModel,
+    searched_model_key,
     searched_model_stats,
     top_models,
 )
 from purchase_price.services.g2b_delivery_record import g2b_url_for_source_record
+from purchase_price.ui.model_links import LINK_COLUMN, LINK_TEXT
 from purchase_price.ui.number_columns import NUMBER_FORMAT, number, number_column_config
 from purchase_price.ui.theme import (
     TONE_INFO,
@@ -57,6 +59,9 @@ CATEGORY_MARKET_TOP_MODELS_V1 = True
 # Runtime marker (UX v1.2 Q1): the model, buyer, supplier and company tables hold numbers
 # (None when missing) with the unit in the header, so a header click sorts by value.
 NUMERIC_TABLES_V1 = True
+# Runtime marker (UX v1.2 Q2): other models open in a new tab (top lists are links, the full model
+# table is shown directly with a 가격 조사 link column and no row selection).
+CATEGORY_MARKET_NEW_TAB_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -116,6 +121,8 @@ CSS = """
 .cm-top-name {font-size:13px; font-weight:700; color:#25466B; line-height:1.45; overflow-wrap:anywhere;}
 .cm-top-sub {font-size:12px; color:#5B6C82; line-height:1.5; overflow-wrap:anywhere;}
 .cm-top-me {background:#EEF6F5;}
+.cm-top-link {color:inherit; text-decoration:underline; text-underline-offset:2px;}
+.cm-top-link:hover {color:var(--pc-teal);}
 .cm-top-me .cm-top-name {color:var(--pc-teal);}
 .cm-top-self {font-size:12.5px; color:#25466B; line-height:1.55; margin:8px 0 0 0; padding:8px 10px; border-radius:8px;
   background:#EEF6F5; overflow-wrap:anywhere;}
@@ -424,6 +431,7 @@ def summary_html(
 
 TOP_MODELS_DOM_ID = "category-top-models-v1"
 TOP_MODELS_NOTE = "많이 거래된 순서일 뿐 품질이나 권장 순위가 아닙니다."
+TOP_MODELS_LINK_NOTE = "모델 이름을 누르면 그 모델의 가격 조사가 새 탭에서 열립니다."
 
 
 def top_model_line(model: TopModel) -> str:
@@ -433,14 +441,38 @@ def top_model_line(model: TopModel) -> str:
     return text
 
 
-def _top_list_html(title: str, models: Sequence[TopModel], searched_model: str) -> str:
+# (model name, the MFDS registration when known) -> absolute new-tab URL ('' = no link).
+ModelUrl = Callable[[str, CategoryModel | None], str]
+
+
+def _registration_for(market: CategoryMarket, model_name: str) -> CategoryModel | None:
+    """The one registration of the market whose model name equals ``model_name``; None when 0 or 2+."""
+
+    key = searched_model_key(model_name)
+    found = [item for item in market.models if key and searched_model_key(item.model) == key]
+    return found[0] if len(found) == 1 else None
+
+
+def _top_name_html(label: str, url: str) -> str:
+    if not url:
+        return esc(label)
+    return f'<a class="cm-top-link" href="{esc(url)}" target="_blank" rel="noopener">{esc(label)}</a>'
+
+
+def _top_list_html(
+    title: str,
+    models: Sequence[TopModel],
+    searched_model: str,
+    urls: Mapping[str, str] | None = None,
+) -> str:
     rows = []
     for rank, model in enumerate(models, start=1):
         mine = model.matches(searched_model)
         label = f"▶ {model.label}" if mine else model.label
+        url = "" if mine else (urls or {}).get(model.label, "")
         rows.append(
             f'<li class="cm-top-row{" cm-top-me" if mine else ""}"><span class="cm-top-rank">{rank}</span>'
-            f'<div class="cm-top-main"><div class="cm-top-name">{esc(label)}</div>'
+            f'<div class="cm-top-main"><div class="cm-top-name">{_top_name_html(label, url)}</div>'
             f'<div class="cm-top-sub">{esc(top_model_line(model))}</div></div></li>'
         )
     return f'<div><div class="cm-top-title">{esc(title)}</div><ol class="cm-top-list">{"".join(rows)}</ol></div>'
@@ -462,18 +494,26 @@ def top_models_caption(market: CategoryMarket) -> str:
     )
 
 
-def top_models_html(market: CategoryMarket, *, searched_model: str = "") -> str:
-    """Two short rankings of the stated models; '' when no equipment line states a model."""
+def top_models_html(market: CategoryMarket, *, searched_model: str = "", model_url: ModelUrl | None = None) -> str:
+    """Two short rankings of the stated models; '' when no equipment line states a model.
+
+    With ``model_url`` every model name except the searched one is a new-tab link."""
 
     by_trades = top_models(market, by="trades")
     if not by_trades:
         return ""
     by_institutions = top_models(market, by="institutions")
+    urls: dict[str, str] = {}
+    if model_url is not None:
+        for item in (*by_trades, *by_institutions):
+            if item.label not in urls:
+                urls[item.label] = model_url(item.model_name, _registration_for(market, item.model_name)) or ""
+    caption = top_models_caption(market) + (f" {TOP_MODELS_LINK_NOTE}" if any(urls.values()) else "")
     body = (
-        f'<div class="cm-top-caption">{esc(top_models_caption(market))}</div>'
+        f'<div class="cm-top-caption">{esc(caption)}</div>'
         '<div class="cm-top-grid">'
-        + _top_list_html("거래 건수가 많은 모델", by_trades, searched_model)
-        + _top_list_html("납품 기관이 많은 모델", by_institutions, searched_model)
+        + _top_list_html("거래 건수가 많은 모델", by_trades, searched_model, urls)
+        + _top_list_html("납품 기관이 많은 모델", by_institutions, searched_model, urls)
         + "</div>"
     )
     if searched_model.strip() and not any(item.matches(searched_model) for item in (*by_trades, *by_institutions)):
@@ -498,7 +538,9 @@ def _status_word(status: str) -> str:
     return words.get(status, status) or "확인 전"
 
 
-def model_rows(models: Sequence[CategoryModel]) -> list[dict[str, object]]:
+def model_rows(models: Sequence[CategoryModel], *, model_url: ModelUrl | None = None) -> list[dict[str, object]]:
+    """One row per registration; with ``model_url`` the first column is its new-tab link."""
+
     rows = []
     for model in models:
         if model.trade_count is None:
@@ -512,8 +554,12 @@ def model_rows(models: Sequence[CategoryModel]) -> list[dict[str, object]]:
             notes.append(f"동물용 구매 {model.veterinary_count}건 포함")
         if model.parts_count:
             notes.append(f"부품·수리 {model.parts_count}건 포함")
+        link: dict[str, object] = {}
+        if model_url is not None:
+            link[LINK_COLUMN] = None if model.current else (model_url(model.model, model) or None)
         rows.append(
             {
+                **link,
                 "모델": f"▶ {model.model}" if model.current else model.model,
                 "제조·수입업체": model.company or "확인 안 됨",
                 # A number (None = 조회 불가); the status words have their own column.
@@ -643,7 +689,7 @@ def render_category_market(
     has_direct: bool = False,
     section_heading: bool = False,
     show_headline: bool = True,
-    on_open_model: Callable[[CategoryModel], None],
+    model_url: ModelUrl,
     on_open_trade: Callable[[Mapping[str, object]], None],
     render_company_lookup: Callable[[str, str], None] | None = None,
     model_count_note: str = "",
@@ -658,7 +704,7 @@ def render_category_market(
         models_tab, buyers_tab, suppliers_tab = st.tabs(list(tab_labels(market)))
         with models_tab:
             _render_models(
-                market, key=key, on_open_model=on_open_model, count_note=model_count_note, searched_model=searched_model
+                market, key=key, model_url=model_url, count_note=model_count_note, searched_model=searched_model
             )
         with buyers_tab:
             _render_buyers(market, key=key, on_open_trade=on_open_trade)
@@ -670,48 +716,50 @@ def _render_models(
     market: CategoryMarket,
     *,
     key: str,
-    on_open_model: Callable[[CategoryModel], None],
+    model_url: ModelUrl,
     count_note: str = "",
     searched_model: str = "",
 ) -> None:
-    top_html = top_models_html(market, searched_model=searched_model)
+    top_html = top_models_html(market, searched_model=searched_model, model_url=model_url)
     if top_html:
         st.markdown(top_html, unsafe_allow_html=True)
     if not market.models:
         st.info("식약처에 같은 품목으로 등록된 모델을 찾지 못했습니다.")
         return
-    with st.expander(f"같은 품목 모델 전체 {len(market.models)}개", expanded=False):
-        rows = model_rows(market.models)
-        event = st.dataframe(
+    # Shown directly (no folded box); each row's first cell opens that model in a new tab.
+    st.markdown(f"##### 같은 품목 모델 전체 {len(market.models):,}개")
+    rows = model_rows(market.models, model_url=model_url)
+    st.dataframe(
+        rows,
+        use_container_width=True,
+        hide_index=True,
+        key=f"cm_models::{key}",
+        height=_table_height(len(rows), 430),
+        column_config=number_column_config(
             rows,
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            key=f"cm_models::{key}",
-            height=_table_height(len(rows), 430),
-            column_config=number_column_config(
-                rows,
-                {
-                    "모델": st.column_config.TextColumn("모델", width="medium"),
-                    "같은 제품 거래": st.column_config.NumberColumn("같은 제품 거래", format=NUMBER_FORMAT),
-                    "가운데 값(원)": st.column_config.NumberColumn("가운데 값(원)", format=NUMBER_FORMAT, width=110),
-                    "참고": st.column_config.TextColumn("참고", width=150),
-                },
-            ),
-        )
-        picked = list(getattr(getattr(event, "selection", None), "rows", []) or [])
-        if picked and 0 <= picked[0] < len(market.models):
-            on_open_model(market.models[picked[0]])
-        st.caption(
-            "식약처에 같은 품목으로 등록된 모델 전부입니다. 나라장터 거래가 있는 모델이 위에 오고, ▶ 표시는 검색한 모델입니다. "
-            "행을 누르면 그 모델의 가격 조사로 이동합니다. 성능이나 대체 가능 여부는 판단하지 않습니다. "
-            "거래 건수는 모델명이 같은 나라장터 거래만"
-            + (f" {market.data_as_of} 수집분 전체 기간으로" if market.data_as_of else " 전체 기간으로")
-            + " 셉니다"
-            + (" (위 거래 기간과 상관없이)." if market.period_start else ".")
-            + (f" {count_note}" if count_note else "")
-        )
+            {
+                LINK_COLUMN: st.column_config.LinkColumn(LINK_COLUMN, display_text=LINK_TEXT, width=110),
+                "모델": st.column_config.TextColumn("모델", width="medium"),
+                "같은 제품 거래": st.column_config.NumberColumn("같은 제품 거래", format=NUMBER_FORMAT),
+                "가운데 값(원)": st.column_config.NumberColumn("가운데 값(원)", format=NUMBER_FORMAT, width=110),
+                "참고": st.column_config.TextColumn("참고", width=150),
+            },
+        ),
+    )
+    st.caption(models_table_caption(market, count_note))
+
+
+def models_table_caption(market: CategoryMarket, count_note: str = "") -> str:
+    return (
+        "식약처에 같은 품목으로 등록된 모델 전부입니다. 나라장터 거래가 있는 모델이 위에 오고, ▶ 표시는 검색한 모델입니다. "
+        f"'{LINK_COLUMN}' 칸의 '{LINK_TEXT}'를 누르면 그 모델의 가격 조사가 새 탭에서 열리고, 이 화면은 그대로 남습니다. "
+        "성능이나 서로 바꿔 쓸 수 있는지는 판단하지 않습니다. "
+        "거래 건수는 모델명이 같은 나라장터 거래만"
+        + (f" {market.data_as_of} 수집분 전체 기간으로" if market.data_as_of else " 전체 기간으로")
+        + " 셉니다"
+        + (" (위 거래 기간과 상관없이)." if market.period_start else ".")
+        + (f" {count_note}" if count_note else "")
+    )
 
 
 def _render_buyers(

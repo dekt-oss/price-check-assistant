@@ -119,6 +119,7 @@ from purchase_price.services.unified_search_intent import (
     interpret_unified_search,
 )
 from purchase_price.ui import category_market as category_market_ui
+from purchase_price.ui import model_links as model_links_ui
 from purchase_price.ui import number_columns as number_columns_ui
 from purchase_price.ui import price_trend as price_trend_ui
 from purchase_price.ui import product_identity as product_identity_ui
@@ -266,6 +267,8 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.price_trend", "NUMERIC_TABLES_V1"),
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_QUOTE_RULE_V1"),
     ("purchase_price.ui.category_market", "NUMERIC_TABLES_V1"),
+    # UX v1.2 Q2: other models open in a new tab (model_links is a new module).
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_NEW_TAB_V1"),
 )
 
 
@@ -1204,11 +1207,39 @@ def _item_status_labels(permits: list[str]) -> dict[str, str]:
     return labels
 
 
-def _open_category_model(model: category_market_service.CategoryModel, records: list[Any] | tuple[Any, ...]) -> None:
-    """A model row of 같은 품목 시장 opens that registration's price result (the same view again)."""
+def _identity_token_index(records: list[Any] | tuple[Any, ...]) -> dict[tuple[str, str, str], str]:
+    """(model, permit, company) and (model, permit, '') -> the first record's identity token.
 
-    token = _overview_identity_token(list(records), (model.permit_number, model.model, model.company))
-    _open_model_from_overview(model.model, identity_token=token)
+    The same answer as ``_overview_identity_token`` for every key, built once for a whole table."""
+
+    index: dict[tuple[str, str, str], str] = {}
+    for record in records:
+        model = normalize_text(getattr(record, "model_name", "") or "")
+        permit = normalize_text(getattr(record, "permit_number", "") or "")
+        company = normalize_text(getattr(record, "registered_company", "") or "")
+        for key in ((model, permit, company), (model, permit, "")):
+            if key not in index:
+                index[key] = _identity_selection_token(record)
+    return index
+
+
+def _category_model_url(records: list[Any] | tuple[Any, ...]) -> Any:
+    """A 같은 품목 시장 model opens that registration's price result in a new tab (Q2)."""
+
+    tokens = _identity_token_index(records)
+    base = model_links_ui.app_base_url()
+
+    def url(model_name: str, registration: category_market_service.CategoryModel | None) -> str:
+        token = ""
+        if registration is not None:
+            key = tuple(
+                normalize_text(part)
+                for part in (registration.model, registration.permit_number, registration.company)
+            )
+            token = tokens.get(key, "")
+        return model_links_ui.model_search_url(model_name, identity_token=token, base=base)
+
+    return url
 
 
 def _render_category_market(
@@ -1229,7 +1260,7 @@ def _render_category_market(
         has_direct=has_direct,
         section_heading=section_heading,
         show_headline=show_headline,
-        on_open_model=lambda model: _open_category_model(model, records),
+        model_url=_category_model_url(records),
         on_open_trade=_open_trade_dialog,
         render_company_lookup=_render_business_license_lookup,
         model_count_note=model_count_note,
@@ -1411,15 +1442,15 @@ def _render_overview(state: dict[str, Any]) -> None:
                     if search_routing.company_matches_needle(heading, normalize_text(matched_from))
                     else f"같은 회사를 부르는 다른 이름이 들어간 {heading}를 보여줍니다. "
                 )
-                + "업체 이름은 바꾸지 않고 등록된 그대로 보여줍니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
+                + "업체 이름은 바꾸지 않고 등록된 그대로 보여줍니다. 표에서 모델을 누르면 그 모델의 가격 조사가 새 탭에서 열립니다."
             )
         elif switched_from:
             st.caption(
                 f"‘{switched_from}’ 이름 그대로 등록된 업체는 나라장터 거래가 없어, 거래가 있는 {heading}를 먼저 "
-                "보여줍니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
+                "보여줍니다. 표에서 모델을 누르면 그 모델의 가격 조사가 새 탭에서 열립니다."
             )
         else:
-            st.caption("업체 이름으로 찾은 결과입니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다.")
+            st.caption("업체 이름으로 찾은 결과입니다. 표에서 모델을 누르면 그 모델의 가격 조사가 새 탭에서 열립니다.")
         for similar in state.get("similar_companies") or ():
             note_col, button_col = st.columns([4, 1.4], vertical_alignment="center")
             more = " 이상" if similar.get("more") else ""
@@ -1471,9 +1502,9 @@ def _render_overview(state: dict[str, Any]) -> None:
         else:
             st.caption(
                 "품목 이름으로 찾은 결과입니다. 이 품목의 다른 모델, 참고 시세, 도입 기관, 구할 수 있는 곳을 모았습니다. "
-                "모델을 누르면 그 모델의 가격 조사로 이동합니다."
+                "모델을 누르면 그 모델의 가격 조사가 새 탭에서 열립니다."
                 if market is not None
-                else "품목 이름으로 찾은 결과입니다. 표에서 모델을 누르면 그 모델의 가격 조사로 이동합니다."
+                else "품목 이름으로 찾은 결과입니다. 표에서 모델을 누르면 그 모델의 가격 조사가 새 탭에서 열립니다."
             )
         class_rows = overview_ui.classification_rows(records)
         companies = {r.registered_company for r in records if r.registered_company}
@@ -1521,26 +1552,37 @@ def _render_overview(state: dict[str, Any]) -> None:
         _render_category_market(market, key=f"overview::{heading}", records=records)
     elif model_rows:
         st.markdown(f"#### 모델별 나라장터 거래 · 전체 {len(all_models)}개 중 {len(model_rows)}개")
-        event = st.dataframe(
-            model_rows,
+        # Each row opens its model in a new tab; the token pins the maker's registration ("M40"
+        # alone also matches other makers' M40).
+        model_keys = result_summary_ui.overview_model_keys(crosslinks)
+        tokens = _identity_token_index(records)
+        base_url = model_links_ui.app_base_url()
+        linked_rows = []
+        for index, row in enumerate(model_rows):
+            key = tuple(normalize_text(part) for part in model_keys[index]) if index < len(model_keys) else None
+            token = tokens.get((key[1], key[0], key[2]), "") if key else ""
+            linked_rows.append(
+                {
+                    model_links_ui.LINK_COLUMN: model_links_ui.model_search_url(
+                        str(row.get("모델") or ""), identity_token=token, base=base_url
+                    )
+                    or None,
+                    **row,
+                }
+            )
+        st.dataframe(
+            linked_rows,
             use_container_width=True,
             hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
             key=f"overview_models::{route}::{heading}",
+            column_config={
+                model_links_ui.LINK_COLUMN: st.column_config.LinkColumn(
+                    model_links_ui.LINK_COLUMN, display_text=model_links_ui.LINK_TEXT, width=110
+                )
+            },
         )
-        selected = list(getattr(getattr(event, "selection", None), "rows", []) or [])
-        if selected and 0 <= selected[0] < len(model_rows):
-            # Pin the clicked maker's registration: "M40" alone also matches other makers' M40.
-            model_keys = result_summary_ui.overview_model_keys(crosslinks)
-            token = (
-                _overview_identity_token(records, model_keys[selected[0]])
-                if selected[0] < len(model_keys)
-                else ""
-            )
-            _open_model_from_overview(str(model_rows[selected[0]]["모델"]), identity_token=token)
         st.caption(
-            "행을 누르면 그 모델의 가격 조사로 이동합니다. "
+            f"'{model_links_ui.LINK_TEXT}'를 누르면 그 모델의 가격 조사가 새 탭에서 열리고, 이 화면은 그대로 남습니다. "
             + result_summary_ui.collected_counts_note(str(state.get("track_b_data_as_of") or "") or None)
         )
     else:
@@ -1550,14 +1592,17 @@ def _render_overview(state: dict[str, Any]) -> None:
         if all_models:
             pick_col, button_col = st.columns([4, 1.4], vertical_alignment="bottom")
             chosen = pick_col.selectbox("다른 모델 고르기", options=all_models, key=f"overview_pick::{route}")
-            if button_col.button("이 모델 조사", key=f"overview_open::{route}", use_container_width=True):
-                chosen_records = [r for r in records if str(r.model_name or "") == chosen]
-                token = (
-                    _identity_selection_token(chosen_records[0])
-                    if len({_identity_selection_token(r) for r in chosen_records}) == 1
-                    else ""
+            chosen_records = [r for r in records if str(r.model_name or "") == chosen]
+            token = (
+                _identity_selection_token(chosen_records[0])
+                if len({_identity_selection_token(r) for r in chosen_records}) == 1
+                else ""
+            )
+            chosen_url = model_links_ui.model_search_url(str(chosen or ""), identity_token=token)
+            if chosen_url:
+                button_col.link_button(
+                    "이 모델 조사 · 새 탭", chosen_url, key=f"overview_open::{route}", use_container_width=True
                 )
-                _open_model_from_overview(chosen, identity_token=token)
         if route == "company_overview":
             st.markdown("##### 식약처에 등록한 품목")
             st.dataframe(result_summary_ui.display_rows(product_rows), use_container_width=True, hide_index=True)
@@ -3181,16 +3226,35 @@ def _render_supplier_and_models(
             if current_note:
                 st.info(current_note)
             if summary_view.rows:
-                same_item_table = result_summary_ui.same_item_summary_rows(summary_view.rows)
+                base_url = model_links_ui.app_base_url()
+                same_item_table = [
+                    {
+                        model_links_ui.LINK_COLUMN: (
+                            None
+                            if str(row.get("모델") or "").startswith("▶")
+                            else model_links_ui.model_search_url(str(row.get("모델") or ""), base=base_url) or None
+                        ),
+                        **row,
+                    }
+                    for row in result_summary_ui.same_item_summary_rows(summary_view.rows)
+                ]
                 st.dataframe(
                     same_item_table,
                     use_container_width=True,
                     hide_index=True,
-                    column_config=number_columns_ui.number_column_config(same_item_table),
+                    column_config=number_columns_ui.number_column_config(
+                        same_item_table,
+                        {
+                            model_links_ui.LINK_COLUMN: st.column_config.LinkColumn(
+                                model_links_ui.LINK_COLUMN, display_text=model_links_ui.LINK_TEXT, width=110
+                            )
+                        },
+                    ),
                 )
                 st.caption(
                     "식약처에 같은 품목으로 등록된 모델 중 나라장터 거래가 있는 모델입니다. ▶ 표시는 검색한 모델입니다. "
-                    "성능이나 대체 가능 여부는 판단하지 않습니다. "
+                    f"'{model_links_ui.LINK_TEXT}'를 누르면 그 모델의 가격 조사가 새 탭에서 열립니다. "
+                    "성능이나 서로 바꿔 쓸 수 있는지는 판단하지 않습니다. "
                     + result_summary_ui.collected_counts_note(track_b_data_as_of)
                 )
                 gap_note = same_item_ui.price_gap_note(summary_view)

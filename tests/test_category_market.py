@@ -384,7 +384,7 @@ def test_dashboard_wires_the_view_into_result_overview_and_handoff() -> None:
     assert "market_main = bool(category_market is not None and not any_direct" in source
     assert "_render_category_market(market, key=f\"overview::{heading}\", records=records)" in source
     assert "section_heading=True" in source
-    assert "_open_model_from_overview(model.model, identity_token=token)" in source
+    assert "model_url=_category_model_url(records)" in source
     assert "on_open_trade=_open_trade_dialog" in source
     assert "render_company_lookup=_render_business_license_lookup" in source
     assert 'search_timings["category_market"]' in source
