@@ -4471,6 +4471,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v23" style="display:none">purchase-workspace-runtime-v23</span>'
     '<span id="purchase-workspace-runtime-v24" style="display:none">purchase-workspace-runtime-v24</span>'
     '<span id="purchase-workspace-runtime-v25" style="display:none">purchase-workspace-runtime-v25</span>'
+    '<span id="purchase-workspace-runtime-v26" style="display:none">purchase-workspace-runtime-v26</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
