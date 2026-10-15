@@ -67,6 +67,8 @@ CATEGORY_MARKET_NEW_TAB_V1 = True
 # Runtime marker (UX v1.2 Q3): a 도입 기관 row reopens its trade window on every pick, and a
 # 납품업체 row shows only that supplier's trades in 도입 기관.
 CATEGORY_MARKET_REOPEN_V1 = True
+# Priced models in their own table (empty cells sort first on an ascending click).
+CATEGORY_MARKET_PRICED_SPLIT_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -737,31 +739,58 @@ def _render_models(
         st.info("식약처에 같은 품목으로 등록된 모델을 찾지 못했습니다.")
         return
     # Shown directly (no folded box); each row's first cell opens that model in a new tab.
+    # Models with a trade price get their own table: Streamlit's grid sorts empty cells first on an
+    # ascending click, so one table of 302 rows with 4 prices showed 298 blanks on top (2026-10-15).
     st.markdown(f"##### 같은 품목 모델 전체 {len(market.models):,}개")
     rows = model_rows(market.models, model_url=model_url)
+    priced, unpriced = split_priced_rows(rows)
+    if priced:
+        st.markdown(f"**나라장터 거래 가격이 있는 모델 {len(priced):,}개**")
+        _model_table(priced, key=f"cm_models::{key}")
+    if unpriced:
+        st.markdown(f"**거래 가격이 없는 모델 {len(unpriced):,}개** (나라장터 거래 없음·조회 불가)")
+        _model_table(
+            [{name: value for name, value in row.items() if name not in PRICE_COLUMNS} for row in unpriced],
+            key=f"cm_models_rest::{key}",
+        )
+    st.caption(models_table_caption(market, count_note))
+
+
+PRICE_COLUMNS = ("가운데 값(원)", "최저(원)", "최고(원)")
+
+
+def split_priced_rows(
+    rows: Sequence[Mapping[str, object]],
+) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
+    """Rows with a 가운데 값 first (sortable without blanks), the rest separately."""
+
+    priced = [row for row in rows if row.get("가운데 값(원)") is not None]
+    unpriced = [row for row in rows if row.get("가운데 값(원)") is None]
+    return priced, unpriced
+
+
+def _model_table(rows: Sequence[Mapping[str, object]], *, key: str) -> None:
+    columns = {
+        LINK_COLUMN: st.column_config.LinkColumn(LINK_COLUMN, display_text=LINK_TEXT, width=110),
+        "모델": st.column_config.TextColumn("모델", width="medium"),
+        "같은 제품 거래": st.column_config.NumberColumn("같은 제품 거래", format=NUMBER_FORMAT),
+        "참고": st.column_config.TextColumn("참고", width=150),
+    }
+    if any("가운데 값(원)" in row for row in rows):
+        columns["가운데 값(원)"] = st.column_config.NumberColumn("가운데 값(원)", format=NUMBER_FORMAT, width=110)
     st.dataframe(
-        rows,
+        list(rows),
         use_container_width=True,
         hide_index=True,
-        key=f"cm_models::{key}",
+        key=key,
         height=_table_height(len(rows), 430),
-        column_config=number_column_config(
-            rows,
-            {
-                LINK_COLUMN: st.column_config.LinkColumn(LINK_COLUMN, display_text=LINK_TEXT, width=110),
-                "모델": st.column_config.TextColumn("모델", width="medium"),
-                "같은 제품 거래": st.column_config.NumberColumn("같은 제품 거래", format=NUMBER_FORMAT),
-                "가운데 값(원)": st.column_config.NumberColumn("가운데 값(원)", format=NUMBER_FORMAT, width=110),
-                "참고": st.column_config.TextColumn("참고", width=150),
-            },
-        ),
+        column_config=number_column_config(rows, columns),
     )
-    st.caption(models_table_caption(market, count_note))
 
 
 def models_table_caption(market: CategoryMarket, count_note: str = "") -> str:
     return (
-        "식약처에 같은 품목으로 등록된 모델 전부입니다. 나라장터 거래가 있는 모델이 위에 오고, ▶ 표시는 검색한 모델입니다. "
+        "식약처에 같은 품목으로 등록된 모델 전부입니다. 나라장터 거래 가격이 있는 모델은 위 표, 없는 모델은 아래 표에 있고, ▶ 표시는 검색한 모델입니다. "
         f"'{LINK_COLUMN}' 칸의 '{LINK_TEXT}'를 누르면 그 모델의 가격 조사가 새 탭에서 열리고, 이 화면은 그대로 남습니다. "
         "성능이나 서로 바꿔 쓸 수 있는지는 판단하지 않습니다. "
         "거래 건수는 모델명이 같은 나라장터 거래만"

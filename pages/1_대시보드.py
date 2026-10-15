@@ -273,6 +273,7 @@ _UI_RUNTIME_MARKERS = (
     # UX v1.2 Q3: trade windows reopen on the same row; supplier/year rows filter 거래 전체
     # (table_actions is a new module).
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_REOPEN_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_PRICED_SPLIT_V1"),
 )
 
 
@@ -4614,6 +4615,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v25" style="display:none">purchase-workspace-runtime-v25</span>'
     '<span id="purchase-workspace-runtime-v26" style="display:none">purchase-workspace-runtime-v26</span>'
     '<span id="purchase-workspace-runtime-v27" style="display:none">purchase-workspace-runtime-v27</span>'
+    '<span id="purchase-workspace-runtime-v28" style="display:none">purchase-workspace-runtime-v28</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

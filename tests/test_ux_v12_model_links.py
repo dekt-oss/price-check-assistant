@@ -80,6 +80,7 @@ def test_model_rows_start_with_the_link_column_and_skip_the_searched_model() -> 
 def test_model_table_is_shown_directly_with_a_link_column_and_no_selection() -> None:
     source = Path("src/purchase_price/ui/category_market.py").read_text(encoding="utf-8")
     body = source.split("def _render_models(", 1)[1].split("def models_table_caption(", 1)[0]
+    assert "split_priced_rows(rows)" in body
     assert "st.expander" not in body
     assert "on_select" not in body and "selection_mode" not in body
     assert "st.column_config.LinkColumn(LINK_COLUMN, display_text=LINK_TEXT" in body
@@ -138,3 +139,15 @@ def test_dashboard_call_sites_follow_the_new_tab_rule() -> None:
     assert '_open_model_from_overview(str(rows[selected[0]]["식약처 품목명"]))' in source
     assert source.count("_open_model_from_overview(") == 3  # the definition and the two pickers
     assert '("purchase_price.ui.category_market", "CATEGORY_MARKET_NEW_TAB_V1")' in source
+
+
+def test_priced_models_get_their_own_table_so_an_ascending_sort_has_no_blanks() -> None:
+    rows = [
+        {"모델": "A", "가운데 값(원)": 835},
+        {"모델": "B", "가운데 값(원)": None},
+        {"모델": "C", "가운데 값(원)": 52_500_000},
+    ]
+    priced, unpriced = ui.split_priced_rows(rows)
+    assert [row["모델"] for row in priced] == ["A", "C"]
+    assert [row["모델"] for row in unpriced] == ["B"]
+    assert all(row["가운데 값(원)"] is not None for row in priced)
