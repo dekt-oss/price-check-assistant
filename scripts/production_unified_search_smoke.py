@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,7 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v26"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v27"
 # Streamlit Cloud has kept serving the previous build 10~25 minutes after a merge (2026-10-09, 10-13).
 # `--wait-only` runs first in the workflow and waits this long, so a slow deploy shows up as its own
 # "배포 지연" failure instead of a broken search step. Later in-run waits stay short.
@@ -352,6 +353,191 @@ def _submit_dfm100(page: Any, report: dict[str, object]) -> None:
 
 
 
+# ── UX v1.2 Q4: links, numeric sort and trade-window reopen on the DFM100 result ──
+# st.dataframe draws on a canvas; glide-data-grid keeps an accessibility table (role="grid") with
+# the raw cell values (a link cell holds its URL, a number cell its plain number), read here.
+DATAFRAME_SELECTOR = '[data-testid="stDataFrame"]'
+MODEL_LINK_HEADER = "가격 조사"
+TRADE_TAB_PATTERN = re.compile(r"^거래 전체")
+GRID_ROW_HEIGHT = 35  # Streamlit's default row and header height (px)
+_GRID_SNAPSHOT_JS = """
+(element) => {
+  const table = element.querySelector('table[role="grid"]');
+  if (!table) return null;
+  const headers = [...table.querySelectorAll('th[role="columnheader"]')].map((cell) => cell.innerText.trim());
+  const rows = [...table.querySelectorAll('tbody tr')].map(
+    (row) => [...row.querySelectorAll('td[role="gridcell"]')].map((cell) => cell.innerText.trim())
+  );
+  return {headers, rows};
+}
+"""
+
+
+def _grid(table: Any) -> dict[str, Any]:
+    try:
+        table.scroll_into_view_if_needed(timeout=10_000)
+    except Exception:
+        pass
+    snapshot = table.evaluate(_GRID_SNAPSHOT_JS)
+    return snapshot or {"headers": [], "rows": []}
+
+
+def _find_grid(app: Any, wanted: Callable[[list[str]], bool], *, timeout_seconds: float = 30) -> tuple[Any, dict[str, Any]] | None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        for table in app.locator(DATAFRAME_SELECTOR).all():
+            try:
+                if not table.is_visible():
+                    continue
+                snapshot = _grid(table)
+            except Exception:
+                continue
+            if snapshot["headers"] and wanted(snapshot["headers"]):
+                return table, snapshot
+        time.sleep(1)
+    return None
+
+
+def _grid_numbers(snapshot: dict[str, Any], header: str) -> list[float]:
+    # A sorted header carries a sort mark ("↑ 가운데 값(원)").
+    index = next((i for i, name in enumerate(snapshot["headers"]) if header in name), None)
+    if index is None:
+        return []
+    values = []
+    for row in snapshot["rows"]:
+        text = row[index].replace(",", "") if index < len(row) else ""
+        try:
+            values.append(float(text))
+        except ValueError:
+            continue
+    return values
+
+
+def _verify_model_links(page: Any, report: dict[str, object]) -> Any | None:
+    """(a) The same-item model table links each model to an absolute ?q= URL, never the inner /~/+/."""
+
+    app = _app(page)
+    if "같은 품목의 다른 모델" not in _body_text(page):
+        report["model_link_check"] = {"status": "skipped", "note": "DFM100 result has no 같은 품목 section"}
+        return None
+    found = _find_grid(app, lambda headers: headers[0] == MODEL_LINK_HEADER)
+    if found is None:
+        raise RuntimeError("Same-item model table with a '가격 조사' link column did not render")
+    table, snapshot = found
+    hrefs = [row[0] for row in snapshot["rows"] if row and row[0]]
+    bad = [href for href in hrefs if "?q=" not in href or "/~/+/" in href or not href.startswith("http")]
+    if not hrefs or bad:
+        raise RuntimeError(f"Same-item model links are not absolute ?q= URLs: {bad[:3] or 'none'}")
+    top_links = app.locator("a.cm-top-link")
+    top = [(top_links.nth(i).get_attribute("href") or "", top_links.nth(i).get_attribute("target") or "")
+           for i in range(top_links.count())]
+    bad_top = [href for href, target in top if "?q=" not in href or "/~/+/" in href or target != "_blank"]
+    if bad_top:
+        raise RuntimeError(f"Top-model links do not open a ?q= URL in a new tab: {bad_top[:3]}")
+    report["model_link_check"] = {
+        "status": "pass",
+        "table_links_visible": len(hrefs),
+        "sample_href": hrefs[0],
+        "top_list_links": len(top),
+    }
+    return table
+
+
+def _verify_numeric_sort(page: Any, report: dict[str, object], table: Any | None) -> None:
+    """(b) A header click on a "(원)" column orders the cells by number, both directions."""
+
+    if table is None:
+        report["numeric_sort_check"] = {"status": "skipped", "note": "no same-item model table"}
+        return
+    app = _app(page)
+    snapshot = _grid(table)
+    header = next((name for name in snapshot["headers"] if name == "가운데 값(원)"), None) or next(
+        (name for name in snapshot["headers"] if name.endswith("(원)")), None
+    )
+    values = _grid_numbers(snapshot, header) if header else []
+    if header is None or len(set(values)) < 2:
+        report["numeric_sort_check"] = {"status": "skipped", "note": f"fewer than 2 price values in {header}"}
+        return
+    # Hide every other column (the grid's own Show/hide menu) so the header to click sits at the left.
+    table.hover()
+    table.locator('[aria-label="Show/hide columns"]').first.click(timeout=10_000)
+    menu = app.locator('[data-testid="stDataFrameColumnVisibilityMenu"]')
+    menu.wait_for(state="visible", timeout=10_000)
+    boxes = menu.locator('input[type="checkbox"]')
+    for index in range(boxes.count()):
+        box = boxes.nth(index)
+        label = box.get_attribute("aria-label") or ""
+        if label in {"Select all", "(index)", header}:
+            continue
+        if box.is_checked():
+            box.locator("xpath=ancestor::label[1]").click(timeout=10_000)  # the input itself is hidden
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(800)
+    grid_box = table.locator('[data-testid="stDataFrameResizable"]').bounding_box()
+    if grid_box is None:
+        raise RuntimeError("Same-item model table has no size to click its header")
+    orders = []
+    for _click in range(2):
+        page.mouse.click(grid_box["x"] + 70, grid_box["y"] + GRID_ROW_HEIGHT / 2)
+        page.wait_for_timeout(1_200)
+        sorted_grid = _grid(table)
+        shown = _grid_numbers(sorted_grid, header)[:2]
+        if len(shown) < 2:
+            raise RuntimeError(f"Sorted {header} shows fewer than 2 numbers: {shown} {sorted_grid['headers']}")
+        orders.append(shown)
+    ascending, descending = orders
+    if not (ascending[0] <= ascending[1] and descending[0] >= descending[1] and ascending != descending):
+        raise RuntimeError(f"{header} does not sort by number: first click {ascending}, second {descending}")
+    report["numeric_sort_check"] = {
+        "status": "pass",
+        "column": header,
+        "ascending_first_two": ascending,
+        "descending_first_two": descending,
+    }
+
+
+def _verify_trade_dialog_reopen(page: Any, report: dict[str, object]) -> None:
+    """(c) Picking the same 거래 전체 row twice opens the trade window twice."""
+
+    app = _app(page)
+    tab = app.get_by_role("tab", name=TRADE_TAB_PATTERN)
+    if tab.count() == 0:
+        report["trade_dialog_reopen_check"] = {"status": "skipped", "note": "no 거래 전체 tab"}
+        return
+    tab.first.click(timeout=10_000)
+    found = _find_grid(app, lambda headers: "거래 총액(원)" in headers)
+    if found is None:
+        report["trade_dialog_reopen_check"] = {"status": "skipped", "note": "no selectable trade table"}
+        return
+    table, _snapshot = found
+    grid_box = table.locator('[data-testid="stDataFrameResizable"]').bounding_box()
+    if grid_box is None:
+        raise RuntimeError("거래 전체 table has no size to pick a row")
+    checkbox = (grid_box["x"] + 18, grid_box["y"] + GRID_ROW_HEIGHT * 1.5)
+    dialog = app.locator('[role="dialog"]')
+    opened = []
+    for attempt in range(2):
+        page.mouse.click(*checkbox)
+        try:
+            dialog.first.wait_for(state="visible", timeout=30_000)
+        except Exception as exc:
+            raise RuntimeError(f"Trade window did not open on pick {attempt + 1} of the same row") from exc
+        opened.append(attempt + 1)
+        page.keyboard.press("Escape")
+        dialog.first.wait_for(state="hidden", timeout=15_000)
+        page.wait_for_timeout(1_500)
+    report["trade_dialog_reopen_check"] = {"status": "pass", "opened_on_picks": opened}
+
+
+def _verify_result_interactions(page: Any, report: dict[str, object]) -> None:
+    """Q4 checks after the DFM100 flow; each records pass or skipped, a failure raises."""
+
+    table = _verify_model_links(page, report)
+    _verify_numeric_sort(page, report, table)
+    _verify_trade_dialog_reopen(page, report)
+    _save_snapshot(page, report, "unified-search-dfm100-interactions")
+
+
 def _build_dfm100_quote(path: Path) -> None:
     workbook = Workbook()
     sheet = workbook.active
@@ -472,6 +658,7 @@ def main() -> None:
             try:
                 _wait_for_deployed_app(page, report)
                 _submit_dfm100(page, report)
+                _verify_result_interactions(page, report)
                 _verify_quote_upload_uses_unified_workspace(browser, report)
                 _verify_track_h_pages(page, report)
                 report["status"] = "pass"
