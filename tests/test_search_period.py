@@ -61,8 +61,9 @@ def test_year_rows_are_newest_first_and_never_mix_units() -> None:
 
     assert [row["연도"] for row in table] == ["2026", "2024"]
     assert table[0]["거래 건수"] == 3
-    assert table[0]["1대당 중앙값"] == "5,492,750원"
-    assert table[0]["1대당 최저~최고"] == "4,400,000원 ~ 6,585,500원"
-    assert table[0]["다른 단위 거래"] == "1건"
-    assert table[0]["총수량"] == "3 대"
-    assert table[1]["1대당 중앙값"] == "4,100,000원"
+    assert table[0]["1대당 중앙값(원)"] == 5492750
+    assert table[0]["1대당 최저(원)"] == 4400000
+    assert table[0]["1대당 최고(원)"] == 6585500
+    assert table[0]["다른 단위 거래(건)"] == 1
+    assert table[0]["총수량(대)"] == 3
+    assert table[1]["1대당 중앙값(원)"] == 4100000

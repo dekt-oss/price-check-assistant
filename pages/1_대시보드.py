@@ -119,6 +119,7 @@ from purchase_price.services.unified_search_intent import (
     interpret_unified_search,
 )
 from purchase_price.ui import category_market as category_market_ui
+from purchase_price.ui import number_columns as number_columns_ui
 from purchase_price.ui import price_trend as price_trend_ui
 from purchase_price.ui import product_identity as product_identity_ui
 from purchase_price.ui import quote_input as quote_input_ui
@@ -258,6 +259,13 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.mfds_recall", "MFDS_RECALL_BUDGET_V1"),
     # UX v1.1 P4: the chosen trade period is kept in the URL (?period=3y|5y|all).
     ("purchase_price.ui.result_summary", "PERIOD_URL_V1"),
+    # UX v1.2 Q1: table cells are numbers (number_columns is a new module), and the result card
+    # explains the median ±20% rule against the bar's highest trade.
+    ("purchase_price.ui.same_item_compare", "NUMERIC_TABLES_V1"),
+    ("purchase_price.ui.result_summary", "NUMERIC_TABLES_V1"),
+    ("purchase_price.ui.price_trend", "NUMERIC_TABLES_V1"),
+    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_QUOTE_RULE_V1"),
+    ("purchase_price.ui.category_market", "NUMERIC_TABLES_V1"),
 )
 
 
@@ -1578,10 +1586,12 @@ def _render_overview(state: dict[str, Any]) -> None:
             only_priced = st.checkbox("거래가 있는 모델만", value=True, key="overview_product_priced")
             view = same_item_ui.build_same_item_rows(crosslinks, None, include_unpriced=not only_priced)
             if view.rows:
+                overview_same_item_rows = result_summary_ui.display_rows(view.rows)
                 st.dataframe(
-                    result_summary_ui.display_rows(view.rows),
+                    overview_same_item_rows,
                     use_container_width=True,
                     hide_index=True,
+                    column_config=number_columns_ui.number_column_config(overview_same_item_rows),
                 )
                 notes = [
                     same_item_ui.hidden_note(view),
@@ -2859,7 +2869,13 @@ def _render_price_trend(price_result: Any, *, quote: Decimal | None, unit: str |
     st.caption(trend.caption)
     if trend.granularity in {"month", "quarter"}:
         with st.expander("기간별 숫자로 보기", expanded=False):
-            st.dataframe(price_trend_ui.trend_rows(trend, unit=unit), use_container_width=True, hide_index=True)
+            trend_table = price_trend_ui.trend_rows(trend, unit=unit)
+            st.dataframe(
+                trend_table,
+                use_container_width=True,
+                hide_index=True,
+                column_config=number_columns_ui.number_column_config(trend_table),
+            )
 
 
 def _render_price_sections(
@@ -2923,14 +2939,21 @@ def _render_price_sections(
                 _render_price_trend(price_result, quote=quote, unit=unit_split.main_unit, key=quote_key)
             if year_rows:
                 st.markdown("##### 연도별")
-                st.dataframe(year_rows, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    year_rows,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config=number_columns_ui.number_column_config(year_rows),
+                )
             st.caption("가격은 위 결론과 같은 단위만 묶었습니다. 다른 단위 거래는 건수만 따로 셉니다.")
         with unit_tab:
             if all_groups:
+                shown_groups = all_groups[: result_summary_ui.SUMMARY_ROW_LIMIT]
                 st.dataframe(
-                    all_groups[: result_summary_ui.SUMMARY_ROW_LIMIT],
+                    shown_groups,
                     use_container_width=True,
                     hide_index=True,
+                    column_config=number_columns_ui.number_column_config(shown_groups),
                 )
             st.caption(
                 "단위(대·set 등)와 거래조건이 같은 거래끼리 묶었습니다. 가격은 모두 1단위 가격이며, "
@@ -2978,17 +3001,19 @@ def _render_price_sections(
             # The period is part of the key: a narrower period must not keep an old row index.
             record_table_key = f"workspace_direct_table::{quote_key}::{period_label}"
             record_applied_key = f"workspace_direct_table_applied::{quote_key}::{period_label}"
+            # 거래 총액 → 수량 → 1단위 가격 순서라 세트 거래도 헷갈리지 않습니다.
+            trade_rows = result_summary_ui.trade_table_rows(direct_rows)
             event = st.dataframe(
-                # 거래 총액 → 수량 → 1단위 가격 순서라 세트 거래도 헷갈리지 않습니다.
-                result_summary_ui.trade_table_rows(direct_rows),
+                trade_rows,
                 use_container_width=True,
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
                 key=record_table_key,
-                column_config={
-                    "나라장터": st.column_config.LinkColumn("나라장터", display_text="열기"),
-                },
+                column_config=number_columns_ui.number_column_config(
+                    trade_rows,
+                    {"나라장터": st.column_config.LinkColumn("나라장터", display_text="열기")},
+                ),
             )
             picked_rows = list(getattr(getattr(event, "selection", None), "rows", []) or [])
             picked = picked_rows[0] if picked_rows else None
@@ -3026,14 +3051,22 @@ def _render_price_sections(
             f"비슷한 품목 거래 {reference_count}건 보기 · 같은 제품인지 확인 안 됨, 비교에서 제외",
             expanded=False,
         ):
+            reference_table = result_summary_ui.reference_table_rows(reference_rows)
             st.dataframe(
-                result_summary_ui.display_rows(reference_rows),
+                reference_table,
                 use_container_width=True,
                 hide_index=True,
-                column_config={
-                    "대당 단가": st.column_config.TextColumn("표기 금액 (미검증)"),
-                    "총액": st.column_config.TextColumn("거래총액"),
-                },
+                column_config=number_columns_ui.number_column_config(
+                    reference_table,
+                    {
+                        "대당 단가": st.column_config.NumberColumn(
+                            "표기 금액(원, 미검증)", format=number_columns_ui.NUMBER_FORMAT
+                        ),
+                        "총액": st.column_config.NumberColumn(
+                            "거래 총액(원)", format=number_columns_ui.NUMBER_FORMAT
+                        ),
+                    },
+                ),
             )
             st.caption(
                 "품목명이나 분류가 비슷한 거래입니다. 모델·규격이 같은지 확인되기 전에는 가격 비교에 쓰지 않습니다."
@@ -3069,10 +3102,12 @@ def _render_supplier_and_models(
             st.markdown("#### 누가 파는가")
             procurement_suppliers = supplier_rows(track_b)
             if procurement_suppliers:
+                supplier_table = result_summary_ui.supplier_summary_rows(procurement_suppliers)
                 st.dataframe(
-                    result_summary_ui.supplier_summary_rows(procurement_suppliers),
+                    supplier_table,
                     use_container_width=True,
                     hide_index=True,
+                    column_config=number_columns_ui.number_column_config(supplier_table),
                 )
                 hidden_suppliers = len(procurement_suppliers) - result_summary_ui.SUMMARY_ROW_LIMIT
                 st.caption(
@@ -3108,10 +3143,12 @@ def _render_supplier_and_models(
         st.markdown("#### 누가 파는가")
         procurement_suppliers = supplier_rows(track_b)
         if procurement_suppliers:
+            supplier_table = result_summary_ui.supplier_summary_rows(procurement_suppliers)
             st.dataframe(
-                result_summary_ui.supplier_summary_rows(procurement_suppliers),
+                supplier_table,
                 use_container_width=True,
                 hide_index=True,
+                column_config=number_columns_ui.number_column_config(supplier_table),
             )
             hidden_suppliers = len(procurement_suppliers) - result_summary_ui.SUMMARY_ROW_LIMIT
             st.caption(
@@ -3144,10 +3181,12 @@ def _render_supplier_and_models(
             if current_note:
                 st.info(current_note)
             if summary_view.rows:
+                same_item_table = result_summary_ui.same_item_summary_rows(summary_view.rows)
                 st.dataframe(
-                    result_summary_ui.same_item_summary_rows(summary_view.rows),
+                    same_item_table,
                     use_container_width=True,
                     hide_index=True,
+                    column_config=number_columns_ui.number_column_config(same_item_table),
                 )
                 st.caption(
                     "식약처에 같은 품목으로 등록된 모델 중 나라장터 거래가 있는 모델입니다. ▶ 표시는 검색한 모델입니다. "
@@ -3251,10 +3290,12 @@ def _render_supplier_and_models(
                 current_note = same_item_ui.current_model_note(full_view)
                 if current_note:
                     st.info(current_note)
+                full_same_item_table = result_summary_ui.display_rows(full_view.rows)
                 st.dataframe(
-                    result_summary_ui.display_rows(full_view.rows),
+                    full_same_item_table,
                     use_container_width=True,
                     hide_index=True,
+                    column_config=number_columns_ui.number_column_config(full_same_item_table),
                 )
             else:
                 st.info("조건에 맞는 모델이 없습니다.")
@@ -3511,8 +3552,9 @@ def _render_search_result(state: dict[str, Any]) -> None:
         quote_label_col.markdown(
             '<span class="rl-setting-label">내 견적 단가</span>', unsafe_allow_html=True
         )
+        # Same text as the visible label beside it, so a screen reader names the box the same way.
         quote_text = quote_col.text_input(
-            "내 견적가 (원)",
+            "내 견적 단가",
             key=price_key,
             placeholder="예: 2,100,000",
             label_visibility="collapsed",
@@ -3886,7 +3928,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
                 ""
                 if track_b_unavailable
                 else result_layout_ui.comparison_status_html(
-                    price_result, quote_entered=workspace_quote is not None
+                    price_result, quote_entered=workspace_quote is not None, quote=workspace_quote
                 )
             ),
             after_price_html=after_price_html,

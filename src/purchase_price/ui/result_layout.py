@@ -46,6 +46,9 @@ RESULT_LAYOUT_STACK_V1 = True
 # status pill, evidence level, difference in won, excluded-count note, latest 원문 links,
 # short-evidence category line, stale-data chip.
 RESULT_LAYOUT_COMPARISON_V1 = True
+# Runtime marker (UX v1.2 Q1): one plain line under the status pill when the status (median
+# ±20%) and the bar (highest trade) read differently, or when a low quote needs a unit check.
+RESULT_LAYOUT_QUOTE_RULE_V1 = True
 
 RESULT_CSS = """
 <style>
@@ -103,6 +106,7 @@ RESULT_CSS = """
 .rl-status {display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin:0 0 10px 0;}
 .rl-status .pc-pill {font-size:12.5px; font-weight:800;}
 .rl-evidence {font-size:12px; color:#5B6C82; word-break:keep-all;}
+.rl-status-note {flex-basis:100%; font-size:12.5px; color:#5B6C82; line-height:1.6; word-break:keep-all;}
 .rl-evidence b {color:var(--pc-navy);}
 .rl-diff {font-size:15px; font-weight:700; color:#5B6C82; white-space:nowrap;}
 .rl-sources {font-size:12px; color:#5B6C82; margin-top:8px; line-height:1.7; word-break:keep-all;}
@@ -459,11 +463,45 @@ _STATUS_TONES = {
 }
 
 
-def comparison_status_html(result: Any, *, quote_entered: bool) -> str:
+def quote_rule_note(result: Any, *, quote: Decimal | None) -> str:
+    """One plain sentence under the status pill, or '' when the pill says enough.
+
+    - 거래 범위 안 although the quote is above the highest trade: the pill uses the median ±20%
+      rule while the bar compares with the highest trade, so the card says both rules once.
+    - 확인 필요 because the quote is far below the median: the same unit/configuration check
+      the 견적 검토 page gives (price_metrics.compare_quote)."""
+
+    from purchase_price.services.price_metrics import (
+        QUOTE_CHECK_THRESHOLD_PERCENT,
+        STATUS_CHECK,
+        STATUS_IN_RANGE,
+    )
+
+    if quote is None or quote <= 0:
+        return ""
+    comparison = result.comparison
+    high = getattr(result.summary, "high", None)
+    threshold = f"{QUOTE_CHECK_THRESHOLD_PERCENT:g}"
+    if comparison.status == STATUS_IN_RANGE and high is not None and quote > high:
+        return (
+            f"상태는 가운데 값 ±{threshold}% 기준으로 정하고, 막대의 '최고보다 높음'은 지금까지 거래된 "
+            "가장 높은 값과 비교한 것이라 두 표시가 다를 수 있습니다."
+        )
+    percent = comparison.difference_percent
+    if comparison.status == STATUS_CHECK and percent is not None and percent < 0:
+        return (
+            f"가운데 값보다 {threshold}% 넘게 낮아 확인 필요로 표시했습니다. "
+            "단위·수량·구성(설치·옵션 포함 여부)이 거래와 같은지 확인하세요."
+        )
+    return ""
+
+
+def comparison_status_html(result: Any, *, quote_entered: bool, quote: Decimal | None = None) -> str:
     """Status pill (one of four) and the evidence level with its reasons.
 
     Without a typed quote there is nothing to compare, so the pill only shows when the data itself
-    is short (or the identity is unconfirmed); the evidence level always shows."""
+    is short (or the identity is unconfirmed); the evidence level always shows. ``quote`` adds the
+    one-line ``quote_rule_note`` below them when it applies."""
 
     from purchase_price.services.price_metrics import MIN_COMPARABLE_TRADES, STATUS_IDENTITY_NEEDED
 
@@ -483,6 +521,9 @@ def comparison_status_html(result: Any, *, quote_entered: bool) -> str:
         + (f" · {esc(reasons)}" if reasons else "")
         + "</span>"
     )
+    note = quote_rule_note(result, quote=quote) if quote_entered else ""
+    if note:
+        parts.append(f'<span class="rl-status-note">{esc(note)}</span>')
     return f'<div class="rl-status rl-keep" id="purchase-comparison-status-v1">{"".join(parts)}</div>'
 
 

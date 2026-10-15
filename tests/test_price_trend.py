@@ -93,7 +93,7 @@ def test_table_rows_match_the_chart_data_newest_first() -> None:
     frame = ui.trend_frame(trend)
     assert len(rows) == len(frame) == len(trend.buckets)
     assert rows[0]["기간"].startswith(trend.buckets[-1].label)
-    assert {"기간", "거래 건수", "1대당 가운데 값", "최저~최고", "비교"} <= set(rows[0])
+    assert {"기간", "거래 건수", "1대당 가운데 값(원)", "최저(원)", "최고(원)", "비교"} <= set(rows[0])
     chart = ui.trend_chart(trend, quote=Decimal("12000000"))
     if trend.granularity is not None:
         assert chart is not None

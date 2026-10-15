@@ -128,4 +128,4 @@ def test_g2b_links_open_the_integrated_search_on_the_number() -> None:
     assert record.g2b_url_for_source_record("live:abc") is None
     row = rs.trade_table_rows([{"가격": "4,400,000원", "원천기록": "delivery:R26TB02199340|change:00|line:2"}])[0]
     assert row["나라장터"].endswith("searchKeyword=R26TB02199340")
-    assert list(row)[5] == "나라장터"
+    assert list(row)[5:7] == ["1단위 가격(원)", "나라장터"]

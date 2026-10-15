@@ -13,7 +13,12 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from purchase_price.ui.number_columns import number
+
 PRICE_TREND_UI_V1 = True
+# Runtime marker (UX v1.2 Q1): trend_rows gives numbers (count, median, low, high) so the table
+# under the chart sorts by value; the page formats them with a NumberColumn.
+NUMERIC_TABLES_V1 = True
 
 ENOUGH_COLOR = "#1D4ED8"
 THIN_COLOR = "#A9B4C2"
@@ -22,10 +27,6 @@ MUTED = "#7A899B"
 GRID = "#E9EEF4"
 ENOUGH_LABEL = "비교에 사용"
 THIN_LABEL = "거래가 적어 비교 안 함"
-
-
-def _won(value: Decimal | None) -> str:
-    return f"{value:,.0f}원" if value is not None else "—"
 
 
 def trend_rows(trend: Any, *, unit: str | None) -> list[dict[str, object]]:
@@ -37,9 +38,10 @@ def trend_rows(trend: Any, *, unit: str | None) -> list[dict[str, object]]:
         rows.append(
             {
                 "기간": bucket.label + (" (진행 중)" if bucket.ongoing else ""),
-                "거래 건수": f"{bucket.count}건",
-                f"{per}가운데 값".strip(): _won(bucket.median),
-                "최저~최고": f"{_won(bucket.low)} ~ {_won(bucket.high)}" if bucket.low is not None else "—",
+                "거래 건수": bucket.count,
+                f"{per}가운데 값(원)".strip(): number(bucket.median),
+                "최저(원)": number(bucket.low),
+                "최고(원)": number(bucket.high) if bucket.low is not None else None,
                 "비교": ENOUGH_LABEL if bucket.enough else THIN_LABEL,
             }
         )

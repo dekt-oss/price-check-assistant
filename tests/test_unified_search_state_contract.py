@@ -86,7 +86,7 @@ def test_unified_search_result_survives_streamlit_widget_reruns() -> None:
     assert "direct_transaction_rows" not in source
     assert "reference_transaction_rows" not in source
     assert "비슷한 품목 거래" in source
-    assert "표기 금액 (미검증)" in source
+    assert "표기 금액(원, 미검증)" in source
     assert "식약처 등록업체" not in source
     assert "품목 책임주체" in source
     assert "result_summary_ui.build_conclusion(" in source

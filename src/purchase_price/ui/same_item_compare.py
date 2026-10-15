@@ -18,6 +18,7 @@ from decimal import Decimal
 from typing import Any
 
 from purchase_price.services.matching import normalize_text
+from purchase_price.ui.number_columns import number
 
 STATUS_ACTIVE = "국내 정상"
 STATUS_CANCELLED = "취소·취하"
@@ -26,6 +27,9 @@ STATUS_UNKNOWN = "상태 미확인"
 _INACTIVE = {STATUS_CANCELLED, STATUS_EXPORT, f"{STATUS_CANCELLED}(품목)", f"{STATUS_EXPORT}(품목)"}
 # Runtime marker: the dashboard reloads a retained older copy of this module (hot reload).
 ITEM_STATUS_AWARE = True
+# Runtime marker (UX v1.2 Q1): 나라장터 거래 is a number (None = 조회 불가 in 나라장터 상태) and the
+# price range is two number columns 최저(원) · 최고(원), so the tables sort by value.
+NUMERIC_TABLES_V1 = True
 PRICE_GAP_FACTOR = Decimal("3")
 
 # Runtime marker: the dashboard reloads a retained pre-2026-10 copy of this module (hot reload).
@@ -138,6 +142,7 @@ def build_same_item_rows(
         permit = str(row.get("식약처 품목번호") or "").strip()
         kind = str(row.get("유형") or "").strip()
         count = row.get("나라장터 직접거래")
+        bounds = price_bounds(row.get("나라장터 가격범위"))
         output.append(
             {
                 # Company only on the first row of its group, so the table reads as a tree.
@@ -145,10 +150,12 @@ def build_same_item_rows(
                 "모델": f"▶ {row.get('모델')}" if current else str(row.get("모델") or ""),
                 "식약처 품목번호": f"[{kind}] {permit}" if kind and permit else permit or "미확인",
                 "식약처 상태": status,
-                "나라장터 거래": "조회 불가" if count is None else f"{_direct_count(row)}건",
-                "가격범위": row.get("나라장터 가격범위") or "",
+                "나라장터 거래": None if count is None else _direct_count(row),
+                "최저(원)": number(bounds[0]) if bounds else None,
+                "최고(원)": number(bounds[1]) if bounds else None,
                 "최근거래": row.get("최근거래") or "",
                 "실제 납품업체": row.get("실제 조달 공급업체") or "",
+                "나라장터 상태": "조회 불가" if count is None else "",
             }
         )
         previous_company = company

@@ -103,7 +103,9 @@ def test_lead_and_conclusion_never_show_a_five_digit_percentage() -> None:
 
 def test_dashboard_uses_the_quote_parser_and_keeps_the_hidden_label() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
-    assert '"내 견적가 (원)"' in source
+    # The box's accessible name is the visible label (the smoke finds the box by this label).
+    assert '"내 견적 단가",\n            key=price_key' in source
+    assert '"내 견적가 (원)"' not in source
     assert "quote_input_ui.parse_quote_input(quote_text)" in source
     assert "quote_input_ui.quote_error_message(" in source
     assert "직전 값으로 비교합니다" not in source

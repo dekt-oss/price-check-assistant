@@ -222,9 +222,11 @@ def test_models_with_trades_come_first_and_every_registered_model_is_listed() ->
     rows = ui.model_rows(market.models)
     assert rows[0]["참고"] == "동물용 구매 1건 포함"
     by_model = {row["모델"]: row for row in rows}
-    assert by_model["▶ Flow-c"]["같은 제품 거래"] == "나라장터 거래 없음"
+    assert by_model["▶ Flow-c"]["같은 제품 거래"] == 0
+    assert by_model["▶ Flow-c"]["거래 자료 상태"] == "나라장터 거래 없음"
     assert by_model["▶ Flow-c"]["허가 상태"] == "판매 가능(허가 기준)"
-    assert by_model["Broken"]["같은 제품 거래"] == "조회 불가"
+    assert by_model["Broken"]["같은 제품 거래"] is None
+    assert by_model["Broken"]["거래 자료 상태"] == "조회 불가"
     assert market.traded_models == 2
     assert [company.name for company in market.companies][0] == "지이헬스케어코리아(주)"
 
