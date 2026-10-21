@@ -22,6 +22,7 @@ from purchase_price.storage.r2_state import R2OperationalStateStore
 
 KST = ZoneInfo("Asia/Seoul")
 ROLLING_WINDOW_DAYS = 7
+MAX_WINDOW_DAYS = 365  # the shopping API rejects ranges longer than one year (code 07)
 
 
 class ManifestingRawStore:
@@ -52,15 +53,15 @@ def _exit_code(summary) -> int:
 
 
 def _rolling_window(state: SupplementalTrackBState, *, today: date) -> tuple[date, date] | None:
+    # A weekly run that only covered seven days could never catch up once a run was missed
+    # (2026-10-18 was cancelled by the shared concurrency group and coverage stayed at
+    # 2026-10-02), so a run that starts behind covers everything up to today in one window.
     covered = date.fromisoformat(state.rolling_covered_through)
     if today <= covered:
         return None
     first_uncovered = covered + timedelta(days=1)
-    recent_begin = today - timedelta(days=ROLLING_WINDOW_DAYS - 1)
-    begin = min(recent_begin, first_uncovered) if recent_begin > first_uncovered else recent_begin
-    if recent_begin > first_uncovered:
-        begin = first_uncovered
-    return begin, min(today, begin + timedelta(days=ROLLING_WINDOW_DAYS - 1))
+    begin = min(first_uncovered, today - timedelta(days=ROLLING_WINDOW_DAYS - 1))
+    return begin, min(today, begin + timedelta(days=MAX_WINDOW_DAYS - 1))
 
 
 def run(*, request_budget: int, output: Path) -> int:
