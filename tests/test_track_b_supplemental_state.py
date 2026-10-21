@@ -81,3 +81,39 @@ def test_rolling_completion_advances_covered_through() -> None:
     assert state.rolling_cycles_completed == 1
     assert state.rolling_window_begin is None
     assert state.rolling_cursor == SUPPLEMENTAL_ROLLING_CURSOR
+
+
+def _rolling_state(covered_through: str) -> SupplementalTrackBState:
+    state = SupplementalTrackBState.bootstrap(("4511181101",))
+    state.apply_historical(_summary(next_cursor=CollectionCursor(1, 1)), object_keys=[])
+    state.rolling_covered_through = covered_through
+    return state
+
+
+def test_rolling_window_catches_up_a_missed_week_in_one_run() -> None:
+    from purchase_price.scripts.run_g2b_track_b_supplemental import _rolling_window
+
+    state = _rolling_state("2026-10-02")
+    assert _rolling_window(state, today=date(2026, 10, 21)) == (
+        date(2026, 10, 3),
+        date(2026, 10, 21),
+    )
+
+
+def test_rolling_window_replays_the_last_week_when_current() -> None:
+    from purchase_price.scripts.run_g2b_track_b_supplemental import _rolling_window
+
+    state = _rolling_state("2026-10-20")
+    assert _rolling_window(state, today=date(2026, 10, 21)) == (
+        date(2026, 10, 15),
+        date(2026, 10, 21),
+    )
+    assert _rolling_window(state, today=date(2026, 10, 20)) is None
+
+
+def test_rolling_window_never_exceeds_the_one_year_api_limit() -> None:
+    from purchase_price.scripts.run_g2b_track_b_supplemental import _rolling_window
+
+    begin, end = _rolling_window(_rolling_state("2025-01-01"), today=date(2026, 10, 21))
+    assert begin == date(2025, 1, 2)
+    assert (end - begin).days == 364
