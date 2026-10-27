@@ -311,3 +311,59 @@ def test_runtime_reports_sqlite_search_support() -> None:
     assert supported is True  # FTS5 trigram needs SQLite >= 3.34
     snapshot = memory_diagnostic.take_snapshot()
     assert "부분검색 색인 사용 가능" in memory_diagnostic.format_snapshot(snapshot)
+
+
+@pytest.mark.parametrize("limit", [1, 7, 30, 500])
+def test_detail_code_rows_match_the_original_newest_first_query(serving_file: Path, limit: int) -> None:
+    # NT960 search (2026-10-27): the newest rows of a large 세부품명 are chosen through the side
+    # index instead of sorting every row of the class; ties, undated rows, a cancelled change
+    # order and an identity conflict must come out exactly as before.
+    from sqlalchemy import exists, select
+    from sqlalchemy.orm import aliased
+
+    _build(serving_file)
+    newer = aliased(TrackBDeliveryLine)
+    statement = select(TrackBDeliveryLine).where(
+        ~exists(
+            select(1).where(
+                newer.delivery_request_number == TrackBDeliveryLine.delivery_request_number,
+                newer.product_sequence == TrackBDeliveryLine.product_sequence,
+                newer.change_order_number > TrackBDeliveryLine.change_order_number,
+            )
+        ),
+        TrackBDeliveryLine.unit_price > 0,
+        TrackBDeliveryLine.identity_conflict.is_(False),
+        TrackBDeliveryLine.detail_code == "4217210101",
+    )
+    engine, session = _session(serving_file)
+    original = session.scalars(
+        statement.order_by(
+            TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc()
+        ).limit(limit)
+    ).all()
+    indexed = search_index.detail_code_rows(session, statement, ("4217210101",), limit=limit)
+    paths = list(session.info.get(search_index.PATHS_KEY, []))
+    assert search_index.recent_ids_for_detail_codes(session, ("9999999999",)) == []
+    session.close()
+    engine.dispose()
+
+    assert [row.id for row in indexed] == [row.id for row in original]
+    assert paths == ["index"]
+
+
+def test_category_trades_are_the_same_through_the_side_index(serving_file: Path) -> None:
+    from purchase_price.services import category_market
+
+    engine, legacy_session = _session(serving_file)
+    legacy = category_market.load_category_trades(legacy_session, ["4217210101"], limit=25)
+    legacy_session.close()
+    engine.dispose()
+    _build(serving_file)
+    engine, session = _session(serving_file)
+    indexed = category_market.load_category_trades(session, ["4217210101"], limit=25)
+    paths = list(session.info.get(search_index.PATHS_KEY, []))
+    session.close()
+    engine.dispose()
+
+    assert indexed == legacy
+    assert "index" in paths

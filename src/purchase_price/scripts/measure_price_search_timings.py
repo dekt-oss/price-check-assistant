@@ -7,6 +7,9 @@ Opens ``<url>?q=<query>`` for each query in a headless browser, waits for the co
 * the server stages from the hidden ``#purchase-search-timings-v2`` marker (start-up index wait,
   cold flag, identity, same-model trades, category market, live check, safety, total)
 * ``render_card`` from ``#purchase-render-timings-v1``
+* ``wall_done``: seconds until ``#purchase-deferred-timings-v1``, written once the same-품목
+  models below the card are built (review D-02), with where they ran (``same_item_when``) and
+  their ``same_item_models`` / ``category_market`` seconds
 
 Samples go to a JSON file and, with ``--r2``, into a rolling R2 state object
 (``state/v1/perf/price-search-timings.json``, newest ``MAX_SAMPLES``) so a week of scheduled runs
@@ -52,6 +55,7 @@ TIMING_KEYS = (
 )
 SUMMARY_STAGES = (
     "wall",
+    "wall_done",
     "warmup_wait",
     "identity",
     "track_b",
@@ -68,6 +72,8 @@ RESULT_SELECTORS = ("#purchase-conclusion-v1", "#purchase-not-found-v1", "#categ
 STATE_NAME = "perf/price-search-timings"
 MAX_SAMPLES = 600
 PAGE_TIMEOUT_SECONDS = 300
+DEFERRED_MARKER = "#purchase-deferred-timings-v1"
+DEFERRED_TIMEOUT_SECONDS = 120
 # Streamlit Community Cloud puts an idle app to sleep and shows this screen instead of the app.
 # Without clicking the wake button every query waits out its full timeout (2026-10-14 04:55Z).
 STREAMLIT_SLEEP_MARKER = "This app has gone to sleep due to inactivity."
@@ -85,11 +91,17 @@ def sample_from_markers(
     render: Mapping[str, str | None],
     status: str,
     at: datetime,
+    deferred: Mapping[str, str | None] | None = None,
+    wall_done: float | None = None,
 ) -> dict[str, Any]:
-    """One sample: marker attribute names (track-b) become stage names (track_b)."""
+    """One sample: marker attribute names (track-b) become stage names (track_b).
+
+    ``deferred`` (the after-card marker) adds the same-품목 stages when they ran after the card."""
 
     stages: dict[str, float] = {}
-    for key, raw in timings.items():
+    for key, raw in {**timings, **{k: v for k, v in (deferred or {}).items() if k != "when"}}.items():
+        if key == "done":
+            continue
         if raw is None:
             # Not reported by the page: a measurement gap, not a 0-second stage.
             continue
@@ -109,6 +121,8 @@ def sample_from_markers(
         "cold": bool(stages.pop("cold", 0.0)),
         "stages": stages,
         "render_card": render_card,
+        "wall_done": round(wall_done, 3) if wall_done is not None else None,
+        "same_item_when": (deferred or {}).get("when"),
     }
 
 
@@ -125,7 +139,7 @@ def _percentile(values: Sequence[float], share: float) -> float:
 
 
 def _stage_value(sample: Mapping[str, Any], stage: str) -> float | None:
-    if stage in {"wall", "render_card"}:
+    if stage in {"wall", "wall_done", "render_card"}:
         value = sample.get(stage)
     else:
         value = (sample.get("stages") or {}).get(stage)
@@ -228,8 +242,28 @@ def measure_query(page: Any, url: str, query: str) -> dict[str, Any]:
     wall = time.monotonic() - started
     timings = _attributes(root, "#purchase-search-timings-v2", TIMING_KEYS) if status == "ok" else {}
     render = _attributes(root, "#purchase-render-timings-v1", ("card",)) if status == "ok" else {}
+    deferred: dict[str, str | None] = {}
+    wall_done: float | None = None
+    if status == "ok":
+        done_deadline = time.monotonic() + DEFERRED_TIMEOUT_SECONDS
+        while time.monotonic() < done_deadline:
+            root = _root(page)
+            if root.locator(DEFERRED_MARKER).count() > 0:
+                wall_done = time.monotonic() - started
+                deferred = _attributes(
+                    root, DEFERRED_MARKER, ("when", "done", "same-item-models", "category-market")
+                )
+                break
+            page.wait_for_timeout(500)
     sample = sample_from_markers(
-        query=query, wall=wall, timings=timings, render=render, status=status, at=datetime.now(UTC)
+        query=query,
+        wall=wall,
+        timings=timings,
+        render=render,
+        status=status,
+        at=datetime.now(UTC),
+        deferred=deferred,
+        wall_done=wall_done,
     )
     if woke:
         sample["woke"] = True

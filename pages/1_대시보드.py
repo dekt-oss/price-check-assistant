@@ -209,6 +209,9 @@ _TRACK_B_RUNTIME_MARKERS = (
     (track_b_comparison_service, "LOOKUP_NO_LAZY_LOADS_V1"),
     # Review fix D-01: the reference lookup (0 same-model trades) eager-loads its conditions too.
     (track_b_comparison_service, "REFERENCE_NO_LAZY_LOADS_V1"),
+    # NT960 search: newest rows of a 세부품명 through the side index (helper first, then callers).
+    (track_b_search_index_service, "DETAIL_CODE_ROWS_V1"),
+    (track_b_reference_quality_service, "REFERENCE_QUALITY_DETAIL_CODE_ROWS_V1"),
 )
 
 
@@ -258,6 +261,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.price_metrics", "PRICE_TREND_V1"),
     ("purchase_price.ui.price_trend", "PRICE_TREND_UI_V1"),
     ("purchase_price.services.category_market", "CATEGORY_MARKET_TOP_MODELS_V1"),
+    ("purchase_price.services.category_market", "CATEGORY_MARKET_DETAIL_CODE_ROWS_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_TOP_MODELS_V1"),
     # UX v1.1 P2b: alias registries cached per file (grading read the CSVs once per row).
     ("purchase_price.services.product_matching", "ALIAS_REGISTRY_CACHE_V1"),
@@ -1211,6 +1215,24 @@ def _ensure_same_item_market(state: dict[str, Any]) -> None:
         timings["category_market"] = round(monotonic() - category_started, 3)
     state["mfds_procurement_crosslinks"] = crosslinks
     state["category_market"] = market
+
+
+def _same_item_timing_marker_html(state: dict[str, Any], *, when: str, render_started: float) -> str:
+    """Hidden marker after the conclusion card: where the same-품목 work ran and how long it took.
+
+    ``when`` is before-card, after-card or none; ``done`` is seconds from the start of the render.
+    """
+
+    timings = state.get("search_timings_seconds")
+    timings = timings if isinstance(timings, dict) else {}
+    attrs = [f'data-when="{when}"', f'data-done="{monotonic() - render_started:.3f}"']
+    for key in ("same_item_models", "category_market"):
+        if key in timings:
+            try:
+                attrs.append(f'data-{key.replace("_", "-")}="{float(timings[key]):.3f}"')
+            except (TypeError, ValueError):
+                continue
+    return '<span id="purchase-deferred-timings-v1" ' + " ".join(attrs) + ' style="display:none"></span>'
 
 
 def _same_item_needed_before_card(track_b: Any, *, any_direct: bool, preferred_unit: str | None) -> bool:
@@ -2563,6 +2585,9 @@ def _render_diagnostic_markers(state: dict[str, Any]) -> None:
         # v2 (UX v1.1 P2a): every stage, the start-up wait and whether the search started cold.
         v2_attrs: list[str] = []
         for key in SEARCH_TIMING_KEYS_V2:
+            if key not in timings and key not in {"warmup_wait", "cold"}:
+                # Not run yet (the same-품목 stages run after the card): missing, not 0 seconds.
+                continue
             try:
                 v2_attrs.append(f'data-{key.replace("_", "-")}="{float(timings.get(key, 0.0)):.3f}"')
             except (TypeError, ValueError):
@@ -3881,9 +3906,11 @@ def _render_search_result(state: dict[str, Any]) -> None:
             price_header_card,
             note=price_header_card.note + f" · 최근 {stats.direct_count}건 기준 (더 오래된 거래 있음)",
         )
+    same_item_when = "none"
     if state.get("same_item_pending") and _same_item_needed_before_card(
         track_b, any_direct=any_direct, preferred_unit=all_period_unit
     ):
+        same_item_when = "before-card"
         _ensure_same_item_market(state)
         mfds_procurement_crosslinks = list(state.get("mfds_procurement_crosslinks") or [])
         category_market = state.get("category_market")
@@ -4152,6 +4179,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     )
     if state.get("same_item_pending"):
         # Review D-02: the card is on screen; the same-품목 models below it are built now, once.
+        same_item_when = "after-card"
         with st.spinner("같은 품목의 다른 모델을 정리하고 있습니다..."):
             _ensure_same_item_market(state)
         mfds_procurement_crosslinks = list(state.get("mfds_procurement_crosslinks") or [])
@@ -4159,6 +4187,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
             mfds_procurement_crosslinks, state.get("category_market")
         )
         market_main = bool(category_market is not None and not any_direct and not track_b_unavailable)
+    st.markdown(
+        _same_item_timing_marker_html(state, when=same_item_when, render_started=render_started),
+        unsafe_allow_html=True,
+    )
 
     mfds_live_count_note = ""
     if isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "success" and mfds.records:
@@ -4694,6 +4726,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v28" style="display:none">purchase-workspace-runtime-v28</span>'
     '<span id="purchase-workspace-runtime-v29" style="display:none">purchase-workspace-runtime-v29</span>'
     '<span id="purchase-workspace-runtime-v30" style="display:none">purchase-workspace-runtime-v30</span>'
+    '<span id="purchase-workspace-runtime-v31" style="display:none">purchase-workspace-runtime-v31</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

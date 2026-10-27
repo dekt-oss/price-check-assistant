@@ -111,3 +111,31 @@ def test_measure_clicks_the_streamlit_wake_button() -> None:
     source = Path("src/purchase_price/scripts/measure_price_search_timings.py").read_text(encoding="utf-8")
     assert "Yes, get this app back up!" in source
     assert "woke = _wake_if_sleeping(page)" in source
+
+
+def test_after_card_marker_adds_the_same_item_stages_and_done_time() -> None:
+    sample = m.sample_from_markers(
+        query="HeartOn A16-DS",
+        wall=3.6,
+        timings={"cold": "0", "track-b": "1.2", "total": "1.5"},
+        render={"card": "0.6"},
+        status="ok",
+        at=AT,
+        deferred={"when": "after-card", "done": "10.4", "same-item-models": "6.7", "category-market": "3.4"},
+        wall_done=14.3,
+    )
+    assert sample["stages"]["same_item_models"] == 6.7
+    assert sample["stages"]["category_market"] == 3.4
+    assert "done" not in sample["stages"] and "when" not in sample["stages"]
+    assert (sample["wall"], sample["wall_done"], sample["same_item_when"]) == (3.6, 14.3, "after-card")
+    rows = {r["stage"]: r for r in m.summarize([sample])}
+    assert rows["wall_done"]["median"] == 14.3
+
+
+def test_dashboard_writes_the_after_card_marker_and_omits_unrun_stages() -> None:
+    source = DASHBOARD.read_text(encoding="utf-8")
+    assert 'id="purchase-deferred-timings-v1"' in source
+    assert m.DEFERRED_MARKER == "#purchase-deferred-timings-v1"
+    assert 'if key not in timings and key not in {"warmup_wait", "cold"}:' in source
+    for when in ('"before-card"', '"after-card"', '"none"'):
+        assert when in source

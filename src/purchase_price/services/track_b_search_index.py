@@ -347,6 +347,56 @@ def _fetch_in_order(
     return rows
 
 
+def recent_ids_for_detail_codes(session: Session, codes: Sequence[str]) -> list[int] | None:
+    """Ids of rows under these 세부품명번호, newest first, without reading the wide table.
+
+    The detail_code B-tree gives the ids and the small ``(id, transaction_date)`` table orders
+    them; sorting through the table itself read every row of a large 품목 (노트북컴퓨터: 80,767
+    rows, about 10 s from a cold 4.6 GB file). None means the side index cannot answer.
+    """
+
+    wanted = list(dict.fromkeys(str(code) for code in codes if code))
+    if not wanted or not search_index_ready(session):
+        return None
+    params = {f"code{index}": code for index, code in enumerate(wanted)}
+    sql = (
+        f"SELECT r.id FROM track_b_delivery_lines AS t JOIN {SEARCH_ROWS_TABLE} AS r ON r.id = t.id "
+        f"WHERE t.detail_code IN ({', '.join(':' + name for name in params)}) "
+        "ORDER BY r.transaction_date DESC, r.id DESC"
+    )
+    try:
+        return [int(value) for value in session.execute(text(sql), params).scalars()]
+    except SQLAlchemyError:
+        return None
+
+
+def detail_code_rows(
+    session: Session,
+    statement,
+    codes: Sequence[str],
+    *,
+    limit: int,
+    scalars: bool = True,
+) -> list[Any]:
+    """Run ``statement`` newest first with ``LIMIT limit``, like the original query.
+
+    ``statement`` keeps all its WHERE terms and must itself restrict ``detail_code`` to ``codes``;
+    the side index only chooses which rows are read, in the original order.
+    """
+
+    ids = recent_ids_for_detail_codes(session, codes)
+    session.info.setdefault(PATHS_KEY, []).append("legacy" if ids is None else "index")
+    if ids is None:
+        ordered = _ordered(statement, "recent").limit(limit)
+        result = session.scalars(ordered) if scalars else session.execute(ordered)
+        return list(result.all())
+    return _fetch_in_order(session, statement, ids, limit=limit, order="recent", scalars=scalars)
+
+
+# Runtime marker: callers below need detail_code_rows (2026-10 review, NT960 search).
+DETAIL_CODE_ROWS_V1 = True
+
+
 def matching_rows(
     session: Session,
     statement,

@@ -53,6 +53,10 @@ def _current_clause():
     )
 
 
+# Runtime marker: the dashboard reloads a retained copy without the side-index class lookup.
+REFERENCE_QUALITY_DETAIL_CODE_ROWS_V1 = True
+
+
 def _base_query(current_clause):
     return select(TrackBDeliveryLine).where(
         current_clause,
@@ -178,12 +182,15 @@ def _verified_classification_references(
         return ()
     if mapping is None or not mapping.detail_product_code:
         return ()
-    rows = _recent_rows(
+    # Newest 500 of the 세부품명 through the side index: a large 품목 (노트북컴퓨터) no longer reads
+    # and sorts every row of the class first.
+    rows = search_index.detail_code_rows(
         session,
         _base_query(current_clause).where(
             TrackBDeliveryLine.detail_code == mapping.detail_product_code
         ),
-        scan_limit=500,
+        (mapping.detail_product_code,),
+        limit=500,
     )
     if not rows:
         return ()
