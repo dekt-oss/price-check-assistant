@@ -356,7 +356,6 @@ _WARMUP_TIMING_KEY = "_price_search_warmup_timing"
 SEARCH_STAGE_LABELS = {
     "identity": "1/4 제품 확인 중 · 식약처 허가정보",
     "track_b": "2/4 같은 제품 거래 찾는 중 · 나라장터",
-    "category_market": "3/4 같은 품목 참고 시세 계산 중",
     "track_b_live": "3/4 최근 며칠 거래 실시간 확인 중 · 나라장터",
     "safety": "4/4 회수·판매중지 확인 중 · 식약처",
 }
@@ -1162,6 +1161,70 @@ def _class_market_overview(raw_search: str, snapshot_runtime: Any) -> dict[str, 
         "category_market": market,
         "class_only": True,
     }
+
+
+def _ensure_same_item_market(state: dict[str, Any]) -> None:
+    """Build the deferred same-품목 models and 같은 품목 시장 once, into the search state.
+
+    Same inputs and builders as the search used before review D-02; a failure leaves both empty,
+    like any optional section."""
+
+    pending = state.get("same_item_pending")
+    if not isinstance(pending, dict):
+        return
+    state["same_item_pending"] = None
+    records = tuple(state.get("same_product_identity") or ())
+    timings = state.get("search_timings_seconds")
+    model_stats: dict[str, Any] = {}
+    crosslinks: list[dict[str, object]] = []
+    market = None
+    started = monotonic()
+    category_started = started
+    try:
+        snapshot_runtime, _live_runtime = _track_b_runtime()
+        with snapshot_runtime.open_track_b_serving_snapshot() as snapshot:
+            crosslinks = _build_mfds_procurement_crosslinks(
+                records,
+                track_b_snapshot=snapshot,
+                current_model=str(pending.get("current_model") or ""),
+                stats_out=model_stats,
+            )
+            category_started = monotonic()
+            market = _build_category_market(
+                snapshot,
+                product_names=tuple(
+                    dict.fromkeys(
+                        [
+                            str(pending.get("identity_product") or ""),
+                            *(r.product_name for r in records if r.product_name),
+                        ]
+                    )
+                ),
+                records=records,
+                crosslinks=crosslinks,
+                model_stats=model_stats,
+            )
+    except Exception:  # noqa: BLE001 - an optional section below the card never breaks the result
+        crosslinks, market = [], None
+    if isinstance(timings, dict):
+        timings["same_item_models"] = round(category_started - started, 3)
+        timings["category_market"] = round(monotonic() - category_started, 3)
+    state["mfds_procurement_crosslinks"] = crosslinks
+    state["category_market"] = market
+
+
+def _same_item_needed_before_card(track_b: Any, *, any_direct: bool, preferred_unit: str | None) -> bool:
+    """True when the conclusion card itself shows the 같은 품목 시장: no same-model trade at all,
+    or fewer priced ones in the chosen period than the contract compares (price.md 제품군 조건)."""
+
+    if not any_direct:
+        return True
+    summary = price_metrics_service.summarize_same_model(
+        [price_metrics_service.PriceTrade.from_candidate(c) for c in grade_ab_candidates(track_b)],
+        cutoff=None,
+        preferred_unit=preferred_unit,
+    )
+    return price_metrics_service.category_allowed_in_conclusion(summary)
 
 
 def _build_category_market(
@@ -2241,33 +2304,16 @@ def _execute_search(
             )
             if matched:
                 indexed_identity = MfdsIdentityLookup("success", raw_search or query.model_name or "", "model", matched)
-        model_stats: dict[str, Any] = {}
-        same_item_started = monotonic()
-        mfds_procurement_crosslinks = _build_mfds_procurement_crosslinks(
-            same_product_identity,
-            track_b_snapshot=track_b_snapshot,
-            current_model=query.model_name or "",
-            stats_out=model_stats,
-        )
-        search_timings["same_item_models"] = round(monotonic() - same_item_started, 3)
-        stage("category_market")
-        category_started = monotonic()
-        category_market = (
-            _build_category_market(
-                track_b_snapshot,
-                product_names=tuple(
-                    dict.fromkeys(
-                        [identity_product or "", *(r.product_name for r in same_product_identity if r.product_name)]
-                    )
-                ),
-                records=same_product_identity,
-                crosslinks=mfds_procurement_crosslinks,
-                model_stats=model_stats,
-            )
+        # Review D-02: the other models of the same 품목 and the 같은 품목 시장 are built by
+        # _ensure_same_item_market when the result is drawn: before the conclusion card only when
+        # the card shows them (no or fewer than 3 priced same-model trades), otherwise after it.
+        mfds_procurement_crosslinks: list[dict[str, object]] = []
+        category_market = None
+        same_item_pending = (
+            {"identity_product": identity_product or "", "current_model": query.model_name or ""}
             if same_product_identity
             else None
         )
-        search_timings["category_market"] = round(monotonic() - category_started, 3)
     search_timings["track_b"] = round(monotonic() - track_b_started, 3)
 
     overview_started = monotonic()
@@ -2411,6 +2457,7 @@ def _execute_search(
         "same_product_identity": same_product_identity,
         "mfds_procurement_crosslinks": mfds_procurement_crosslinks,
         "category_market": category_market,
+        "same_item_pending": same_item_pending,
         "track_b_data_as_of": track_b_data_as_of,
         "track_b_live": track_b_live,
         "track_b_index_updated_at": track_b_index_updated_at,
@@ -3834,27 +3881,37 @@ def _render_search_result(state: dict[str, Any]) -> None:
             price_header_card,
             note=price_header_card.note + f" · 최근 {stats.direct_count}건 기준 (더 오래된 거래 있음)",
         )
-    # Instant 판매 가능/취소 status from the item-status index (fail-closed while it is still
-    # being collected: active is definitive, inactive only after a verified full cycle).
-    item_status_lookup = mfds_item_status_service.lookup_item_status_from_r2(
-        [
-            *identity_permits,
-            *(row.get("식약처 품목번호") for row in mfds_procurement_crosslinks),
-        ]
-    )
-    item_status_labels: dict[str, str] = {}
-    for status_key, item_status in item_status_lookup.statuses.items():
-        label = mfds_item_status_service.item_status_label(
-            item_status, cycle_verified=item_status_lookup.cycle_verified
+    if state.get("same_item_pending") and _same_item_needed_before_card(
+        track_b, any_direct=any_direct, preferred_unit=all_period_unit
+    ):
+        _ensure_same_item_market(state)
+        mfds_procurement_crosslinks = list(state.get("mfds_procurement_crosslinks") or [])
+        category_market = state.get("category_market")
+
+    def label_same_item(
+        crosslinks: list[dict[str, object]], market: Any
+    ) -> tuple[dict[str, str], category_market_service.CategoryMarket | None]:
+        # Instant 판매 가능/취소 status from the item-status index (fail-closed while it is still
+        # being collected: active is definitive, inactive only after a verified full cycle).
+        lookup = mfds_item_status_service.lookup_item_status_from_r2(
+            [*identity_permits, *(row.get("식약처 품목번호") for row in crosslinks)]
         )
-        if label:
-            item_status_labels[status_key] = label
-    if category_market is not None:
-        category_market = category_market_service.with_status_labels(category_market, item_status_labels)
+        labels: dict[str, str] = {}
+        for status_key, item_status in lookup.statuses.items():
+            label = mfds_item_status_service.item_status_label(
+                item_status, cycle_verified=lookup.cycle_verified
+            )
+            if label:
+                labels[status_key] = label
+        if not isinstance(market, category_market_service.CategoryMarket):
+            return labels, None
+        market = category_market_service.with_status_labels(market, labels)
         # The market follows the same 거래 기간 as the same-product numbers above it.
-        category_market = category_market_service.within_period(
-            category_market, period_choice.cutoff, label=period_choice.label
+        return labels, category_market_service.within_period(
+            market, period_choice.cutoff, label=period_choice.label
         )
+
+    item_status_labels, category_market = label_same_item(mfds_procurement_crosslinks, category_market)
     # No same-model trade: 같은 품목 시장 becomes the main body right after the conclusion.
     market_main = bool(category_market is not None and not any_direct and not track_b_unavailable)
     identity_status_label = next(
@@ -4093,6 +4150,15 @@ def _render_search_result(state: dict[str, Any]) -> None:
         'style="display:none"></span>',
         unsafe_allow_html=True,
     )
+    if state.get("same_item_pending"):
+        # Review D-02: the card is on screen; the same-품목 models below it are built now, once.
+        with st.spinner("같은 품목의 다른 모델을 정리하고 있습니다..."):
+            _ensure_same_item_market(state)
+        mfds_procurement_crosslinks = list(state.get("mfds_procurement_crosslinks") or [])
+        item_status_labels, category_market = label_same_item(
+            mfds_procurement_crosslinks, state.get("category_market")
+        )
+        market_main = bool(category_market is not None and not any_direct and not track_b_unavailable)
 
     mfds_live_count_note = ""
     if isinstance(mfds, MfdsWorkspaceResult) and mfds.status == "success" and mfds.records:
@@ -4627,6 +4693,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v27" style="display:none">purchase-workspace-runtime-v27</span>'
     '<span id="purchase-workspace-runtime-v28" style="display:none">purchase-workspace-runtime-v28</span>'
     '<span id="purchase-workspace-runtime-v29" style="display:none">purchase-workspace-runtime-v29</span>'
+    '<span id="purchase-workspace-runtime-v30" style="display:none">purchase-workspace-runtime-v30</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

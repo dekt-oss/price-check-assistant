@@ -11,7 +11,8 @@ Opens ``<url>?q=<query>`` for each query in a headless browser, waits for the co
 Samples go to a JSON file and, with ``--r2``, into a rolling R2 state object
 (``state/v1/perf/price-search-timings.json``, newest ``MAX_SAMPLES``) so a week of scheduled runs
 gives the baseline in ``docs/performance/UX_V11_PRICE_BASELINE.md``. ``--summary`` prints median
-and 90th percentile per stage, split by cold and warm searches.
+and 90th percentile per model and stage, split by cold and warm searches. A stage the page did not
+report is counted as missing, never as 0 seconds.
 
 Playwright is imported lazily: the CI workflow installs it, the app venv does not need it.
 
@@ -89,8 +90,11 @@ def sample_from_markers(
 
     stages: dict[str, float] = {}
     for key, raw in timings.items():
+        if raw is None:
+            # Not reported by the page: a measurement gap, not a 0-second stage.
+            continue
         try:
-            stages[key.replace("-", "_")] = float(raw) if raw is not None else 0.0
+            stages[key.replace("-", "_")] = float(raw)
         except ValueError:
             continue
     try:
@@ -131,38 +135,62 @@ def _stage_value(sample: Mapping[str, Any], stage: str) -> float | None:
         return None
 
 
+def _queries(samples: Sequence[Mapping[str, Any]]) -> list[str]:
+    return list(dict.fromkeys(str(s.get("query") or "") for s in samples))
+
+
 def summarize(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Median and 90th percentile per stage for warm and cold searches (successful samples only)."""
+    """Median and 90th percentile per model, warm/cold and stage (successful samples only).
+
+    Models are kept apart so a slow model is not hidden by fast ones; ``missing`` counts
+    successful samples in which the page did not report that stage."""
 
     rows: list[dict[str, Any]] = []
-    for label, cold in (("따뜻한 상태", False), ("차가운 상태", True)):
-        group = [s for s in samples if s.get("status") == "ok" and bool(s.get("cold")) is cold]
-        for stage in SUMMARY_STAGES:
-            values = [v for s in group if (v := _stage_value(s, stage)) is not None]
-            if not values:
-                continue
-            rows.append(
-                {
-                    "state": label,
-                    "stage": stage,
-                    "n": len(values),
-                    "median": round(median(values), 2),
-                    "p90": round(_percentile(values, 0.9), 2),
-                }
-            )
+    for query in _queries(samples):
+        for label, cold in (("따뜻한 상태", False), ("차가운 상태", True)):
+            group = [
+                s
+                for s in samples
+                if str(s.get("query") or "") == query
+                and s.get("status") == "ok"
+                and bool(s.get("cold")) is cold
+            ]
+            for stage in SUMMARY_STAGES:
+                values = [v for s in group if (v := _stage_value(s, stage)) is not None]
+                if not values:
+                    continue
+                rows.append(
+                    {
+                        "query": query,
+                        "state": label,
+                        "stage": stage,
+                        "n": len(values),
+                        "missing": len(group) - len(values),
+                        "median": round(median(values), 2),
+                        "p90": round(_percentile(values, 0.9), 2),
+                    }
+                )
     return rows
 
 
 def summary_markdown(samples: Sequence[Mapping[str, Any]]) -> str:
     rows = summarize(samples)
     failed = sum(1 for s in samples if s.get("status") != "ok")
-    lines = [
-        f"표본 {len(samples)}개 (실패·시간 초과 {failed}개)",
+    lines = [f"표본 {len(samples)}개 (실패·시간 초과 {failed}개)", ""]
+    for query in _queries(samples):
+        mine = [s for s in samples if str(s.get("query") or "") == query]
+        mine_failed = sum(1 for s in mine if s.get("status") != "ok")
+        lines.append(f"- {query}: 표본 {len(mine)}개, 실패·시간 초과 {mine_failed}개")
+    lines += [
         "",
-        "| 상태 | 단계 | 표본 | 중앙값(초) | 90%(초) |",
-        "| --- | --- | ---: | ---: | ---: |",
+        "| 모델 | 상태 | 단계 | 표본 | 누락 | 중앙값(초) | 90%(초) |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
-    lines += [f"| {r['state']} | {r['stage']} | {r['n']} | {r['median']} | {r['p90']} |" for r in rows]
+    lines += [
+        f"| {r['query']} | {r['state']} | {r['stage']} | {r['n']} | {r['missing']} "
+        f"| {r['median']} | {r['p90']} |"
+        for r in rows
+    ]
     return "\n".join(lines) + "\n"
 
 
