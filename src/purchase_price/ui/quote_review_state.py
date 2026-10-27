@@ -47,6 +47,8 @@ class IdentityResult:
 @dataclass
 class QuoteReviewState:
     file_name: str | None = None
+    # SHA-256 of the extracted upload; the file name alone misses a revised quote with the same name.
+    file_fingerprint: str | None = None
     file_kind: str | None = None
     extraction: QuoteExtractionResult | None = None
     diagnostics: QuoteExtractionDiagnostics | None = None

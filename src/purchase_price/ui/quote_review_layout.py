@@ -44,6 +44,8 @@ QUOTE_REVIEW_CARD_WRAP_V1 = True
 # (UX v1.1 P1); the 판정 words are the contract's labels.
 QUOTE_REVIEW_PRICE_CONTRACT_V1 = True
 QUOTE_REVIEW_LOW_CHECK_V1 = True
+# Review fix A-02: the rule sentence states the lower bound too.
+QUOTE_REVIEW_RULE_BOTH_SIDES_V1 = True
 
 # A quote this many percent above the median of same-product trades is flagged for a check.
 QUOTE_CHECK_THRESHOLD_PERCENT = Decimal("20")
@@ -75,7 +77,9 @@ def rule_sentence(
 
     return (
         f"같은 제품 거래가 {min_trades}건 이상일 때만 판정합니다. 견적 단가가 거래 가운데 값(중앙값)보다 "
-        f"{threshold:g}% 넘게 높으면 '{VERDICT_CHECK}', 그렇지 않으면 '{VERDICT_IN_RANGE}'입니다. "
+        f"{threshold:g}% 넘게 높거나 {threshold:g}% 넘게 낮으면 '{VERDICT_CHECK}', 그 사이면 "
+        f"'{VERDICT_IN_RANGE}'입니다. 낮은 쪽은 단위·수량·구성(설치·옵션 포함 여부)이 거래와 "
+        "같은지 확인하라는 뜻입니다. "
         f"거래가 {min_trades}건 미만이거나 견적 단가가 없으면 '{VERDICT_INSUFFICIENT}'으로 둡니다. "
         "어느 경우든 VAT·설치·구성 조건이 같은지는 따로 확인해야 합니다."
     )
@@ -322,7 +326,7 @@ def _check_points(
         )
     if period_note:
         points.append(period_note)
-    if live_status == "failure":
+    if live_status in {"failure", "partial"}:
         points.append(LIVE_FAILURE_POINT)
     if not _text(getattr(item, "vat_status", "")):
         points.append("견적서에 부가세 포함 여부가 없습니다. 거래가는 부가세 포함 금액입니다.")

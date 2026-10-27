@@ -264,3 +264,87 @@ def test_live_cancelling_change_order_drops_the_collected_line() -> None:
     merged = gap.merge_live_gap(indexed, live)
 
     assert [c.source_record_id for c in merged.candidates] == ["delivery:R2|change:00|line:1"]
+
+
+class PagedClient:
+    """Serves fixed pages per detail code with an explicit totalCount (B-01 boundary cases)."""
+
+    def __init__(self, pages: dict[str, list[list[dict[str, Any]]]], total: dict[str, int]) -> None:
+        self.pages = pages
+        self.total = total
+        self.calls: list[dict[str, Any]] = []
+
+    def get_json(self, base_url: str, endpoint: str, **params: Any) -> dict[str, Any]:
+        self.calls.append(params)
+        code = params["dtilPrdctClsfcNo"]
+        code_pages = self.pages.get(code, [])
+        index = params["pageNo"] - 1
+        items = code_pages[index] if index < len(code_pages) else []
+        return {
+            "response": {
+                "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+                "body": {
+                    "items": items,
+                    "totalCount": self.total.get(code, len(items)),
+                    "pageNo": params["pageNo"],
+                    "numOfRows": 999,
+                },
+            }
+        }
+
+
+def _full_page(prefix: str) -> list[dict[str, Any]]:
+    return [_item(f"{prefix}{n}") for n in range(gap.LIVE_PAGE_SIZE)]
+
+
+def test_empty_page_below_total_count_is_partial_not_zero() -> None:
+    client = PagedClient({"4217210101": [[]]}, {"4217210101": 10_000})
+
+    result = gap.fetch_live_gap(
+        QUERY, detail_codes=("4217210101",), window=WINDOW, client=client, request_budget=1
+    )
+
+    assert result.status == gap.LIVE_PARTIAL_STATUS
+    assert result.status in gap.LIVE_INCOMPLETE_STATUSES
+    assert result.candidates == ()
+
+
+def test_budget_spent_before_the_last_page_and_code_is_partial() -> None:
+    client = PagedClient(
+        {"4217210101": [_full_page("A")], "4217210102": [[_item("B1")]]},
+        {"4217210101": 1_500, "4217210102": 1},
+    )
+
+    result = gap.fetch_live_gap(
+        QUERY,
+        detail_codes=("4217210101", "4217210102"),
+        window=WINDOW,
+        client=client,
+        request_budget=1,
+    )
+
+    assert [call["dtilPrdctClsfcNo"] for call in client.calls] == ["4217210101"]
+    assert result.status == gap.LIVE_PARTIAL_STATUS
+    assert result.candidates == ()
+    assert result.rows_seen == gap.LIVE_PAGE_SIZE
+
+
+def test_partial_live_rows_are_not_merged_into_the_indexed_result() -> None:
+    indexed = TrackBQuoteComparison("success_0", (), 0)
+    partial = gap.TrackBLiveGapFill(gap.LIVE_PARTIAL_STATUS, "실시간 조회를 끝까지 하지 못함")
+
+    assert gap.merge_live_gap(indexed, partial) is indexed
+
+
+def test_every_page_read_is_still_success() -> None:
+    client = PagedClient(
+        {"4217210101": [_full_page("A"), [_item("A-last")]]},
+        {"4217210101": gap.LIVE_PAGE_SIZE + 1},
+    )
+
+    result = gap.fetch_live_gap(
+        QUERY, detail_codes=("4217210101",), window=WINDOW, client=client, request_budget=6
+    )
+
+    assert len(client.calls) == 2
+    assert result.status == "success"

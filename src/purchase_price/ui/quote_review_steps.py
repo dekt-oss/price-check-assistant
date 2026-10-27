@@ -26,7 +26,7 @@ from purchase_price.services.quote_extraction_diagnostics import (
     diagnose_quote_extraction,
     diagnose_quote_extraction_error,
 )
-from purchase_price.services.quote_upload_security import temporary_quote_upload
+from purchase_price.services.quote_upload_security import temporary_quote_upload, upload_fingerprint
 from purchase_price.services.runtime_readiness import ocr_runtime_readiness
 from purchase_price.ui.mapping_requests import register_mapping_request
 from purchase_price.ui.quote_review_contract import (
@@ -147,6 +147,12 @@ def friendly_read_error(file_name: str) -> str:
     return _READ_ERROR_BY_KIND.get(suffix, _READ_ERROR_UNKNOWN)
 
 
+def needs_extraction(uploaded_file, state: QuoteReviewState) -> bool:
+    """True for a file not read yet in this session, judged by its bytes rather than its name."""
+
+    return state.extraction is None or state.file_fingerprint != upload_fingerprint(uploaded_file)
+
+
 def _store_extraction(uploaded_file, state: QuoteReviewState, *, show_error: bool = True) -> None:
     suffix = uploaded_file.name.rsplit(".", 1)[-1].casefold() if "." in uploaded_file.name else ""
     st.session_state.pop(READ_ERROR_SESSION_KEY, None)
@@ -155,6 +161,7 @@ def _store_extraction(uploaded_file, state: QuoteReviewState, *, show_error: boo
         # The reader sees only the Korean sentence; the cause stays in the server log.
         _log.warning("quote read failed (%s): %s: %s", suffix or "?", type(exc).__name__, exc)
         state.extraction = None
+        state.file_fingerprint = None
         state.items = []
         message = friendly_read_error(uploaded_file.name)
         st.session_state[READ_ERROR_SESSION_KEY] = message
@@ -178,6 +185,7 @@ def _store_extraction(uploaded_file, state: QuoteReviewState, *, show_error: boo
         return
 
     state.file_name = uploaded_file.name
+    state.file_fingerprint = upload_fingerprint(uploaded_file)
     state.file_kind = suffix
     state.extraction = result
     state.diagnostics = diagnostics
@@ -205,7 +213,7 @@ def _store_extraction(uploaded_file, state: QuoteReviewState, *, show_error: boo
 def render_s1(state: QuoteReviewState) -> None:
     st.subheader("1. 업로드·추출")
     uploaded = st.file_uploader("견적서 파일", type=["pdf", "xlsx", "xls"])
-    if uploaded is not None and (state.file_name != uploaded.name or state.extraction is None):
+    if uploaded is not None and needs_extraction(uploaded, state):
         _store_extraction(uploaded, state)
 
     if state.extraction is None:

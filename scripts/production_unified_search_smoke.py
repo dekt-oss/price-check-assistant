@@ -14,7 +14,7 @@ from openpyxl import Workbook
 PRODUCTION_URL = os.getenv("PRODUCTION_URL", "https://bp-price-research.streamlit.app/")
 ARTIFACT_DIR = Path("artifacts/production-browser-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
-DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v28"
+DEPLOYMENT_MARKER = "#purchase-workspace-runtime-v29"
 # Streamlit Cloud has kept serving the previous build 10~25 minutes after a merge (2026-10-09, 10-13).
 # `--wait-only` runs first in the workflow and waits this long, so a slow deploy shows up as its own
 # "배포 지연" failure instead of a broken search step. Later in-run waits stay short.

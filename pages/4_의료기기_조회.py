@@ -411,7 +411,8 @@ def _render_trades(result: dev.MarketResult) -> None:
         _retry_button(MARKET_SLOT, "trades-unavailable")
         return
     summary = result.trades
-    if result.track_b_live == "failure":
+    # "partial": the live check stopped before its last page, so recent trades may be missing too.
+    if result.track_b_live in {"failure", "partial"}:
         st.markdown(notice_html(dev.LIVE_FAILURE_NOTE, TONE_WARN), unsafe_allow_html=True)
     st.markdown(dev.trade_summary_cards(summary), unsafe_allow_html=True)
     st.markdown(dev.entry_error_note_html(summary), unsafe_allow_html=True)

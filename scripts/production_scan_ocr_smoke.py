@@ -12,7 +12,8 @@ ARTIFACT_DIR = Path("artifacts/production-scan-ocr-smoke")
 APP_IFRAME = 'iframe[title="streamlitApp"]'
 # The quote-review page now routes uploads straight into the unified purchase workspace, so the
 # smoke uploads into the dedicated extraction UAT page, which shows the parser result in place.
-UAT_NAV_LABEL = "견적추출 UAT"
+# Its sidebar link shows only in ADMIN_MODE, but the page stays registered, so the smoke opens its
+# URL directly (waiting for the hidden link timed out every week after the menu was hidden).
 UAT_UPLOAD_LABEL = "UAT 견적 파일"
 UAT_URL_PATH = "quote-extraction-uat"
 SUCCESS_STRATEGY = "PDF 로컬 OCR(Tesseract kor+eng)"
@@ -24,6 +25,18 @@ OCR_FAILURE_MARKERS = (
     "Error installing requirements",
     "Error running app",
 )
+
+
+class SmokeStageError(RuntimeError):
+    """A failure tagged with where it happened: opening the page is not an OCR failure."""
+
+    def __init__(self, stage: str, message: str) -> None:
+        super().__init__(f"{stage}: {message}")
+        self.stage = stage
+
+
+def uat_url(production_url: str = PRODUCTION_URL) -> str:
+    return f"{production_url.rstrip('/')}/{UAT_URL_PATH}"
 
 
 def _app_frame(page: Any) -> Any:
@@ -133,16 +146,14 @@ def _verify_extraction(body: str) -> dict[str, object]:
 
 
 def _run_attempt(page: Any, pdf_path: Path, attempt: int) -> dict[str, object]:
-    response = page.goto(PRODUCTION_URL, wait_until="domcontentloaded", timeout=60_000)
-    page.wait_for_timeout(3_000)
-    app = _app_frame(page)
-    app.get_by_role("link", name=UAT_NAV_LABEL, exact=True).wait_for(
-        state="visible", timeout=60_000
-    )
-    app.get_by_role("link", name=UAT_NAV_LABEL, exact=True).click()
-    app.get_by_label(UAT_UPLOAD_LABEL, exact=True).wait_for(state="visible", timeout=30_000)
+    try:
+        response = page.goto(uat_url(), wait_until="domcontentloaded", timeout=60_000)
+        app = _app_frame(page)
+        app.get_by_label(UAT_UPLOAD_LABEL, exact=True).wait_for(state="visible", timeout=90_000)
+    except Exception as exc:
+        raise SmokeStageError("entry", f"{type(exc).__name__}: {exc}") from exc
     if UAT_URL_PATH not in page.url:
-        raise RuntimeError(f"Quote extraction UAT page opened at an unexpected URL: {page.url}")
+        raise SmokeStageError("entry", f"UAT page opened at an unexpected URL: {page.url}")
 
     uploader = app.locator(f'section[aria-label="{UAT_UPLOAD_LABEL}"] input[type="file"]')
     uploader.set_input_files(str(pdf_path), timeout=15_000)
@@ -205,6 +216,7 @@ def main() -> None:
                                 "attempt": attempt,
                                 "status": "failure",
                                 "error_type": type(exc).__name__,
+                                "failure_stage": getattr(exc, "stage", "extraction"),
                                 "error_message": str(exc)[:3000],
                             }
                         )

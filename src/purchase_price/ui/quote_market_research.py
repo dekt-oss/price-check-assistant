@@ -76,6 +76,7 @@ from purchase_price.ui.quote_review_steps import (
     READ_ERROR_SESSION_KEY,
     _store_extraction,
     friendly_read_error,
+    needs_extraction,
 )
 from purchase_price.ui.quote_review_summary import render_purchase_review_summary
 from purchase_price.ui.theme import TONE_WARN, notice_html
@@ -1146,10 +1147,7 @@ def render_quote_market_research(state: QuoteReviewState) -> None:
     st.caption(
         "올린 파일은 품목을 읽은 뒤 바로 지우고, 원문을 외부 AI 서비스로 보내지 않습니다."
     )
-    newly_extracted = bool(
-        uploaded is not None
-        and (state.file_name != uploaded.name or state.extraction is None)
-    )
+    newly_extracted = bool(uploaded is not None and needs_extraction(uploaded, state))
     if newly_extracted and uploaded is not None:
         with st.spinner("견적서에서 품목을 읽고 있습니다..."):
             _store_extraction(uploaded, state, show_error=False)
