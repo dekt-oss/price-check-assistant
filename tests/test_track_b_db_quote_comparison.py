@@ -470,3 +470,42 @@ def test_lookup_reads_conditions_without_one_select_per_row(session: Session) ->
 
     assert len(result.candidates) == 30
     assert selects <= 2
+
+
+def _reference_lookup_selects(session: Session, rows: int) -> tuple[int, int]:
+    items = []
+    for sequence in range(1, rows + 1):
+        item = _item(title=f"제습기, 나우이엘, MA-045DTX{sequence:03d}, 45L/d")
+        item["prdctSno"] = str(sequence)
+        items.append(item)
+    ingest_track_b_page(session, _page(items))
+    session.commit()
+    session.expire_all()
+    selects = 0
+
+    def count_selects(_conn, _cursor, statement, _parameters, _context, _executemany) -> None:
+        nonlocal selects
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects += 1
+
+    event.listen(session.bind, "before_cursor_execute", count_selects)
+    try:
+        result = compare_track_b_quote(session, _query(), quote_unit_price=Decimal("100"))
+    finally:
+        event.remove(session.bind, "before_cursor_execute", count_selects)
+    assert result.status == "success_0"
+    return selects, len(result.reference_candidates)
+
+
+def test_reference_lookup_reads_conditions_without_one_select_per_row() -> None:
+    counts = []
+    for rows in (1, 25):
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        with Session(engine) as fresh:
+            selects, references = _reference_lookup_selects(fresh, rows)
+            assert references == rows
+            counts.append(selects)
+
+    # Review D-01: 25 references used to add 100 lazy SELECTs (4 condition columns per row).
+    assert counts[1] == counts[0]

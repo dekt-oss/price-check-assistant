@@ -149,7 +149,7 @@ from purchase_price.ui.quote_review_state import (
     QUOTE_REVIEW_STATE_SESSION_KEY,
     QuoteReviewState,
 )
-from purchase_price.ui.quote_review_steps import _store_extraction
+from purchase_price.ui.quote_review_steps import _store_extraction, needs_extraction
 from purchase_price.ui.runtime_secrets import hydrate_streamlit_runtime_secrets
 from purchase_price.ui.theme import notice_html, page_header_html
 from purchase_price.ui.track_b_transactions import (
@@ -202,10 +202,13 @@ _TRACK_B_RUNTIME_MARKERS = (
     (track_b_r2_index_service, "LOOKUP_LIMIT_5000"),
     (track_b_snapshot_service, "LOOKUP_LIMIT_5000"),
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
+    (track_b_live_service, "LIVE_PARTIAL_V1"),
     (track_b_transactions_ui, "AMOUNT_CHECK_WORDS"),
     (same_item_ui, "ITEM_STATUS_AWARE"),
     # UX v1.1 P2b: one SELECT per lookup (no per-row lazy loads), grading cached per 품명.
     (track_b_comparison_service, "LOOKUP_NO_LAZY_LOADS_V1"),
+    # Review fix D-01: the reference lookup (0 same-model trades) eager-loads its conditions too.
+    (track_b_comparison_service, "REFERENCE_NO_LAZY_LOADS_V1"),
 )
 
 
@@ -246,6 +249,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.price_metrics", "PRICE_METRICS_V1"),
     ("purchase_price.services.price_metrics", "PRICE_METRICS_LOW_CHECK_V1"),
     ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_LOW_CHECK_V1"),
+    ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_RULE_BOTH_SIDES_V1"),
     ("purchase_price.services.market_survey_export", "MARKET_SURVEY_PRICE_CONTRACT_V1"),
     ("purchase_price.ui.quote_review_layout", "QUOTE_REVIEW_PRICE_CONTRACT_V1"),
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_COMPARISON_V1"),
@@ -2694,9 +2698,11 @@ def _render_quote_items(state: dict[str, Any]) -> None:
         st.page_link("pages/2_견적_검토.py", label="견적서 전체 품목 · 상세 검증 열기", icon="📋")
         return
     file_name = str(state.get("quote_file_name") or quote_state.file_name or "견적서")
+    # Keyed by the file's bytes: a revised quote under the same name must not reuse item results.
+    file_key = quote_state.file_fingerprint or file_name
     cache = st.session_state.get(QUOTE_ITEM_RESULTS_SESSION_KEY)
-    if not isinstance(cache, dict) or cache.get("file") != file_name:
-        cache = {"file": file_name, "results": {}}
+    if not isinstance(cache, dict) or cache.get("file") != file_key:
+        cache = {"file": file_key, "results": {}}
         st.session_state[QUOTE_ITEM_RESULTS_SESSION_KEY] = cache
     current_index = state.get("quote_item_index")
     if isinstance(current_index, int):
@@ -2715,7 +2721,7 @@ def _render_quote_items(state: dict[str, Any]) -> None:
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
-        key=f"quote_items::{file_name}",
+        key=f"quote_items::{file_key[:16]}",
     )
     selected = list(getattr(getattr(event, "selection", None), "rows", []) or [])
     if selected and 0 <= selected[0] < len(quote_state.items) and selected[0] != current_index:
@@ -3950,6 +3956,10 @@ def _render_search_result(state: dict[str, Any]) -> None:
         elif live_status == "failure":
             live_failed = True
             live_note = "나라장터 실시간 확인 실패, 수집해 둔 자료만 표시"
+        elif live_status == "partial":
+            # Some pages were not read; showing their rows or "0건" would claim a finished check.
+            live_failed = True
+            live_note = "나라장터 실시간 확인을 끝까지 하지 못해 수집해 둔 자료만 표시"
         elif live_status == "not_applicable" and getattr(live, "reason", ""):
             live_note = f"실시간 확인 안 함({live.reason})"
         if live_note and getattr(live, "truncated_window", False):
@@ -4616,6 +4626,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v26" style="display:none">purchase-workspace-runtime-v26</span>'
     '<span id="purchase-workspace-runtime-v27" style="display:none">purchase-workspace-runtime-v27</span>'
     '<span id="purchase-workspace-runtime-v28" style="display:none">purchase-workspace-runtime-v28</span>'
+    '<span id="purchase-workspace-runtime-v29" style="display:none">purchase-workspace-runtime-v29</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
@@ -4875,7 +4886,7 @@ if uploaded is not None:
     if QUOTE_REVIEW_STATE_SESSION_KEY not in st.session_state:
         st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY] = QuoteReviewState()
     quote_state: QuoteReviewState = st.session_state[QUOTE_REVIEW_STATE_SESSION_KEY]
-    newly_extracted = quote_state.file_name != uploaded.name or quote_state.extraction is None
+    newly_extracted = needs_extraction(uploaded, quote_state)
     if newly_extracted:
         with st.spinner("견적서에서 품목을 뽑고 있습니다..."):
             _store_extraction(uploaded, quote_state)
@@ -4883,7 +4894,9 @@ if uploaded is not None:
         st.session_state.pop(QUOTE_ITEM_RESULTS_SESSION_KEY, None)
 
     if quote_state.items:
-        already_routed = st.session_state.get(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY) == uploaded.name
+        already_routed = (
+            st.session_state.get(QUOTE_AUTO_ROUTE_FILE_SESSION_KEY) == quote_state.file_fingerprint
+        )
         if not already_routed:
             item = quote_state.items[0]
             try:
@@ -4906,12 +4919,12 @@ if uploaded is not None:
                     quote_result["quote_file_name"] = uploaded.name
                     quote_result["quote_item_index"] = 0
                     st.session_state[HOME_SEARCH_STATE_KEY] = quote_result
-                    st.session_state[QUOTE_AUTO_ROUTE_FILE_SESSION_KEY] = uploaded.name
+                    st.session_state[QUOTE_AUTO_ROUTE_FILE_SESSION_KEY] = quote_state.file_fingerprint
                     st.session_state[HOME_SEARCH_DETAILS_KEY] = False
                     status.update(label="1번 품목 조사 완료", state="complete")
                 st.rerun()
             except ValueError as exc:
-                st.session_state[QUOTE_AUTO_ROUTE_FILE_SESSION_KEY] = uploaded.name
+                st.session_state[QUOTE_AUTO_ROUTE_FILE_SESSION_KEY] = quote_state.file_fingerprint
                 st.warning(
                     "1번 품목에 품명이나 모델명이 없어 바로 조사하지 못했습니다. "
                     f"아래 '견적 상세 검증'에서 추출 내용을 확인하세요. ({exc})"

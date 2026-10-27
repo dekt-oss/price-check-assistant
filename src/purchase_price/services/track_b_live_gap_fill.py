@@ -51,6 +51,11 @@ LIVE_PAGE_SIZE = 999
 MAX_GAP_DAYS = 62
 MAX_DETAIL_CODES = 3
 DEFAULT_REQUEST_BUDGET = 6
+# A live check that did not read every page of every detail code. Its rows are not merged: a later
+# page may hold a newer change order (e.g. a cancellation) of a line already read.
+LIVE_PARTIAL_STATUS = "partial"
+# Statuses that leave recent trades possibly missing; screens say so instead of "0건".
+LIVE_INCOMPLETE_STATUSES = frozenset({"failure", LIVE_PARTIAL_STATUS})
 _SOURCE_ID = re.compile(r"^delivery:(?P<delivery>.+)\|change:(?P<change>[^|]+)\|line:(?P<line>.+)$")
 
 
@@ -60,7 +65,7 @@ class _JsonClient(Protocol):
 
 @dataclass(frozen=True)
 class TrackBLiveGapFill:
-    status: str  # success | success_0 | up_to_date | not_applicable | failure
+    status: str  # success | success_0 | up_to_date | not_applicable | partial | failure
     reason: str = ""
     begin_date: str | None = None
     end_date: str | None = None
@@ -187,9 +192,12 @@ def fetch_live_gap(
     records = []
     requests = 0
     rows_seen = 0
+    incomplete_codes = 0
     try:
         for code in codes:
             page_no = 1
+            code_rows = 0
+            complete = False
             while requests < request_budget:
                 payload = client.get_json(
                     base_url,
@@ -200,6 +208,7 @@ def fetch_live_gap(
                 page = unwrap_g2b_page(payload)
                 items = tuple(dict(item) for item in page.items)
                 rows_seen += len(items)
+                code_rows += len(items)
                 envelope = _live_page_envelope(
                     detail_code=code,
                     begin=begin,
@@ -215,8 +224,13 @@ def fetch_live_gap(
                 )
                 records.extend(normalized.records)
                 if len(items) < LIVE_PAGE_SIZE:
+                    # A short page ends the code only when it agrees with totalCount; fewer rows
+                    # than announced (shrunk or empty page) is an unfinished read, not 0건.
+                    complete = page.total_count is None or code_rows >= page.total_count
                     break
                 page_no += 1
+            if not complete:
+                incomplete_codes += 1
     except Exception as exc:  # live data is optional; never break the indexed result
         return TrackBLiveGapFill(
             "failure",
@@ -224,6 +238,15 @@ def fetch_live_gap(
             rows_seen=rows_seen,
             request_count=requests,
             error_type=type(exc).__name__,
+            **common,
+        )
+
+    if incomplete_codes:
+        return TrackBLiveGapFill(
+            LIVE_PARTIAL_STATUS,
+            "실시간 조회를 끝까지 하지 못함",
+            rows_seen=rows_seen,
+            request_count=requests,
             **common,
         )
 
@@ -259,6 +282,7 @@ def fetch_live_gap(
 
 # Runtime marker: the dashboard reloads a retained pre-fix copy of this module (hot reload).
 DROPS_CANCELLED_LINES = True
+LIVE_PARTIAL_V1 = True
 
 
 def _line_identity(source_record_id: str) -> tuple[tuple[str, str], int] | None:

@@ -411,6 +411,7 @@ SEARCH_INDEX_V1 = True
 # (they are deferred on the model, so each row used to fire 4 more SELECTs) and grades each
 # distinct 품명 once per lookup.
 LOOKUP_NO_LAZY_LOADS_V1 = True
+REFERENCE_NO_LAZY_LOADS_V1 = True
 
 
 def _condition_columns_available(session: Session) -> frozenset[str]:
@@ -645,10 +646,17 @@ def _find_reference_candidates(
     if not conditions:
         return ()
 
+    # Same eager condition columns as the direct lookup: without them each reference row ran one
+    # lazy SELECT per condition column (25 rows -> 100 extra SELECTs).
+    condition_columns_available = _condition_columns_available(session)
+    eager = [
+        undefer(getattr(TrackBDeliveryLine, name))
+        for name in sorted(condition_columns_available)
+    ]
     # Substring LIKEs cannot use a B-tree index; the side index narrows the rows read.
     rows = search_index.matching_rows(
         session,
-        select(TrackBDeliveryLine).where(
+        select(TrackBDeliveryLine).options(*eager).where(
             current_clause,
             or_(*conditions),
             _not_cancelled_clause(),
@@ -675,7 +683,6 @@ def _find_reference_candidates(
             -row.id,
         ),
     )
-    condition_columns_available = _condition_columns_available(session)
     references: list[TrackBReferenceCandidate] = []
     seen: set[str] = set()
     for row in ranked:

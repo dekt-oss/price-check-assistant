@@ -61,10 +61,20 @@ def test_rule_constants_are_named_and_stated_in_plain_words() -> None:
     assert MIN_COMPARABLE_TRADES == 3
     sentence = rule_sentence()
     assert "3건 이상" in sentence
-    assert "20% 넘게 높으면" in sentence
+    assert "20% 넘게 높거나 20% 넘게 낮으면" in sentence
+    assert "단위·수량·구성" in sentence
     assert "비교 근거 부족" in sentence
     assert "거래 범위 안 (조건 미확인)" in sentence
     assert "판단 부족" not in sentence
+
+
+def test_rule_sentence_matches_the_verdict_on_both_sides() -> None:
+    # Review A-02: −90% is 확인 필요, so the sentence must not call everything not +20% in range.
+    low = quote_verdict(
+        quote_unit_price=Decimal("10"), median_price=Decimal("100"), comparable_count=3
+    )
+    assert low.kind == VERDICT_CHECK
+    assert "그렇지 않으면" not in rule_sentence()
 
 
 def test_fewer_than_three_trades_is_not_judged() -> None:

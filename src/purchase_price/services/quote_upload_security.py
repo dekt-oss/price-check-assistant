@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -36,6 +37,12 @@ CURRENT_QUOTE_UPLOAD_SECURITY_POLICY = QuoteUploadSecurityPolicy(
 QUOTE_UPLOAD_IMAGES_V1 = True
 
 _ALLOWED_SUFFIXES = set(CURRENT_QUOTE_UPLOAD_SECURITY_POLICY.allowed_suffixes)
+
+
+def upload_fingerprint(uploaded_file: UploadedQuoteFile) -> str:
+    """SHA-256 of the uploaded bytes: a revised quote sent under the same file name is a new file."""
+
+    return hashlib.sha256(uploaded_file.getvalue()).hexdigest()
 
 
 @contextmanager
