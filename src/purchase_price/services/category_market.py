@@ -41,6 +41,7 @@ CATEGORY_MARKET_PERIOD_V1 = True
 CATEGORY_MARKET_ENTRY_ERRORS_V1 = True
 # Runtime marker (P3b): top_models ranks the stated models of the 장비 구매 lines by trades / institutions.
 CATEGORY_MARKET_TOP_MODELS_V1 = True
+CATEGORY_MARKET_DETAIL_CODE_ROWS_V1 = True
 CATEGORY_TRADE_LIMIT = 6000
 PRICE_FACTOR = Decimal("3")
 PRICE_RULE_MIN_ROWS = 4
@@ -841,6 +842,7 @@ def load_category_trades(
     from sqlalchemy.orm import aliased
 
     from purchase_price.models import TrackBDeliveryLine as Line
+    from purchase_price.services import track_b_search_index
 
     if not codes:
         return (), False
@@ -877,9 +879,10 @@ def load_category_trades(
     has_business = "business_name" in columns
     if has_business:
         selected.append(Line.business_name)
-    rows = session.execute(
-        select(*selected)
-        .where(
+    # Newest first through the side index (same rows and order as ORDER BY ... LIMIT).
+    rows = track_b_search_index.detail_code_rows(
+        session,
+        select(*selected).where(
             Line.detail_code.in_(list(codes)),
             current,
             Line.identity_conflict.is_(False),
@@ -888,10 +891,11 @@ def load_category_trades(
                 Line.unit_price > 0,
                 and_(Line.unit_price.is_(None), Line.total_amount > 0, Line.quantity > 0),
             ),
-        )
-        .order_by(Line.transaction_date.desc(), Line.id.desc())
-        .limit(limit + 1)
-    ).all()
+        ),
+        list(codes),
+        limit=limit + 1,
+        scalars=False,
+    )
     trades: list[CategoryTrade] = []
     for row in rows[:limit]:
         price = row.unit_price
