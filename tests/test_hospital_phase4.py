@@ -202,7 +202,8 @@ def test_weekly_report_workflow_contract() -> None:
     for secret in ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY"):
         assert f"secrets.{secret}" in text
     assert "--with-ai --with-news --r2" in text
-    assert "retention-days: 21" in text
+    # Review C-01: titles up to 7 days old + 14 days = the 21-day NAVER limit.
+    assert "retention-days: 14" in text
     assert "NAVER_CLIENT" not in text  # the report reads stored titles; it never searches NAVER
 
 
@@ -218,3 +219,27 @@ def test_benchmark_page_keeps_plain_words_and_ai_fallback_text() -> None:
     assert "@st.cache_data" in source
     assert "_cached_screen_report" in source
     assert rs.has_banned_term(source) is None
+
+
+def test_step_summary_counts_news_without_copying_titles() -> None:
+    # Review C-01: GitHub run summaries outlive the 21-day limit, so they never carry titles.
+    from purchase_price.scripts import generate_hospital_report as script
+
+    data = benchmark.load_benchmark_data()
+    target = data.master.get("H-BUSAN-PAIK")
+    report = report_service.build_report(data, target, "region", 2024, now=datetime(2026, 10, 12, 8, tzinfo=KST))
+    report.news = [
+        report_service.NewsLine(
+            published="2026-10-10 09:00",
+            keywords="병원",
+            title="SYNTH-NEWS-TITLE-1",
+            source="example.kr",
+            url="https://example.kr/a",
+        )
+    ]
+
+    text = script.step_summary_markdown(report)
+
+    assert "SYNTH-NEWS-TITLE-1" not in text and "https://example.kr/a" not in text
+    assert "뉴스 1건은 R2의 보고서 파일에만 실었습니다" in text
+    assert "SYNTH-NEWS-TITLE-1" in report_service.report_markdown(report)

@@ -427,6 +427,8 @@ def run_digest(args: argparse.Namespace, store: nri.NewsRadarStore, *, now: date
     day = current.astimezone(nri.KST).date()
     written = store.write_digest(day, text)
     removed = store.prune_digests(day - timedelta(days=nri.RETENTION_DAYS))
+    # Daily, so a weekly report with news titles goes on the day its oldest title turns 21 days.
+    removed_reports = store.prune_reports(nri.report_prune_before(day))
     _append_step_summary(text)
     mailed = send_to_subscribers(
         _subscriber_store(args),
@@ -441,6 +443,7 @@ def run_digest(args: argparse.Namespace, store: nri.NewsRadarStore, *, now: date
         "written": written,
         "day": day.isoformat(),
         "removed_old_digests": removed,
+        "removed_old_reports": removed_reports,
         "line_count": len(text.splitlines()),
     }
 

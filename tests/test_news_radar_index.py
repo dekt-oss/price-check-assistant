@@ -396,3 +396,29 @@ def test_times_are_shown_in_korean_time_even_on_a_utc_server() -> None:
         "a", "t", "https://a.kr", "", "a.kr", datetime(2026, 10, 7, 23, 30, tzinfo=UTC), ("k",), NOW
     )
     assert radar.summarize([entry], today=date(2026, 10, 8)).today == 1
+
+
+def test_report_folders_go_when_their_oldest_title_turns_21_days() -> None:
+    # Review C-01: a weekly report holds titles up to 7 days old, so its folder goes 14 days after
+    # the report date (the oldest title is then 21 days old), not 21 days after it.
+    today = date(2026, 10, 27)
+    assert nri.report_prune_before(today) == date(2026, 10, 14)
+    assert (today - date(2026, 10, 13)).days + nri.REPORT_NEWS_DAYS == nri.RETENTION_DAYS
+
+    s3 = _FakeS3()
+    store = nri.R2NewsRadarStore(client=s3, bucket="b")
+    for key in (
+        "reports/v1/2026-10-13/report.md",
+        "reports/v1/2026-10-13/report.xlsx",
+        "reports/v1/2026-10-14/report.md",
+        "reports/v1/not-a-date/report.md",
+        "news/v1/digest/2026-09-01.md",
+    ):
+        s3.objects[key] = {"Body": b"x", "Metadata": {}}
+
+    assert store.prune_reports(nri.report_prune_before(today)) == 2
+    assert sorted(s3.objects) == [
+        "news/v1/digest/2026-09-01.md",
+        "reports/v1/2026-10-14/report.md",
+        "reports/v1/not-a-date/report.md",
+    ]

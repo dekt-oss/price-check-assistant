@@ -62,4 +62,5 @@ jobs:
           name: hospital-weekly-report
           path: artifacts/hospital-report/
           if-no-files-found: warn
-          retention-days: 21
+          # The newest report holds titles up to 7 days old: 14 more days reaches the 21-day limit.
+          retention-days: 14

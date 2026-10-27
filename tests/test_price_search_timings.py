@@ -35,19 +35,60 @@ def test_rolling_samples_keep_the_newest() -> None:
     assert merged[0]["at"] == "2026-01-01T00:00:01+00:00"
 
 
-def _sample(wall: float, *, cold: bool = False, status: str = "ok") -> dict:
-    return {"status": status, "cold": cold, "wall": wall, "stages": {"total": wall - 1}, "render_card": 0.2}
+def _sample(
+    wall: float,
+    *,
+    cold: bool = False,
+    status: str = "ok",
+    query: str = "PNB-704",
+    stages: dict | None = None,
+) -> dict:
+    return {
+        "query": query,
+        "status": status,
+        "cold": cold,
+        "wall": wall,
+        "stages": {"total": wall - 1} if stages is None else stages,
+        "render_card": 0.2,
+    }
 
 
 def test_summary_splits_cold_and_warm_and_skips_failures() -> None:
     samples = [_sample(w) for w in (2, 3, 4, 5, 20)] + [_sample(60, cold=True), _sample(99, status="timeout")]
-    rows = {(r["state"], r["stage"]): r for r in m.summarize(samples)}
-    warm = rows[("따뜻한 상태", "wall")]
+    rows = {(r["query"], r["state"], r["stage"]): r for r in m.summarize(samples)}
+    warm = rows[("PNB-704", "따뜻한 상태", "wall")]
     assert (warm["n"], warm["median"], warm["p90"]) == (5, 4, 20)
-    assert rows[("차가운 상태", "wall")]["n"] == 1
-    assert ("따뜻한 상태", "render_card") in rows
+    assert rows[("PNB-704", "차가운 상태", "wall")]["n"] == 1
+    assert ("PNB-704", "따뜻한 상태", "render_card") in rows
     text = m.summary_markdown(samples)
     assert "표본 7개 (실패·시간 초과 1개)" in text
+
+
+def test_summary_keeps_a_slow_model_apart_from_fast_ones() -> None:
+    # Review C-04: 8-second and 14-second models were one warm median.
+    samples = [_sample(8, query="PNB-704") for _ in range(3)] + [_sample(14, query="NT960XJG-K72AG")]
+    rows = {(r["query"], r["stage"]): r for r in m.summarize(samples) if r["state"] == "따뜻한 상태"}
+    assert rows[("PNB-704", "wall")]["median"] == 8
+    assert rows[("NT960XJG-K72AG", "wall")]["median"] == 14
+    text = m.summary_markdown(samples)
+    assert "| NT960XJG-K72AG | 따뜻한 상태 | wall | 1 | 0 | 14.0 | 14.0 |" in text
+    assert "- NT960XJG-K72AG: 표본 1개, 실패·시간 초과 0개" in text
+
+
+def test_unreported_stage_is_missing_not_zero_seconds() -> None:
+    sample = m.sample_from_markers(
+        query="HeartOn A16-DS",
+        wall=9.0,
+        timings={"cold": "0", "same-item-models": None, "total": "3.0"},
+        render={"card": None},
+        status="ok",
+        at=AT,
+    )
+    assert "same_item_models" not in sample["stages"]
+    reported = _sample(9, query="HeartOn A16-DS", stages={"same_item_models": 4.5, "total": 3.0})
+    rows = {r["stage"]: r for r in m.summarize([sample, reported]) if r["state"] == "따뜻한 상태"}
+    assert (rows["same_item_models"]["n"], rows["same_item_models"]["missing"]) == (1, 1)
+    assert rows["same_item_models"]["median"] == 4.5
 
 
 def test_dashboard_reports_each_stage_and_emits_the_v2_marker() -> None:
@@ -56,8 +97,11 @@ def test_dashboard_reports_each_stage_and_emits_the_v2_marker() -> None:
     assert 'id="purchase-render-timings-v1"' in source
     # The production smoke still reads v1; keep it.
     assert 'id="purchase-search-timings-v1"' in source
-    for stage in ("identity", "track_b", "category_market", "track_b_live", "safety"):
+    for stage in ("identity", "track_b", "track_b_live", "safety"):
         assert f'stage("{stage}")' in source
+    # Review D-02: the same-품목 models and market are timed where they are built, after the card.
+    assert 'timings["same_item_models"]' in source
+    assert 'timings["category_market"]' in source
     assert source.count("progress=_stage_reporter(status)") >= 5
     for key in m.TIMING_KEYS:
         assert key.replace("-", "_") in source

@@ -135,8 +135,9 @@ NEWS_RADAR_INDEX_PATH=.local/news-radar.json.gz streamlit run Home.py   # /news-
   병원별 전체 지표, 5년 추이, 자료 상태, (선택) 최근 7일 관련 기사 제목·링크.
 - Benchmark 화면 아래 "리포트 내려받기"에서 지금 화면 기준으로 내려받는다. AI 설명을 본 뒤 받으면 설명도 들어간다.
 - 주간 자동 리포트 `.github/workflows/hospital-weekly-report.yml`: 매주 월요일 08:00(한국 시간) 부산백병원
-  지역 경쟁군·동일 의료원 리포트를 만들어 Actions 요약, 산출물(21일 보관), R2 `reports/v1/<날짜>/`에 올린다.
-  기사 제목이 들어가므로 R2 리포트도 21일 지나면 지운다. `ANTHROPIC_API_KEY` Secret이 있으면 AI 설명을 넣는다.
+  지역 경쟁군·동일 의료원 리포트를 만들어 Actions 요약, 산출물(14일 보관), R2 `reports/v1/<날짜>/`에 올린다.
+  리포트에는 최근 7일 기사 제목이 들어가므로, 가장 오래된 제목이 21일이 되는 리포트 날짜+14일에 R2 폴더를 지운다
+  (매일 08:30 뉴스 요약 작업도 같은 기준으로 정리). Actions 요약에는 기사 제목 없이 건수만 남긴다(2026-10 리뷰 C-01). `ANTHROPIC_API_KEY` Secret이 있으면 AI 설명을 넣는다.
 
 ```bash
 python -m purchase_price.scripts.generate_hospital_report --hospital H-BUSAN-PAIK --peer region --output-dir .local/report

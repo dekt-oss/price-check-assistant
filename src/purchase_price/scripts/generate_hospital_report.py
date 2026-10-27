@@ -6,17 +6,20 @@
 Writes ``<output-dir>/<name>.md`` and ``.xlsx``. ``--with-ai`` adds a paragraph from Claude built
 only from computed numbers (skipped with a note when ANTHROPIC_API_KEY is missing or the answer
 fails the number check). ``--with-news`` adds the last 7 days of News Radar titles and links.
-``--r2`` also uploads both files under ``reports/v1/<date>/`` and removes report folders older
-than 21 days, because a report with news titles is a NAVER display cache (21-day limit).
+``--r2`` also uploads both files under ``reports/v1/<date>/`` and removes report folders whose
+oldest news title is past 21 days (a report with news titles is a NAVER display cache, 21-day
+limit); the daily News Radar digest job prunes the same folders. The step summary gives the
+number of news lines, never their titles: run summaries outlive 21 days.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from purchase_price.config import Settings
@@ -27,7 +30,6 @@ from purchase_price.services import hospital_report as report_service
 from purchase_price.services import news_radar as radar
 
 REPORT_PREFIX = "reports/v1"
-REPORT_RETENTION_DAYS = 21
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -80,10 +82,12 @@ def _news(settings: Settings) -> list[report_service.NewsLine]:
         index.items.values(),
         report_service.keywords_in_groups(),
         now=datetime.now().astimezone(radar.SEOUL),
+        days=news_index.REPORT_NEWS_DAYS,
     )
 
 
 def _upload(settings: Settings, files: list[Path], day: str) -> list[str]:
+    from purchase_price.services import news_radar_index as news_index
     from purchase_price.services.news_radar_index import R2NewsRadarStore
 
     store = R2NewsRadarStore.from_settings(settings)
@@ -98,21 +102,20 @@ def _upload(settings: Settings, files: list[Path], day: str) -> list[str]:
         )
         client.put_object(Bucket=bucket, Key=key, Body=path.read_bytes(), ContentType=content_type)
         keys.append(key)
-    cutoff = (datetime.now().astimezone(radar.SEOUL) - timedelta(days=REPORT_RETENTION_DAYS)).date().isoformat()
-    token = None
-    while True:
-        kwargs = {"Bucket": bucket, "Prefix": f"{REPORT_PREFIX}/"}
-        if token:
-            kwargs["ContinuationToken"] = token
-        response = client.list_objects_v2(**kwargs)
-        for obj in response.get("Contents", []) or []:
-            parts = str(obj["Key"]).split("/")
-            if len(parts) >= 3 and parts[2] < cutoff:
-                client.delete_object(Bucket=bucket, Key=obj["Key"])
-        if not response.get("IsTruncated"):
-            break
-        token = response.get("NextContinuationToken")
+    store.prune_reports(news_index.report_prune_before(datetime.now().astimezone(radar.SEOUL).date()))
     return keys
+
+
+def step_summary_markdown(report: report_service.BenchmarkReport) -> str:
+    """The report without its news titles, plus how many there were (review C-01)."""
+
+    text = report_service.report_markdown(dataclasses.replace(report, news=[]))
+    if report.news:
+        text += (
+            f"\n\n뉴스 {len(report.news)}건은 R2의 보고서 파일에만 실었습니다"
+            "(가장 오래된 기사가 21일이 되면 지웁니다).\n"
+        )
+    return text
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now().astimezone(radar.SEOUL)
     written: list[Path] = []
+    step_texts: list[str] = []
     summaries: list[dict[str, object]] = []
     for peer_kind in args.peer or ["region", "network"]:
         low, high = (int(v) for v in args.bed_range.split("-", 1))
@@ -145,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         md_path.write_text(report_service.report_markdown(report), encoding="utf-8")
         xlsx_path.write_bytes(report_service.report_workbook(report))
         written += [md_path, xlsx_path]
+        step_texts.append(step_summary_markdown(report))
         summaries.append(
             {
                 "peer": report.peer_label,
@@ -168,9 +173,8 @@ def main(argv: list[str] | None = None) -> int:
     step_summary = os.getenv("GITHUB_STEP_SUMMARY")
     if step_summary:
         with open(step_summary, "a", encoding="utf-8") as handle:
-            for path in written:
-                if path.suffix == ".md":
-                    handle.write(path.read_text(encoding="utf-8") + "\n\n---\n\n")
+            for text in step_texts:
+                handle.write(text + "\n\n---\n\n")
     return 0
 
 

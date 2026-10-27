@@ -43,6 +43,11 @@ NEWS_PREFIX = "news/v1"
 INDEX_KEY = f"{NEWS_PREFIX}/index.json.gz"
 STATUS_KEY = f"{NEWS_PREFIX}/status.json"
 DIGEST_PREFIX = f"{NEWS_PREFIX}/digest"
+# Weekly hospital reports (scripts/generate_hospital_report.py) carry the last REPORT_NEWS_DAYS of
+# titles, so a report folder goes when its oldest title would pass RETENTION_DAYS (review C-01),
+# not 21 days after the report date.
+REPORT_PREFIX = "reports/v1"
+REPORT_NEWS_DAYS = 7
 INDEX_SCHEMA = "news-radar-index-v2"
 READABLE_INDEX_SCHEMAS = {"news-radar-index-v1", INDEX_SCHEMA}
 STATUS_SCHEMA = "news-radar-status-v1"
@@ -53,6 +58,12 @@ KST = radar.SEOUL
 ALERT_ITEM_LIMIT = 20
 _DIGEST_KEY_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.md$")
 LOGGER = logging.getLogger(__name__)
+
+
+def report_prune_before(today: date) -> date:
+    """Report folders dated before this day hold a title older than RETENTION_DAYS."""
+
+    return today - timedelta(days=RETENTION_DAYS - REPORT_NEWS_DAYS - 1)
 
 
 class NewsRadarIndexError(RuntimeError):
@@ -675,6 +686,8 @@ class NewsRadarStore(Protocol):
 
     def prune_digests(self, before: date) -> int: ...
 
+    def prune_reports(self, before: date) -> int: ...
+
 
 def _index_bytes(index: NewsRadarIndex) -> bytes:
     return json.dumps(index_to_payload(index), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
@@ -743,6 +756,9 @@ class LocalNewsRadarStore:
                 path.unlink(missing_ok=True)
                 removed += 1
         return removed
+
+    def prune_reports(self, before: date) -> int:
+        return 0  # reports are only uploaded to R2
 
 
 class R2NewsRadarStore:
@@ -872,6 +888,32 @@ class R2NewsRadarStore:
                 key = str(item.get("Key") or "")
                 match = _DIGEST_KEY_RE.search(key)
                 if match and date.fromisoformat(match.group(1)) < before:
+                    self._client.delete_object(Bucket=self.bucket, Key=key)
+                    removed += 1
+            if not response.get("IsTruncated"):
+                return removed
+            token = str(response.get("NextContinuationToken") or "") or None
+            if token is None:
+                return removed
+
+    def prune_reports(self, before: date) -> int:
+        """Delete ``reports/v1/<YYYY-MM-DD>/...`` objects dated before ``before``."""
+
+        removed = 0
+        token: str | None = None
+        while True:
+            kwargs: dict[str, Any] = {"Bucket": self.bucket, "Prefix": f"{REPORT_PREFIX}/", "MaxKeys": 1000}
+            if token:
+                kwargs["ContinuationToken"] = token
+            response = self._client.list_objects_v2(**kwargs)
+            for item in response.get("Contents") or []:
+                key = str(item.get("Key") or "")
+                parts = key.split("/")
+                try:
+                    day = date.fromisoformat(parts[2]) if len(parts) >= 4 else None
+                except ValueError:
+                    day = None
+                if day is not None and day < before:
                     self._client.delete_object(Bucket=self.bucket, Key=key)
                     removed += 1
             if not response.get("IsTruncated"):
