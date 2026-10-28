@@ -509,3 +509,51 @@ def test_reference_lookup_reads_conditions_without_one_select_per_row() -> None:
 
     # Review D-01: 25 references used to add 100 lazy SELECTs (4 condition columns per row).
     assert counts[1] == counts[0]
+
+
+def test_batch_reads_model_chunks_in_parallel_on_an_index_file(tmp_path) -> None:
+    """Same-품목 speed: an index file is read in model-key chunks at once, with the same result."""
+
+    import threading
+
+    from purchase_price.services import track_b_db_quote_comparison as module
+
+    engine = create_engine(f"sqlite+pysqlite:///{(tmp_path / 'index.sqlite').as_posix()}")
+    Base.metadata.create_all(engine)
+    items, queries = [], []
+    for sequence in range(1, 21):
+        model = f"MA-{sequence:03d}DT"
+        for change, price in (("00", "80"), ("01", "90")):  # only the newest change order counts
+            item = _item(change=change, price=price, title=f"제습기, 나우이엘, {model}, 45L/d")
+            item["prdctSno"] = str(sequence)
+            items.append(item)
+        queries.append(
+            ProductQuery(product_name="제습기", manufacturer="나우이엘", model_name=model, specification="45L/d")
+        )
+    with Session(engine) as session:
+        ingest_track_b_page(session, _page(items))
+        session.commit()
+
+    threads: set[str] = set()
+
+    def note_thread(*_args) -> None:
+        threads.add(threading.current_thread().name)
+
+    event.listen(engine, "before_cursor_execute", note_thread)
+    with Session(engine) as session:
+        parallel = compare_track_b_models_batch(session, tuple(queries))
+    event.remove(engine, "before_cursor_execute", note_thread)
+
+    original = module.BATCH_PARALLEL_MIN_KEYS
+    module.BATCH_PARALLEL_MIN_KEYS = 10**9
+    try:
+        with Session(engine) as session:
+            serial = compare_track_b_models_batch(session, tuple(queries))
+    finally:
+        module.BATCH_PARALLEL_MIN_KEYS = original
+    engine.dispose()
+
+    assert sum(name.startswith("track-b-batch") for name in threads) >= 2
+    assert parallel == serial
+    assert [len(result.candidates) for result in parallel] == [1] * 20
+    assert {result.candidates[0].price for result in parallel} == {Decimal("90")}

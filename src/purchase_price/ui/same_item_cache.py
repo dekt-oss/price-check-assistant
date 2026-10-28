@@ -21,6 +21,9 @@ LIMIT = 32
 # overlaps the rest of the search instead of starting after the conclusion card (first search of
 # HeartOn A16-DS: ~5-6 s of cold index reads in Production). Two workers: two searches at once.
 EARLY_START_V1 = True
+# Bumped with the parallel batch reads: the deploy reloads this module once, so the cache starts
+# empty and the first search after it measures the new cold path (2026-10-28).
+PARALLEL_BATCH_V1 = True
 RUNNING_LIMIT = 16
 _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="same-item")
 _RUNNING: dict[str, Future[Any]] = {}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -832,6 +833,52 @@ def compare_track_b_quote(
     )
 
 
+# Same-품목 models: the trades of ~130 models sit on ~6,800 scattered pages of the 4.6 GB index,
+# and Production drops its page cache, so the first read is one random disk read after another
+# (~5 s). Reading model-key chunks on separate connections lets those waits overlap; sqlite3
+# releases the GIL while it reads. Only for an index file (an in-memory test DB is per connection).
+BATCH_PARALLEL_READS_V1 = True
+BATCH_READ_WORKERS = 4
+BATCH_PARALLEL_MIN_KEYS = 8
+
+
+def _current_rows_for_model_keys(session: Session, model_keys: tuple[str, ...]) -> list[TrackBDeliveryLine]:
+    """Current (latest change order) price rows of these model keys, in no particular order."""
+
+    newer = aliased(TrackBDeliveryLine)
+    current = ~exists(
+        select(1).where(
+            newer.delivery_request_number == TrackBDeliveryLine.delivery_request_number,
+            newer.product_sequence == TrackBDeliveryLine.product_sequence,
+            newer.change_order_number > TrackBDeliveryLine.change_order_number,
+        )
+    )
+
+    def statement(keys: tuple[str, ...]):
+        return select(TrackBDeliveryLine).where(
+            current,
+            TrackBDeliveryLine.model_key.in_(keys),
+            _price_evidence_clause(),
+            TrackBDeliveryLine.identity_conflict.is_(False),
+        )
+
+    bind = session.get_bind()
+    database = str(getattr(getattr(bind, "url", None), "database", "") or "")
+    if len(model_keys) < BATCH_PARALLEL_MIN_KEYS or database in {"", ":memory:"}:
+        return list(session.scalars(statement(model_keys)).all())
+
+    workers = min(BATCH_READ_WORKERS, len(model_keys))
+    chunks = [model_keys[index::workers] for index in range(workers)]
+
+    def read(keys: tuple[str, ...]) -> list[TrackBDeliveryLine]:
+        # Own session and connection per chunk; loaded rows stay usable after it closes.
+        with Session(bind=bind, autoflush=False, expire_on_commit=False) as chunk_session:
+            return list(chunk_session.scalars(statement(keys)).all())
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="track-b-batch") as pool:
+        return [row for rows in pool.map(read, chunks) for row in rows]
+
+
 def compare_track_b_models_batch(
     session: Session,
     queries: tuple[ProductQuery, ...],
@@ -871,24 +918,8 @@ def compare_track_b_models_batch(
             for query in queries
         )
 
-    newer = aliased(TrackBDeliveryLine)
-    current = ~exists(
-        select(1).where(
-            newer.delivery_request_number == TrackBDeliveryLine.delivery_request_number,
-            newer.product_sequence == TrackBDeliveryLine.product_sequence,
-            newer.change_order_number > TrackBDeliveryLine.change_order_number,
-        )
-    )
-    rows = session.scalars(
-        select(TrackBDeliveryLine)
-        .where(
-            current,
-            TrackBDeliveryLine.model_key.in_(all_model_keys),
-            _price_evidence_clause(),
-            TrackBDeliveryLine.identity_conflict.is_(False),
-        )
-        .order_by(TrackBDeliveryLine.transaction_date.desc(), TrackBDeliveryLine.id.desc())
-    ).all()
+    # Each model's rows are sorted newest first below, so the read order does not matter.
+    rows = _current_rows_for_model_keys(session, all_model_keys)
 
     rows_by_model: dict[str, list[TrackBDeliveryLine]] = {}
     for row in rows:
