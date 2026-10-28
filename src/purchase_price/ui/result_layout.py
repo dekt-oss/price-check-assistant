@@ -49,6 +49,7 @@ RESULT_LAYOUT_COMPARISON_V1 = True
 # Runtime marker (UX v1.2 Q1): one plain line under the status pill when the status (median
 # ±20%) and the bar (highest trade) read differently, or when a low quote needs a unit check.
 RESULT_LAYOUT_QUOTE_RULE_V1 = True
+RESULT_LAYOUT_REFRESH_FAILED_V1 = True
 
 RESULT_CSS = """
 <style>
@@ -985,6 +986,7 @@ def basis_chip(
     *,
     track_b_data_as_of: str | None,
     index_updated_at: str | None = None,
+    index_refresh_failed: bool = False,
     live_checked_until: str | None = None,
     live_failed: bool = False,
     mfds_coverage_percent: float | None = None,
@@ -992,7 +994,8 @@ def basis_chip(
     stale: bool = False,
 ) -> Chip | None:
     """A live-check failure is said as a failure, never as '0건'. ``stale`` (data older than the
-    contract's DATA_AS_OF_STALE_DAYS with no live check) turns the chip amber."""
+    contract's DATA_AS_OF_STALE_DAYS with no live check) turns the chip amber. ``index_refresh_failed``
+    (R2 unreachable, last verified copy in use) is said too, so old data is never shown as new."""
 
     if track_b_data_as_of:
         text = f"나라장터 {track_b_data_as_of} 수집분"
@@ -1009,6 +1012,9 @@ def basis_chip(
         text, tone = f"나라장터 자료 갱신 {index_updated_at}", TONE_MUTED
     else:
         return None
+    if index_refresh_failed:
+        text += " · 최신 자료를 확인하지 못해 이 수집분으로 표시"
+        tone = TONE_WARN
     if not mfds_complete and mfds_coverage_percent is not None:
         text += f" · 식약처 자료 {mfds_coverage_percent:.0f}% 수집 중"
     return Chip("자료 기준", text, tone)

@@ -27,6 +27,10 @@ concurrency:
   # Shares the production writer group with collection and the serving-index sync.
   group: ${{ github.event_name == 'pull_request' && format('track-b-history-pr-{0}', github.event.pull_request.number) || 'track-b-r2-pipeline' }}
   cancel-in-progress: false
+  # Review C-03: let every waiting run keep its place (FIFO, up to 100). The default keeps only one
+  # waiting run per group, so a new schedule cancelled the waiting collection or publish run
+  # (2026-10-25 UTC: a history, a supplemental and a serving-index run cancelled within an hour).
+  queue: max
 
 permissions:
   contents: read

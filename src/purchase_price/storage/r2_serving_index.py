@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import gzip
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +14,7 @@ from purchase_price.storage.r2 import (
     R2QuotaExceededError,
     R2RawEvidenceStore,
 )
-from purchase_price.storage.streaming_gzip import write_verified_gzip_body
+from purchase_price.storage.streaming_gzip import gzip_file_for_upload, write_verified_gzip_body
 
 _NOT_FOUND_CODES = {"404", "NoSuchKey", "NotFound"}
 SERVING_INDEX_SCHEMA = "track-b-serving-sqlite-v3"
@@ -78,48 +76,51 @@ class R2ServingIndexStore:
         )
 
     def put_sqlite(self, path: Path) -> R2ServingIndexRef:
-        raw = path.read_bytes()
-        digest = hashlib.sha256(raw).hexdigest()
-        key = f"{self.prefix}/{digest[:2]}/{digest}.sqlite.gz"
-        compressed = gzip.compress(raw, compresslevel=6, mtime=0)
+        # Hash and compress through a temporary file, then upload from it: the index never sits
+        # in memory whole (review B-02). Same key, metadata and gzip bytes as before.
+        with gzip_file_for_upload(path) as upload:
+            digest = upload.sha256
+            key = f"{self.prefix}/{digest[:2]}/{digest}.sqlite.gz"
 
-        existing = self._head_if_exists(key)
-        if existing is not None:
-            metadata = existing.get("Metadata") or {}
-            if metadata.get("sha256") != digest or metadata.get("schema") != SERVING_INDEX_SCHEMA:
-                raise R2IntegrityError(f"R2 serving index metadata mismatch for {key}")
+            existing = self._head_if_exists(key)
+            if existing is not None:
+                metadata = existing.get("Metadata") or {}
+                if metadata.get("sha256") != digest or metadata.get("schema") != SERVING_INDEX_SCHEMA:
+                    raise R2IntegrityError(f"R2 serving index metadata mismatch for {key}")
+                return R2ServingIndexRef(
+                    key=key,
+                    sha256=digest,
+                    stored_bytes=int(existing.get("ContentLength") or upload.stored_bytes),
+                    uncompressed_bytes=upload.uncompressed_bytes,
+                )
+
+            if self._quota_store is not None:
+                usage = self._quota_store.quota_status(refresh=True)
+                if usage.stored_bytes + upload.stored_bytes > usage.hard_limit_bytes:
+                    raise R2QuotaExceededError(
+                        "R2 serving index write would exceed the configured zero-cost hard limit"
+                    )
+            with upload.path.open("rb") as body:
+                self._client.put_object(
+                    Bucket=self.bucket,
+                    Key=key,
+                    Body=body,
+                    ContentLength=upload.stored_bytes,
+                    ContentType="application/x-sqlite3",
+                    ContentEncoding="gzip",
+                    Metadata={
+                        "sha256": digest,
+                        "schema": SERVING_INDEX_SCHEMA,
+                        "data-classification": "public-derived-index",
+                    },
+                    StorageClass="STANDARD",
+                )
             return R2ServingIndexRef(
                 key=key,
                 sha256=digest,
-                stored_bytes=int(existing.get("ContentLength") or len(compressed)),
-                uncompressed_bytes=len(raw),
+                stored_bytes=upload.stored_bytes,
+                uncompressed_bytes=upload.uncompressed_bytes,
             )
-
-        if self._quota_store is not None:
-            usage = self._quota_store.quota_status(refresh=True)
-            if usage.stored_bytes + len(compressed) > usage.hard_limit_bytes:
-                raise R2QuotaExceededError(
-                    "R2 serving index write would exceed the configured zero-cost hard limit"
-                )
-        self._client.put_object(
-            Bucket=self.bucket,
-            Key=key,
-            Body=compressed,
-            ContentType="application/x-sqlite3",
-            ContentEncoding="gzip",
-            Metadata={
-                "sha256": digest,
-                "schema": SERVING_INDEX_SCHEMA,
-                "data-classification": "public-derived-index",
-            },
-            StorageClass="STANDARD",
-        )
-        return R2ServingIndexRef(
-            key=key,
-            sha256=digest,
-            stored_bytes=len(compressed),
-            uncompressed_bytes=len(raw),
-        )
 
     def download_sqlite(self, ref: R2ServingIndexRef, destination: Path) -> Path:
         response = self._client.get_object(Bucket=self.bucket, Key=ref.key)

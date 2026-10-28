@@ -32,7 +32,8 @@ class FakeClient:
         **kwargs,
     ):  # noqa: N803
         del Bucket, kwargs
-        self.objects[Key] = (Body, dict(Metadata), ContentType)
+        body = Body.read() if hasattr(Body, "read") else Body
+        self.objects[Key] = (body, dict(Metadata), ContentType)
         return {}
 
     def get_object(self, *, Bucket: str, Key: str):  # noqa: N803
@@ -88,3 +89,34 @@ def test_serving_index_download_accepts_legacy_v1_for_zero_downtime_rebuild(
     store.download_sqlite(ref, destination)
 
     assert destination.read_bytes() == raw
+
+
+def test_put_sqlite_streams_through_a_temp_file(tmp_path: Path) -> None:
+    """Review B-02: same gzip bytes as before, no temp file left, memory not proportional to size."""
+
+    import gzip
+    import random
+    import tracemalloc
+
+    client = FakeClient()
+    store = R2ServingIndexStore(client=client, bucket="bucket")
+    source = tmp_path / "index.sqlite"
+    rng = random.Random(7)
+    source.write_bytes(b"".join(rng.randbytes(1024) + bytes(3072) for _ in range(8 * 1024)))  # 32 MiB
+
+    tracemalloc.start()
+    ref = store.put_sqlite(source)
+    _current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    raw = source.read_bytes()
+    stored = client.objects[ref.key][0]
+    before = gzip.compress(raw, compresslevel=6, mtime=0)
+    # Header byte 9 is the OS code, platform-dependent in gzip.compress itself.
+    assert stored[:9] == before[:9] and stored[10:] == before[10:]
+    assert gzip.decompress(stored) == raw
+    assert ref.stored_bytes == len(stored)
+    assert ref.uncompressed_bytes == len(raw)
+    # The fake client keeps the uploaded body (~8 MiB); before the change the peak was over 64 MiB.
+    assert peak < len(stored) + 4 * 1024 * 1024
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["index.sqlite"]
