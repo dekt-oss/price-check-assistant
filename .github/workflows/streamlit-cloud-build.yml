@@ -26,7 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     container:
-      image: python:3.12-bullseye
+      # Same Python and Debian release as Production (Home.py?_memdiag=1 RUNTIME line, 2026-10-28:
+      # python 3.14.9, Debian 13 trixie). See docs/operations/CURRENT_OPERATIONS.md.
+      image: python:3.14-trixie
 
     steps:
       - name: Checkout
