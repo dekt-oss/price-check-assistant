@@ -213,6 +213,8 @@ _TRACK_B_RUNTIME_MARKERS = (
     # NT960 search: newest rows of a 세부품명 through the side index (helper first, then callers).
     (track_b_search_index_service, "DETAIL_CODE_ROWS_V1"),
     (track_b_reference_quality_service, "REFERENCE_QUALITY_DETAIL_CODE_ROWS_V1"),
+    # Review B-03: last verified copy when R2 cannot be reached, said on the 자료 기준 chip.
+    (track_b_r2_index_service, "STALE_COPY_ON_REFRESH_FAILURE_V1"),
 )
 
 
@@ -276,6 +278,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.result_summary", "NUMERIC_TABLES_V1"),
     ("purchase_price.ui.price_trend", "NUMERIC_TABLES_V1"),
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_QUOTE_RULE_V1"),
+    ("purchase_price.ui.result_layout", "RESULT_LAYOUT_REFRESH_FAILED_V1"),
     ("purchase_price.ui.category_market", "NUMERIC_TABLES_V1"),
     # UX v1.2 Q2: other models open in a new tab (model_links is a new module).
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_NEW_TAB_V1"),
@@ -2299,9 +2302,11 @@ def _execute_search(
     track_b_started = monotonic()
     track_b_data_as_of: str | None = None
     track_b_index_updated_at: str | None = None
+    track_b_refresh_failed = False
     with snapshot_runtime.open_track_b_serving_snapshot() as track_b_snapshot:
         track_b_data_as_of = getattr(track_b_snapshot, "data_as_of", None)
         track_b_index_updated_at = getattr(track_b_snapshot, "index_updated_at", None)
+        track_b_refresh_failed = bool(getattr(track_b_snapshot, "refresh_failed", False))
         track_b = track_b_snapshot.lookup(
             query,
             quote_unit_price=review_input.quote_unit_price,
@@ -2530,6 +2535,7 @@ def _execute_search(
         "track_b_data_as_of": track_b_data_as_of,
         "track_b_live": track_b_live,
         "track_b_index_updated_at": track_b_index_updated_at,
+        "track_b_refresh_failed": track_b_refresh_failed,
         "search_timings_seconds": search_timings,
         "research_stage_timings_seconds": research_stage_timings,
         "research_status": "pending",
@@ -3707,6 +3713,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
     mfds_procurement_crosslinks = list(state.get("mfds_procurement_crosslinks") or [])
     track_b_data_as_of = str(state.get("track_b_data_as_of") or "").strip() or None
     track_b_index_updated_at = str(state.get("track_b_index_updated_at") or "").strip() or None
+    track_b_refresh_failed = bool(state.get("track_b_refresh_failed"))
     interpretation = state.get("interpretation")
     quote_key = str(heading or "result").strip()
     category_market = state.get("category_market")
@@ -4186,6 +4193,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
             result_layout_ui.basis_chip(
                 track_b_data_as_of=track_b_data_as_of,
                 index_updated_at=track_b_index_updated_at,
+                index_refresh_failed=track_b_refresh_failed,
                 live_checked_until=live_checked_until,
                 live_failed=live_failed,
                 mfds_coverage_percent=mfds_coverage,
@@ -4776,6 +4784,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v31" style="display:none">purchase-workspace-runtime-v31</span>'
     '<span id="purchase-workspace-runtime-v32" style="display:none">purchase-workspace-runtime-v32</span>'
     '<span id="purchase-workspace-runtime-v33" style="display:none">purchase-workspace-runtime-v33</span>'
+    '<span id="purchase-workspace-runtime-v34" style="display:none">purchase-workspace-runtime-v34</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

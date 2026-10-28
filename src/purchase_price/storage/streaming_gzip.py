@@ -17,6 +17,7 @@ import threading
 import zlib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -162,3 +163,50 @@ def write_verified_gzip_body(
             temp_path.unlink(missing_ok=True)
     return destination
 
+
+
+@dataclass(frozen=True)
+class GzipUpload:
+    """A source file hashed and gzip-compressed to a temporary file, ready to upload."""
+
+    sha256: str
+    uncompressed_bytes: int
+    path: Path
+    stored_bytes: int
+
+
+@contextmanager
+def gzip_file_for_upload(source: Path, *, chunk_bytes: int = CHUNK_BYTES) -> Iterator[GzipUpload]:
+    """Hash and compress ``source`` in chunks; the temporary ``.gz`` is removed on exit.
+
+    Publishing used to read the whole SQLite file and ``gzip.compress`` it, holding both copies in
+    memory (61 MiB peak for a 16 MiB index; the Track B index is 4.6 GB). The deflate stream is
+    the same as ``gzip.compress(raw, compresslevel=6, mtime=0)``'s: no file name, mtime 0. Only the
+    header's OS byte may differ, which ``gzip.compress`` takes from the platform's zlib anyway.
+    """
+
+    digest = hashlib.sha256()
+    raw_bytes = 0
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=source.parent, prefix=f".{source.name}.", suffix=".gz.tmp", delete=False
+        ) as handle:
+            temp_path = Path(handle.name)
+            with (
+                source.open("rb") as reader,
+                gzip.GzipFile(filename="", mode="wb", compresslevel=6, fileobj=handle, mtime=0) as stream,
+            ):
+                for chunk in iter(lambda: reader.read(chunk_bytes), b""):
+                    digest.update(chunk)
+                    raw_bytes += len(chunk)
+                    stream.write(chunk)
+        yield GzipUpload(
+            sha256=digest.hexdigest(),
+            uncompressed_bytes=raw_bytes,
+            path=temp_path,
+            stored_bytes=temp_path.stat().st_size,
+        )
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)

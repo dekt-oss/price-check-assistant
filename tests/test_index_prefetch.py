@@ -188,7 +188,11 @@ def test_download_progress_reaches_the_warm_status(monkeypatch) -> None:
 def test_track_b_search_uses_the_copy_on_disk_while_a_refresh_downloads(monkeypatch, tmp_path) -> None:
     old = tmp_path / "old.sqlite"
     old.write_bytes(b"")
-    monkeypatch.setattr(track_b_index, "_LAST_GOOD_SNAPSHOT", (old, {"sha256": "old"}))
+    monkeypatch.setattr(
+        track_b_index,
+        "_LAST_GOOD_SNAPSHOT",
+        {("", ""): track_b_index._LocalCopy(old, {"sha256": "old"}, checked_at=-1e9)},
+    )
     monkeypatch.setattr(
         track_b_index,
         "_local_index_snapshot_locked",

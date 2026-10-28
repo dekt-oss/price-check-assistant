@@ -5,6 +5,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
+from time import monotonic
 
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import create_engine
@@ -28,7 +29,38 @@ _CACHE_DIR = Path(tempfile.gettempdir()) / "price-check-track-b"
 _VALIDATED_CACHE_FILES: dict[str, tuple[int, int, int, int]] = {}
 # One download at a time: the start-up prefetch thread and a search can both ask for the index.
 _LOCAL_INDEX_LOCK = Lock()
-_LAST_GOOD_SNAPSHOT: tuple[Path, dict[str, object]] | None = None
+# Review B-03: the pointer is read from R2 at most every 5 minutes (like the MFDS index), and when
+# that read or the download fails for a network reason, searches keep using the verified copy on
+# disk with "refresh_failed" set so the screen says the newest data could not be checked. A hash
+# or schema mismatch (R2IntegrityError) is never covered up this way.
+POINTER_TTL_SECONDS = 300.0
+STALE_COPY_ON_REFRESH_FAILURE_V1 = True
+_TRANSIENT_ERRORS = (BotoCoreError, ClientError, OSError)
+
+
+@dataclass
+class _LocalCopy:
+    path: Path
+    pointer: dict[str, object]
+    checked_at: float
+    refresh_failed: bool = False
+
+    def answer(self) -> tuple[Path, dict[str, object]]:
+        pointer = dict(self.pointer)
+        if self.refresh_failed:
+            pointer["refresh_failed"] = True
+        return self.path, pointer
+
+
+# Last verified copy per (endpoint, bucket).
+_LAST_GOOD_SNAPSHOT: dict[tuple[str, str], _LocalCopy] = {}
+
+
+def _source_key(settings: Settings | None) -> tuple[str, str]:
+    return (
+        str(getattr(settings, "resolved_r2_endpoint_url", "") or ""),
+        str(getattr(settings, "resolved_r2_bucket_name", "") or ""),
+    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -64,21 +96,37 @@ def _remember_validated_cache(path: Path, sha256: str) -> None:
 def _local_index_snapshot(
     settings: Settings,
 ) -> tuple[Path | None, dict[str, object] | None]:
-    global _LAST_GOOD_SNAPSHOT
+    key = _source_key(settings)
     # While another thread (usually the start-up prefetch refreshing every 10 minutes) downloads
     # a newer index, answer from the copy already on disk instead of waiting for it.
     if not _LOCAL_INDEX_LOCK.acquire(blocking=False):
-        last_good = _LAST_GOOD_SNAPSHOT
-        if last_good is not None and last_good[0].exists():
-            return last_good[0], dict(last_good[1])
+        last_good = _LAST_GOOD_SNAPSHOT.get(key)
+        if last_good is not None and last_good.path.exists():
+            return last_good.answer()
         _LOCAL_INDEX_LOCK.acquire()
     try:
-        path, pointer = _local_index_snapshot_locked(settings)
+        now = monotonic()
+        last_good = _LAST_GOOD_SNAPSHOT.get(key)
+        if (
+            last_good is not None
+            and now - last_good.checked_at < POINTER_TTL_SECONDS
+            and last_good.path.exists()
+        ):
+            return last_good.answer()
+        try:
+            path, pointer = _local_index_snapshot_locked(settings)
+        except _TRANSIENT_ERRORS:
+            if last_good is None or not last_good.path.exists():
+                raise
+            # Try R2 again after the TTL; until then every search says the refresh failed.
+            last_good.checked_at = now
+            last_good.refresh_failed = True
+            return last_good.answer()
+        if path is not None and pointer is not None:
+            _LAST_GOOD_SNAPSHOT[key] = _LocalCopy(path, dict(pointer), now)
+        return path, pointer
     finally:
         _LOCAL_INDEX_LOCK.release()
-    if path is not None and pointer is not None:
-        _LAST_GOOD_SNAPSHOT = (path, dict(pointer))
-    return path, pointer
 
 
 def _local_index_snapshot_locked(
@@ -140,6 +188,8 @@ class TrackBServingSnapshot:
     session: Session | None = None
     data_as_of: str | None = None
     index_updated_at: str | None = None
+    # The newest index could not be checked (R2 unreachable); this is the last verified copy.
+    refresh_failed: bool = False
 
     def __enter__(self) -> TrackBServingSnapshot:
         return self
@@ -235,6 +285,7 @@ def open_track_b_serving_snapshot(
             session=Session(bind=engine, autoflush=False, expire_on_commit=False),
             data_as_of=data_as_of,
             index_updated_at=index_updated_at,
+            refresh_failed=bool(pointer.get("refresh_failed")),
         )
     except (
         BotoCoreError,
