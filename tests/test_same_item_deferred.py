@@ -91,3 +91,103 @@ def test_result_builds_the_rest_after_the_conclusion_card_once() -> None:
     assert early < card_marker < late
     ensure = _function_source("_ensure_same_item_market")
     assert 'state["same_item_pending"] = None' in ensure
+
+
+def _cache_namespace(calls: list[str]):
+    """The deferred builder and its cache from the page script, with stub index and builders."""
+
+    import contextlib
+    from threading import Lock
+    from time import monotonic
+
+    wanted = {"_same_item_cache_key", "_ensure_same_item_market", "_SameItemCached"}
+    tree = ast.parse(SOURCE)
+    nodes = [
+        node
+        for node in tree.body
+        if (isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in wanted)
+        or (
+            isinstance(node, (ast.Assign, ast.AnnAssign))
+            and any(
+                isinstance(target, ast.Name) and target.id.startswith("_SAME_ITEM_CACHE")
+                for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+            )
+        )
+    ]
+    state = {"file": "a" * 64}
+
+    @contextlib.contextmanager
+    def open_snapshot():
+        yield SimpleNamespace(status="available", path=Path(f"{state['file']}.sqlite"), data_as_of="2026-10-27")
+
+    def crosslinks(records, *, track_b_snapshot, current_model, stats_out):
+        calls.append("crosslinks")
+        return [{"모델": "HeartOn A16-DS", "나라장터 직접거래": 92}]
+
+    def category(snapshot, **_kwargs):
+        calls.append("category")
+        return "MARKET"
+
+    namespace = {
+        "Any": object,
+        "Lock": Lock,
+        "monotonic": monotonic,
+        "_track_b_runtime": lambda: (SimpleNamespace(open_track_b_serving_snapshot=open_snapshot), None),
+        "_build_mfds_procurement_crosslinks": crosslinks,
+        "_build_category_market": category,
+    }
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(DASHBOARD), "exec"), namespace)
+    return namespace, state
+
+
+def _search_state() -> dict:
+    record = SimpleNamespace(
+        permit_number="제허 15-127 호", model_name="HeartOn A16-DS", registered_company="(주)메디아나",
+        product_name="저출력심장충격기", udi_di="",
+    )
+    return {
+        "same_item_pending": {"identity_product": "저출력심장충격기", "current_model": "HeartOn A16-DS"},
+        "same_product_identity": (record,),
+        "search_timings_seconds": {},
+    }
+
+
+def test_same_item_result_is_reused_for_the_same_index_file_only() -> None:
+    calls: list[str] = []
+    namespace, index = _cache_namespace(calls)
+    ensure = namespace["_ensure_same_item_market"]
+
+    first = _search_state()
+    ensure(first)
+    assert calls == ["crosslinks", "category"]
+    assert first["same_item_cache"] == "miss" and first["same_item_pending"] is None
+    assert set(first["search_timings_seconds"]) == {"same_item_open", "same_item_models", "category_market"}
+
+    first["mfds_procurement_crosslinks"][0]["모델"] = "changed on screen"
+    second = _search_state()
+    ensure(second)
+    assert calls == ["crosslinks", "category"]  # nothing rebuilt
+    assert second["same_item_cache"] == "hit"
+    assert second["mfds_procurement_crosslinks"] == [{"모델": "HeartOn A16-DS", "나라장터 직접거래": 92}]
+    assert second["category_market"] == "MARKET"
+
+    index["file"] = "b" * 64  # a new serving index arrived
+    third = _search_state()
+    ensure(third)
+    assert calls == ["crosslinks", "category", "crosslinks", "category"]
+    assert third["same_item_cache"] == "miss"
+
+
+def test_cache_keeps_at_most_the_limit_and_drops_the_oldest() -> None:
+    calls: list[str] = []
+    namespace, _index = _cache_namespace(calls)
+    ensure = namespace["_ensure_same_item_market"]
+    limit = namespace["_SAME_ITEM_CACHE_LIMIT"]
+
+    for number in range(limit + 3):
+        state = _search_state()
+        state["same_item_pending"]["current_model"] = f"MODEL-{number}"
+        ensure(state)
+
+    assert len(namespace["_SAME_ITEM_CACHE"]) == limit
+    assert all("MODEL-0" not in key for key in namespace["_SAME_ITEM_CACHE"])
