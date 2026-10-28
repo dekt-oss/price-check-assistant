@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote
@@ -26,6 +27,12 @@ G2B_SEARCH_LINK = "https://www.g2b.go.kr/link/FIUA009_01/single/?searchKeyword="
 # Runtime marker: bump when the field list or links change so a retained copy reloads.
 FIELD_ORDER_V1 = True
 G2B_LINK_V1 = True
+LIVE_RAW_KEY_V2 = True
+
+# Review B-05: a live gap-fill line is a session observation, not an archived page. Its raw key
+# says so: live:<세부품명번호>:<begin>:<end>:<page>:<fetched UTC>:<response SHA-256 prefix>.
+LIVE_RAW_KEY_PREFIX = "live:"
+_KST = timezone(timedelta(hours=9))
 
 _SOURCE_ID = re.compile(r"^delivery:(?P<number>[^|]+)\|change:(?P<change>[^|]*)\|line:(?P<line>.+)$")
 _RAW_HASH = re.compile(r"(?P<hash>[0-9a-f]{64})\.json\.gz$")
@@ -90,6 +97,38 @@ class DeliveryRecordLookup:
     status: str  # found | not_archived | not_found | failure
     fields: tuple[tuple[str, str], ...] = ()
     error_type: str = ""
+
+
+def live_raw_key(
+    *, detail_code: str, begin: date, end: date, page_no: int, fetched_at: datetime, sha256: str
+) -> str:
+    fetched = fetched_at.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return (
+        f"{LIVE_RAW_KEY_PREFIX}{detail_code}:{begin.isoformat()}:{end.isoformat()}:{page_no}"
+        f":{fetched}:{sha256[:16]}"
+    )
+
+
+def describe_raw_key(raw_object_key: object) -> str:
+    """The 원문 위치 cell: an archived key as is, a live key in words that say it is not kept."""
+
+    key = str(raw_object_key or "").strip()
+    if not key.startswith(LIVE_RAW_KEY_PREFIX):
+        return key
+    parts = key[len(LIVE_RAW_KEY_PREFIX) :].split(":")
+    if len(parts) != 6:
+        # Keys from before LIVE_RAW_KEY_V2 had no fetch time or fingerprint.
+        return "보관 안 됨 · 실시간 조회(수집 전)"
+    code, begin, end, page, fetched, sha = parts
+    try:
+        when = datetime.strptime(fetched, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC).astimezone(_KST)
+        fetched_text = when.strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        fetched_text = fetched
+    return (
+        f"보관 안 됨 · 실시간 조회 {fetched_text} · 세부품명번호 {code} {begin}~{end} {page}쪽"
+        f" · 응답 확인값 {sha[:12]}"
+    )
 
 
 def g2b_search_url(number: str) -> str:

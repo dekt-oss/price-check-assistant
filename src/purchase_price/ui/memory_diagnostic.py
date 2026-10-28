@@ -10,12 +10,26 @@ This reports both views side by side so the next incident has numbers instead of
 from __future__ import annotations
 
 import os
+import platform
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 # Runtime marker: pages/1_대시보드.py reloads a retained pre-#329 copy that lacks it.
 SEARCH_INDEX_V1 = True
+# Review E-01: the same readout names the runtime (Python, OS, key packages; no secrets) so the
+# CI job that mirrors Production can be checked against what Production really runs.
+RUNTIME_LINE_V1 = True
+RUNTIME_PACKAGES = (
+    "streamlit",
+    "pandas",
+    "SQLAlchemy",
+    "pydantic",
+    "boto3",
+    "pypdfium2",
+    "pytesseract",
+    "tesseract-bin",
+)
 CACHE_DIR_NAMES = ("price-check-track-b", "price-check-mfds", "price-check-mfds-item-status")
 _CGROUP_V2 = Path("/sys/fs/cgroup")
 _CGROUP_V1 = Path("/sys/fs/cgroup/memory")
@@ -129,3 +143,32 @@ def format_snapshot(snapshot: MemorySnapshot) -> str:
         f"(그중 파일 캐시 {show(snapshot.container_file_mb)}) · 임시폴더 인덱스 파일 {files}"
         f" · SQLite {snapshot.sqlite_search or '읽을 수 없음'}"
     )
+
+
+def _os_name() -> str:
+    try:
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if line.startswith("PRETTY_NAME="):
+                return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return f"{platform.system()} {platform.release()}".strip()
+
+
+def runtime_line() -> str:
+    """One line: RUNTIME python=… os=… machine=… <package>=<version> …"""
+
+    from importlib.metadata import PackageNotFoundError, version
+
+    parts = [
+        f"python={platform.python_version()}",
+        f"os={_os_name()}",
+        f"machine={platform.machine() or '?'}",
+        f"libc={'-'.join(part for part in platform.libc_ver() if part) or '?'}",
+    ]
+    for name in RUNTIME_PACKAGES:
+        try:
+            parts.append(f"{name}={version(name)}")
+        except PackageNotFoundError:
+            parts.append(f"{name}=없음")
+    return "RUNTIME " + " · ".join(parts)

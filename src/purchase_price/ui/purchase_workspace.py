@@ -5,6 +5,7 @@ from decimal import Decimal
 from statistics import median
 from typing import Any
 
+from purchase_price.services.g2b_delivery_record import describe_raw_key
 from purchase_price.ui.track_b_transactions import (
     category_reference_candidates,
     grade_ab_candidates,
@@ -14,6 +15,7 @@ from purchase_price.ui.track_b_transactions import (
 
 # Runtime marker: re-imports strict_comparison_candidates, which now leaves 입력 오류 의심 trades out.
 ENTRY_ERRORS_EXCLUDED_V1 = True
+LIVE_RAW_KEY_V2 = True
 
 
 @dataclass(frozen=True)
@@ -179,7 +181,7 @@ def supplier_rows(track_b: Any) -> list[dict[str, object]]:
         ]
         raw_keys = sorted(
             {
-                str(getattr(candidate, "raw_object_key", "") or "").strip()
+                describe_raw_key(getattr(candidate, "raw_object_key", ""))
                 for candidate in candidates
                 if str(getattr(candidate, "raw_object_key", "") or "").strip()
             }

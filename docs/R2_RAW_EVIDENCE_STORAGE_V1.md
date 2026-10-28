@@ -1,5 +1,7 @@
 # Cloudflare R2 Raw Evidence Storage v1
 
+> **2026-09 설계안(역사 문서).** 지금 운영의 나라장터 검색은 PostgreSQL이 아니라 R2에 올린 SQLite 인덱스를 쓴다(기준 커밋 `a9ad7c2`). 현재 기준: `docs/operations/CURRENT_OPERATIONS.md`.
+
 - 작성일: 2026-09-11
 - Repository: `dekt-oss/price-check-assistant`
 - 목적: PostgreSQL은 검색/정규화/가격판정용 Operational DB로 유지하고, 공개 원천 Raw Evidence와 향후 DB backup은 Cloudflare R2에 분리 보관한다.

@@ -204,6 +204,9 @@ _TRACK_B_RUNTIME_MARKERS = (
     (track_b_snapshot_service, "LOOKUP_LIMIT_5000"),
     (track_b_live_service, "DROPS_CANCELLED_LINES"),
     (track_b_live_service, "LIVE_PARTIAL_V1"),
+    # Review B-05: the live module imports live_raw_key from g2b_delivery_record; that one first.
+    (delivery_record_service, "LIVE_RAW_KEY_V2"),
+    (track_b_live_service, "LIVE_RAW_KEY_V2"),
     (track_b_transactions_ui, "AMOUNT_CHECK_WORDS"),
     (same_item_ui, "ITEM_STATUS_AWARE"),
     # UX v1.1 P2b: one SELECT per lookup (no per-row lazy loads), grading cached per 품명.
@@ -238,6 +241,10 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.same_item_compare", "PLAIN_WORDING_2026_10"),
     ("purchase_price.ui.workspace_header", "PLAIN_WORDING_2026_10C"),
     ("purchase_price.services.g2b_delivery_record", "G2B_LINK_V1"),
+    # Review B-05: live gap-fill rows say "보관 안 됨" in 원문 위치 (helper first, then its users).
+    ("purchase_price.services.g2b_delivery_record", "LIVE_RAW_KEY_V2"),
+    ("purchase_price.ui.track_b_transactions", "LIVE_RAW_KEY_V2"),
+    ("purchase_price.ui.purchase_workspace", "LIVE_RAW_KEY_V2"),
     ("purchase_price.ui.result_summary", "RESULT_SUMMARY_V3"),
     ("purchase_price.ui.search_overviews", "OVERVIEW_V2"),
     ("purchase_price.ui.result_layout", "RESULT_LAYOUT_V3"),
@@ -4785,6 +4792,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v32" style="display:none">purchase-workspace-runtime-v32</span>'
     '<span id="purchase-workspace-runtime-v33" style="display:none">purchase-workspace-runtime-v33</span>'
     '<span id="purchase-workspace-runtime-v34" style="display:none">purchase-workspace-runtime-v34</span>'
+    '<span id="purchase-workspace-runtime-v35" style="display:none">purchase-workspace-runtime-v35</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

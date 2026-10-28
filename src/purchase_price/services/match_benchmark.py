@@ -21,6 +21,29 @@ class MatchBenchmarkError(RuntimeError):
     pass
 
 
+# Review E-03: the score is a regression check on a few hand-reviewed rows, not an accuracy
+# estimate. Each ground-truth row names the kind of mistake it guards against, and the report
+# counts rows, positives, negatives and errors per kind, listing kinds that have no rows at all.
+RISK_TYPES = (
+    "다른 제조사·모델",
+    "같은 제조사 다른 모델",
+    "제품군 이름만",
+    "별칭·원산지 표기",
+    "취소·수출 거래",
+)
+UNCLASSIFIED_RISK = "미분류"
+SCOPE_NOTE = "회귀 점검용 소표본: 정확도 추정치가 아니며 verified 매핑을 자동으로 올리지 않는다"
+
+
+@dataclass(frozen=True)
+class RiskCoverage:
+    risk_type: str
+    rows: int
+    positives: int  # expected A/B
+    negatives: int
+    mismatches: int
+
+
 @dataclass(frozen=True)
 class BenchmarkPrediction:
     benchmark_model: str
@@ -28,6 +51,7 @@ class BenchmarkPrediction:
     expected_grade: MatchGrade
     predicted_grade: MatchGrade
     match_note: str
+    risk_type: str = UNCLASSIFIED_RISK
 
 
 @dataclass(frozen=True)
@@ -117,6 +141,10 @@ def run_match_benchmark(
                     f"invalid expected grade at line {line_no}: {grade_text!r}"
                 ) from exc
 
+            risk_type = (row.get("risk_type") or "").strip() or UNCLASSIFIED_RISK
+            if risk_type not in RISK_TYPES and risk_type != UNCLASSIFIED_RISK:
+                raise MatchBenchmarkError(f"unknown risk_type at line {line_no}: {risk_type!r}")
+
             identity = parse_g2b_identity(title)
             decision = grade_product_identity(query, identity)
             predictions.append(
@@ -126,6 +154,7 @@ def run_match_benchmark(
                     expected_grade=expected_grade,
                     predicted_grade=decision.grade,
                     match_note=decision.note,
+                    risk_type=risk_type,
                 )
             )
             expected.append(expected_grade)
@@ -178,6 +207,27 @@ def summarize_benchmark_coverage(result: MatchBenchmarkResult) -> BenchmarkCover
     )
 
 
+def summarize_risk_coverage(result: MatchBenchmarkResult) -> tuple[RiskCoverage, ...]:
+    """Rows, positives, negatives and errors per risk type; every known type is listed."""
+
+    seen = [row.risk_type for row in result.predictions]
+    kinds = list(RISK_TYPES) + ([UNCLASSIFIED_RISK] if UNCLASSIFIED_RISK in seen else [])
+    coverage = []
+    for kind in kinds:
+        rows = [row for row in result.predictions if row.risk_type == kind]
+        positives = sum(row.expected_grade in {MatchGrade.A, MatchGrade.B} for row in rows)
+        coverage.append(
+            RiskCoverage(
+                risk_type=kind,
+                rows=len(rows),
+                positives=positives,
+                negatives=len(rows) - positives,
+                mismatches=sum(row.expected_grade != row.predicted_grade for row in rows),
+            )
+        )
+    return tuple(coverage)
+
+
 def write_benchmark_summary(result: MatchBenchmarkResult, path: Path) -> None:
     """Write auditable benchmark metrics and factual coverage limits as JSON."""
 
@@ -197,6 +247,20 @@ def write_benchmark_summary(result: MatchBenchmarkResult, path: Path) -> None:
             coverage.reviewed_models_without_direct_positive
         ),
         "grade_counts": dict(coverage.grade_counts),
+        "scope_note": SCOPE_NOTE,
+        "risk_coverage": [
+            {
+                "risk_type": risk.risk_type,
+                "rows": risk.rows,
+                "positives": risk.positives,
+                "negatives": risk.negatives,
+                "mismatches": risk.mismatches,
+            }
+            for risk in summarize_risk_coverage(result)
+        ],
+        "risk_types_without_samples": [
+            risk.risk_type for risk in summarize_risk_coverage(result) if risk.rows == 0
+        ],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -211,6 +275,7 @@ PREDICTION_FIELDS = (
     "expected_grade",
     "predicted_grade",
     "match_note",
+    "risk_type",
 )
 
 
@@ -229,5 +294,6 @@ def write_benchmark_predictions(result: MatchBenchmarkResult, path: Path) -> Non
                     "expected_grade": row.expected_grade.value,
                     "predicted_grade": row.predicted_grade.value,
                     "match_note": row.match_note,
+                    "risk_type": row.risk_type,
                 }
             )

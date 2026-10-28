@@ -76,3 +76,13 @@ def test_cli_fails_when_strict_and_prediction_mismatches(monkeypatch, capsys) ->
     assert evaluate_match_benchmark.main(["--fail-on-mismatch"]) == 1
     assert "benchmark_status=failed mismatches=1" in capsys.readouterr().out
     assert evaluate_match_benchmark.main([]) == 0
+
+
+def test_cli_reports_each_risk_type_and_the_scope_note(capsys) -> None:
+    from purchase_price.scripts.evaluate_match_benchmark import main
+
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    assert "risk[같은 제조사 다른 모델] rows=" in out
+    assert "risk_types_without_samples=" in out
+    assert "scope_note=회귀 점검용 소표본" in out

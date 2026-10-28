@@ -5,6 +5,7 @@ from decimal import Decimal
 from statistics import median
 from typing import Any
 
+from purchase_price.services.g2b_delivery_record import describe_raw_key
 from purchase_price.services.price_entry_check import (
     EntryError,
     candidate_entry_error,
@@ -16,6 +17,7 @@ from purchase_price.ui.amount_check import amount_check_label
 ENTRY_ERRORS_EXCLUDED_V1 = True
 # Quantities in the trade tables carry thousands separators (1,071, not 1071).
 QUANTITY_COMMAS_V1 = True
+LIVE_RAW_KEY_V2 = True
 
 
 def comparison_candidates(track_b: Any) -> tuple[Any, ...]:
@@ -230,7 +232,7 @@ def _transaction_row(candidate: Any, *, comparison_level: str) -> dict[str, obje
         "거래기록": getattr(candidate, "transaction_type", None)
         or "나라장터 납품요구",
         "Source": "나라장터 납품요구",
-        "원문근거키": getattr(candidate, "raw_object_key", None) or "미확인",
+        "원문근거키": describe_raw_key(getattr(candidate, "raw_object_key", None)) or "미확인",
         # delivery:<납품요구번호>|change:<차수>|line:<물품순번>; opens the archived public record.
         "원천기록": getattr(candidate, "source_record_id", None) or "",
         "사업명": getattr(candidate, "business_name", None) or "",

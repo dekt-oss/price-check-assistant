@@ -124,6 +124,12 @@ python -m purchase_price.scripts.evaluate_match_benchmark --fail-on-mismatch --o
 Ground truth가 비어 있으면 성능값을 추정하지 않고 `rows=0`, precision/recall을 `N/A`로 출력한다.
 A/B 양성 행이 없으면 `direct_positive_rows=0`과 함께 precision/recall을 `N/A`로 둔다.
 
+**이 점수를 정확도로 읽지 않는다 (리뷰 E-03, 2026-10-28).** Ground truth는 3개 모델 11행이고 A/B 양성은
+1행(1모델)이다. 그래서 100%는 "사람이 판정한 11행을 matcher가 그대로 맞췄다"는 회귀 점검일 뿐이다. 각 행에는
+`risk_type`(다른 제조사·모델 / 같은 제조사 다른 모델 / 제품군 이름만 / 별칭·원산지 표기 / 취소·수출 거래)을
+적고, 출력은 종류별 행·양성·음성·오류 수와 표본이 없는 종류(`risk_types_without_samples`)를 함께 보인다.
+이 결과로 매핑을 자동으로 verified로 올리지 않는다.
+
 - `--fail-on-mismatch`: 사람 판정과 다른 등급이 하나라도 있으면 exit 1. CI는 이 옵션으로 실행하므로
   matcher 규칙 변경이 기존 사람 판정을 깨면 PR이 실패한다.
 - `--output`: 행별 `expected_grade`/`predicted_grade`/`match_note`를 CSV로 남겨 판정 근거를 재현 가능하게
@@ -174,6 +180,6 @@ python -m purchase_price.scripts.scan_g2b_exact_model_candidates \
 - G2B 외 제조사/유통/계약 Source는 source별 title/field parser가 추가로 필요하다.
 - 규격 비교는 현재 token presence 기반의 보수적 1차 규칙이며, 용량/전압/패키지/옵션처럼 의미 단위의 충돌 판정은 후속 확장 대상이다.
 - `Sophie` 등 특정 benchmark에 대한 실제 나라장터 동일모델 A/B 레코드 존재 여부는 별도 live 조사로 검증해야 한다. synthetic test fixture를 실제 근거로 간주하지 않는다.
-- 2026-07-14~08-13 구간 전체 스캔(run 33765916042)에서 Sophie(9건), NT960XJG-K72AG(1,021건) 모두 exact 모델 토큰 후보 0건이었다. 현재 Ground Truth 10건은 전부 X이므로 direct precision/recall은 N/A다.
+- 2026-07-14~08-13 구간 전체 스캔(run 33765916042)에서 Sophie(9건), NT960XJG-K72AG(1,021건) 모두 exact 모델 토큰 후보 0건이었다(당시 Ground Truth 10건은 전부 X). 이후 C5570 A 1건이 추가되어 지금은 11행, 양성 1행이다.
 - `(VN)`/`(CN)` 같은 모델 한정어의 업무적 의미는 공개 문서로 확인하지 않았다. 확인되면 `exact_with_unverified_qualifier`를 B로 승격하는 규칙을 별도 PR에서 검토한다.
 - 더 넓은 기간의 window 스캔은 `DATA_GO_KR_SERVICE_KEY`가 있는 환경에서 workflow 수동 실행이 필요하며, 이 저장소 작업환경에서는 아직 실행하지 않았다.
