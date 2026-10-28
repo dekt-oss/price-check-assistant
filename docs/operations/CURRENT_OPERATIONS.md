@@ -25,11 +25,14 @@
 | --- | --- | --- |
 | 주소 | https://bp-price-research.streamlit.app | |
 | 호스팅 | Streamlit Community Cloud, 메모리 한도 약 3.2 GB | `?_memdiag=1` 의 MEMORY_DIAGNOSTIC 줄 |
-| Python | 3.14 (미검증: v35 배포 뒤 RUNTIME 줄로 확인해 이 칸을 고친다) | `?_memdiag=1` 의 RUNTIME 줄 |
+| Python | 3.14.9 (2026-10-28 v35에서 확인) | `?_memdiag=1` 의 RUNTIME 줄 |
+| OS | Debian GNU/Linux 13 (trixie), x86_64, glibc 2.41 | 같은 줄 |
+| 주요 패키지 | streamlit 1.66.1 · pandas 2.3.3 · SQLAlchemy 2.1.6 · pydantic 2.14.1 · pypdfium2 5.14.0 · tesseract-bin 1.1.0 | 같은 줄 (requirements.txt가 범위만 정하므로 재시작 때 바뀔 수 있다) |
 | 패키지 설치 | `requirements.txt` (cloud가 uv로 설치) | |
 | 배포 확인 | `pages/1_대시보드.py`의 숨은 표식 `purchase-workspace-runtime-vNN` | Production Browser Smoke가 머지 뒤 이 표식을 기다린다 |
 
-CI는 두 가지 Python에서 돈다: 개발 기준 3.11(`ci.yml`의 `test`)과 운영과 같은 Python(`test-production-python`).
+CI는 두 가지 Python에서 돈다: 개발 기준 3.11(`ci.yml`의 `test`)과 운영과 같은 Python(`test-production-python`, 3.14).
+`streamlit-cloud-build.yml`은 운영과 같은 `python:3.14-trixie` 컨테이너에서 requirements 설치를 재현한다.
 
 ## 3. 정해진 한도
 
