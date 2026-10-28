@@ -19,7 +19,7 @@ import dataclasses
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -33,7 +33,9 @@ from purchase_price.collectors.g2b_shopping import (
 )
 from purchase_price.models import TrackBDeliveryLine
 from purchase_price.schemas import ProductQuery
+from purchase_price.services.g2b_delivery_record import live_raw_key
 from purchase_price.services.g2b_track_b_normalization import (
+    _payload_sha256,
     normalize_track_b_page,
     project_latest_track_b_records,
 )
@@ -205,6 +207,7 @@ def fetch_live_gap(
                     **_live_params(detail_code=code, begin=begin, end=end, page_no=page_no),
                 )
                 requests += 1
+                fetched_at = datetime.now(UTC)
                 page = unwrap_g2b_page(payload)
                 items = tuple(dict(item) for item in page.items)
                 rows_seen += len(items)
@@ -218,9 +221,21 @@ def fetch_live_gap(
                     total_count=page.total_count,
                     items=items,
                 )
+                sha256 = _payload_sha256(envelope)
+                # Not archived (the public app does not write R2): the key records when and what
+                # was asked, and a fingerprint of the response, so it is never read as a kept page.
                 normalized = normalize_track_b_page(
                     envelope,
-                    raw_object_key=f"live:{code}:{begin.isoformat()}:{end.isoformat()}:{page_no}",
+                    raw_object_key=live_raw_key(
+                        detail_code=code,
+                        begin=begin,
+                        end=end,
+                        page_no=page_no,
+                        fetched_at=fetched_at,
+                        sha256=sha256,
+                    ),
+                    raw_payload_sha256=sha256,
+                    fetched_at=fetched_at,
                 )
                 records.extend(normalized.records)
                 if len(items) < LIVE_PAGE_SIZE:
@@ -283,6 +298,7 @@ def fetch_live_gap(
 # Runtime marker: the dashboard reloads a retained pre-fix copy of this module (hot reload).
 DROPS_CANCELLED_LINES = True
 LIVE_PARTIAL_V1 = True
+LIVE_RAW_KEY_V2 = True  # review B-05: live raw keys say "not archived" (g2b_delivery_record)
 
 
 def _line_identity(source_record_id: str) -> tuple[tuple[str, str], int] | None:

@@ -1,0 +1,56 @@
+name: Evidence FK PostgreSQL Check
+
+# Review B-04: run the evidence foreign-key migration (0007) and its delete/rollback checks against
+# a throwaway PostgreSQL service, the engine production Postgres would use. No secrets, no R2.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/evidence-fk-postgres.yml
+      - alembic/**
+      - src/purchase_price/models.py
+      - tests/test_evidence_fk_restrict_migration.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidence-fk-postgres-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: evidence_fk
+          POSTGRES_USER: evidence_user
+          POSTGRES_PASSWORD: evidence_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U evidence_user -d evidence_fk"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PYTHONPATH: src
+      EVIDENCE_FK_POSTGRES_URL: postgresql+psycopg://evidence_user:evidence_pass@localhost:5432/evidence_fk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Migrate, refuse the delete, roll back and re-apply on PostgreSQL
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q -rs tests/test_evidence_fk_restrict_migration.py -k postgresql | tee result.txt
+          if grep -q skipped result.txt; then echo "PostgreSQL case was skipped"; exit 1; fi

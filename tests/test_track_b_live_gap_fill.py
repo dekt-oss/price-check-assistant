@@ -348,3 +348,39 @@ def test_every_page_read_is_still_success() -> None:
 
     assert len(client.calls) == 2
     assert result.status == "success"
+
+
+def test_live_rows_say_they_are_not_archived_with_time_range_and_fingerprint() -> None:
+    """Review B-05: a live row is a session observation; 원문 위치 never reads as a kept page."""
+
+    from purchase_price.services import g2b_delivery_record as record
+    from purchase_price.ui.track_b_transactions import _transaction_row
+
+    client = FakeClient({"4217210101": [_item("R1")]})
+    result = gap.fetch_live_gap(QUERY, detail_codes=["4217210101"], window=WINDOW, client=client)
+    (candidate,) = result.candidates
+
+    key = candidate.raw_object_key
+    assert key.startswith("live:4217210101:2026-09-19:2026-10-05:1:")
+    assert key.count(":") == 6 and not key.endswith(".json.gz")
+
+    text = record.describe_raw_key(key)
+    assert text.startswith("보관 안 됨 · 실시간 조회 20")
+    assert "세부품명번호 4217210101 2026-09-19~2026-10-05 1쪽" in text
+    assert "응답 확인값 " in text
+
+    row = _transaction_row(candidate, comparison_level="같은 제품")
+    assert row["원문근거키"] == text
+    # The trade dialog sees no archived page and says so instead of reading R2.
+    ref = record.parse_record_ref(row["원천기록"], row["원문근거키"])
+    assert ref is not None and ref.payload_hash is None
+    assert record.load_delivery_record(ref).status == "not_archived"
+
+
+def test_archived_and_older_live_keys_are_described_plainly() -> None:
+    from purchase_price.services.g2b_delivery_record import describe_raw_key
+
+    archived = "raw/g2b/track-b/" + "a" * 64 + ".json.gz"
+    assert describe_raw_key(archived) == archived
+    assert describe_raw_key("live:4217210101:2026-09-19:2026-10-05:1") == "보관 안 됨 · 실시간 조회(수집 전)"
+    assert describe_raw_key(None) == ""

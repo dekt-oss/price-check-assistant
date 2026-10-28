@@ -1,5 +1,7 @@
 # Track B daily backfill + R2 serving index
 
+> Current schedules, limits and storage: `docs/operations/CURRENT_OPERATIONS.md` (the authoritative table; updated 2026-10-28).
+
 ## Purpose
 
 The production pipeline completes the bounded one-year G2B Track B backfill and keeps both durable raw evidence and the rebuildable query index in Cloudflare R2. No Supabase/PostgreSQL storage is required for the Track B corpus.
@@ -20,7 +22,7 @@ that KST day without a rate-limit stop, at about 1.1 s per call.
 | Run | Schedule | Default budget | Override (repo variable) |
 | --- | --- | --- | --- |
 | Base: rolling recent window | 03:10 KST daily | 6,000 (one full 5,208-code cycle) | `TRACK_B_DAILY_REQUEST_BUDGET` |
-| History: 2021-01-01 to 2025-09-11 | every 3 h at :40 UTC; each run loops 2,000-call batches for up to 320 min | 2,000 per batch | `TRACK_B_HISTORY_REQUEST_BUDGET` |
+| History: 2021-01-01 to 2025-09-11 | every 3 h at :40 UTC; each run loops 2,000-call batches for up to 140 min (job timeout 175 min) | 2,000 per batch | `TRACK_B_HISTORY_REQUEST_BUDGET` |
 | Supplemental verified codes | 04:40 KST Monday | 50 | workflow input |
 
 Each base cycle re-reads the last 31 days, because 납품요구 rows can be registered weeks after

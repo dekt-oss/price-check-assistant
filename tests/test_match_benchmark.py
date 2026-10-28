@@ -97,3 +97,47 @@ def test_benchmark_coverage_separates_reviewed_positive_and_unreviewed_models(
     assert coverage.reviewed_models_without_direct_positive == ("NT960XJG-K72AG",)
     assert dict(coverage.grade_counts)["A"] == 1
     assert dict(coverage.grade_counts)["X"] == 1
+
+
+def test_real_ground_truth_names_a_risk_type_on_every_row() -> None:
+    """Review E-03: every reviewed row says which mistake it guards against."""
+
+    from purchase_price.services.match_benchmark import RISK_TYPES, summarize_risk_coverage
+
+    result = run_match_benchmark()
+    assert all(row.risk_type in RISK_TYPES for row in result.predictions)
+    by_type = {risk.risk_type: risk for risk in summarize_risk_coverage(result)}
+    assert list(by_type) == list(RISK_TYPES)  # kinds without rows are still listed
+    assert sum(risk.rows for risk in by_type.values()) == result.evaluation.total
+
+
+def test_risk_coverage_counts_positives_negatives_and_errors(tmp_path: Path) -> None:
+    from purchase_price.services.match_benchmark import summarize_risk_coverage
+
+    products = tmp_path / "products.csv"
+    truth = tmp_path / "truth.csv"
+    _write(products, PRODUCTS)
+    _write(
+        truth,
+        "benchmark_model,source_name,source_record_id,candidate_title,expected_grade,review_note,evidence_url,risk_type\n"
+        'Sophie,g2b,1,"인공호흡기, Stephan, Sophie, 운반형",A,t,u,별칭·원산지 표기\n'
+        'NT960XJG-K72AG,g2b,2,"노트북컴퓨터, Other Vendor, NT960XJG-K72AG, 32GB 1TB",A,t,u,다른 제조사·모델\n',
+    )
+    by_type = {r.risk_type: r for r in summarize_risk_coverage(run_match_benchmark(products_path=products, ground_truth_path=truth))}
+
+    assert (by_type["별칭·원산지 표기"].positives, by_type["별칭·원산지 표기"].mismatches) == (1, 0)
+    assert (by_type["다른 제조사·모델"].rows, by_type["다른 제조사·모델"].mismatches) == (1, 1)
+    assert by_type["취소·수출 거래"].rows == 0
+
+
+def test_unknown_risk_type_fails_closed(tmp_path: Path) -> None:
+    products = tmp_path / "products.csv"
+    truth = tmp_path / "truth.csv"
+    _write(products, PRODUCTS)
+    _write(
+        truth,
+        "benchmark_model,source_name,source_record_id,candidate_title,expected_grade,review_note,evidence_url,risk_type\n"
+        'Sophie,g2b,1,"인공호흡기, Stephan, Sophie, 운반형",A,t,u,아무거나\n',
+    )
+    with pytest.raises(MatchBenchmarkError, match="unknown risk_type"):
+        run_match_benchmark(products_path=products, ground_truth_path=truth)

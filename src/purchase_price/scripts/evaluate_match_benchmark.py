@@ -5,8 +5,10 @@ import sys
 from pathlib import Path
 
 from purchase_price.services.match_benchmark import (
+    SCOPE_NOTE,
     run_match_benchmark,
     summarize_benchmark_coverage,
+    summarize_risk_coverage,
     write_benchmark_predictions,
     write_benchmark_summary,
 )
@@ -65,6 +67,18 @@ def main(argv: list[str] | None = None) -> int:
         "reviewed_models_without_direct_positive="
         + (",".join(coverage.reviewed_models_without_direct_positive) or "-")
     )
+
+    risks = summarize_risk_coverage(result)
+    for risk in risks:
+        print(
+            f"risk[{risk.risk_type}] rows={risk.rows} positives={risk.positives} "
+            f"negatives={risk.negatives} mismatches={risk.mismatches}"
+        )
+    print(
+        "risk_types_without_samples="
+        + (",".join(risk.risk_type for risk in risks if risk.rows == 0) or "-")
+    )
+    print(f"scope_note={SCOPE_NOTE}")
 
     mismatches = [
         row for row in result.predictions if row.expected_grade != row.predicted_grade

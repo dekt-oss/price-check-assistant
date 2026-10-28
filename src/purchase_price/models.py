@@ -90,7 +90,9 @@ class PriceObservation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
     evidence_id: Mapped[int] = mapped_column(
-        ForeignKey("raw_evidence.id", ondelete="SET NULL"), nullable=False, index=True
+        ForeignKey("raw_evidence.id", ondelete="RESTRICT", name="fk_price_observations_evidence_id"),
+        nullable=False,
+        index=True,
     )
     derivation_version: Mapped[str] = mapped_column(String(80), default="v1")
     price: Mapped[Decimal] = mapped_column(Numeric(18, 2))

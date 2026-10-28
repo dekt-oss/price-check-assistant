@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | 구매가격 조사 | `/` | 기존 기능 그대로 |
 | 병원 News Radar | `/news-radar` | 30분마다 자동 수집한 기사 목록(R2 `news/v1/`, 21일 보관; 수집 작업이 59분 반복 후 다음 실행을 스스로 시작, 끄기: 저장소 변수 `NEWS_RADAR_CHAIN=off`)과 직접 "새 기사 확인", 읽음/중요 표시 저장, 즉시 알림(선택 webhook)·매일 08:30 요약 (`NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`, 뉴스 검색 API 활성화 필요; `docs/HOSPITAL_INTELLIGENCE_PHASE1_20261008.md` Phase 2) |
-| 병원 경영 Benchmark | `/hospital-benchmark` | 병원 Master 8곳, 비교군 선택, 지표 계산 틀 (회계자료는 아직 미적재) |
+| 병원 경영 Benchmark | `/hospital-benchmark` | 병원 Master 8곳, 비교군 선택, KHIDI 공시 2016~2024 회계자료로 지표 계산 (병상수는 심평원 키 대기) |
 
 NAVER 검색결과는 제목·시간·링크를 그대로 보여 주는 탐지 용도로만 쓰고 AI 요약·학습에 넘기지 않는다
 (2026-09-07 네이버 검색 API 이용약관). 자세한 상태는 `docs/HOSPITAL_INTELLIGENCE_PHASE1_20261008.md`.
@@ -42,15 +42,20 @@ NAVER 검색결과는 제목·시간·링크를 그대로 보여 주는 탐지 �
 2. 사용자가 모델명을 입력함
 3. 해당 exact model이 `data/g2b_product_mappings.csv`에서 `verified` 상태임
 
-현재 verified mapping은 5개입니다.
+현재 verified mapping은 10개입니다. 정본은 `data/g2b_product_mappings.csv`이고, 운영 기준은 `docs/operations/CURRENT_OPERATIONS.md`에 모아 둡니다.
 
 | 모델 | G2B 세부품명 | 세부품명번호 |
 | --- | --- | --- |
+| TN500 | 보육기 | 4227171401 |
 | Sophie | 인공호흡기 | 4227220901 |
+| ROTAPRO | 혈관강박리카테터장치 | 4220341801 |
 | Veriti Pro Dx | 유전자증폭기 | 4110630701 |
+| MAC5 | 심전계 | 4218170101 |
 | NT960XJG-K72AG | 노트북컴퓨터 | 4321150301 |
 | ApeosPrint C5570 GK | 레이저프린터 | 4321210501 |
 | ThinkStation P2 Tower | 워크스테이션 | 4321151501 |
+| CX30N | 영상모니터 | 4511181101 |
+| APC-30D | 이산화탄소배양기 | 4110449801 |
 
 나머지 품목은 `unverified`입니다. 매핑이 불명확하면 검색어·분류를 임의 생성하지 않고 G2B 자동검색을 건너뜁니다.
 

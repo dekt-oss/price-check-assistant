@@ -128,7 +128,7 @@ def test_dashboard_reloads_pre_search_index_modules_in_dependency_order() -> Non
     assert positions[0] > source.index("_TRACK_B_RUNTIME_MARKERS = (")
 
     home = Path("Home.py").read_text(encoding="utf-8")
-    assert 'if not hasattr(memory_diagnostic, "SEARCH_INDEX_V1"):' in home
+    assert 'if not hasattr(memory_diagnostic, "RUNTIME_LINE_V1"):' in home
 
 
 def test_native_snapshot_lookup_reads_beyond_50_rows(tmp_path) -> None:
