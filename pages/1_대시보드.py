@@ -218,6 +218,8 @@ _TRACK_B_RUNTIME_MARKERS = (
     # NT960 search: newest rows of a 세부품명 through the side index (helper first, then callers).
     (track_b_search_index_service, "DETAIL_CODE_ROWS_V1"),
     (track_b_reference_quality_service, "REFERENCE_QUALITY_DETAIL_CODE_ROWS_V1"),
+    # First search: the same-품목 model batch reads model-key chunks at once.
+    (track_b_comparison_service, "BATCH_PARALLEL_READS_V1"),
     # Review B-03: last verified copy when R2 cannot be reached, said on the 자료 기준 chip.
     (track_b_r2_index_service, "STALE_COPY_ON_REFRESH_FAILURE_V1"),
 )
@@ -247,6 +249,7 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.g2b_delivery_record", "LIVE_RAW_KEY_V2"),
     # First search: the same-품목 build starts in the background (start/take in this module).
     ("purchase_price.ui.same_item_cache", "EARLY_START_V1"),
+    ("purchase_price.ui.same_item_cache", "PARALLEL_BATCH_V1"),
     ("purchase_price.ui.track_b_transactions", "LIVE_RAW_KEY_V2"),
     ("purchase_price.ui.purchase_workspace", "LIVE_RAW_KEY_V2"),
     ("purchase_price.ui.result_summary", "RESULT_SUMMARY_V3"),
@@ -4849,6 +4852,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v34" style="display:none">purchase-workspace-runtime-v34</span>'
     '<span id="purchase-workspace-runtime-v35" style="display:none">purchase-workspace-runtime-v35</span>'
     '<span id="purchase-workspace-runtime-v36" style="display:none">purchase-workspace-runtime-v36</span>'
+    '<span id="purchase-workspace-runtime-v37" style="display:none">purchase-workspace-runtime-v37</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
