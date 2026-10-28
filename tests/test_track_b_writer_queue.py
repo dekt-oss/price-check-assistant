@@ -12,13 +12,9 @@ WRITERS = (
 
 
 def _concurrency_block(name: str) -> str:
-    text = (WORKFLOWS / name).read_text(encoding="utf-8")
-    block = text.split("
-concurrency:
-", 1)[1]
-    return block.split("
-
-", 1)[0]
+    text = (WORKFLOWS / name).read_text(encoding="utf-8").replace("\r\n", "\n")
+    block = text.split("\nconcurrency:\n", 1)[1]
+    return block.split("\n\n", 1)[0]
 
 
 def test_every_writer_shares_the_group_and_queues_all_waiting_runs() -> None:
@@ -26,10 +22,8 @@ def test_every_writer_shares_the_group_and_queues_all_waiting_runs() -> None:
         block = _concurrency_block(name)
         assert "|| 'track-b-r2-pipeline' }}" in block, name
         # queue: max cannot be combined with cancel-in-progress: true (GitHub validation error).
-        assert "
-  cancel-in-progress: false" in block, name
-        assert "
-  queue: max" in block, name
+        assert "\n  cancel-in-progress: false" in block, name
+        assert "\n  queue: max" in block, name
 
 
 def test_no_other_workflow_joins_the_writer_group() -> None:
