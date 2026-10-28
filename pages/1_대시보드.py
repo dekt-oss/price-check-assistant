@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import importlib
 import sqlite3
 import sys
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime
@@ -243,6 +245,8 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.services.g2b_delivery_record", "G2B_LINK_V1"),
     # Review B-05: live gap-fill rows say "보관 안 됨" in 원문 위치 (helper first, then its users).
     ("purchase_price.services.g2b_delivery_record", "LIVE_RAW_KEY_V2"),
+    # First search: the same-품목 build starts in the background (start/take in this module).
+    ("purchase_price.ui.same_item_cache", "EARLY_START_V1"),
     ("purchase_price.ui.track_b_transactions", "LIVE_RAW_KEY_V2"),
     ("purchase_price.ui.purchase_workspace", "LIVE_RAW_KEY_V2"),
     ("purchase_price.ui.result_summary", "RESULT_SUMMARY_V3"),
@@ -1202,18 +1206,11 @@ def _same_item_cache_key(
     )
 
 
-def _ensure_same_item_market(state: dict[str, Any]) -> None:
-    """Build the deferred same-품목 models and 같은 품목 시장 once, into the search state.
+def _compute_same_item(pending: dict[str, Any], records: tuple[Any, ...]) -> dict[str, Any]:
+    """The same-품목 models and 같은 품목 시장 for ``pending``; never raises, never touches ``st``.
 
-    Same inputs and builders as the search used before review D-02; a failure leaves both empty,
-    like any optional section. Results are reused across sessions for the same index file."""
+    Runs on the script thread or on a same_item_cache worker (started early by the search)."""
 
-    pending = state.get("same_item_pending")
-    if not isinstance(pending, dict):
-        return
-    state["same_item_pending"] = None
-    records = tuple(state.get("same_product_identity") or ())
-    timings = state.get("search_timings_seconds")
     model_stats: dict[str, Any] = {}
     crosslinks: list[dict[str, object]] = []
     market = None
@@ -1259,13 +1256,66 @@ def _ensure_same_item_market(state: dict[str, Any]) -> None:
         pass
     except Exception:  # noqa: BLE001 - an optional section below the card never breaks the result
         crosslinks, market = [], None
+    return {
+        "crosslinks": crosslinks,
+        "market": market,
+        "cache": cache_state,
+        "same_item_open": round(opened - started, 3),
+        "same_item_models": round(category_started - opened, 3),
+        "category_market": round(monotonic() - category_started, 3),
+    }
+
+
+# A background build not finished by then is given up; the section stays empty like a failure.
+SAME_ITEM_WAIT_SECONDS = 90
+
+
+def _start_same_item_early(pending: dict[str, Any] | None, records: tuple[Any, ...]) -> str | None:
+    """Start the same-품목 build in the background now; the token goes into the search state."""
+
+    if not pending:
+        return None
+    token = uuid.uuid4().hex
+    try:
+        same_item_cache.start(token, functools.partial(_compute_same_item, dict(pending), tuple(records)))
+    except Exception:  # noqa: BLE001 - fall back to building it when the result is drawn
+        return None
+    return token
+
+
+def _ensure_same_item_market(state: dict[str, Any]) -> None:
+    """Put the same-품목 models and 같은 품목 시장 into the search state, once.
+
+    Takes the background build the search started (review follow-up: first search), else builds
+    now. Same inputs and builders as before review D-02; a failure leaves both empty."""
+
+    pending = state.get("same_item_pending")
+    if not isinstance(pending, dict):
+        return
+    state["same_item_pending"] = None
+    records = tuple(state.get("same_product_identity") or ())
+    waited_from = monotonic()
+    future = same_item_cache.take(state.pop("same_item_token", None))
+    result: dict[str, Any] | None = None
+    early = future is not None
+    if future is not None:
+        try:
+            result = future.result(timeout=SAME_ITEM_WAIT_SECONDS)
+        except Exception:  # noqa: BLE001 - timed out or failed: an empty optional section
+            result = {"crosslinks": [], "market": None, "cache": "miss"}
+    if result is None:
+        result = _compute_same_item(pending, records)
+    timings = state.get("search_timings_seconds")
     if isinstance(timings, dict):
-        timings["same_item_open"] = round(opened - started, 3)
-        timings["same_item_models"] = round(category_started - opened, 3)
-        timings["category_market"] = round(monotonic() - category_started, 3)
-    state["same_item_cache"] = cache_state
-    state["mfds_procurement_crosslinks"] = crosslinks
-    state["category_market"] = market
+        for key in ("same_item_open", "same_item_models", "category_market"):
+            if key in result:
+                timings[key] = result[key]
+        # How long the result drawing actually waited for it (≈ 0 when the early build was done).
+        timings["same_item_wait"] = round(monotonic() - waited_from, 3)
+    state["same_item_cache"] = result.get("cache", "miss")
+    state["same_item_early"] = early
+    state["mfds_procurement_crosslinks"] = list(result.get("crosslinks") or [])
+    state["category_market"] = result.get("market")
 
 
 class _SameItemCached(Exception):
@@ -1283,7 +1333,9 @@ def _same_item_timing_marker_html(state: dict[str, Any], *, when: str, render_st
     attrs = [f'data-when="{when}"', f'data-done="{monotonic() - render_started:.3f}"']
     if state.get("same_item_cache") in {"hit", "miss"}:
         attrs.append(f'data-cache="{state["same_item_cache"]}"')
-    for key in ("same_item_open", "same_item_models", "category_market"):
+    if "same_item_early" in state:
+        attrs.append(f'data-early="{1 if state["same_item_early"] else 0}"')
+    for key in ("same_item_wait", "same_item_open", "same_item_models", "category_market"):
         if key in timings:
             try:
                 attrs.append(f'data-{key.replace("_", "-")}="{float(timings[key]):.3f}"')
@@ -2395,6 +2447,8 @@ def _execute_search(
             if same_product_identity
             else None
         )
+        # Start building it now, in the background, so it overlaps the rest of the search.
+        same_item_token = _start_same_item_early(same_item_pending, tuple(same_product_identity))
     search_timings["track_b"] = round(monotonic() - track_b_started, 3)
 
     overview_started = monotonic()
@@ -2539,6 +2593,7 @@ def _execute_search(
         "mfds_procurement_crosslinks": mfds_procurement_crosslinks,
         "category_market": category_market,
         "same_item_pending": same_item_pending,
+        "same_item_token": same_item_token,
         "track_b_data_as_of": track_b_data_as_of,
         "track_b_live": track_b_live,
         "track_b_index_updated_at": track_b_index_updated_at,
@@ -4793,6 +4848,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v33" style="display:none">purchase-workspace-runtime-v33</span>'
     '<span id="purchase-workspace-runtime-v34" style="display:none">purchase-workspace-runtime-v34</span>'
     '<span id="purchase-workspace-runtime-v35" style="display:none">purchase-workspace-runtime-v35</span>'
+    '<span id="purchase-workspace-runtime-v36" style="display:none">purchase-workspace-runtime-v36</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

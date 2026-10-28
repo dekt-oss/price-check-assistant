@@ -100,8 +100,8 @@ def test_dashboard_reports_each_stage_and_emits_the_v2_marker() -> None:
     for stage in ("identity", "track_b", "track_b_live", "safety"):
         assert f'stage("{stage}")' in source
     # Review D-02: the same-품목 models and market are timed where they are built, after the card.
-    assert 'timings["same_item_models"]' in source
-    assert 'timings["category_market"]' in source
+    assert '"same_item_models": round(' in source
+    assert '"category_market": round(' in source
     assert source.count("progress=_stage_reporter(status)") >= 5
     for key in m.TIMING_KEYS:
         assert key.replace("-", "_") in source

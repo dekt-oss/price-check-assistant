@@ -388,7 +388,7 @@ def test_dashboard_wires_the_view_into_result_overview_and_handoff() -> None:
     assert "on_open_trade=_open_trade_dialog" in source
     assert "render_company_lookup=_render_business_license_lookup" in source
     # Review D-02: timed where it is built (after the conclusion card unless the card shows it).
-    assert 'timings["category_market"]' in source and "_ensure_same_item_market(state)" in source
+    assert '"category_market": round(' in source and "_ensure_same_item_market(state)" in source
     assert "identity_from_same_product" in source and "_retry_model_identity" in source
 
 
