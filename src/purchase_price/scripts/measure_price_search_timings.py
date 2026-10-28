@@ -60,6 +60,7 @@ SUMMARY_STAGES = (
     "identity",
     "track_b",
     "track_b_lookup",
+    "same_item_wait",
     "same_item_open",
     "same_item_models",
     "category_market",
@@ -102,7 +103,7 @@ def sample_from_markers(
     stages: dict[str, float] = {}
     for key, raw in {
         **timings,
-        **{k: v for k, v in (deferred or {}).items() if k not in {"when", "cache"}},
+        **{k: v for k, v in (deferred or {}).items() if k not in {"when", "cache", "early"}},
     }.items():
         if key == "done":
             continue
@@ -128,6 +129,7 @@ def sample_from_markers(
         "wall_done": round(wall_done, 3) if wall_done is not None else None,
         "same_item_when": (deferred or {}).get("when"),
         "same_item_cache": (deferred or {}).get("cache"),
+        "same_item_early": (deferred or {}).get("early"),
     }
 
 
@@ -258,7 +260,16 @@ def measure_query(page: Any, url: str, query: str) -> dict[str, Any]:
                 deferred = _attributes(
                     root,
                     DEFERRED_MARKER,
-                    ("when", "cache", "done", "same-item-open", "same-item-models", "category-market"),
+                    (
+                        "when",
+                        "cache",
+                        "early",
+                        "done",
+                        "same-item-wait",
+                        "same-item-open",
+                        "same-item-models",
+                        "category-market",
+                    ),
                 )
                 break
             page.wait_for_timeout(500)

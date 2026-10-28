@@ -102,10 +102,23 @@ def _cache_namespace(calls: list[str]):
     from purchase_price.ui import same_item_cache
 
     same_item_cache.clear()
-    wanted = {"_same_item_cache_key", "_ensure_same_item_market", "_SameItemCached"}
+    wanted = {
+        "_same_item_cache_key",
+        "_compute_same_item",
+        "_start_same_item_early",
+        "_ensure_same_item_market",
+        "_SameItemCached",
+        "SAME_ITEM_WAIT_SECONDS",
+    }
     tree = ast.parse(SOURCE)
     nodes = [
-        node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in wanted
+        node
+        for node in tree.body
+        if (isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in wanted)
+        or (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id in wanted for t in node.targets)
+        )
     ]
     state = {"file": "a" * 64}
 
@@ -124,6 +137,8 @@ def _cache_namespace(calls: list[str]):
     def build_namespace():
         namespace = {
             "Any": object,
+            "functools": __import__("functools"),
+            "uuid": __import__("uuid"),
             "monotonic": monotonic,
             "same_item_cache": same_item_cache,
             "_track_b_runtime": lambda: (SimpleNamespace(open_track_b_serving_snapshot=open_snapshot), None),
@@ -156,7 +171,13 @@ def test_same_item_result_survives_a_page_rerun_for_the_same_index_file() -> Non
     build_namespace()["_ensure_same_item_market"](first)
     assert calls == ["crosslinks", "category"]
     assert first["same_item_cache"] == "miss" and first["same_item_pending"] is None
-    assert set(first["search_timings_seconds"]) == {"same_item_open", "same_item_models", "category_market"}
+    assert set(first["search_timings_seconds"]) == {
+        "same_item_wait",
+        "same_item_open",
+        "same_item_models",
+        "category_market",
+    }
+    assert first["same_item_early"] is False
 
     # Streamlit runs the page script afresh on every rerun: a new namespace must still hit.
     first["mfds_procurement_crosslinks"][0]["모델"] = "changed on screen"
@@ -190,3 +211,60 @@ def test_the_page_script_keeps_no_cache_of_its_own() -> None:
     # v32 kept the dict in the page script; every rerun emptied it (two production misses).
     assert "_SAME_ITEM_CACHE" not in SOURCE
     assert "same_item_cache.get(cache_key)" in SOURCE and "same_item_cache.put(" in SOURCE
+
+
+def test_search_starts_the_build_early_and_the_result_takes_it() -> None:
+    """First search: the build runs in the background while the search goes on."""
+
+    import threading
+
+    calls: list[str] = []
+    build_namespace, _index = _cache_namespace(calls)
+    namespace = build_namespace()
+    state = _search_state()
+    release = threading.Event()
+    inner = namespace["_build_mfds_procurement_crosslinks"]
+
+    def slow_crosslinks(*args, **kwargs):
+        calls.append(threading.current_thread().name)
+        release.wait(5)
+        return inner(*args, **kwargs)
+
+    namespace["_build_mfds_procurement_crosslinks"] = slow_crosslinks
+    token = namespace["_start_same_item_early"](state["same_item_pending"], state["same_product_identity"])
+    assert token
+    state["same_item_token"] = token
+    release.set()
+    namespace["_ensure_same_item_market"](state)
+
+    assert calls[0].startswith("same-item")  # built on the worker, not the script thread
+    assert calls.count("crosslinks") == 1 and calls.count("category") == 1
+    assert state["same_item_early"] is True and state["same_item_cache"] == "miss"
+    assert state["mfds_procurement_crosslinks"] == [{"모델": "HeartOn A16-DS", "나라장터 직접거래": 92}]
+    assert state["category_market"] == "MARKET"
+    assert "same_item_token" not in state and state["same_item_pending"] is None
+
+
+def test_a_failed_early_build_leaves_the_section_empty() -> None:
+    from purchase_price.ui import same_item_cache
+
+    calls: list[str] = []
+    build_namespace, _index = _cache_namespace(calls)
+    namespace = build_namespace()
+    state = _search_state()
+
+    def boom():
+        raise RuntimeError("worker failed")
+
+    same_item_cache.start("t-fail", boom)
+    state["same_item_token"] = "t-fail"
+    namespace["_ensure_same_item_market"](state)
+
+    assert calls == []  # not rebuilt on the script thread
+    assert state["mfds_procurement_crosslinks"] == [] and state["category_market"] is None
+
+
+def test_search_stores_the_early_token_in_its_state() -> None:
+    search = _function_source("_run_purchase_search") if "def _run_purchase_search(" in SOURCE else SOURCE
+    assert "same_item_token = _start_same_item_early(same_item_pending, tuple(same_product_identity))" in search
+    assert '"same_item_token": same_item_token' in search
