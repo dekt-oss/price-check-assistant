@@ -60,6 +60,7 @@ SUMMARY_STAGES = (
     "identity",
     "track_b",
     "track_b_lookup",
+    "same_item_open",
     "same_item_models",
     "category_market",
     "overview_probe",
@@ -99,7 +100,10 @@ def sample_from_markers(
     ``deferred`` (the after-card marker) adds the same-품목 stages when they ran after the card."""
 
     stages: dict[str, float] = {}
-    for key, raw in {**timings, **{k: v for k, v in (deferred or {}).items() if k != "when"}}.items():
+    for key, raw in {
+        **timings,
+        **{k: v for k, v in (deferred or {}).items() if k not in {"when", "cache"}},
+    }.items():
         if key == "done":
             continue
         if raw is None:
@@ -123,6 +127,7 @@ def sample_from_markers(
         "render_card": render_card,
         "wall_done": round(wall_done, 3) if wall_done is not None else None,
         "same_item_when": (deferred or {}).get("when"),
+        "same_item_cache": (deferred or {}).get("cache"),
     }
 
 
@@ -251,7 +256,9 @@ def measure_query(page: Any, url: str, query: str) -> dict[str, Any]:
             if root.locator(DEFERRED_MARKER).count() > 0:
                 wall_done = time.monotonic() - started
                 deferred = _attributes(
-                    root, DEFERRED_MARKER, ("when", "done", "same-item-models", "category-market")
+                    root,
+                    DEFERRED_MARKER,
+                    ("when", "cache", "done", "same-item-open", "same-item-models", "category-market"),
                 )
                 break
             page.wait_for_timeout(500)

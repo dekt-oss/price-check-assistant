@@ -1167,11 +1167,43 @@ def _class_market_overview(raw_search: str, snapshot_runtime: Any) -> dict[str, 
     }
 
 
+# Same-품목 models and 같은 품목 시장 per (serving-index file, inputs), shared by every session of
+# this process: the index file never changes under its SHA-256 name and the rows are public
+# procurement data, so a second search of the same 품목 skips the ~7 s build. Newest kept last.
+_SAME_ITEM_CACHE: dict[tuple[object, ...], tuple[list[dict[str, object]], Any]] = {}
+_SAME_ITEM_CACHE_LIMIT = 32
+_SAME_ITEM_CACHE_LOCK = Lock()
+
+
+def _same_item_cache_key(
+    snapshot: Any, pending: dict[str, Any], records: tuple[Any, ...]
+) -> tuple[object, ...] | None:
+    path = getattr(snapshot, "path", None)
+    if getattr(snapshot, "status", "") != "available" or path is None:
+        return None
+    return (
+        str(getattr(path, "stem", path)),  # the index file is named by its SHA-256
+        str(getattr(snapshot, "data_as_of", "") or ""),
+        str(pending.get("current_model") or ""),
+        str(pending.get("identity_product") or ""),
+        tuple(
+            (
+                str(getattr(r, "permit_number", "") or ""),
+                str(getattr(r, "model_name", "") or ""),
+                str(getattr(r, "registered_company", "") or ""),
+                str(getattr(r, "product_name", "") or ""),
+                str(getattr(r, "udi_di", "") or ""),
+            )
+            for r in records
+        ),
+    )
+
+
 def _ensure_same_item_market(state: dict[str, Any]) -> None:
     """Build the deferred same-품목 models and 같은 품목 시장 once, into the search state.
 
     Same inputs and builders as the search used before review D-02; a failure leaves both empty,
-    like any optional section."""
+    like any optional section. Results are reused across sessions for the same index file."""
 
     pending = state.get("same_item_pending")
     if not isinstance(pending, dict):
@@ -1183,10 +1215,22 @@ def _ensure_same_item_market(state: dict[str, Any]) -> None:
     crosslinks: list[dict[str, object]] = []
     market = None
     started = monotonic()
+    opened = started
     category_started = started
+    cache_state = "miss"
     try:
         snapshot_runtime, _live_runtime = _track_b_runtime()
         with snapshot_runtime.open_track_b_serving_snapshot() as snapshot:
+            opened = monotonic()
+            cache_key = _same_item_cache_key(snapshot, pending, records)
+            with _SAME_ITEM_CACHE_LOCK:
+                cached = _SAME_ITEM_CACHE.get(cache_key) if cache_key is not None else None
+            if cached is not None:
+                cache_state = "hit"
+                crosslinks = [dict(row) for row in cached[0]]
+                market = cached[1]
+                category_started = monotonic()
+                raise _SameItemCached
             crosslinks = _build_mfds_procurement_crosslinks(
                 records,
                 track_b_snapshot=snapshot,
@@ -1208,13 +1252,27 @@ def _ensure_same_item_market(state: dict[str, Any]) -> None:
                 crosslinks=crosslinks,
                 model_stats=model_stats,
             )
+            if cache_key is not None:
+                with _SAME_ITEM_CACHE_LOCK:
+                    _SAME_ITEM_CACHE.pop(cache_key, None)
+                    _SAME_ITEM_CACHE[cache_key] = ([dict(row) for row in crosslinks], market)
+                    while len(_SAME_ITEM_CACHE) > _SAME_ITEM_CACHE_LIMIT:
+                        _SAME_ITEM_CACHE.pop(next(iter(_SAME_ITEM_CACHE)))
+    except _SameItemCached:
+        pass
     except Exception:  # noqa: BLE001 - an optional section below the card never breaks the result
         crosslinks, market = [], None
     if isinstance(timings, dict):
-        timings["same_item_models"] = round(category_started - started, 3)
+        timings["same_item_open"] = round(opened - started, 3)
+        timings["same_item_models"] = round(category_started - opened, 3)
         timings["category_market"] = round(monotonic() - category_started, 3)
+    state["same_item_cache"] = cache_state
     state["mfds_procurement_crosslinks"] = crosslinks
     state["category_market"] = market
+
+
+class _SameItemCached(Exception):
+    """Leaves the snapshot block early when the cache already holds the same-품목 result."""
 
 
 def _same_item_timing_marker_html(state: dict[str, Any], *, when: str, render_started: float) -> str:
@@ -1226,7 +1284,9 @@ def _same_item_timing_marker_html(state: dict[str, Any], *, when: str, render_st
     timings = state.get("search_timings_seconds")
     timings = timings if isinstance(timings, dict) else {}
     attrs = [f'data-when="{when}"', f'data-done="{monotonic() - render_started:.3f}"']
-    for key in ("same_item_models", "category_market"):
+    if state.get("same_item_cache") in {"hit", "miss"}:
+        attrs.append(f'data-cache="{state["same_item_cache"]}"')
+    for key in ("same_item_open", "same_item_models", "category_market"):
         if key in timings:
             try:
                 attrs.append(f'data-{key.replace("_", "-")}="{float(timings[key]):.3f}"')
@@ -4727,6 +4787,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v29" style="display:none">purchase-workspace-runtime-v29</span>'
     '<span id="purchase-workspace-runtime-v30" style="display:none">purchase-workspace-runtime-v30</span>'
     '<span id="purchase-workspace-runtime-v31" style="display:none">purchase-workspace-runtime-v31</span>'
+    '<span id="purchase-workspace-runtime-v32" style="display:none">purchase-workspace-runtime-v32</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'
