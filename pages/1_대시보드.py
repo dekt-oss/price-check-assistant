@@ -126,6 +126,7 @@ from purchase_price.ui import product_identity as product_identity_ui
 from purchase_price.ui import quote_input as quote_input_ui
 from purchase_price.ui import result_layout as result_layout_ui
 from purchase_price.ui import result_summary as result_summary_ui
+from purchase_price.ui import same_item_cache
 from purchase_price.ui import same_item_compare as same_item_ui
 from purchase_price.ui import search_overviews as overview_ui
 from purchase_price.ui import table_actions as table_actions_ui
@@ -1167,14 +1168,6 @@ def _class_market_overview(raw_search: str, snapshot_runtime: Any) -> dict[str, 
     }
 
 
-# Same-품목 models and 같은 품목 시장 per (serving-index file, inputs), shared by every session of
-# this process: the index file never changes under its SHA-256 name and the rows are public
-# procurement data, so a second search of the same 품목 skips the ~7 s build. Newest kept last.
-_SAME_ITEM_CACHE: dict[tuple[object, ...], tuple[list[dict[str, object]], Any]] = {}
-_SAME_ITEM_CACHE_LIMIT = 32
-_SAME_ITEM_CACHE_LOCK = Lock()
-
-
 def _same_item_cache_key(
     snapshot: Any, pending: dict[str, Any], records: tuple[Any, ...]
 ) -> tuple[object, ...] | None:
@@ -1223,12 +1216,11 @@ def _ensure_same_item_market(state: dict[str, Any]) -> None:
         with snapshot_runtime.open_track_b_serving_snapshot() as snapshot:
             opened = monotonic()
             cache_key = _same_item_cache_key(snapshot, pending, records)
-            with _SAME_ITEM_CACHE_LOCK:
-                cached = _SAME_ITEM_CACHE.get(cache_key) if cache_key is not None else None
+            # Kept in an imported module: a dict in this page script is new on every rerun.
+            cached = same_item_cache.get(cache_key)
             if cached is not None:
                 cache_state = "hit"
-                crosslinks = [dict(row) for row in cached[0]]
-                market = cached[1]
+                crosslinks, market = cached
                 category_started = monotonic()
                 raise _SameItemCached
             crosslinks = _build_mfds_procurement_crosslinks(
@@ -1252,12 +1244,7 @@ def _ensure_same_item_market(state: dict[str, Any]) -> None:
                 crosslinks=crosslinks,
                 model_stats=model_stats,
             )
-            if cache_key is not None:
-                with _SAME_ITEM_CACHE_LOCK:
-                    _SAME_ITEM_CACHE.pop(cache_key, None)
-                    _SAME_ITEM_CACHE[cache_key] = ([dict(row) for row in crosslinks], market)
-                    while len(_SAME_ITEM_CACHE) > _SAME_ITEM_CACHE_LIMIT:
-                        _SAME_ITEM_CACHE.pop(next(iter(_SAME_ITEM_CACHE)))
+            same_item_cache.put(cache_key, crosslinks, market)
     except _SameItemCached:
         pass
     except Exception:  # noqa: BLE001 - an optional section below the card never breaks the result
@@ -4788,6 +4775,7 @@ st.markdown(
     '<span id="purchase-workspace-runtime-v30" style="display:none">purchase-workspace-runtime-v30</span>'
     '<span id="purchase-workspace-runtime-v31" style="display:none">purchase-workspace-runtime-v31</span>'
     '<span id="purchase-workspace-runtime-v32" style="display:none">purchase-workspace-runtime-v32</span>'
+    '<span id="purchase-workspace-runtime-v33" style="display:none">purchase-workspace-runtime-v33</span>'
     '<span id="purchase-workspace-mfds-v1" style="display:none">purchase-workspace-mfds-v1</span>'
     '<span id="purchase-workspace-mfds-v2" style="display:none">purchase-workspace-mfds-v2</span>'
     '<span id="purchase-workspace-quote-v1" style="display:none">purchase-workspace-quote-v1</span>'

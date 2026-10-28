@@ -94,25 +94,18 @@ def test_result_builds_the_rest_after_the_conclusion_card_once() -> None:
 
 
 def _cache_namespace(calls: list[str]):
-    """The deferred builder and its cache from the page script, with stub index and builders."""
+    """The deferred builder from the page script with stub index and builders; the real cache module."""
 
     import contextlib
-    from threading import Lock
     from time import monotonic
 
+    from purchase_price.ui import same_item_cache
+
+    same_item_cache.clear()
     wanted = {"_same_item_cache_key", "_ensure_same_item_market", "_SameItemCached"}
     tree = ast.parse(SOURCE)
     nodes = [
-        node
-        for node in tree.body
-        if (isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in wanted)
-        or (
-            isinstance(node, (ast.Assign, ast.AnnAssign))
-            and any(
-                isinstance(target, ast.Name) and target.id.startswith("_SAME_ITEM_CACHE")
-                for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
-            )
-        )
+        node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in wanted
     ]
     state = {"file": "a" * 64}
 
@@ -128,16 +121,19 @@ def _cache_namespace(calls: list[str]):
         calls.append("category")
         return "MARKET"
 
-    namespace = {
-        "Any": object,
-        "Lock": Lock,
-        "monotonic": monotonic,
-        "_track_b_runtime": lambda: (SimpleNamespace(open_track_b_serving_snapshot=open_snapshot), None),
-        "_build_mfds_procurement_crosslinks": crosslinks,
-        "_build_category_market": category,
-    }
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(DASHBOARD), "exec"), namespace)
-    return namespace, state
+    def build_namespace():
+        namespace = {
+            "Any": object,
+            "monotonic": monotonic,
+            "same_item_cache": same_item_cache,
+            "_track_b_runtime": lambda: (SimpleNamespace(open_track_b_serving_snapshot=open_snapshot), None),
+            "_build_mfds_procurement_crosslinks": crosslinks,
+            "_build_category_market": category,
+        }
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), str(DASHBOARD), "exec"), namespace)
+        return namespace
+
+    return build_namespace, state
 
 
 def _search_state() -> dict:
@@ -152,20 +148,20 @@ def _search_state() -> dict:
     }
 
 
-def test_same_item_result_is_reused_for_the_same_index_file_only() -> None:
+def test_same_item_result_survives_a_page_rerun_for_the_same_index_file() -> None:
     calls: list[str] = []
-    namespace, index = _cache_namespace(calls)
-    ensure = namespace["_ensure_same_item_market"]
+    build_namespace, index = _cache_namespace(calls)
 
     first = _search_state()
-    ensure(first)
+    build_namespace()["_ensure_same_item_market"](first)
     assert calls == ["crosslinks", "category"]
     assert first["same_item_cache"] == "miss" and first["same_item_pending"] is None
     assert set(first["search_timings_seconds"]) == {"same_item_open", "same_item_models", "category_market"}
 
+    # Streamlit runs the page script afresh on every rerun: a new namespace must still hit.
     first["mfds_procurement_crosslinks"][0]["모델"] = "changed on screen"
     second = _search_state()
-    ensure(second)
+    build_namespace()["_ensure_same_item_market"](second)
     assert calls == ["crosslinks", "category"]  # nothing rebuilt
     assert second["same_item_cache"] == "hit"
     assert second["mfds_procurement_crosslinks"] == [{"모델": "HeartOn A16-DS", "나라장터 직접거래": 92}]
@@ -173,21 +169,24 @@ def test_same_item_result_is_reused_for_the_same_index_file_only() -> None:
 
     index["file"] = "b" * 64  # a new serving index arrived
     third = _search_state()
-    ensure(third)
+    build_namespace()["_ensure_same_item_market"](third)
     assert calls == ["crosslinks", "category", "crosslinks", "category"]
     assert third["same_item_cache"] == "miss"
 
 
 def test_cache_keeps_at_most_the_limit_and_drops_the_oldest() -> None:
-    calls: list[str] = []
-    namespace, _index = _cache_namespace(calls)
-    ensure = namespace["_ensure_same_item_market"]
-    limit = namespace["_SAME_ITEM_CACHE_LIMIT"]
+    from purchase_price.ui import same_item_cache
 
-    for number in range(limit + 3):
-        state = _search_state()
-        state["same_item_pending"]["current_model"] = f"MODEL-{number}"
-        ensure(state)
+    same_item_cache.clear()
+    for number in range(same_item_cache.LIMIT + 3):
+        same_item_cache.put(("file", f"MODEL-{number}"), [{"n": number}], None)
+    assert same_item_cache.size() == same_item_cache.LIMIT
+    assert same_item_cache.get(("file", "MODEL-0")) is None
+    assert same_item_cache.get(("file", f"MODEL-{same_item_cache.LIMIT + 2}")) == ([{"n": same_item_cache.LIMIT + 2}], None)
+    same_item_cache.clear()
 
-    assert len(namespace["_SAME_ITEM_CACHE"]) == limit
-    assert all("MODEL-0" not in key for key in namespace["_SAME_ITEM_CACHE"])
+
+def test_the_page_script_keeps_no_cache_of_its_own() -> None:
+    # v32 kept the dict in the page script; every rerun emptied it (two production misses).
+    assert "_SAME_ITEM_CACHE" not in SOURCE
+    assert "same_item_cache.get(cache_key)" in SOURCE and "same_item_cache.put(" in SOURCE
