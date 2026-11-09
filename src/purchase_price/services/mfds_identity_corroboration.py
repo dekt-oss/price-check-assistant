@@ -24,6 +24,8 @@ from purchase_price.services.product_matching import (
     parse_g2b_identity,
 )
 
+# Runtime marker (#385): trade_corroborates_record exists; the dashboard reloads a retained copy.
+TRADE_CORROBORATION_V1 = True
 WEAK_KEY_SHAPES = frozenset({"digits_only", "unit_like", "short"})
 _UNIT_KEY = re.compile(r"^\d+(ml|cc|cm|mm|g|kg|l|ea|oz|매|개|본)$")
 _MIN_PRODUCT_KEY_LENGTH = 3

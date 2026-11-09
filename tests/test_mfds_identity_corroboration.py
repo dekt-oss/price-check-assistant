@@ -199,5 +199,16 @@ def test_dashboard_counts_only_corroborated_trades_for_registered_models() -> No
     start = source.index("def _build_mfds_procurement_crosslinks(")
     body = source[start : source.index("\ndef ", start + 10)]
 
-    assert "if trade_corroborates_record(candidate, item)" in body
+    assert "corroborates(candidate, item)" in body
     assert body.index("trade_corroborates_record") < body.index('stats_out.setdefault("detail_codes"')
+
+
+def test_dashboard_survives_a_retained_pre_385_module() -> None:
+    # Streamlit can keep the old module after a deploy: the page must not import the new name
+    # at the top (that runs before _refresh_ui_modules), and the refresh must know the marker.
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+
+    assert "import identity_needs_review,\n    trade_corroborates_record" not in source
+    assert "trade_corroborates_record\n)" not in source
+    assert '("purchase_price.services.mfds_identity_corroboration", "TRADE_CORROBORATION_V1")' in source
+    assert corroboration.TRADE_CORROBORATION_V1 is True

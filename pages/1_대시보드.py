@@ -31,6 +31,7 @@ from purchase_price.schemas import ProductQuery
 from purchase_price.services import category_market as category_market_service
 from purchase_price.services import g2b_delivery_record as delivery_record_service
 from purchase_price.services import index_prefetch as index_prefetch_service
+from purchase_price.services import mfds_identity_corroboration as corroboration_service
 from purchase_price.services import mfds_identity_r2 as mfds_identity_r2_service
 from purchase_price.services import mfds_item_status_r2 as mfds_item_status_service
 from purchase_price.services import mfds_recall as mfds_recall_service
@@ -70,10 +71,7 @@ from purchase_price.services.mfds_device_intelligence import (
     MfdsBusinessLicenseClient,
     MfdsModelInfoClient,
 )
-from purchase_price.services.mfds_identity_corroboration import (
-    identity_needs_review,
-    trade_corroborates_record,
-)
+from purchase_price.services.mfds_identity_corroboration import identity_needs_review
 from purchase_price.services.mfds_identity_index import (
     MfdsIdentityLookup,
     MfdsIdentityRecord,
@@ -303,6 +301,8 @@ _UI_RUNTIME_MARKERS = (
     # (table_actions is a new module).
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_REOPEN_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_PRICED_SPLIT_V1"),
+    # 2026-11-09: a registered model's trades must agree on maker or product name (#385).
+    ("purchase_price.services.mfds_identity_corroboration", "TRADE_CORROBORATION_V1"),
 )
 
 
@@ -817,10 +817,13 @@ def _build_mfds_procurement_crosslinks(
         company = str(getattr(item, "registered_company", "") or "").strip()
         # A model-name match must also agree on the maker or the product name: a 책소독기 that
         # shares an ultrasound model's name is not that ultrasound's trade (2026-11-09).
+        # Looked up at call time: a process that kept the pre-#385 module has no such function
+        # until _refresh_ui_modules reloads it, and must not fail the whole page meanwhile.
+        corroborates = getattr(corroboration_service, "trade_corroborates_record", None)
         direct = tuple(
             candidate
             for candidate in _strict_candidates_compat(comparison)
-            if trade_corroborates_record(candidate, item)
+            if corroborates is None or corroborates(candidate, item)
         )
         # The price range uses the model's main unit only (대 vs set are not one range).
         priced = result_summary_ui.split_by_main_unit(direct).kept
