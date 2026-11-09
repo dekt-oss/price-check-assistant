@@ -21,6 +21,7 @@ from purchase_price.services.matching import normalize_text
 from purchase_price.services.product_matching import (
     canonical_manufacturer,
     load_manufacturer_aliases,
+    parse_g2b_identity,
 )
 
 WEAK_KEY_SHAPES = frozenset({"digits_only", "unit_like", "short"})
@@ -126,6 +127,24 @@ def corroborated_records(
         record
         for record in records
         if record_corroborated(record, manufacturer=manufacturer, product_name=product_name)
+    )
+
+
+def trade_corroborates_record(trade: Any, record: Any) -> bool:
+    """True when a 나라장터 trade matched to an MFDS registration by model name alone also agrees
+    on the maker (or its recorded importer) or on the product name.
+
+    A bare model-name match is not enough: an 이동형 초음파영상진단장치 model whose name equals a
+    책소독기 model (2026-11-09) pulled every 책소독기 trade into the ultrasound's 같은 품목 시장.
+    """
+
+    title = getattr(trade, "product_title", None)
+    parsed = parse_g2b_identity(title) if title else None
+    maker = getattr(trade, "manufacturer", None) or (parsed.manufacturer if parsed else None)
+    if company_corroborates(maker, getattr(record, "registered_company", None)):
+        return True
+    return product_corroborates(
+        parsed.product_name if parsed else None, getattr(record, "product_name", None)
     )
 
 

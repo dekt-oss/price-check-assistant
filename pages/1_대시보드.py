@@ -70,7 +70,10 @@ from purchase_price.services.mfds_device_intelligence import (
     MfdsBusinessLicenseClient,
     MfdsModelInfoClient,
 )
-from purchase_price.services.mfds_identity_corroboration import identity_needs_review
+from purchase_price.services.mfds_identity_corroboration import (
+    identity_needs_review,
+    trade_corroborates_record,
+)
 from purchase_price.services.mfds_identity_index import (
     MfdsIdentityLookup,
     MfdsIdentityRecord,
@@ -812,7 +815,13 @@ def _build_mfds_procurement_crosslinks(
     for item, comparison in zip(items, comparisons, strict=True):
         model = str(getattr(item, "model_name", "") or "").strip()
         company = str(getattr(item, "registered_company", "") or "").strip()
-        direct = _strict_candidates_compat(comparison)
+        # A model-name match must also agree on the maker or the product name: a 책소독기 that
+        # shares an ultrasound model's name is not that ultrasound's trade (2026-11-09).
+        direct = tuple(
+            candidate
+            for candidate in _strict_candidates_compat(comparison)
+            if trade_corroborates_record(candidate, item)
+        )
         # The price range uses the model's main unit only (대 vs set are not one range).
         priced = result_summary_ui.split_by_main_unit(direct).kept
         prices = sorted(

@@ -135,7 +135,8 @@ def test_importer_relations_registry_has_required_columns() -> None:
 def test_dashboard_routes_weak_keys_to_candidate_confirmation() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
 
-    assert "from purchase_price.services.mfds_identity_corroboration import identity_needs_review" in source
+    start = source.index("from purchase_price.services.mfds_identity_corroboration import")
+    assert "identity_needs_review" in source[start : start + 200]
     assert "selected_identity is None" in source
     assert '"review_reason": "weak_model_key" if weak_key_review else "ambiguous"' in source
     assert 'state.get("review_reason") == "weak_model_key"' in source
@@ -160,3 +161,43 @@ def test_importer_relations_are_evidenced_and_not_manufacturer_aliases() -> None
         assert "audit" in row["evidence_note"]
         # Importers must stay out of the Track B manufacturer alias registry.
         assert normalize_text(row["mfds_registered_company"]) not in aliases
+
+
+def _trade(title: str, manufacturer: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(product_title=title, manufacturer=manufacturer)
+
+
+ULTRASOUND = "이동형 초음파 영상 진단장치"
+
+
+def test_same_model_name_of_another_product_is_not_the_registrations_trade() -> None:
+    # 2026-11-09: an ultrasound model named like a 책소독기 pulled 책소독기 trades into its market.
+    record = _record("LBS601", "삼성메디슨(주)", ULTRASOUND)
+
+    assert not corroboration.trade_corroborates_record(
+        _trade("책소독기, 에버트리, LBS601, 소독방식: 자외선", "에버트리"), record
+    )
+
+
+def test_trade_kept_when_maker_or_product_name_agrees() -> None:
+    record = _record("HM70", "삼성메디슨(주)", ULTRASOUND)
+
+    # Same maker, product named differently on 나라장터.
+    assert corroboration.trade_corroborates_record(
+        _trade("의료용진단장비, 삼성메디슨, HM70", "삼성메디슨"), record
+    )
+    # Maker spelled differently, but the 나라장터 product name is the same class.
+    assert corroboration.trade_corroborates_record(
+        _trade("초음파영상진단장치, Samsung Medison, HM70", "Samsung Medison"), record
+    )
+    # Maker missing on the trade row: the title's maker is used.
+    assert corroboration.trade_corroborates_record(_trade("기타장비, 삼성메디슨, HM70"), record)
+
+
+def test_dashboard_counts_only_corroborated_trades_for_registered_models() -> None:
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+    start = source.index("def _build_mfds_procurement_crosslinks(")
+    body = source[start : source.index("\ndef ", start + 10)]
+
+    assert "if trade_corroborates_record(candidate, item)" in body
+    assert body.index("trade_corroborates_record") < body.index('stats_out.setdefault("detail_codes"')
