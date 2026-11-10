@@ -26,3 +26,8 @@ artifacts/
 .DS_Store
 Thumbs.db
 .worktrees/
+
+# 공개 저장소다. 공통 하네스(claude-config)의 점검 스킬 중 다른 비공개 프로젝트의 운영 기록(매매·주문·손실 등)을
+# 사례로 담은 것은 싣지 않는다(2026-11-10, 하네스 배달로 들어온 12종을 되돌림). 완료 보고 스킬만 허용한다.
+.claude/skills/*
+!.claude/skills/work-completion-report/
