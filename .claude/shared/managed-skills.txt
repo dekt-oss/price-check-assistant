@@ -1,0 +1,13 @@
+adjacent-path-guard-audit
+dead-wiring-audit
+deploy-staleness-check
+enforce-by-type-or-test
+error-vs-empty-audit
+gate-prompt-feedback-parity
+gemini-structured-output-guard
+log-driven-integration-debug
+magic-number-audit
+platform-constraint-ledger
+render-required-verification-audit
+value-duplication-drift-audit
+work-completion-report
