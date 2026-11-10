@@ -1,5 +1,9 @@
 # CLAUDE.md — price-check-assistant (구매 시장가격 검토 보조 PoC)
 
+<!-- harness:begin — claude-config 에서 자동 배달. 이 블록과 .claude/shared/ 는 손으로 고치지 말 것 -->
+공통 규칙(모든 프로젝트): @.claude/shared/HARNESS.md
+<!-- harness:end -->
+
 이 파일은 Claude Code가 이 레포에서 일할 때 항상 따르는 지침이다. 프로젝트 설명은 `README.md`를 본다.
 
 ## 작업 결과 보고 (항상 — 사용자 지시 2026-10-04)
