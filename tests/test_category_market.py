@@ -383,7 +383,8 @@ def test_dashboard_wires_the_view_into_result_overview_and_handoff() -> None:
     source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
     assert "market_main = bool(category_market is not None and not any_direct" in source
     assert "_render_category_market(market, key=f\"overview::{heading}\", records=records)" in source
-    assert "section_heading=True" in source
+    # 2026-11: under a product with its own trades the 품목 is folded to one line and five models.
+    assert "category_market_ui.compact_html(" in source
     assert "model_url=_category_model_url(records)" in source
     assert "on_open_trade=_open_trade_dialog" in source
     assert "render_company_lookup=_render_business_license_lookup" in source
@@ -427,3 +428,24 @@ def test_block_fits_a_390px_phone_without_cutting_text():
     assert ".cm-recent-row .cm-who {order:3; flex:1 1 100%; white-space:normal" in narrow
     assert ".cm-strip-note {white-space:normal" in narrow
     assert "overflow-wrap:anywhere" in css
+
+
+def test_compact_block_is_one_line_five_models_and_a_link_to_the_item_page() -> None:
+    trades = [
+        _trade("1540000", number=f"R{n}", date="2026-09-30", institution=f"기관{n}", model="NT-381.B")
+        for n in range(4)
+    ] + [
+        _trade(str(1_600_000 + n), number=f"S{n}", date="2026-09-29", institution=f"병원{n}", model=f"M-{n}")
+        for n in range(6)
+    ]
+    codes = (cm.DetailCode("4217210101", "저출력심장충격기"),)
+    market = cm.build_category_market(trades, product_name="저출력심장충격기", codes=codes, data_as_of="2026-10-09")
+
+    html = ui.compact_html(market, item_url="https://app/?q=x", model_url=lambda name, _reg: f"https://app/?q={name}")
+
+    assert ui.compact_line(market).startswith("1대 가운데 값 ")
+    assert html.count('class="cm-top-row') == ui.COMPACT_TOP
+    assert "NT-381.B" in html and 'href="https://app/?q=NT-381.B"' in html
+    assert "저출력심장충격기 전체 보기" in html and 'href="https://app/?q=x"' in html
+    # The full market (year table, excluded trades, tabs) is not drawn here.
+    assert "연도별 시세" not in html.split("전체 보기")[0] and "cm-excluded" not in html.split("</style>")[-1]
