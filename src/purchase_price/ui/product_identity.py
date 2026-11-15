@@ -28,6 +28,8 @@ PRODUCT_IDENTITY_V1 = True
 # 2026-10-10: a bare model name shared by several permits is narrowed to the quote's / trades'
 # maker, else shown as "허가 N건 — 확인 필요" without merging makers.
 PRODUCT_IDENTITY_V2 = True
+# Runtime marker (2026-11): official names as rows, each a search link (OfficialRow).
+OFFICIAL_NAME_ROWS_V1 = True
 
 NOT_CHECKED = "확인 전"
 NONE = "—"

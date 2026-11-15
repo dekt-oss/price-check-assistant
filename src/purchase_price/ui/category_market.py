@@ -69,6 +69,8 @@ CATEGORY_MARKET_NEW_TAB_V1 = True
 CATEGORY_MARKET_REOPEN_V1 = True
 # Priced models in their own table (empty cells sort first on an ascending click).
 CATEGORY_MARKET_PRICED_SPLIT_V1 = True
+# Runtime marker (2026-11): one-line 같은 품목 summary under a product with its own trades.
+CATEGORY_MARKET_COMPACT_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
