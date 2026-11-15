@@ -131,6 +131,9 @@ CSS = """
 .cm-top-link {color:inherit; text-decoration:underline; text-underline-offset:2px;}
 .cm-top-link:hover {color:var(--pc-teal);}
 .cm-top-me .cm-top-name {color:var(--pc-teal);}
+.cm-compact-line {font-size:17px; font-weight:800; color:var(--pc-navy); line-height:1.5; letter-spacing:-0.4px;
+  margin:0 0 6px 0; overflow-wrap:anywhere;}
+.cm-compact-more {display:inline-block; margin:10px 0 0 0; font-size:13px; font-weight:700; color:#25466B;}
 .cm-top-self {font-size:12.5px; color:#25466B; line-height:1.55; margin:8px 0 0 0; padding:8px 10px; border-radius:8px;
   background:#EEF6F5; overflow-wrap:anywhere;}
 .st-key-cm_block [data-baseweb="tab-list"] {gap:20px;}
@@ -528,6 +531,62 @@ def top_models_html(market: CategoryMarket, *, searched_model: str = "", model_u
         if own is not None:
             body += f'<div class="cm-top-self">{esc("▶ 검색한 모델: " + own.label + " · " + top_model_line(own))}</div>'
     return f'<div class="cm-cq"><div class="pc-card cm-top" id="{TOP_MODELS_DOM_ID}">{body}</div></div>'
+
+
+COMPACT_DOM_ID = "category-market-compact-v1"
+COMPACT_TOP = 5
+
+
+def compact_line(market: CategoryMarket) -> str:
+    """'1대 가운데 값 1,650,000원 · 장비 구매 3,470건 · 거래 있는 모델 55개' (the 품목 in one line)."""
+
+    level = market.level
+    parts: list[str] = []
+    if level.median is not None:
+        parts.append(f"{unit_text(level.unit)} 가운데 값 {won(level.median)}")
+        parts.append(f"장비 구매 {level.count:,}건")
+    elif market.equipment:
+        parts.append(f"장비 구매 {len(market.equipment):,}건")
+    if market.traded_models:
+        parts.append(f"거래 있는 모델 {market.traded_models:,}개")
+    return " · ".join(parts)
+
+
+def compact_html(
+    market: CategoryMarket,
+    *,
+    searched_model: str = "",
+    model_url: ModelUrl | None = None,
+    item_url: str = "",
+) -> str:
+    """같은 품목 under a product that has its own trades: one summary line, the five most traded
+    models, and a link to the 품목 page that holds the full market (years, buyers, all models)."""
+
+    product = product_label(market)
+    line = compact_line(market)
+    period = f" · {market.period_label}" if market.period_label else ""
+    head = (
+        f'<div class="cm-eyebrow">같은 품목 · {esc(product)}{esc(period)} · 참고 시세</div>'
+        f'<div class="cm-compact-line">{esc(line) if line else "가격을 셀 장비 구매가 없습니다."}</div>'
+    )
+    top = top_models(market, by="trades")[:COMPACT_TOP]
+    urls = (
+        {item.label: model_url(item.model_name, _registration_for(market, item.model_name)) or "" for item in top}
+        if model_url is not None
+        else {}
+    )
+    body = _top_list_html("거래가 많은 다른 모델", top, searched_model, urls) if top else ""
+    more = (
+        f'<a class="cm-top-link cm-compact-more" href="{esc(item_url)}" target="_blank" rel="noopener">'
+        f"{esc(product)} 전체 보기 (연도별 시세 · 도입 기관 · 모델 {len(market.models):,}개) ›</a>"
+        if item_url
+        else ""
+    )
+    note = f'<div class="cm-top-caption">{esc(TOP_MODELS_NOTE)} 다른 모델의 가격은 이 제품의 가격이 아닙니다.</div>'
+    return (
+        CSS
+        + f'<div class="cm-cq"><div class="pc-card cm-top" id="{COMPACT_DOM_ID}">{head}{note}{body}{more}</div></div>'
+    )
 
 
 # ── Tables ──

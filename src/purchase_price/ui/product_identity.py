@@ -520,3 +520,86 @@ def pair_html(
 
 def field_map(fields: Iterable[IdentityField]) -> Mapping[str, IdentityField]:
     return {field.key: field for field in fields}
+
+
+# ── Official names (가격 조사 result, 2026-11) ──
+# One row per official name (식약처 품목명 · 나라장터 세부품명 · 허가번호 · 업체): the name opens a
+# search for it in a new tab, and the row says what that whole name costs or holds.
+
+ROWS_CSS = """
+<style>
+.pi-rows {display:grid; grid-template-columns:minmax(0,1fr);}
+.pi-row {display:grid; grid-template-columns:132px minmax(0,1.05fr) minmax(0,1.25fr); gap:4px 14px; align-items:baseline;
+  padding:9px 16px; border-top:1px solid #E3EAF2; min-width:0;}
+.pi-row:first-child {border-top:0;}
+.pi-row-main {background:#F7FAFE; padding:12px 16px;}
+.pi-rlabel {font-size:11.5px; color:#6A7D90; line-height:1.4;}
+.pi-rvalue {display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; font-size:14px; font-weight:700;
+  color:var(--pc-navy); line-height:1.4; min-width:0; overflow-wrap:anywhere; word-break:keep-all;}
+.pi-rvalue .pc-pill {padding:2px 7px; font-size:10.5px; margin:0 !important;}
+.pi-row-main .pi-rvalue {font-size:22px; font-weight:800; letter-spacing:-0.6px;}
+.pi-rvalue a {color:#1D4F91; text-decoration:underline; text-underline-offset:3px;}
+.pi-rvalue a:hover {color:var(--pc-teal);}
+.pi-rvalue.pi-empty {color:#98A5B5; font-weight:600;}
+.pi-rline {font-size:12.5px; color:#3E536C; line-height:1.5; min-width:0; overflow-wrap:anywhere; word-break:keep-all;}
+.pi-rline b {color:var(--pc-navy);}
+.pi-rows-note {font-size:11.5px; color:#7A899B; margin:6px 2px 0 2px; line-height:1.5;}
+@container (max-width: 640px) {
+  .pi-row {grid-template-columns:minmax(0,1fr); padding:9px 12px;}
+  .pi-row-main .pi-rvalue {font-size:19px;}
+}
+</style>
+"""
+
+
+@dataclass(frozen=True)
+class OfficialRow:
+    """One official name. ``href`` makes the name a new-tab search; ``line`` is its price or count."""
+
+    key: str
+    label: str
+    value: str = ""
+    href: str = ""
+    status: str = ""
+    tone: str = TONE_MUTED
+    line: str = ""
+    empty_text: str = NONE
+    main: bool = False
+
+
+def _row_html(row: OfficialRow) -> str:
+    status = pill_html(row.status, row.tone) if row.status else ""
+    if not row.value:
+        value = f'<div class="pi-rvalue pi-empty">{esc(row.empty_text)}{status}</div>'
+    elif row.href:
+        value = (
+            f'<div class="pi-rvalue"><a href="{esc(row.href)}" target="_blank" rel="noopener" '
+            f'title="{esc(row.value)}(으)로 검색 (새 탭)">{esc(row.value)} ›</a>{status}</div>'
+        )
+    else:
+        value = f'<div class="pi-rvalue">{esc(row.value)}{status}</div>'
+    main = " pi-row-main" if row.main else ""
+    return (
+        f'<div class="pi-row{main}" data-field="{esc(row.key)}"><div class="pi-rlabel">{esc(row.label)}</div>'
+        f'{value}<div class="pi-rline">{row.line}</div></div>'
+    )
+
+
+def official_rows_html(
+    rows: Sequence[OfficialRow],
+    *,
+    marker_heading: str = "",
+    note: str = "",
+    include_css: bool = True,
+) -> str:
+    """The product as official names, one per row. ``OfficialRow.line`` is trusted HTML (callers
+    escape their values); everything else is escaped here."""
+
+    heading = f'<div class="pi-sr"><h2>{esc(marker_heading)}</h2></div>' if marker_heading else ""
+    foot = f'<div class="pi-rows-note">{esc(note)}</div>' if note else ""
+    body = "".join(_row_html(row) for row in rows)
+    return (
+        (CSS + ROWS_CSS if include_css else "")
+        + f'<div class="pi-cq" id="product-identity-v1">{heading}'
+        f'<div class="pi-frame"><div class="pi-rows" id="product-official-names-v1">{body}</div></div>{foot}</div>'
+    )

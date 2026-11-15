@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import importlib
+import re
 import sqlite3
 import sys
 import uuid
@@ -3453,14 +3454,17 @@ def _render_supplier_and_models(
                 st.warning("나라장터 가격 자료를 읽지 못해 납품업체를 확인하지 못했습니다.")
             else:
                 st.caption("같은 제품 거래가 없어 납품업체도 없습니다.")
-            _render_category_market(
-                category_market,
-                key=quote_key,
-                records=same_product_identity,
-                searched_model=str(getattr(query, "model_name", "") or ""),
-                has_direct=True,
-                section_heading=True,
-                model_count_note=model_count_note,
+            # 2026-11: the product has its own trades, so the 품목 is one line and five models; the
+            # full market (years, buyers, every model) lives on the 품목 page the link opens.
+            st.markdown("#### 같은 품목의 다른 모델")
+            st.markdown(
+                category_market_ui.compact_html(
+                    category_market,
+                    searched_model=str(getattr(query, "model_name", "") or ""),
+                    model_url=_category_model_url(same_product_identity),
+                    item_url=model_links_ui.model_search_url(category_market_ui.product_label(category_market)),
+                ),
+                unsafe_allow_html=True,
             )
         _render_medical_lookup_link(indexed_identity, mfds, query)
         return
@@ -3675,6 +3679,92 @@ def _render_supplier_and_models(
                     use_container_width=True,
                     hide_index=True,
                 )
+
+
+def _official_name_rows(
+    fields: Sequence[product_identity_ui.IdentityField],
+    *,
+    price_card: Any,
+    category_market: category_market_service.CategoryMarket | None,
+    market_pending: bool,
+) -> tuple[list[product_identity_ui.OfficialRow], str]:
+    """The product as official names (2026-11): each name searches itself in a new tab, and says
+    what the whole name costs (품목) or holds (분류 · 허가 · 업체). Returns the rows and a footnote."""
+
+    esc_ = result_layout_ui.esc
+    by_key = product_identity_ui.field_map(fields)
+    base = model_links_ui.app_base_url()
+
+    def field(key: str) -> product_identity_ui.IdentityField:
+        return by_key.get(key) or product_identity_ui.IdentityField(key, "")
+
+    def search_url(value: str, *, company: bool = False) -> str:
+        return model_links_ui.model_search_url(value, exact_company=company, base=base) if value else ""
+
+    model = field("model")
+    price_value = str(getattr(price_card, "value", "") or "")
+    model_line = ""
+    if price_value and "0건" not in price_value and price_value != "조회 불가":
+        model_line = (
+            f"{esc_(getattr(price_card, 'label', ''))} <b>{esc_(price_value)}</b> · {esc_(getattr(price_card, 'note', ''))}"
+        )
+    elif price_value:
+        model_line = esc_(price_value)
+
+    market_line = ""
+    class_line = ""
+    if category_market is not None:
+        summary = category_market_ui.compact_line(category_market)
+        period = f" ({category_market.period_label})" if category_market.period_label else ""
+        if summary:
+            market_line = f"이 품목 전체{esc_(period)} · <b>{esc_(summary)}</b>"
+        excluded = len(category_market.trades) - len(category_market.equipment)
+        class_line = f"나라장터 거래 {len(category_market.trades):,}건 중 장비 구매 {len(category_market.equipment):,}건" + (
+            f" (부품·수리·동물용 {excluded:,}건 제외)" if excluded else ""
+        )
+    elif market_pending:
+        market_line = "이 품목 전체 시세를 계산하고 있습니다..."
+
+    detail = field("detail_class")
+    code = re.search(r"\((\d{6,})\)\s*$", detail.value or "")
+    detail_name = (detail.value or "")[: code.start()].strip() if code else (detail.value or "")
+    # A 나라장터 medical class (42…) opens its market; other classes have no search page yet.
+    detail_href = search_url(detail_name) if code and code.group(1).startswith("42") else ""
+    permit, grade = field("permit"), field("grade")
+    permit_line = " · ".join(part for part in (grade.value, permit.note) if part)
+    company = field("company")
+    rows = [
+        product_identity_ui.OfficialRow(
+            "model", model.label or "모델명", model.value, status=model.status, tone=model.tone,
+            line=model_line, empty_text=model.empty_text, main=True,
+        ),
+        product_identity_ui.OfficialRow(
+            "mfds_product", "식약처 품목명", field("mfds_product").value,
+            href=search_url(field("mfds_product").value), line=market_line,
+            empty_text=field("mfds_product").empty_text or product_identity_ui.NOT_CHECKED,
+        ),
+        product_identity_ui.OfficialRow(
+            "detail_class", "나라장터 세부품명", detail.value, href=detail_href,
+            line=esc_(class_line or (detail.note if detail.value else "")),
+        ),
+        product_identity_ui.OfficialRow(
+            "permit", permit.label or "식약처 허가번호", permit.value, href=search_url(permit.value),
+            # An empty permit already reads "확인 전"; the pill would only repeat it.
+            status=permit.status if permit.value else "", tone=permit.tone, line=esc_(permit_line),
+            empty_text=permit.empty_text or product_identity_ui.NOT_CHECKED,
+        ),
+        product_identity_ui.OfficialRow(
+            "company", "제조·수입업체", company.value, href=search_url(company.value, company=True),
+            line=esc_(company.note), empty_text=company.empty_text or product_identity_ui.NOT_CHECKED,
+        ),
+    ]
+    search = field("search").value
+    note = (
+        f"검색어 ‘{search}’을(를) 정식 이름 ‘{model.value}’(으)로 찾았습니다. 이름을 누르면 그 이름으로 새 탭에서 검색합니다."
+        if search and model.value
+        else "이름을 누르면 그 이름으로 새 탭에서 검색합니다."
+    )
+    return rows, note
 
 
 def _result_identity_fields(
@@ -4081,32 +4171,40 @@ def _render_search_result(state: dict[str, Any]) -> None:
         None,
     )
     # ── 머리말: 이 제품이 무엇인지 (모델명 · 품목명 · 업체 · 허가번호 · 등급 · 세부품명 · 검색어) ──
-    head_title.markdown(
-        product_identity_ui.identity_html(
-            _result_identity_fields(
-                heading=heading,
-                search_text=search_text,
-                indexed_identity=indexed_identity,
-                mfds=mfds,
-                all_direct=strict_comparison_candidates(state["track_b"]),
-                identity_product=identity_product or "",
-                identity_companies=identity_companies,
-                identity_permits=identity_permits,
-                identity_permit_type=identity_permit_type or "",
-                identity_grade=identity_grade or "",
-                identity_status_label=identity_status_label or "",
-                procurement_maker=workspace_header_ui.most_common_text(direct_rows, "제조사") or "",
-                procurement_spec=procurement_spec,
-                category_market=category_market,
-                period_label=period_choice.label,
-                period_count=strict_count,
-                other_unit_count=len(unit_split.other),
-                other_units=unit_split.other_units,
-            ),
-            marker_heading=f"{search_text or heading} 거래가격",
-        ),
-        unsafe_allow_html=True,
+    identity_fields = _result_identity_fields(
+        heading=heading,
+        search_text=search_text,
+        indexed_identity=indexed_identity,
+        mfds=mfds,
+        all_direct=strict_comparison_candidates(state["track_b"]),
+        identity_product=identity_product or "",
+        identity_companies=identity_companies,
+        identity_permits=identity_permits,
+        identity_permit_type=identity_permit_type or "",
+        identity_grade=identity_grade or "",
+        identity_status_label=identity_status_label or "",
+        procurement_maker=workspace_header_ui.most_common_text(direct_rows, "제조사") or "",
+        procurement_spec=procurement_spec,
+        category_market=category_market,
+        period_label=period_choice.label,
+        period_count=strict_count,
+        other_unit_count=len(unit_split.other),
+        other_units=unit_split.other_units,
     )
+    head_slot = head_title.empty()
+
+    def draw_head(market: category_market_service.CategoryMarket | None, *, pending: bool) -> None:
+        rows, rows_note = _official_name_rows(
+            identity_fields, price_card=price_header_card, category_market=market, market_pending=pending
+        )
+        head_slot.markdown(
+            product_identity_ui.official_rows_html(
+                rows, marker_heading=f"{search_text or heading} 거래가격", note=rows_note
+            ),
+            unsafe_allow_html=True,
+        )
+
+    draw_head(category_market, pending=bool(state.get("same_item_pending")))
     mfds_header_card = workspace_header_ui.mfds_card(
         mfds_metric,
         permit_numbers=identity_permits,
@@ -4319,6 +4417,7 @@ def _render_search_result(state: dict[str, Any]) -> None:
             mfds_procurement_crosslinks, state.get("category_market")
         )
         market_main = bool(category_market is not None and not any_direct and not track_b_unavailable)
+        draw_head(category_market, pending=False)
     st.markdown(
         _same_item_timing_marker_html(state, when=same_item_when, render_started=render_started),
         unsafe_allow_html=True,

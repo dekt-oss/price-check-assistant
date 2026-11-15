@@ -247,7 +247,8 @@ def test_result_header_uses_the_grid_and_keeps_the_smoke_heading():
     from pathlib import Path
 
     source = (Path(__file__).resolve().parents[1] / "pages" / "1_대시보드.py").read_text(encoding="utf-8")
-    assert "product_identity_ui.identity_html(" in source
+    # 2026-11: one row per official name, each a search link with its own price or count.
+    assert "product_identity_ui.official_rows_html(" in source
     assert 'marker_heading=f"{search_text or heading} 거래가격"' in source
     # The 같은 품목 시장 follows the result's 거래 기간.
     assert "category_market_service.within_period(" in source
@@ -257,3 +258,21 @@ def test_pair_puts_quote_values_next_to_the_matched_product():
     html = pi.pair_html(pi.quote_fields(_Item()), _fields(), include_css=False)
     assert html.index("견적서에 적힌 값") < html.index("확인된 제품")
     assert "6,500,000원" in html and "Flow-c" in html
+
+
+def test_official_rows_link_names_and_escape_values() -> None:
+    from purchase_price.ui import product_identity as pi
+
+    html = pi.official_rows_html(
+        [
+            pi.OfficialRow("model", "모델명", "Efficia DFM100", main=True, line="<b>10,340,000원</b>"),
+            pi.OfficialRow("mfds_product", "식약처 품목명", "저출력 <심장> 충격기", href="https://app/?q=a&b=1"),
+            pi.OfficialRow("permit", "식약처 허가번호", "", empty_text="확인 전"),
+        ],
+        marker_heading="DFM100 거래가격",
+    )
+
+    assert 'href="https://app/?q=a&amp;b=1" target="_blank"' in html
+    assert "저출력 &lt;심장&gt; 충격기 ›" in html
+    assert "<b>10,340,000원</b>" in html  # the line is caller-built HTML
+    assert "pi-row-main" in html and "확인 전" in html and "<h2>DFM100 거래가격</h2>" in html
