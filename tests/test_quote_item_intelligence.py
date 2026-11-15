@@ -208,7 +208,8 @@ def test_quote_identity_lookup_is_cached_and_prefers_model(monkeypatch) -> None:
     quote_market_research._ensure_mfds_identity(state)
     quote_market_research._ensure_mfds_identity(state)
 
-    assert calls == ["DFM100"]
+    # Not registered as written, so the search page's model table is tried once; both are cached.
+    assert calls == ["DFM100", "Efficia DFM100"]
     assert state.mfds_identity[0] is lookup
 
 

@@ -69,3 +69,24 @@ def test_short_ambiguous_text_is_not_forced_into_model_mapping() -> None:
     assert result.product_name == "P2"
     assert result.model_name == ""
     assert result.mapping_status is None
+
+
+def test_quote_short_model_finds_identity_through_the_search_model_table() -> None:
+    from types import SimpleNamespace
+
+    from purchase_price.services.unified_search_intent import lookup_identity_with_model_alias
+
+    asked: list[str] = []
+
+    def lookup(model: str):
+        asked.append(model)
+        return SimpleNamespace(status="success" if model == "Efficia DFM100" else "success_0")
+
+    assert lookup_identity_with_model_alias("DFM100", lookup).status == "success"
+    assert asked == ["DFM100", "Efficia DFM100"]
+
+    asked.clear()
+    # An exact registration is used as written, and an unknown model is not retried.
+    assert lookup_identity_with_model_alias("Efficia DFM100", lookup).status == "success"
+    assert lookup_identity_with_model_alias("ZZ-9999X", lookup).status == "success_0"
+    assert asked == ["Efficia DFM100", "ZZ-9999X"]
