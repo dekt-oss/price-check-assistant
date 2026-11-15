@@ -38,6 +38,10 @@ _UI_RUNTIME_MARKERS = (
     # 구매 검토 요약: wrapping cards; quote_market_research must re-import the new render function.
     ("purchase_price.ui.quote_review_summary", "QUOTE_REVIEW_SUMMARY_CARDS_V1"),
     ("purchase_price.ui.quote_market_research", "QUOTE_REVIEW_SUMMARY_CARDS_V1"),
+    # #395: short quote models use the search model table (helper first, then its users).
+    ("purchase_price.services.unified_search_intent", "QUOTE_MODEL_ALIAS_V1"),
+    ("purchase_price.ui.quote_review_steps", "QUOTE_MODEL_ALIAS_V1"),
+    ("purchase_price.ui.quote_market_research", "QUOTE_MODEL_ALIAS_V1"),
 )
 
 

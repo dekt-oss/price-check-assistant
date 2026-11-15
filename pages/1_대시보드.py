@@ -304,6 +304,12 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_PRICED_SPLIT_V1"),
     # 2026-11-09: a registered model's trades must agree on maker or product name (#385).
     ("purchase_price.services.mfds_identity_corroboration", "TRADE_CORROBORATION_V1"),
+    # #395 and #396 (2026-11): quote short models, official-name rows, compact 같은 품목.
+    ("purchase_price.services.unified_search_intent", "QUOTE_MODEL_ALIAS_V1"),
+    ("purchase_price.ui.quote_review_steps", "QUOTE_MODEL_ALIAS_V1"),
+    ("purchase_price.ui.quote_market_research", "QUOTE_MODEL_ALIAS_V1"),
+    ("purchase_price.ui.product_identity", "OFFICIAL_NAME_ROWS_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_COMPACT_V1"),
 )
 
 

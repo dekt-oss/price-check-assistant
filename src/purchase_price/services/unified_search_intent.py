@@ -134,6 +134,10 @@ def resolve_model_mapping_from_text(
     return best[0]
 
 
+# Runtime marker (#395): quotes resolve short models through the search model table.
+QUOTE_MODEL_ALIAS_V1 = True
+
+
 def lookup_identity_with_model_alias(model_name: str, identity_lookup):
     """MFDS identity for a model as written, else for the registered model the price search maps
     it to ("DFM100" -> "Efficia DFM100"), so a quote and a one-line search find the same product."""

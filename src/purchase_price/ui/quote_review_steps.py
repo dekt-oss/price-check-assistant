@@ -120,6 +120,8 @@ def render_path_card(state: QuoteReviewState) -> None:
 QUOTE_REVIEW_ACCEPTANCE_V3 = True
 # Step 3's 식약처 check reads the full R2 허가 목록 index like the rest of the page (2026-10-10).
 QUOTE_REVIEW_MFDS_INDEX_V1 = True
+# #395: imports lookup_identity_with_model_alias; reload after unified_search_intent.
+QUOTE_MODEL_ALIAS_V1 = True
 READ_ERROR_SESSION_KEY = "quote_review_read_error_v1"
 
 _READ_ERROR_BY_KIND = {
