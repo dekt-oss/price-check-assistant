@@ -31,6 +31,7 @@ from purchase_price.services.track_b_db_quote_comparison import (
     TrackBReferenceCandidate,
 )
 from purchase_price.services.track_b_quote_with_live import lookup_track_b_quote_with_live
+from purchase_price.services.unified_search_intent import lookup_identity_with_model_alias
 
 # 금액검증 wording shared with the 가격 조사 tables (one definition, re-exported here).
 from purchase_price.ui.amount_check import AMOUNT_CHECK_LABELS, amount_check_label  # noqa: F401
@@ -492,10 +493,11 @@ def _ensure_mfds_identity(state: QuoteReviewState) -> None:
     for index, item in enumerate(state.items):
         if index in state.mfds_identity:
             continue
-        lookup_key = (item.model_name or item.product_name or "").strip()
-        if not lookup_key:
-            continue
-        state.mfds_identity[index] = lookup_mfds_identity_from_r2(lookup_key)
+        model = (item.model_name or "").strip()
+        if model:
+            state.mfds_identity[index] = lookup_identity_with_model_alias(model, lookup_mfds_identity_from_r2)
+        elif (item.product_name or "").strip():
+            state.mfds_identity[index] = lookup_mfds_identity_from_r2(item.product_name.strip())
 
 
 def _ensure_safety_lookup(state: QuoteReviewState) -> None:

@@ -28,6 +28,7 @@ from purchase_price.services.quote_extraction_diagnostics import (
 )
 from purchase_price.services.quote_upload_security import temporary_quote_upload, upload_fingerprint
 from purchase_price.services.runtime_readiness import ocr_runtime_readiness
+from purchase_price.services.unified_search_intent import lookup_identity_with_model_alias
 from purchase_price.ui.mapping_requests import register_mapping_request
 from purchase_price.ui.quote_review_contract import (
     build_extracted_item_snippet,
@@ -461,7 +462,7 @@ def _mfds_exact_confirmed(
 
     if not item.product_name.strip() or not item.model_name.strip():
         return False, "식약처 허가 목록 확인에는 품명과 모델명이 필요합니다."
-    lookup = identity_lookup(item.model_name.strip())
+    lookup = lookup_identity_with_model_alias(item.model_name.strip(), identity_lookup)
     if lookup.status in {"unavailable", "not_ingested"}:
         return False, "식약처 허가 목록을 지금은 조회할 수 없습니다. 잠시 뒤 다시 시도하세요."
     if lookup.status != "success" or lookup.match_type not in _MFDS_EXACT_MATCH_TYPES:

@@ -134,6 +134,20 @@ def resolve_model_mapping_from_text(
     return best[0]
 
 
+def lookup_identity_with_model_alias(model_name: str, identity_lookup):
+    """MFDS identity for a model as written, else for the registered model the price search maps
+    it to ("DFM100" -> "Efficia DFM100"), so a quote and a one-line search find the same product."""
+
+    found = identity_lookup(model_name)
+    if found.status == "success":
+        return found
+    mapping = resolve_model_mapping_from_text(model_name)
+    if mapping is None or normalize_text(mapping.model_name) == normalize_text(model_name):
+        return found
+    mapped = identity_lookup(mapping.model_name)
+    return mapped if mapped.status == "success" else found
+
+
 def interpret_unified_search(
     *,
     search_text: str,
