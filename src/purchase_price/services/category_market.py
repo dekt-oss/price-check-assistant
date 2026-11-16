@@ -44,6 +44,8 @@ CATEGORY_MARKET_TOP_MODELS_V1 = True
 CATEGORY_MARKET_DETAIL_CODE_ROWS_V1 = True
 # Runtime marker (2026-11): upper_tier() splits the 1,000만 원+ lines of a 품목 into their own market.
 CATEGORY_MARKET_TIERS_V1 = True
+# Runtime marker (2026-11): CategoryModel.product_name (식약처 품목명) for the model tables.
+CATEGORY_MARKET_PRODUCT_NAME_V1 = True
 CATEGORY_TRADE_LIMIT = 6000
 PRICE_FACTOR = Decimal("3")
 PRICE_RULE_MIN_ROWS = 4
@@ -320,6 +322,8 @@ class CategoryModel:
     current: bool = False
     veterinary_count: int = 0
     parts_count: int = 0
+    # 식약처 품목명 of this registration ('' when the 식약처 record is not at hand).
+    product_name: str = ""
 
     @property
     def has_trades(self) -> bool:
@@ -707,6 +711,7 @@ def model_summaries(
                 current=bool(link.get("현재 모델")),
                 veterinary_count=marks[KIND_VETERINARY],
                 parts_count=marks[KIND_PARTS],
+                product_name=_text(getattr(record, "product_name", "")) if record is not None else "",
             )
         )
     return tuple(
