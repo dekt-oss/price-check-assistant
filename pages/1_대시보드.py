@@ -1250,7 +1250,9 @@ def _compute_same_item(pending: dict[str, Any], records: tuple[Any, ...]) -> dic
             cache_key = _same_item_cache_key(snapshot, pending, records)
             # Kept in an imported module: a dict in this page script is new on every rerun.
             cached = same_item_cache.get(cache_key)
-            if cached is not None:
+            # A cached empty market may be a failed build (2026-11-16: HeartOn kept one on
+            # Production while DFM100, same 품목, had its market); build it again instead.
+            if cached is not None and cached[1] is not None:
                 cache_state = "hit"
                 crosslinks, market = cached
                 category_started = monotonic()
@@ -1276,7 +1278,8 @@ def _compute_same_item(pending: dict[str, Any], records: tuple[Any, ...]) -> dic
                 crosslinks=crosslinks,
                 model_stats=model_stats,
             )
-            same_item_cache.put(cache_key, crosslinks, market)
+            if market is not None:  # shortcut: a 품목 with truly no market rebuilds on each search
+                same_item_cache.put(cache_key, crosslinks, market)
     except _SameItemCached:
         pass
     except Exception:  # noqa: BLE001 - an optional section below the card never breaks the result

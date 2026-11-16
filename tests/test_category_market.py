@@ -539,3 +539,10 @@ def test_base_line_counts_only_base_models() -> None:
     lines = ui.tier_lines(_tier_market(), searched_model="Efficia DFM100")
     assert "모델 1개" in lines[0][1]  # NT-381.B only
     assert "모델 2개" in lines[1][1]  # Efficia DFM100, R-Series ALS
+
+
+def test_same_item_cache_never_keeps_or_serves_an_empty_market() -> None:
+    # 2026-11-16: a failed build (market None) was cached and served to every later search.
+    source = Path("pages/1_대시보드.py").read_text(encoding="utf-8")
+    assert "if cached is not None and cached[1] is not None:" in source
+    assert "if market is not None:  # shortcut" in source
