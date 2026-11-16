@@ -134,8 +134,10 @@ def _cache_namespace(calls: list[str]):
         calls.append("category")
         return "MARKET"
 
-    def build_namespace():
+    def build_namespace(market_class=str):
         namespace = {
+            # The page reuses a cached market only of the current CategoryMarket class (the fake is "MARKET").
+            "category_market_service": SimpleNamespace(CategoryMarket=market_class),
             "Any": object,
             "functools": __import__("functools"),
             "uuid": __import__("uuid"),
@@ -268,3 +270,20 @@ def test_search_stores_the_early_token_in_its_state() -> None:
     search = _function_source("_run_purchase_search") if "def _run_purchase_search(" in SOURCE else SOURCE
     assert "same_item_token = _start_same_item_early(same_item_pending, tuple(same_product_identity))" in search
     assert '"same_item_token": same_item_token' in search
+
+
+def test_a_market_cached_before_a_module_reload_is_built_again() -> None:
+    # 2026-11-16: services.category_market was reloaded after a deploy; a market cached before it is
+    # an instance of the old class and drew as "no market" on every search (HeartOn on Production).
+    calls: list[str] = []
+    build_namespace, _index = _cache_namespace(calls)
+    build_namespace()["_ensure_same_item_market"](_search_state())
+    assert calls == ["crosslinks", "category"]
+
+    class ReloadedCategoryMarket:
+        pass
+
+    after_reload = _search_state()
+    build_namespace(ReloadedCategoryMarket)["_ensure_same_item_market"](after_reload)
+    assert calls == ["crosslinks", "category", "crosslinks", "category"]  # rebuilt, not reused
+    assert after_reload["same_item_cache"] == "miss"

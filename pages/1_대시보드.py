@@ -1250,9 +1250,10 @@ def _compute_same_item(pending: dict[str, Any], records: tuple[Any, ...]) -> dic
             cache_key = _same_item_cache_key(snapshot, pending, records)
             # Kept in an imported module: a dict in this page script is new on every rerun.
             cached = same_item_cache.get(cache_key)
-            # A cached empty market may be a failed build (2026-11-16: HeartOn kept one on
-            # Production while DFM100, same 품목, had its market); build it again instead.
-            if cached is not None and cached[1] is not None:
+            # Reuse only a market of the current CategoryMarket class: an empty one may be a failed
+            # build, and one built before services.category_market was reloaded after a deploy fails
+            # the isinstance check below and draws as no market (2026-11-16: HeartOn on Production).
+            if cached is not None and isinstance(cached[1], category_market_service.CategoryMarket):
                 cache_state = "hit"
                 crosslinks, market = cached
                 category_started = monotonic()
