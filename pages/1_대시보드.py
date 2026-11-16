@@ -313,6 +313,9 @@ _UI_RUNTIME_MARKERS = (
     # 2026-11: 보급형 / 고가형 (service first, then the screen module that imports upper_tier).
     ("purchase_price.services.category_market", "CATEGORY_MARKET_TIERS_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_TIERS_V1"),
+    # 2026-11: 품목명(식약처) column (service first, then the screen module).
+    ("purchase_price.services.category_market", "CATEGORY_MARKET_PRODUCT_NAME_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_PRODUCT_NAME_V1"),
 )
 
 

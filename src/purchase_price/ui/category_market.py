@@ -76,6 +76,8 @@ CATEGORY_MARKET_PRICED_SPLIT_V1 = True
 CATEGORY_MARKET_COMPACT_V1 = True
 # Runtime marker (2026-11): 보급형 / 고가형 lines and the searched product's market.
 CATEGORY_MARKET_TIERS_V1 = True
+# Runtime marker (2026-11): the model tables show 품목명(식약처) after 모델.
+CATEGORY_MARKET_PRODUCT_NAME_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -686,6 +688,7 @@ def model_rows(models: Sequence[CategoryModel], *, model_url: ModelUrl | None = 
             {
                 **link,
                 "모델": f"▶ {model.model}" if model.current else model.model,
+                "품목명(식약처)": getattr(model, "product_name", ""),  # a model from a not-yet-reloaded service
                 "제조·수입업체": model.company or "확인 안 됨",
                 # A number (None = 조회 불가); the status words have their own column.
                 "같은 제품 거래": model.trade_count,

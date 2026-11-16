@@ -227,6 +227,10 @@ def test_models_with_trades_come_first_and_every_registered_model_is_listed() ->
     assert by_model["▶ Flow-c"]["허가 상태"] == "판매 가능(허가 기준)"
     assert by_model["Broken"]["같은 제품 거래"] is None
     assert by_model["Broken"]["거래 자료 상태"] == "조회 불가"
+    # 품목명(식약처) right after 모델; '' when the 식약처 record is not at hand.
+    assert list(rows[0])[:2] == ["모델", "품목명(식약처)"]
+    assert by_model["▶ Flow-c"]["품목명(식약처)"] == "가스 마취기"
+    assert by_model["Broken"]["품목명(식약처)"] == ""
     assert market.traded_models == 2
     assert [company.name for company in market.companies][0] == "지이헬스케어코리아(주)"
 
