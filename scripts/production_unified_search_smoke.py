@@ -413,33 +413,73 @@ def _grid_numbers(snapshot: dict[str, Any], header: str) -> list[float]:
     return values
 
 
+def _bad_new_tab_links(links: Any) -> list[str]:
+    pairs = [(links.nth(i).get_attribute("href") or "", links.nth(i).get_attribute("target") or "")
+             for i in range(links.count())]
+    return [href for href, target in pairs if "?q=" not in href or "/~/+/" in href or target != "_blank"]
+
+
 def _verify_model_links(page: Any, report: dict[str, object]) -> Any | None:
-    """(a) The same-item model table links each model to an absolute ?q= URL, never the inner /~/+/."""
+    """(a) DFM100 (#396/#398): the official names in the product card and the folded 같은 품목 block
+    link to absolute ?q= URLs in a new tab, and the block's '전체 보기' link (a.cm-compact-more) is
+    recorded for the 품목 page check. Returns the older model table only when the result still has
+    one (no folded block)."""
 
     app = _app(page)
-    if "같은 품목의 다른 모델" not in _body_text(page):
-        report["model_link_check"] = {"status": "skipped", "note": "DFM100 result has no 같은 품목 section"}
+    names = app.locator("#product-official-names-v1 a")
+    if names.count() == 0:
+        raise RuntimeError("Product card official-name links did not render")
+    bad_names = _bad_new_tab_links(names)
+    if bad_names:
+        raise RuntimeError(f"Official-name links do not open a ?q= URL in a new tab: {bad_names[:3]}")
+    block = app.locator("#category-market-compact-v1")
+    try:
+        block.first.wait_for(state="attached", timeout=30_000)
+    except Exception:
+        # No 같은 품목 market: the result keeps the older model table, which must still link.
+        found = _find_grid(app, lambda headers: headers[0] == MODEL_LINK_HEADER)
+        if found is None:
+            if "같은 품목의 다른 모델" in _body_text(page):
+                raise RuntimeError("같은 품목 section rendered without the folded block or a model table")
+            report["model_link_check"] = {"status": "skipped", "note": "DFM100 result has no 같은 품목 section",
+                                          "official_name_links": names.count()}
+            return None
+        report["model_link_check"] = {"status": "pass", "official_name_links": names.count(), "folded_block": False}
+        return found[0]
+    top_links = block.locator("a.cm-top-link")
+    bad_top = _bad_new_tab_links(top_links)
+    if top_links.count() == 0 or bad_top:
+        raise RuntimeError(f"Folded 같은 품목 links do not open a ?q= URL in a new tab: {bad_top[:3] or 'none'}")
+    item_link = block.locator("a.cm-compact-more")
+    if item_link.count() != 1:
+        raise RuntimeError("Folded 같은 품목 block has no single '전체 보기' link to the 품목 page")
+    report["model_link_check"] = {
+        "status": "pass",
+        "official_name_links": names.count(),
+        "folded_block_links": top_links.count(),
+        "item_page_href": item_link.get_attribute("href") or "",
+    }
+    return None
+
+
+def _open_item_page_model_table(page: Any, report: dict[str, object]) -> Any | None:
+    """The 품목 page from the folded block's last link ('… 전체 보기'): its model table must keep the
+    '가격 조사' link column. Returns the table for the numeric-sort check."""
+
+    href = str((report.get("model_link_check") or {}).get("item_page_href") or "")
+    if not href:
+        report["item_page_table_check"] = {"status": "skipped", "note": "no folded block on the DFM100 result"}
         return None
-    found = _find_grid(app, lambda headers: headers[0] == MODEL_LINK_HEADER)
+    page.goto(href, wait_until="domcontentloaded", timeout=120_000)
+    found = _find_grid(_app(page), lambda headers: headers[0] == MODEL_LINK_HEADER, timeout_seconds=120)
     if found is None:
-        raise RuntimeError("Same-item model table with a '가격 조사' link column did not render")
+        raise RuntimeError("품목 page model table with a '가격 조사' link column did not render")
     table, snapshot = found
     hrefs = [row[0] for row in snapshot["rows"] if row and row[0]]
     bad = [href for href in hrefs if "?q=" not in href or "/~/+/" in href or not href.startswith("http")]
     if not hrefs or bad:
-        raise RuntimeError(f"Same-item model links are not absolute ?q= URLs: {bad[:3] or 'none'}")
-    top_links = app.locator("a.cm-top-link")
-    top = [(top_links.nth(i).get_attribute("href") or "", top_links.nth(i).get_attribute("target") or "")
-           for i in range(top_links.count())]
-    bad_top = [href for href, target in top if "?q=" not in href or "/~/+/" in href or target != "_blank"]
-    if bad_top:
-        raise RuntimeError(f"Top-model links do not open a ?q= URL in a new tab: {bad_top[:3]}")
-    report["model_link_check"] = {
-        "status": "pass",
-        "table_links_visible": len(hrefs),
-        "sample_href": hrefs[0],
-        "top_list_links": len(top),
-    }
+        raise RuntimeError(f"품목 page model links are not absolute ?q= URLs: {bad[:3] or 'none'}")
+    report["item_page_table_check"] = {"status": "pass", "table_links_visible": len(hrefs), "sample_href": hrefs[0]}
     return table
 
 
@@ -544,9 +584,13 @@ def _verify_result_interactions(page: Any, report: dict[str, object]) -> None:
     """Q4 checks after the DFM100 flow; each records pass or skipped, a failure raises."""
 
     table = _verify_model_links(page, report)
-    _verify_numeric_sort(page, report, table)
+    if table is not None:  # older table still on the DFM100 result: sort it there
+        _verify_numeric_sort(page, report, table)
     _verify_trade_dialog_reopen(page, report)
     _save_snapshot(page, report, "unified-search-dfm100-interactions")
+    if table is None:
+        # Leaves the DFM100 result: the full model table is on the 품목 page since #396.
+        _verify_numeric_sort(page, report, _open_item_page_model_table(page, report))
 
 
 def _build_dfm100_quote(path: Path) -> None:
