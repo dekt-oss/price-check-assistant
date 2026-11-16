@@ -449,3 +449,93 @@ def test_compact_block_is_one_line_five_models_and_a_link_to_the_item_page() -> 
     assert "저출력심장충격기 전체 보기" in html and 'href="https://app/?q=x"' in html
     # The full market (year table, excluded trades, tabs) is not drawn here.
     assert "연도별 시세" not in html.split("전체 보기")[0] and "cm-excluded" not in html.split("</style>")[-1]
+
+
+def _tier_market():
+    # Eight 150만 원 AEDs, then hospital units far above them: a named one (x3), another named one (x1)
+    # and an unnamed bundle that must stay out of the 고가형 price.
+    trades = [_trade("1540000", number=f"A{n}", institution=f"보건소{n}", model="NT-381.B", maker="나눔테크") for n in range(8)]
+    trades += [_trade("11000000", number=f"D{n}", institution=f"병원{n}", model="Efficia DFM100", maker="Philips") for n in range(3)]
+    trades += [_trade("16800000", number="Z1", model="R-Series ALS", maker="Zoll")]
+    trades += [_trade("102000000", number="B1")]  # 기타물품포함 수요기관규격: no model
+    codes = (cm.DetailCode("4217210101", "저출력심장충격기"),)
+    return cm.build_category_market(trades, product_name="저출력심장충격기", codes=codes, data_as_of="2026-11-04")
+
+
+def test_upper_tier_is_the_named_lines_far_above_the_item_level() -> None:
+    market = _tier_market()
+    tier = cm.upper_tier(market)
+
+    assert market.level.median == Decimal("1540000")
+    assert tier is not None and tier.level.count == 4  # the unnamed 1억 bundle is left out
+    assert tier.level.median == Decimal("11000000")
+    assert [m.model_name for m in tier.models] == ["Efficia DFM100", "R-Series ALS"]
+    assert tier.has_model("Efficia DFM100") and not tier.has_model("NT-381.B")
+
+
+def test_tier_lines_mark_the_searched_products_market() -> None:
+    market = _tier_market()
+
+    upper = ui.tier_lines(market, searched_model="Efficia DFM100")
+    base = ui.tier_lines(market, searched_model="NT-381.B")
+
+    assert [(label, mine) for label, _line, mine in upper] == [("보급형", False), ("고가형", True)]
+    assert [(label, mine) for label, _line, mine in base] == [("보급형", True), ("고가형", False)]
+    assert "11,000,000원" in upper[1][1]
+    html = ui.compact_html(market, searched_model="Efficia DFM100")
+    assert "고가형 중 거래가 많은 모델" in html and "NT-381.B" not in html.split("거래가 많은 모델")[1]
+
+
+def test_no_upper_tier_below_three_named_lines() -> None:
+    trades = [_trade("1540000", number=f"A{n}", model="NT-381.B", maker="나눔테크") for n in range(8)]
+    trades += [_trade("11000000", number=f"D{n}", model="Efficia DFM100", maker="Philips") for n in range(2)]
+    market = cm.build_category_market(trades, product_name="저출력심장충격기", data_as_of="2026-11-04")
+
+    assert cm.upper_tier(market) is None
+    assert [label for label, _line, _mine in ui.tier_lines(market, searched_model="Efficia DFM100")] == [""]
+
+
+def test_a_mostly_cheap_model_with_stray_expensive_lines_stays_base() -> None:
+    trades = [_trade("1540000", number=f"A{n}", institution=f"보건소{n}", model="NT-381.B", maker="나눔테크") for n in range(20)]
+    trades += [_trade("15400000", number=f"X{n}", model="NT-381.B", maker="나눔테크") for n in range(3)]
+    market = cm.build_category_market(trades, product_name="저출력심장충격기", data_as_of="2026-11-04")
+
+    assert cm.upper_tier(market) is None
+
+
+def test_no_mark_for_a_model_outside_the_item() -> None:
+    lines = ui.tier_lines(_tier_market(), searched_model="NOT-IN-MARKET")
+    assert [mine for _label, _line, mine in lines] == [False, False]
+    assert [mine for _label, _line, mine in ui.tier_lines(_tier_market())] == [False, False]
+
+
+def test_maker_spelling_does_not_make_a_cheap_model_expensive() -> None:
+    trades = [_trade("1540000", number=f"A{n}", institution=f"보건소{n}", model="NT-381.B", maker="나눔테크") for n in range(20)]
+    trades += [_trade("15400000", number=f"X{n}", model="NT-381.B", maker="(주)나눔테크") for n in range(3)]
+    market = cm.build_category_market(trades, product_name="저출력심장충격기", data_as_of="2026-11-04")
+
+    assert cm.upper_tier(market) is None
+
+
+def test_scattered_one_off_expensive_lines_make_no_upper_tier() -> None:
+    trades = [_trade("1540000", number=f"A{n}", institution=f"보건소{n}", model="NT-381.B", maker="나눔테크") for n in range(40)]
+    trades += [_trade("15400000", number=f"X{n}", model=f"NT-381.B 외 {n}종", maker="나눔테크") for n in range(1, 4)]
+    market = cm.build_category_market(trades, product_name="저출력심장충격기", data_as_of="2026-11-04")
+
+    assert cm.upper_tier(market) is None
+
+
+def test_a_model_mostly_sold_cheap_is_not_upper_even_with_cheap_lines_set_aside() -> None:
+    # Level 1,000만 원 (40 lines); model X: 100만 원 x20 (set aside as far below) and 4,000만 원 x3.
+    trades = [_trade("10000000", number=f"A{n}", institution=f"병원{n}", model="BIG-1", maker="가") for n in range(40)]
+    trades += [_trade("1000000", number=f"L{n}", model="X-1", maker="나") for n in range(20)]
+    trades += [_trade("40000000", number=f"H{n}", model="X-1", maker="나") for n in range(3)]
+    market = cm.build_category_market(trades, product_name="저출력심장충격기", data_as_of="2026-11-04")
+
+    assert cm.upper_tier(market) is None
+
+
+def test_base_line_counts_only_base_models() -> None:
+    lines = ui.tier_lines(_tier_market(), searched_model="Efficia DFM100")
+    assert "모델 1개" in lines[0][1]  # NT-381.B only
+    assert "모델 2개" in lines[1][1]  # Efficia DFM100, R-Series ALS

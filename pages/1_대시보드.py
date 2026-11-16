@@ -310,6 +310,9 @@ _UI_RUNTIME_MARKERS = (
     ("purchase_price.ui.quote_market_research", "QUOTE_MODEL_ALIAS_V1"),
     ("purchase_price.ui.product_identity", "OFFICIAL_NAME_ROWS_V1"),
     ("purchase_price.ui.category_market", "CATEGORY_MARKET_COMPACT_V1"),
+    # 2026-11: 보급형 / 고가형 (service first, then the screen module that imports upper_tier).
+    ("purchase_price.services.category_market", "CATEGORY_MARKET_TIERS_V1"),
+    ("purchase_price.ui.category_market", "CATEGORY_MARKET_TIERS_V1"),
 )
 
 
@@ -3720,10 +3723,16 @@ def _official_name_rows(
     market_line = ""
     class_line = ""
     if category_market is not None:
-        summary = category_market_ui.compact_line(category_market)
         period = f" ({category_market.period_label})" if category_market.period_label else ""
-        if summary:
-            market_line = f"이 품목 전체{esc_(period)} · <b>{esc_(summary)}</b>"
+        # 2026-11: 보급형 / 고가형 when the 품목 holds both (AEDs and hospital defibrillators).
+        tiers = category_market_ui.tier_lines(category_market, searched_model=model.value)
+        if len(tiers) == 1:
+            market_line = f"이 품목 전체{esc_(period)} · <b>{esc_(tiers[0][1])}</b>"
+        elif tiers:
+            market_line = f"이 품목{esc_(period)}<br>" + "<br>".join(
+                f"{esc_(label)} · <b>{esc_(line)}</b>" + (" ← 이 제품" if mine else "")
+                for label, line, mine in tiers
+            )
         excluded = len(category_market.trades) - len(category_market.equipment)
         class_line = f"나라장터 거래 {len(category_market.trades):,}건 중 장비 구매 {len(category_market.equipment):,}건" + (
             f" (부품·수리·동물용 {excluded:,}건 제외)" if excluded else ""

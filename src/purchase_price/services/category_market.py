@@ -42,6 +42,8 @@ CATEGORY_MARKET_ENTRY_ERRORS_V1 = True
 # Runtime marker (P3b): top_models ranks the stated models of the 장비 구매 lines by trades / institutions.
 CATEGORY_MARKET_TOP_MODELS_V1 = True
 CATEGORY_MARKET_DETAIL_CODE_ROWS_V1 = True
+# Runtime marker (2026-11): upper_tier() splits the 1,000만 원+ lines of a 품목 into their own market.
+CATEGORY_MARKET_TIERS_V1 = True
 CATEGORY_TRADE_LIMIT = 6000
 PRICE_FACTOR = Decimal("3")
 PRICE_RULE_MIN_ROWS = 4
@@ -522,7 +524,10 @@ def _main_unit(equipment: Sequence[CategoryTrade]) -> tuple[str, str]:
 def model_stats(market: CategoryMarket) -> tuple[TopModel, ...]:
     """Every stated model of the 장비 구매 lines (kind == equipment), unsorted."""
 
-    equipment = [row.trade for row in market.trades if row.kind == KIND_EQUIPMENT]
+    return _model_stats([row.trade for row in market.trades if row.kind == KIND_EQUIPMENT])
+
+
+def _model_stats(equipment: Sequence[CategoryTrade]) -> tuple[TopModel, ...]:
     unit_key, unit_display = _main_unit(equipment)
     grouped: dict[tuple[str, str], list[CategoryTrade]] = defaultdict(list)
     for trade in equipment:
@@ -547,6 +552,70 @@ def model_stats(market: CategoryMarket) -> tuple[TopModel, ...]:
         )
     return tuple(stats)
 
+
+
+# ── 고가형 (2026-11) ──
+# One 나라장터 세부품명 can hold two markets: 저출력심장충격기 is mostly 150만 원 public AEDs, and the
+# 1,000만 원+ hospital defibrillators (Efficia DFM100, Zoll R-Series) fall outside the 3x rule as
+# "가격이 크게 다름". Those lines above the level, with a stated model, are shown as their own market.
+UPPER_TIER_MIN_TRADES = 3
+
+
+@dataclass(frozen=True)
+class UpperTier:
+    level: PriceLevel
+    models: tuple[TopModel, ...]
+
+    def has_model(self, model_name: str) -> bool:
+        return any(item.matches(model_name) for item in self.models)
+
+
+def _model_key(trade: CategoryTrade) -> str:
+    # Model name only, as UpperTier.has_model matches: "나눔테크" and "(주)나눔테크" are one model.
+    return normalize_text(trade.model_name)
+
+
+def upper_tier(market: CategoryMarket) -> UpperTier | None:
+    """The 고가형 market: price_gap lines above the 품목 level that name a model mostly sold there,
+    in the main unit; None below UPPER_TIER_MIN_TRADES lines (the 3-trade floor of every price)."""
+
+    middle = market.level.median
+    if middle is None:
+        return None
+    unit_key = unit_group(market.level.unit)
+    high = [
+        row.trade
+        for row in market.trades
+        if row.kind == KIND_PRICE_GAP
+        and row.trade.unit_price > middle
+        and row.trade.model_stated
+        and unit_group(row.trade.unit) in {"", unit_key}
+    ]
+    # A model is 고가형 only when most of its own lines are: 500 AEDs at 154만 원 with 3 stray
+    # 1,540만 원 lines (bundles, typos) stay 보급형, and their stray lines make no market.
+    # Every equipment line of the model in the main unit, including its cheap price_gap lines.
+    all_counts = Counter(
+        _model_key(row.trade)
+        for row in market.trades
+        if row.kind in {KIND_EQUIPMENT, KIND_PRICE_GAP} and unit_group(row.trade.unit) in {"", unit_key}
+    )
+    high_counts = Counter(_model_key(trade) for trade in high)
+    trades = [trade for trade in high if high_counts[_model_key(trade)] * 2 > all_counts[_model_key(trade)]]
+    # A real second market repeats: one model needs 3+ such lines ("NT-381.B 외 1종" x1 each is not one).
+    if len(trades) < UPPER_TIER_MIN_TRADES or max(Counter(map(_model_key, trades)).values(), default=0) < UPPER_TIER_MIN_TRADES:
+        return None
+    prices = sorted(trade.unit_price for trade in trades)
+    dates = sorted(trade.transaction_date for trade in trades if trade.transaction_date)
+    level = PriceLevel(
+        unit=market.level.unit,
+        count=len(prices),
+        median=median(prices),
+        low=prices[0],
+        high=prices[-1],
+        first_date=dates[0] if dates else "",
+        latest_date=dates[-1] if dates else "",
+    )
+    return UpperTier(level, tuple(_ranked(_model_stats(trades), "trades")))
 
 def _ranked(stats: Sequence[TopModel], by: str) -> list[TopModel]:
     if by not in TOP_MODEL_SORTS:
