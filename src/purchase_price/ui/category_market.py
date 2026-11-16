@@ -29,9 +29,12 @@ from purchase_price.services.category_market import (
     CategoryTrade,
     ClassifiedTrade,
     TopModel,
+    UpperTier,
+    model_stats,
     searched_model_key,
     searched_model_stats,
     top_models,
+    upper_tier,
 )
 from purchase_price.services.g2b_delivery_record import g2b_url_for_source_record
 from purchase_price.ui import table_actions
@@ -71,6 +74,8 @@ CATEGORY_MARKET_REOPEN_V1 = True
 CATEGORY_MARKET_PRICED_SPLIT_V1 = True
 # Runtime marker (2026-11): one-line 같은 품목 summary under a product with its own trades.
 CATEGORY_MARKET_COMPACT_V1 = True
+# Runtime marker (2026-11): 보급형 / 고가형 lines and the searched product's market.
+CATEGORY_MARKET_TIERS_V1 = True
 SECTION_TITLE = "같은 품목 시장"
 MODELS_TAB = "같은 품목의 다른 모델"
 BUYERS_TAB = "도입 기관"
@@ -135,6 +140,10 @@ CSS = """
 .cm-top-me .cm-top-name {color:var(--pc-teal);}
 .cm-compact-line {font-size:17px; font-weight:800; color:var(--pc-navy); line-height:1.5; letter-spacing:-0.4px;
   margin:0 0 6px 0; overflow-wrap:anywhere;}
+.cm-compact-mine {color:var(--pc-teal);}
+.cm-tier {display:inline-block; min-width:46px; margin-right:8px; font-size:12px; font-weight:800; color:#5B6C82;}
+.cm-tier-me {display:inline-block; margin-left:8px; padding:1px 7px; border-radius:999px; font-size:11px;
+  font-weight:800; color:#0F6B63; background:#E2F3F1;}
 .cm-compact-more {display:inline-block; margin:10px 0 0 0; font-size:13px; font-weight:700; color:#25466B;}
 .cm-top-self {font-size:12.5px; color:#25466B; line-height:1.55; margin:8px 0 0 0; padding:8px 10px; border-radius:8px;
   background:#EEF6F5; overflow-wrap:anywhere;}
@@ -554,6 +563,45 @@ def compact_line(market: CategoryMarket) -> str:
     return " · ".join(parts)
 
 
+BASE_TIER = "보급형"
+UPPER_TIER = "고가형"
+TIER_NOTE = "고가형은 품목 가운데 값보다 3배 넘게 비싼 거래가 대부분인 모델만 따로 묶은 시세입니다."
+
+
+def upper_line(tier: UpperTier) -> str:
+    level = tier.level
+    return (
+        f"{unit_text(level.unit)} 가운데 값 {won(level.median)} · {level.count:,}건 · 모델 {len(tier.models):,}개"
+    )
+
+
+def tier_lines(market: CategoryMarket, *, searched_model: str = "") -> list[tuple[str, str, bool]]:
+    """[(label, line, is the searched product's market)]: one unlabelled line without a 고가형,
+    else 보급형 and 고가형, the searched model's own market marked."""
+
+    tier = upper_tier(market)
+    if tier is None:
+        base = compact_line(market)
+        return [("", base, False)] if base else []
+    # 보급형 counts only its own models (the 품목-wide traded_models would include 고가형 ones).
+    upper_keys = {searched_model_key(item.model_name) for item in tier.models}
+    base_models = [item for item in model_stats(market) if searched_model_key(item.model_name) not in upper_keys]
+    level = market.level
+    base = " · ".join(
+        part
+        for part in (
+            f"{unit_text(level.unit)} 가운데 값 {won(level.median)}" if level.median is not None else "",
+            f"장비 구매 {level.count:,}건",
+            f"모델 {len(base_models):,}개",
+        )
+        if part
+    )
+    in_upper = bool(searched_model) and tier.has_model(searched_model)
+    # 보급형 is marked only for a model that has its own lines there (not for one cut off or absent).
+    in_base = not in_upper and bool(searched_model) and searched_model_stats(market, searched_model) is not None
+    return [(BASE_TIER, base, in_base), (UPPER_TIER, upper_line(tier), in_upper)]
+
+
 def compact_html(
     market: CategoryMarket,
     *,
@@ -565,26 +613,35 @@ def compact_html(
     models, and a link to the 품목 page that holds the full market (years, buyers, all models)."""
 
     product = product_label(market)
-    line = compact_line(market)
     period = f" · {market.period_label}" if market.period_label else ""
-    head = (
-        f'<div class="cm-eyebrow">같은 품목 · {esc(product)}{esc(period)} · 참고 시세</div>'
-        f'<div class="cm-compact-line">{esc(line) if line else "가격을 셀 장비 구매가 없습니다."}</div>'
-    )
-    top = top_models(market, by="trades")[:COMPACT_TOP]
+    lines = tier_lines(market, searched_model=searched_model)
+    rows = "".join(
+        f'<div class="cm-compact-line{" cm-compact-mine" if mine else ""}">'
+        + (f'<span class="cm-tier">{esc(label)}</span>' if label else "")
+        + esc(line)
+        + ('<span class="cm-tier-me">이 제품</span>' if mine else "")
+        + "</div>"
+        for label, line, mine in lines
+    ) or '<div class="cm-compact-line">가격을 셀 장비 구매가 없습니다.</div>'
+    head = f'<div class="cm-eyebrow">같은 품목 · {esc(product)}{esc(period)} · 참고 시세</div>{rows}'
+    tier = upper_tier(market)
+    in_upper = tier is not None and bool(searched_model) and tier.has_model(searched_model)
+    top = (tier.models if in_upper else top_models(market, by="trades"))[:COMPACT_TOP]
     urls = (
         {item.label: model_url(item.model_name, _registration_for(market, item.model_name)) or "" for item in top}
         if model_url is not None
         else {}
     )
-    body = _top_list_html("거래가 많은 다른 모델", top, searched_model, urls) if top else ""
+    title = f"{UPPER_TIER} 중 거래가 많은 모델" if in_upper else ("보급형 중 거래가 많은 모델" if tier is not None else "거래가 많은 다른 모델")
+    body = _top_list_html(title, top, searched_model, urls) if top else ""
     more = (
         f'<a class="cm-top-link cm-compact-more" href="{esc(item_url)}" target="_blank" rel="noopener">'
         f"{esc(product)} 전체 보기 (연도별 시세 · 도입 기관 · 모델 {len(market.models):,}개) ›</a>"
         if item_url
         else ""
     )
-    note = f'<div class="cm-top-caption">{esc(TOP_MODELS_NOTE)} 다른 모델의 가격은 이 제품의 가격이 아닙니다.</div>'
+    tier_note = f" {TIER_NOTE}" if tier is not None else ""
+    note = f'<div class="cm-top-caption">{esc(TOP_MODELS_NOTE)} 다른 모델의 가격은 이 제품의 가격이 아닙니다.{esc(tier_note)}</div>'
     return (
         CSS
         + f'<div class="cm-cq"><div class="pc-card cm-top" id="{COMPACT_DOM_ID}">{head}{note}{body}{more}</div></div>'
